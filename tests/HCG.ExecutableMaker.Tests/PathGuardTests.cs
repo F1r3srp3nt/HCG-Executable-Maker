@@ -51,6 +51,17 @@ public class PathGuardTests
     }
 
     [UnixFact]
+    public void GetRealPath_resolves_symlinked_directories_and_keeps_missing_tail()
+    {
+        using var t = new TempDir();
+        var real = Directory.CreateDirectory(t.Combine("real", "inner")).FullName;
+        Directory.CreateSymbolicLink(t.Combine("link"), t.Combine("real"));
+        Assert.Equal(real, PathGuard.GetRealPath(t.Combine("link", "inner")));
+        Assert.Equal(Path.Combine(real, "not", "yet"), PathGuard.GetRealPath(t.Combine("link", "inner", "not", "yet")));
+        Assert.Equal(real, PathGuard.GetRealPath(real));
+    }
+
+    [UnixFact]
     public void IsWithin_handles_filesystem_root() => Assert.True(PathGuard.IsWithin("/", "/tmp/work"));
 
     [Theory]

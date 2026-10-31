@@ -26,7 +26,7 @@ on Linux, macOS and Windows, then has HCG Executable Maker package itself on eac
 and packages itself through its own engine):
 
 ```bash
-dotnet run tools/self-package/self-package.cs -- . ../hcg-self-builds
+dotnet run --no-cache tools/self-package/self-package.cs -- . ../hcg-self-builds
 # options: --targets osx-arm64,osx-x64,win-x64,win-arm64,linux-x64  --version 0.1.0  --dist ../hcg-dist
 ```
 

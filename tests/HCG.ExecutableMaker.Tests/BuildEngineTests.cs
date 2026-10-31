@@ -284,6 +284,40 @@ public class BuildServiceTests : IDisposable
         AssemblyName = "App",
     };
 
+    /// <summary>
+    /// Regression (CI on macOS, where the temp folder is under the /var → /private/var symlink): dotnet restore through a
+    /// symlinked path dropped the project's ProjectReferences, so every build step must receive real paths.
+    /// </summary>
+    [UnixFact]
+    public async Task Build_commands_receive_symlink_free_paths()
+    {
+        var realRoot = _t.Combine("real-data");
+        Directory.CreateDirectory(realRoot);
+        var linkRoot = _t.Combine("linked-data");
+        Directory.CreateSymbolicLink(linkRoot, realRoot);
+        var paths = new AppPaths(linkRoot);
+        paths.EnsureCreated();
+        var ws = Path.Combine(paths.WorkspacesDirectory, "p2");
+        Directory.CreateDirectory(Path.Combine(ws, "source", "src", "App"));
+        File.WriteAllText(Path.Combine(ws, "source", "src", "App", "App.csproj"), "<Project/>");
+        var project = new ProjectRecord { Id = Guid.NewGuid(), Name = "App", SourceKind = ProjectSourceKind.Directory, SourceLocation = "/orig", WorkspacePath = ws, ImportedAt = DateTimeOffset.UtcNow };
+        var db = new SqliteDatabase(paths);
+        await new SqliteProjectRepository(db).UpsertAsync(project);
+
+        var worker = new ScriptedWorker((s, o, c) => Ok(s, o, c));
+        var svc = new BuildService(worker, new FixedToolchains(Fixtures.Toolchains("10.0.114")), new SqliteBuildRepository(db),
+            new PackagingRegistry([new PortableFolderPackager(), new PortableZipPackager(), new MacAppBundlePackager()]), paths, TimeProvider.System);
+        var build = await svc.RunAsync(Request() with { Project = project }, new Observer(), CancellationToken.None);
+
+        Assert.True(build.Status == BuildStatus.Succeeded, build.FailureReason);
+        Assert.All(worker.Calls, c =>
+        {
+            Assert.DoesNotContain(linkRoot, c.WorkingDirectory!);
+            Assert.All(c.Arguments.Where(a => a.StartsWith('/')), a => Assert.DoesNotContain(linkRoot, a));
+            Assert.StartsWith(realRoot, c.WorkingDirectory!);
+        });
+    }
+
     [Fact]
     public async Task Refuses_build_without_trust_acknowledgement()
     {

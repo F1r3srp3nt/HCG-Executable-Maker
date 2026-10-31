@@ -142,9 +142,11 @@ public sealed class BuildService(
                         "The .exe file icon is embedded only when building on a Windows host. The generated .ico is included in the build folder.", "HCG-ICON"));
             }
 
-            var publishDir = Path.Combine(buildDir, "publish");
+            // Real (symlink-free) paths only: see PathGuard.GetRealPath.
+            var publishDir = Path.Combine(PathGuard.GetRealPath(buildDir), "publish");
+            var sourceDir = PathGuard.GetRealPath(request.Project.SourceDirectory);
             var steps = DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
-                settings, request.Project.SourceDirectory, sdk.ExecutablePath, publishDir, host.Platform,
+                settings, sourceDir, sdk.ExecutablePath, publishDir, host.Platform,
                 icons?.IcoPath, scrub.Environment));
 
             var parser = new MsBuildOutputParser(); // shared across steps: MSBuild repeats diagnostics in build and publish

@@ -100,7 +100,7 @@ jobs:
       - name: Self-package with HCG Executable Maker
         shell: bash
         run: >
-          dotnet run tools/self-package/self-package.cs --
+          dotnet run --no-cache tools/self-package/self-package.cs --
           . "${{ runner.temp }}/selfpack"
           --targets "${{ matrix.targets }}"
           --version "$VERSION"

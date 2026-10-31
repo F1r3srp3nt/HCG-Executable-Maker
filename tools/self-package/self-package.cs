@@ -7,10 +7,11 @@
 // (import → static inspection → dotnet restore/build/publish → packaging → verification → checksums).
 //
 // Usage:
-//   dotnet run tools/self-package/self-package.cs -- <repo-root> <output-dir> [--targets osx-arm64,win-x64,...]
+//   dotnet run --no-cache tools/self-package/self-package.cs -- <repo-root> <output-dir> [--targets osx-arm64,win-x64,...]
 //                                                    [--version 0.1.0] [--dist <dir>]
 //
 // <output-dir> must be outside the repository (the repository is what gets imported).
+// --no-cache matters: file-based apps do not notice changes in #:project sources and would run a stale engine.
 // --dist collects the distributable files (.zip/.dmg) into one flat folder with release-friendly names.
 // Formats are chosen per target from PackagingCatalog: macOS → .app (+ .dmg when this host can make one),
 // Windows/Linux → portable ZIP. Exit code is non-zero if any build fails.

@@ -61,6 +61,33 @@ public static class PathGuard
         return true;
     }
 
+    /// <summary>
+    /// Resolves symbolic links in every existing component of <paramref name="path"/> (like realpath(3)); components
+    /// that do not exist yet are appended unchanged. Builds must use real paths: the .NET SDK's standalone restore
+    /// drops project references when a project is reached through a symlinked directory (e.g. macOS /var, /tmp).
+    /// </summary>
+    public static string GetRealPath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var root = Path.GetPathRoot(full) ?? "";
+        var current = root;
+        var parts = full[root.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var next = Path.Combine(current, parts[i]);
+            FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
+            if (!info.Exists)
+            {
+                // Nothing below a missing component can be a link: append the rest verbatim.
+                return Path.Combine([current, .. parts[i..]]);
+            }
+            if (info.LinkTarget is not null && info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                next = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
+            current = next;
+        }
+        return current;
+    }
+
     /// <summary>Turns arbitrary text into a safe single file or directory name.</summary>
     public static string SanitizeFileName(string name, string fallback = "item")
     {
