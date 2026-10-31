@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.ExecutableMaker.Core\HCG.ExecutableMaker.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>HCG.ExecutableMaker.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>

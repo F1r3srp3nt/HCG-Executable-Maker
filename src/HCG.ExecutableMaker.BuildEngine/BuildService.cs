@@ -1,0 +1,339 @@
+using System.Diagnostics;
+using System.Text;
+using HCG.ExecutableMaker.Core;
+using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging;
+using HCG.ExecutableMaker.Packaging.Icons;
+using HCG.ExecutableMaker.Security;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace HCG.ExecutableMaker.BuildEngine;
+
+public sealed record BuildRequest
+{
+    public required ProjectRecord Project { get; init; }
+    public required BuildSettings Settings { get; init; }
+    /// <summary>The user explicitly confirmed they trust the project. Builds are refused without it.</summary>
+    public required bool TrustAcknowledged { get; init; }
+    /// <summary>Allows replacing a previous HCG output folder for the same app/version/RID.</summary>
+    public bool AllowOverwriteOutput { get; init; }
+    /// <summary>Assembly name of the project being built (from inspection), used to locate the app host.</summary>
+    public string? AssemblyName { get; init; }
+}
+
+/// <summary>Receives live build events. Called from background threads.</summary>
+public interface IBuildObserver
+{
+    void OnStarted(BuildRecord build) { }
+    void OnStage(BuildStage stage, string description) { }
+    void OnLog(BuildLogLine line) { }
+    void OnMessage(BuildMessage message) { }
+}
+
+/// <summary>
+/// Runs a complete build: validate → restore → build → publish → verify output → package → checksum → persist.
+/// A build is marked <see cref="BuildStatus.Succeeded"/> only when every command exits 0, the expected executable
+/// exists in the publish output, and no artifact verification fails.
+/// </summary>
+public sealed class BuildService(
+    IBuildWorker worker,
+    IToolchainService toolchains,
+    IBuildRepository builds,
+    PackagingRegistry packagers,
+    IAppPaths paths,
+    TimeProvider time,
+    ILogger<BuildService>? logger = null)
+{
+    public const string OutputMarkerFile = ".hcg-build.json";
+    private readonly ILogger _logger = logger ?? NullLogger<BuildService>.Instance;
+
+    public IBuildWorker Worker => worker;
+
+    public async Task<BuildRecord> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        if (!request.TrustAcknowledged)
+            throw new InvalidOperationException("Build refused: the user has not acknowledged that this project is trusted. " + TrustPolicy.TrustBoundaryExplanation);
+
+        var settings = request.Settings;
+        var build = new BuildRecord
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = request.Project.Id,
+            ProjectName = request.Project.Name,
+            Settings = settings,
+            Status = BuildStatus.Running,
+            StartedAt = time.GetUtcNow(),
+            TrustAcknowledged = true,
+        };
+        var buildDir = Path.Combine(paths.BuildsDirectory, build.Id.ToString("N"));
+        Directory.CreateDirectory(buildDir);
+        build.LogPath = Path.Combine(buildDir, "build.log");
+        build.ToolchainVersions["hcg-executable-maker"] = HostInfo.ProductVersion;
+
+        await using var logWriter = new StreamWriter(build.LogPath, append: false, new UTF8Encoding(false)) { AutoFlush = true };
+        var logGate = new object();
+        void Log(BuildLogKind kind, string text)
+        {
+            var line = new BuildLogLine(time.GetUtcNow(), kind, text);
+            lock (logGate) logWriter.WriteLine($"[{line.Timestamp:HH:mm:ss}] {(kind is BuildLogKind.Output ? "  " : kind.ToString().ToUpperInvariant() + " ")}{text}");
+            observer.OnLog(line);
+        }
+        void AddMessage(BuildMessage m)
+        {
+            lock (build.Messages)
+            {
+                build.Messages.Add(m);
+                if (m.Severity == DiagnosticSeverity.Warning) build.WarningCount++;
+                if (m.Severity == DiagnosticSeverity.Error) build.ErrorCount++;
+            }
+            observer.OnMessage(m);
+        }
+        void Fail(BuildStatus status, string reason)
+        {
+            build.Status = status;
+            build.FailureReason = reason;
+            Log(BuildLogKind.Error, reason);
+        }
+
+        await builds.InsertAsync(build, CancellationToken.None).ConfigureAwait(false);
+        observer.OnStarted(build);
+
+        using var overall = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        overall.CancelAfter(settings.Timeout);
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            observer.OnStage(BuildStage.Preparing, "Validating configuration and toolchains");
+            Log(BuildLogKind.Info, $"HCG Executable Maker {HostInfo.ProductVersion} — build {build.Id}");
+            Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
+            Log(BuildLogKind.Info, $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} ({settings.RuntimeIdentifier}), {settings.Configuration}, {(settings.SelfContained ? "self-contained" : "framework-dependent")}{(settings.SingleFile ? ", single-file" : "")}");
+            Log(BuildLogKind.Warning, $"Isolation: {worker.Description}");
+
+            var report = await toolchains.GetAsync(cancellationToken: overall.Token).ConfigureAwait(false);
+            var host = report.Host;
+            build.ToolchainVersions["host"] = $"{host.DisplayName} ({host.OsDescription})";
+            var sdk = report.Find(ToolchainIds.DotNetSdk);
+            if (sdk is not { IsAvailable: true, ExecutablePath: not null })
+            {
+                Fail(BuildStatus.Failed, "The .NET SDK was not found. Install the .NET SDK and refresh the Toolchains page.");
+                return build;
+            }
+            build.ToolchainVersions["dotnet-sdk"] = sdk.Version ?? "unknown";
+            if (report.Find(ToolchainIds.Git) is { IsAvailable: true, Version: { } gitVersion }) build.ToolchainVersions["git"] = gitVersion;
+
+            DotNetBuildPlanner.Validate(settings);
+            var scrub = worker.CreateEnvironment();
+            if (scrub.RemovedNames.Count > 0)
+                Log(BuildLogKind.Info, $"Removed {scrub.RemovedNames.Count} sensitive environment variable(s) from the build environment: {string.Join(", ", scrub.RemovedNames)}");
+
+            // Icons are generated before compilation so the Windows icon can be embedded.
+            GeneratedIcons? icons = null;
+            if (settings.Identity.IconSourcePath is { } iconSource)
+            {
+                Log(BuildLogKind.Info, $"Processing icon {Path.GetFileName(iconSource)}");
+                icons = IconGenerator.Generate(iconSource, Path.Combine(buildDir, "icons"), "AppIcon",
+                    ico: settings.Platform == TargetPlatform.Windows, icns: settings.Platform == TargetPlatform.MacOS);
+                foreach (var w in icons.Warnings) AddMessage(new BuildMessage(DiagnosticSeverity.Warning, w, "HCG-ICON"));
+                if (settings.Platform == TargetPlatform.Windows && host.Platform != TargetPlatform.Windows)
+                    AddMessage(new BuildMessage(DiagnosticSeverity.Warning,
+                        "The .exe file icon is embedded only when building on a Windows host. The generated .ico is included in the build folder.", "HCG-ICON"));
+            }
+
+            var publishDir = Path.Combine(buildDir, "publish");
+            var steps = DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
+                settings, request.Project.SourceDirectory, sdk.ExecutablePath, publishDir, host.Platform,
+                icons?.IcoPath, scrub.Environment));
+
+            var parser = new MsBuildOutputParser();
+            foreach (var step in steps)
+            {
+                overall.Token.ThrowIfCancellationRequested();
+                observer.OnStage(step.Stage, step.Title);
+                Log(BuildLogKind.Command, step.Process.DisplayCommand);
+                var result = await worker.RunAsync(step.Process, (stream, text) =>
+                {
+                    var message = parser.Parse(text);
+                    Log(message?.Severity switch
+                    {
+                        DiagnosticSeverity.Error => BuildLogKind.Error,
+                        DiagnosticSeverity.Warning => BuildLogKind.Warning,
+                        _ => stream == OutputStream.StdErr ? BuildLogKind.Error : BuildLogKind.Output,
+                    }, text);
+                    if (message is not null) AddMessage(message);
+                }, overall.Token).ConfigureAwait(false);
+
+                build.ExitCode = result.ExitCode;
+                if (result.Cancelled || result.TimedOut || overall.IsCancellationRequested)
+                    overall.Token.ThrowIfCancellationRequested();
+                if (result.ExitCode != 0)
+                {
+                    Fail(BuildStatus.Failed, $"{step.Title} failed with exit code {result.ExitCode}.");
+                    return build;
+                }
+                Log(BuildLogKind.Success, $"{step.Title} completed in {result.Duration.TotalSeconds:F1}s");
+            }
+
+            observer.OnStage(BuildStage.VerifyingOutput, "Verifying publish output");
+            var exeName = LocateExecutable(publishDir, request.AssemblyName, settings.Platform);
+            if (exeName is null)
+            {
+                Fail(BuildStatus.Failed, $"The build reported success, but no {settings.Platform.DisplayName()} executable was found in the publish output ({publishDir}).");
+                return build;
+            }
+            Log(BuildLogKind.Success, $"Found application executable: {exeName}");
+
+            observer.OnStage(BuildStage.Packaging, "Packaging artifacts");
+            var baseName = $"{PathGuard.SanitizeFileName(settings.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(settings.Identity.Version, "0")}-{settings.RuntimeIdentifier}";
+            var outputRoot = PrepareOutputRoot(settings.OutputDirectory, baseName, request.AllowOverwriteOutput);
+            Log(BuildLogKind.Info, $"Output folder: {outputRoot}");
+
+            var packagingRequest = new PackagingRequest
+            {
+                Settings = settings,
+                PublishDirectory = publishDir,
+                ExecutableFileName = exeName,
+                OutputRoot = outputRoot,
+                ArtifactBaseName = baseName,
+                Icons = icons,
+                Host = host,
+                Toolchains = report,
+            };
+            var packagingLog = new PackagingLog(Log);
+            var outputs = new List<PackagedOutput>();
+            foreach (var format in PackagingCatalog.WithDependencies(settings.PackagingFormats))
+            {
+                var packager = packagers.Get(format) ?? throw new InvalidOperationException($"{format.DisplayName()} is not implemented in this version.");
+                Log(BuildLogKind.Info, $"Packaging: {format.DisplayName()}");
+                outputs.AddRange(await packager.PackageAsync(packagingRequest, packagingLog, overall.Token).ConfigureAwait(false));
+            }
+
+            observer.OnStage(BuildStage.Checksumming, "Computing SHA-256 checksums");
+            var sums = new StringBuilder();
+            foreach (var output in outputs)
+            {
+                string sha;
+                long size;
+                if (output.Kind == ArtifactKind.Directory)
+                {
+                    var (digest, manifest, total) = await Checksums.Sha256DirectoryAsync(output.Path, overall.Token).ConfigureAwait(false);
+                    await File.WriteAllTextAsync(Path.Combine(outputRoot, Path.GetFileName(output.Path) + ".manifest.sha256.txt"), manifest, overall.Token).ConfigureAwait(false);
+                    (sha, size) = (digest, total);
+                }
+                else
+                {
+                    sha = await Checksums.Sha256FileAsync(output.Path, overall.Token).ConfigureAwait(false);
+                    size = new FileInfo(output.Path).Length;
+                    sums.Append(sha).Append("  ").Append(Path.GetFileName(output.Path)).Append('\n');
+                }
+                var status = Packaging.Verification.Checks.Combine(output.Checks);
+                build.Artifacts.Add(new ArtifactRecord
+                {
+                    Id = Guid.NewGuid(),
+                    BuildId = build.Id,
+                    Format = output.Format,
+                    Kind = output.Kind,
+                    Path = output.Path,
+                    SizeBytes = size,
+                    Sha256 = sha,
+                    Verification = status,
+                    Checks = output.Checks,
+                    CreatedAt = time.GetUtcNow(),
+                });
+                Log(status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Success,
+                    $"{Path.GetFileName(output.Path)} — {size:N0} bytes — SHA-256 {sha} — verification {status}");
+                foreach (var check in output.Checks.Where(c => c.Status != VerificationStatus.Passed))
+                    Log(check.Status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Warning, $"  {check.Name}: {check.Detail}");
+            }
+            if (sums.Length > 0)
+                await File.WriteAllTextAsync(Path.Combine(outputRoot, "SHA256SUMS.txt"), sums.ToString(), overall.Token).ConfigureAwait(false);
+            await File.WriteAllTextAsync(Path.Combine(outputRoot, OutputMarkerFile), HcgJson.Serialize(new
+            {
+                buildId = build.Id,
+                project = request.Project.Name,
+                settings.Identity.ApplicationName,
+                settings.Identity.Version,
+                runtimeIdentifier = settings.RuntimeIdentifier,
+                createdAt = time.GetUtcNow(),
+                signed = false,
+                notarized = false,
+            }), overall.Token).ConfigureAwait(false);
+
+            if (build.Artifacts.Any(a => a.Verification == VerificationStatus.Failed))
+            {
+                Fail(BuildStatus.Failed, "One or more artifacts failed verification.");
+                return build;
+            }
+            build.Status = BuildStatus.Succeeded;
+            Log(BuildLogKind.Success, $"Build succeeded: {build.Artifacts.Count} artifact(s), {build.WarningCount} warning(s).");
+            return build;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Fail(BuildStatus.Cancelled, "Build cancelled by user. Running processes were terminated.");
+            return build;
+        }
+        catch (OperationCanceledException) when (overall.IsCancellationRequested)
+        {
+            Fail(BuildStatus.TimedOut, $"Build exceeded the time limit of {settings.Timeout.TotalMinutes:F0} minutes and was terminated.");
+            return build;
+        }
+        catch (BuildValidationException ex)
+        {
+            Fail(BuildStatus.Failed, ex.Message);
+            return build;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Build {BuildId} failed unexpectedly", build.Id);
+            Fail(BuildStatus.Failed, $"Unexpected error: {ex.Message}");
+            return build;
+        }
+        finally
+        {
+            stopwatch.Stop();
+            build.EndedAt = time.GetUtcNow();
+            Log(BuildLogKind.Info, $"Finished with status {build.Status} in {stopwatch.Elapsed:hh\\:mm\\:ss}.");
+            await builds.UpdateAsync(build, CancellationToken.None).ConfigureAwait(false);
+            observer.OnStage(BuildStage.Completed, build.Status.ToString());
+        }
+    }
+
+    /// <summary>Finds the native app host in publish output: assembly name first, then the runtimeconfig.json stem.</summary>
+    internal static string? LocateExecutable(string publishDir, string? assemblyName, TargetPlatform platform)
+    {
+        if (!Directory.Exists(publishDir)) return null;
+        var ext = platform == TargetPlatform.Windows ? ".exe" : "";
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(assemblyName)) candidates.Add(assemblyName + ext);
+        candidates.AddRange(Directory.EnumerateFiles(publishDir, "*.runtimeconfig.json")
+            .Select(f => Path.GetFileName(f)[..^".runtimeconfig.json".Length] + ext));
+        return candidates.FirstOrDefault(c => File.Exists(Path.Combine(publishDir, c)));
+    }
+
+    /// <summary>
+    /// Creates the per-build output folder. An existing folder is replaced only when allowed AND it carries HCG's
+    /// marker file — folders HCG did not create are never deleted.
+    /// </summary>
+    internal static string PrepareOutputRoot(string outputDirectory, string baseName, bool allowOverwrite)
+    {
+        var root = Path.Combine(Path.GetFullPath(outputDirectory), baseName);
+        if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any())
+        {
+            if (!allowOverwrite)
+                throw new BuildValidationException($"The output folder '{root}' already exists. Confirm replacement or choose another output directory.");
+            if (!File.Exists(Path.Combine(root, OutputMarkerFile)))
+                throw new BuildValidationException($"'{root}' exists and was not created by HCG Executable Maker, so it will not be replaced. Choose another output directory.");
+            Directory.Delete(root, recursive: true);
+        }
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private sealed class PackagingLog(Action<BuildLogKind, string> log) : IPackagingLog
+    {
+        public void Info(string message) => log(BuildLogKind.Info, message);
+        public void Warning(string message) => log(BuildLogKind.Warning, message);
+    }
+}

@@ -1,0 +1,41 @@
+using HCG.ExecutableMaker.Domain;
+
+namespace HCG.ExecutableMaker.Core;
+
+public interface IProjectRepository
+{
+    Task UpsertAsync(ProjectRecord project, CancellationToken cancellationToken = default);
+    Task<ProjectRecord?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProjectRecord>> ListAsync(CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+}
+
+public sealed record BuildStatistics(int ProjectCount, int TotalBuilds, int Succeeded, int Failed, int Cancelled, int ArtifactCount);
+
+public interface IBuildRepository
+{
+    Task InsertAsync(BuildRecord build, CancellationToken cancellationToken = default);
+    /// <summary>Updates status/timing/counters and replaces messages and artifacts for the build.</summary>
+    Task UpdateAsync(BuildRecord build, CancellationToken cancellationToken = default);
+    Task<BuildRecord?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BuildRecord>> ListAsync(Guid? projectId = null, int? limit = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ArtifactRecord>> ListArtifactsAsync(CancellationToken cancellationToken = default);
+    Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    Task DeleteAllAsync(CancellationToken cancellationToken = default);
+    Task<BuildStatistics> GetStatisticsAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed record AppSettings
+{
+    public string ThemeId { get; init; } = "hcg-future";
+    public ImportLimits ImportLimits { get; init; } = new();
+    public int BuildTimeoutMinutes { get; init; } = 30;
+    public string? DefaultOutputDirectory { get; init; }
+    public string? LastPublisher { get; init; }
+}
+
+public interface ISettingsStore
+{
+    Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default);
+    Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default);
+}

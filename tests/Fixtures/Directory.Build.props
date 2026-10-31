@@ -1,0 +1,3 @@
+<Project>
+  <!-- Fixtures are standalone projects: do not inherit the HCG Executable Maker build settings. -->
+</Project>

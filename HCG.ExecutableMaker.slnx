@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HCG.ExecutableMaker.BuildEngine/HCG.ExecutableMaker.BuildEngine.csproj" />
+    <Project Path="src/HCG.ExecutableMaker.Core/HCG.ExecutableMaker.Core.csproj" />
+    <Project Path="src/HCG.ExecutableMaker.Domain/HCG.ExecutableMaker.Domain.csproj" />
+    <Project Path="src/HCG.ExecutableMaker.Infrastructure/HCG.ExecutableMaker.Infrastructure.csproj" />
+    <Project Path="src/HCG.ExecutableMaker.Packaging/HCG.ExecutableMaker.Packaging.csproj" />
+    <Project Path="src/HCG.ExecutableMaker.ProjectInspection/HCG.ExecutableMaker.ProjectInspection.csproj" />
+    <Project Path="src/HCG.ExecutableMaker.Security/HCG.ExecutableMaker.Security.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HCG.ExecutableMaker.Tests/HCG.ExecutableMaker.Tests.csproj" />
+  </Folder>
+</Solution>

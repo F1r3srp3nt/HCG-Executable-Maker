@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.ExecutableMaker.Core\HCG.ExecutableMaker.Core.csproj" />
+    <ProjectReference Include="..\HCG.ExecutableMaker.Security\HCG.ExecutableMaker.Security.csproj" />
+    <ProjectReference Include="..\HCG.ExecutableMaker.Packaging\HCG.ExecutableMaker.Packaging.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />
+  </ItemGroup>
+</Project>
