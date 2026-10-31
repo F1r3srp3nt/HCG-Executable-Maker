@@ -72,10 +72,11 @@ public class ToolchainTests
     [Fact]
     public void Locator_searches_path_and_candidates()
     {
-        var existing = new HashSet<string> { "/opt/custom/dotnet", Path.Combine("/fake/bin", "git") };
+        var custom = OperatingSystem.IsWindows() ? @"D:\custom\dotnet.exe" : "/opt/custom/dotnet";
+        var existing = new HashSet<string> { custom, Path.Combine("/fake/bin", "git") };
         var locator = new ExecutableLocator(n => n == "PATH" ? "/fake/bin" : null, existing.Contains);
         if (!OperatingSystem.IsWindows()) Assert.Equal(Path.Combine("/fake/bin", "git"), locator.Find("git"));
-        Assert.Equal("/opt/custom/dotnet", locator.Find("dotnet", ["/opt/custom/dotnet"]));
+        Assert.Equal(custom, locator.Find("dotnet", [custom]));
         Assert.Null(locator.Find("definitely-not-a-tool-xyz"));
     }
 

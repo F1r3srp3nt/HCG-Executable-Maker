@@ -35,6 +35,11 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ### Testing & distribution
 - `tools/self-package/self-package.cs`: HCG Executable Maker builds and packages **itself** through its own engine
   (macOS arm64/x64 `.app` + transfer ZIPs, Windows x64 ZIP), verified and checksummed.
+- GitHub Actions workflow *Build & Release*: tests on Linux/macOS/Windows, self-packaging on each real OS (`.dmg` on
+  macOS, embedded `.exe` icon on Windows), artifacts on every push, GitHub pre-release on `v*` tags only.
+- `self-package.cs` options: `--targets`, `--version`, `--dist`; `.dmg` produced automatically on Mac hosts.
+- `DmgPackager` retries `hdiutil create` (intermittent "Resource busy" failures).
+- Tests are portable to Windows (platform-appropriate absolute paths; Windows MSBuild diagnostics covered).
 - `docs/TESTING.md`: how to get a build, first launch of the unsigned app on macOS/Windows, and a 10-minute test script.
 
 ### Fixed during M0.1 verification

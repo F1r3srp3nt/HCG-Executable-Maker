@@ -3,7 +3,17 @@
 #:project ../../src/HCG.ExecutableMaker.Infrastructure/HCG.ExecutableMaker.Infrastructure.csproj
 #:project ../../src/HCG.ExecutableMaker.ProjectInspection/HCG.ExecutableMaker.ProjectInspection.csproj
 #:project ../../src/HCG.ExecutableMaker.BuildEngine/HCG.ExecutableMaker.BuildEngine.csproj
-// Dogfooding: HCG Executable Maker builds and packages itself through its own engine.
+// Dogfooding: HCG Executable Maker builds and packages ITSELF through its own engine
+// (import → static inspection → dotnet restore/build/publish → packaging → verification → checksums).
+//
+// Usage:
+//   dotnet run tools/self-package/self-package.cs -- <repo-root> <output-dir> [--targets osx-arm64,win-x64,...]
+//                                                    [--version 0.1.0] [--dist <dir>]
+//
+// <output-dir> must be outside the repository (the repository is what gets imported).
+// --dist collects the distributable files (.zip/.dmg) into one flat folder with release-friendly names.
+// Formats are chosen per target from PackagingCatalog: macOS → .app (+ .dmg when this host can make one),
+// Windows/Linux → portable ZIP. Exit code is non-zero if any build fails.
 using HCG.ExecutableMaker.BuildEngine;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -17,9 +27,23 @@ using HCG.ExecutableMaker.ProjectInspection;
 using HCG.ExecutableMaker.ProjectInspection.DotNet;
 using Microsoft.Extensions.Logging.Abstractions;
 
-// Usage: dotnet run tools/self-package/self-package.cs -- <repo-root> <output-dir outside the repo>
-var repo = Path.GetFullPath(args[0]); var output = Path.GetFullPath(args[1]);
-if (PathGuard.IsWithin(repo, output)) { Console.Error.WriteLine("Choose an output directory outside the repository (it would be imported on the next run)."); return 2; }
+if (args.Length < 2)
+{
+    Console.Error.WriteLine("Usage: self-package.cs <repo-root> <output-dir> [--targets rid,rid] [--version x.y.z] [--dist dir]");
+    return 2;
+}
+var repo = Path.GetFullPath(args[0]);
+var output = Path.GetFullPath(args[1]);
+string? Option(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
+var targets = (Option("--targets") ?? "osx-arm64,osx-x64,win-x64").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+var version = Option("--version") ?? "0.1.0";
+var dist = Option("--dist") is { } d ? Path.GetFullPath(d) : null;
+if (PathGuard.IsWithin(repo, output) || (dist is not null && PathGuard.IsWithin(repo, dist)))
+{
+    Console.Error.WriteLine("Choose output and dist directories outside the repository (they would be imported on the next run).");
+    return 2;
+}
+
 var paths = new AppPaths(Path.Combine(Path.GetTempPath(), "hcg-selfpack-" + Guid.NewGuid().ToString("N")[..8]));
 var db = new SqliteDatabase(paths);
 var runner = new ProcessRunner();
@@ -28,40 +52,97 @@ var projects = new ProjectService(new ProjectImporter(paths, TimeProvider.System
     new ProjectInspectionService([new DotNetProjectInspector(TimeProvider.System)], TimeProvider.System),
     new SqliteProjectRepository(db), new SqliteSettingsStore(db), toolchains, paths, TimeProvider.System, NullLogger<ProjectService>.Instance);
 var builds = new BuildService(new LocalProcessBuildWorker(runner), toolchains, new SqliteBuildRepository(db),
-    new PackagingRegistry([new PortableFolderPackager(), new PortableZipPackager(), new MacAppBundlePackager()]), paths, TimeProvider.System);
+    new PackagingRegistry([new PortableFolderPackager(), new PortableZipPackager(), new MacAppBundlePackager(), new DmgPackager(runner)]),
+    paths, TimeProvider.System);
 
+var report = await toolchains.GetAsync();
+Console.WriteLine($"Host: {report.Host.DisplayName} · .NET SDK {report.Find(ToolchainIds.DotNetSdk)?.Version ?? "missing"}");
 var import = await projects.ImportDirectoryAsync(repo, null, CancellationToken.None);
-var a = import.Project.Analysis!;
-Console.WriteLine($"Imported {import.FileCount} files. Primary: {a.PrimaryProjectPath} ({a.ApplicationType}, {a.Support})");
-var icon = Path.Combine(import.Project.SourceDirectory, "src/HCG.ExecutableMaker.App/Assets/Branding/hcg-app-icon.png");
+var analysis = import.Project.Analysis!;
+Console.WriteLine($"Imported {import.FileCount} files. Primary: {analysis.PrimaryProjectPath} ({analysis.ApplicationType}, {analysis.Support})");
+if (analysis.Support != SupportLevel.Supported || analysis.PrimaryProjectPath is null)
+{
+    Console.Error.WriteLine("Inspection did not report a supported application: " + analysis.SupportSummary);
+    return 1;
+}
+var icon = Path.Combine(import.Project.SourceDirectory, "src", "HCG.ExecutableMaker.App", "Assets", "Branding", "hcg-app-icon.png");
+if (dist is not null) Directory.CreateDirectory(dist);
 
-foreach (var (platform, arch, formats) in new (TargetPlatform, TargetArchitecture, PackagingFormat[])[]
+var failures = 0;
+foreach (var rid in targets)
 {
-    (TargetPlatform.MacOS, TargetArchitecture.Arm64, [PackagingFormat.MacAppBundle]),
-    (TargetPlatform.MacOS, TargetArchitecture.X64, [PackagingFormat.MacAppBundle]),
-    (TargetPlatform.Windows, TargetArchitecture.X64, [PackagingFormat.PortableZip]),
-})
-{
+    var (platform, arch) = ParseRid(rid);
+    var options = PackagingCatalog.Evaluate(new PackagingContext(platform, report.Host, report, IsGuiApplication: true));
+    PackagingFormat[] wanted = platform == TargetPlatform.MacOS ? [PackagingFormat.MacAppBundle, PackagingFormat.MacDmg] : [PackagingFormat.PortableZip];
+    var formats = wanted.Where(f => options.Any(o => o.Format == f && o.IsAvailable)).ToList();
     var settings = new BuildSettings
     {
-        ProjectRelativePath = a.PrimaryProjectPath!, Platform = platform, Architecture = arch, OutputDirectory = output,
-        Identity = new AppIdentity { ApplicationName = "HCG Executable Maker", Publisher = "Hakmi Capital Group", Version = "0.1.0",
-            ApplicationId = "com.hakmicapital.executablemaker", IconSourcePath = icon, Description = "One project in. A distributable application out." },
+        ProjectRelativePath = analysis.PrimaryProjectPath,
+        Platform = platform,
+        Architecture = arch,
+        OutputDirectory = output,
+        Identity = new AppIdentity
+        {
+            ApplicationName = "HCG Executable Maker", Publisher = "Hakmi Capital Group", Version = version,
+            ApplicationId = "com.hakmicapital.executablemaker", IconSourcePath = File.Exists(icon) ? icon : null,
+            Description = "One project in. A distributable application out.",
+        },
         PackagingFormats = formats,
     };
-    var b = await builds.RunAsync(new BuildRequest { Project = import.Project, Settings = settings, TrustAcknowledged = true, AllowOverwriteOutput = true, AssemblyName = "HCGExecutableMaker" },
-        new Obs(), CancellationToken.None);
-    Console.WriteLine($"{settings.RuntimeIdentifier}: {b.Status} {b.FailureReason} in {b.Duration}");
-    foreach (var art in b.Artifacts)
+    Console.WriteLine($"── {rid}: {string.Join(", ", formats.Select(f => f.DisplayName()))}");
+    var build = await builds.RunAsync(new BuildRequest
     {
-        Console.WriteLine($"  {art.Path} {art.SizeBytes / 1048576.0:F1} MB sha256={art.Sha256} {art.Verification}");
-        foreach (var c in art.Checks.Where(c => c.Status != VerificationStatus.Passed)) Console.WriteLine($"     - {c.Name}: {c.Status} {c.Detail}");
+        Project = import.Project, Settings = settings, TrustAcknowledged = true, AllowOverwriteOutput = true, AssemblyName = "HCGExecutableMaker",
+    }, new ConsoleObserver(), CancellationToken.None);
+    Console.WriteLine($"{rid}: {build.Status} {build.FailureReason} in {build.Duration}");
+    foreach (var art in build.Artifacts)
+    {
+        Console.WriteLine($"  {art.Path}  {art.SizeBytes / 1048576.0:F1} MB  sha256={art.Sha256}  {art.Verification}");
+        foreach (var c in art.Checks.Where(c => c.Status != VerificationStatus.Passed))
+            Console.WriteLine($"     - {c.Name}: {c.Status} — {c.Detail}");
+    }
+    if (build.Status != BuildStatus.Succeeded) { failures++; continue; }
+    if (dist is not null) await CollectAsync(build, settings, dist);
+}
+return failures == 0 ? 0 : 1;
+
+async Task CollectAsync(BuildRecord build, BuildSettings settings, string distDir)
+{
+    var baseName = $"HCG-Executable-Maker-{settings.Identity.Version}-{settings.RuntimeIdentifier}";
+    foreach (var art in build.Artifacts.Where(a => a.Kind == ArtifactKind.File))
+    {
+        var suffix = art.Path.EndsWith(".app.zip", StringComparison.Ordinal) ? ".app.zip" : Path.GetExtension(art.Path);
+        File.Copy(art.Path, Path.Combine(distDir, baseName + suffix), overwrite: true);
+    }
+    // On a Mac host the bundle packager emits no transfer ZIP; create one with ditto (preserves permissions and xattrs).
+    if (OperatingSystem.IsMacOS() && build.Artifacts.FirstOrDefault(a => a.Format == PackagingFormat.MacAppBundle && a.Kind == ArtifactKind.Directory) is { } app)
+    {
+        var zip = Path.Combine(distDir, baseName + ".app.zip");
+        var result = await runner.RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = ["-c", "-k", "--keepParent", app.Path, zip] },
+            (_, line) => Console.WriteLine(line), CancellationToken.None);
+        if (!result.Succeeded) throw new InvalidOperationException($"ditto failed with exit code {result.ExitCode}");
     }
 }
 
-return 0;
-
-sealed class Obs : IBuildObserver
+static (TargetPlatform, TargetArchitecture) ParseRid(string rid)
 {
-    public void OnLog(BuildLogLine l) { if (l.Kind == BuildLogKind.Error) Console.WriteLine("  ! " + l.Text); }
+    var parts = rid.Split('-');
+    var platform = parts[0] switch
+    {
+        "osx" => TargetPlatform.MacOS,
+        "win" => TargetPlatform.Windows,
+        "linux" => TargetPlatform.Linux,
+        _ => throw new ArgumentException($"Unsupported runtime identifier '{rid}'."),
+    };
+    var arch = parts.Length > 1 && parts[1] == "arm64" ? TargetArchitecture.Arm64 : TargetArchitecture.X64;
+    return (platform, arch);
+}
+
+sealed class ConsoleObserver : IBuildObserver
+{
+    public void OnStage(BuildStage stage, string description) => Console.WriteLine($"   [{stage}] {description}");
+    public void OnLog(BuildLogLine line)
+    {
+        if (line.Kind is BuildLogKind.Error or BuildLogKind.Warning) Console.WriteLine($"   {line.Kind.ToString().ToUpperInvariant()}: {line.Text}");
+    }
 }

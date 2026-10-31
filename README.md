@@ -1,5 +1,7 @@
 # HCG Executable Maker
 
+[![Build & Release](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml/badge.svg)](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml)
+
 **Hakmi Capital Group · Software Engineering & Distribution Infrastructure**
 
 > One project in. A distributable application out.
@@ -37,6 +39,13 @@ Android (M0.5+), sandboxed build workers.
 - **.NET 10 SDK** (to build HCG Executable Maker and to build the projects it imports)
 - Windows 10+, macOS 11+ or a modern Linux desktop
 - Network access to NuGet for package restore
+
+## Download
+
+Ready-to-run builds are produced by CI on real macOS, Windows and Linux machines — HCG Executable Maker packages
+itself. Get them from the repository's **Releases** (tagged versions) or from the latest successful
+**Actions → Build & Release** run (artifacts). They are unsigned pre-releases; see [`docs/TESTING.md`](docs/TESTING.md)
+for first-launch steps.
 
 ## Build, run, test
 

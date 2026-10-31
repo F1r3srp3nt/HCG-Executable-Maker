@@ -25,7 +25,7 @@ public class BuildPlannerTests : IDisposable
     };
 
     private DotNetBuildPlanner.PlanInput Input(BuildSettings s, TargetPlatform host = TargetPlatform.Linux, string? ico = null) =>
-        new(s, _t.Path, "/usr/bin/dotnet", _t.Combine("publish"), host, ico, new Dictionary<string, string>());
+        new(s, _t.Path, Fixtures.FakeDotNet, _t.Combine("publish"), host, ico, new Dictionary<string, string>());
 
     [Fact]
     public void Plans_restore_build_publish_with_structured_arguments()
@@ -35,7 +35,7 @@ public class BuildPlannerTests : IDisposable
         var proj = _t.Combine("src", "App", "App.csproj");
 
         Assert.Equal([BuildStage.Restoring, BuildStage.Compiling, BuildStage.Publishing], steps.Select(s => s.Stage));
-        Assert.All(steps, s => Assert.Equal("/usr/bin/dotnet", s.Process.Executable));
+        Assert.All(steps, s => Assert.Equal(Fixtures.FakeDotNet, s.Process.Executable));
         Assert.All(steps, s => Assert.Equal(_t.Combine("src", "App"), s.Process.WorkingDirectory));
         Assert.Equal(["restore", proj, "-r", "osx-arm64", "-nologo", "--disable-build-servers", "-tl:off", "-p:SelfContained=true", "-p:Version=1.2.3"], steps[0].Process.Arguments);
         Assert.Equal(["build", proj, "-c", "Release", "-r", "osx-arm64", "--self-contained", "--no-restore", "-nologo", "--disable-build-servers", "-tl:off", "-p:Version=1.2.3"], steps[1].Process.Arguments);
@@ -55,10 +55,11 @@ public class BuildPlannerTests : IDisposable
     {
         _t.Write("src/App/App.csproj", "<Project/>");
         var s = Settings(_t.Combine("out"), TargetPlatform.Windows, TargetArchitecture.X64) with { SingleFile = true, SelfContained = false };
-        var steps = DotNetBuildPlanner.Plan(Input(s, TargetPlatform.Linux, "/tmp/icon;x.ico"));
+        var icon = _t.Combine("icon;x.ico");
+        var steps = DotNetBuildPlanner.Plan(Input(s, TargetPlatform.Linux, icon));
         var publish = steps[2].Process.Arguments;
         Assert.Contains("-p:EnableWindowsTargeting=true", publish);
-        Assert.Contains("-p:ApplicationIcon=/tmp/icon%3Bx.ico", publish);
+        Assert.Contains("-p:ApplicationIcon=" + icon.Replace(";", "%3B"), publish);
         Assert.Contains("-p:PublishSingleFile=true", publish);
         Assert.Contains("--no-self-contained", publish);
         Assert.DoesNotContain("-p:SelfContained=true", steps[0].Process.Arguments);
@@ -139,6 +140,11 @@ public class MsBuildOutputParserTests
 
         var m = p.Parse("MSBUILD : error MSB1009: Project file does not exist.");
         Assert.Equal("MSB1009", m!.Code);
+        var win = p.Parse(@"C:\src\App\Program.cs(7,13): error CS0103: The name 'x' does not exist in the current context [C:\src\App\App.csproj]");
+        Assert.Equal(DiagnosticSeverity.Error, win!.Severity);
+        Assert.Equal("CS0103", win.Code);
+        Assert.Equal(@"C:\src\App\Program.cs", win.File);
+        Assert.Equal(7, win.Line);
         Assert.Null(p.Parse("  Restored /src/App.csproj (in 1.2 sec)."));
         Assert.Null(p.Parse("Build succeeded."));
     }

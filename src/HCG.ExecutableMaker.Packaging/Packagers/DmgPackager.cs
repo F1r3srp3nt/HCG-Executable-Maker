@@ -33,14 +33,24 @@ public sealed class DmgPackager(IProcessRunner runner) : IPackager
             File.CreateSymbolicLink(Path.Combine(staging, "Applications"), "/Applications");
 
             var dmg = Path.Combine(request.OutputRoot, request.ArtifactBaseName + ".dmg");
-            var create = await runner.RunAsync(new ProcessSpec
+            // hdiutil intermittently fails with "Resource busy" (notably on CI Macs); retry a few times.
+            ProcessResult? create = null;
+            for (var attempt = 1; attempt <= 3; attempt++)
             {
-                Executable = hdiutil,
-                Arguments = ["create", "-volname", request.Settings.Identity.ApplicationName, "-srcfolder", staging, "-format", "UDZO", "-fs", "HFS+", dmg],
-                Timeout = TimeSpan.FromMinutes(10),
-            }, (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
-            if (!create.Succeeded || !File.Exists(dmg))
-                throw new InvalidOperationException($"hdiutil create failed with exit code {create.ExitCode}.");
+                if (File.Exists(dmg)) File.Delete(dmg);
+                create = await runner.RunAsync(new ProcessSpec
+                {
+                    Executable = hdiutil,
+                    Arguments = ["create", "-volname", request.Settings.Identity.ApplicationName, "-srcfolder", staging, "-format", "UDZO", "-fs", "HFS+", dmg],
+                    Timeout = TimeSpan.FromMinutes(10),
+                }, (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
+                if ((create.Succeeded && File.Exists(dmg)) || create.Cancelled || create.TimedOut) break;
+                log.Warning($"hdiutil create failed (attempt {attempt} of 3, exit code {create.ExitCode}); retrying.");
+                await Task.Delay(TimeSpan.FromSeconds(5 * attempt), cancellationToken).ConfigureAwait(false);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (create is not { Succeeded: true } || !File.Exists(dmg))
+                throw new InvalidOperationException($"hdiutil create failed with exit code {create?.ExitCode}.");
 
             var verify = await runner.RunAsync(new ProcessSpec { Executable = hdiutil, Arguments = ["verify", dmg], Timeout = TimeSpan.FromMinutes(5) },
                 (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);

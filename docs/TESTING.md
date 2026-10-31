@@ -2,11 +2,32 @@
 
 ## Get a build
 
-Ready-to-run builds are produced by HCG Executable Maker itself (it imports this repository, inspects it, and builds
+**From GitHub (recommended).** The *Build & Release* workflow (`.github/workflows/build.yml`) runs the full test suite
+on Linux, macOS and Windows, then has HCG Executable Maker package itself on each real OS:
+
+| Runner | Files |
+|---|---|
+| macOS | `HCG-Executable-Maker-<version>-osx-arm64.dmg` / `.app.zip`, same for `osx-x64` |
+| Windows | `HCG-Executable-Maker-<version>-win-x64.zip`, `…-win-arm64.zip` (`.exe` icon embedded) |
+| Linux | `HCG-Executable-Maker-<version>-linux-x64.zip`, `…-linux-arm64.zip` (preview) |
+
+- Every push to `main`: download from **Actions → Build & Release → latest run → Artifacts** (kept 14 days;
+  version `0.1.0-ci.<run>`).
+- A published pre-release: push a version tag. This is the only thing that publishes anything:
+
+  ```bash
+  git tag v0.1.0
+  git push origin v0.1.0
+  ```
+
+  The workflow then creates the GitHub pre-release *HCG Executable Maker 0.1.0* with all files and `SHA256SUMS.txt`.
+
+**Locally.** Ready-to-run builds are produced by HCG Executable Maker itself (it imports this repository, inspects it, and builds
 and packages itself through its own engine):
 
 ```bash
 dotnet run tools/self-package/self-package.cs -- . ../hcg-self-builds
+# options: --targets osx-arm64,osx-x64,win-x64,win-arm64,linux-x64  --version 0.1.0  --dist ../hcg-dist
 ```
 
 This creates, under `../hcg-self-builds/` (keep it outside the repository, which is what gets imported):

@@ -53,6 +53,9 @@ public static class Zips
 
 public static class Fixtures
 {
+    /// <summary>A fully-qualified (but nonexistent) dotnet path valid on the current OS.</summary>
+    public static string FakeDotNet => OperatingSystem.IsWindows() ? @"C:\Program Files\dotnet\dotnet.exe" : "/usr/bin/dotnet";
+
     public static string RepoRoot
     {
         get
@@ -69,7 +72,7 @@ public static class Fixtures
         HostInfo.Detect(),
         sdkVersions.Length == 0
             ? [new ToolchainInfo { Id = ToolchainIds.DotNetSdk, DisplayName = ".NET SDK", Category = "Build", Status = ToolchainStatus.Missing }]
-            : [new ToolchainInfo { Id = ToolchainIds.DotNetSdk, DisplayName = ".NET SDK", Category = "Build", Status = ToolchainStatus.Installed, Version = sdkVersions[0], ExecutablePath = "/usr/bin/dotnet", AdditionalVersions = sdkVersions }],
+            : [new ToolchainInfo { Id = ToolchainIds.DotNetSdk, DisplayName = ".NET SDK", Category = "Build", Status = ToolchainStatus.Installed, Version = sdkVersions[0], ExecutablePath = FakeDotNet, AdditionalVersions = sdkVersions }],
         null, null, DateTimeOffset.UtcNow);
 
     public static string? FindDotNet() => new ExecutableLocator().Find("dotnet", ExecutableLocator.DotNetCandidates());
