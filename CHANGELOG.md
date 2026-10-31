@@ -2,7 +2,7 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.1.0] — Milestone 0.1 "Functional Foundation" — unreleased
+## [0.1.0] — Milestone 0.1 "Functional Foundation" — 2026-10-31 (pre-release)
 
 ### Added
 - Modular .NET 10 solution: Domain, Core, Security, Infrastructure, ProjectInspection, Packaging, BuildEngine, App, Tests.
@@ -24,7 +24,8 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   SHA-256 checksums, per-file manifests, `SHA256SUMS.txt`, `.hcg-build.json` output marker.
 - Icon engine: PNG/ICO/ICNS inspection and aspect-preserving ICO/ICNS generation.
 - SQLite persistence with versioned migrations; settings store; JSON-lines application log.
-- 154 automated tests including real end-to-end builds of an Avalonia fixture for linux-x64, osx-arm64 and win-x64.
+- 162 automated tests including real end-to-end builds of an Avalonia fixture for linux-x64, osx-arm64 and win-x64,
+  green in CI on Linux, macOS and Windows.
 - Documentation: architecture, security model, environment report, status/continuation, HCG Mail validation workflow.
 
 ### Branding
