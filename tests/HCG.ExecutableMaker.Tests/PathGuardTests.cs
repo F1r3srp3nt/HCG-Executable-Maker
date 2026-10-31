@@ -54,11 +54,32 @@ public class PathGuardTests
     public void GetRealPath_resolves_symlinked_directories_and_keeps_missing_tail()
     {
         using var t = new TempDir();
-        var real = Directory.CreateDirectory(t.Combine("real", "inner")).FullName;
+        Directory.CreateDirectory(t.Combine("real", "inner"));
         Directory.CreateSymbolicLink(t.Combine("link"), t.Combine("real"));
+        // The temp folder may itself sit behind a symlink (macOS: /var -> /private/var), so compare canonical forms.
+        var real = PathGuard.GetRealPath(t.Combine("real", "inner"));
+        Assert.DoesNotContain("/link/", real + "/");
         Assert.Equal(real, PathGuard.GetRealPath(t.Combine("link", "inner")));
         Assert.Equal(Path.Combine(real, "not", "yet"), PathGuard.GetRealPath(t.Combine("link", "inner", "not", "yet")));
         Assert.Equal(real, PathGuard.GetRealPath(real));
+    }
+
+    [UnixFact]
+    public void GetRealPath_resolves_link_whose_target_passes_through_another_link_and_detects_loops()
+    {
+        using var t = new TempDir();
+        Directory.CreateDirectory(t.Combine("real", "inner"));
+        Directory.CreateSymbolicLink(t.Combine("outer-link"), t.Combine("real"));
+        // Absolute target that itself goes through outer-link (the macOS /var situation).
+        Directory.CreateSymbolicLink(t.Combine("chained"), t.Combine("outer-link", "inner"));
+        Directory.CreateSymbolicLink(t.Combine("relative"), Path.Combine("outer-link", "inner"));
+        var expected = PathGuard.GetRealPath(t.Combine("real", "inner"));
+        Assert.Equal(expected, PathGuard.GetRealPath(t.Combine("chained")));
+        Assert.Equal(expected, PathGuard.GetRealPath(t.Combine("relative")));
+
+        File.CreateSymbolicLink(t.Combine("loop-a"), t.Combine("loop-b"));
+        File.CreateSymbolicLink(t.Combine("loop-b"), t.Combine("loop-a"));
+        Assert.Throws<IOException>(() => PathGuard.GetRealPath(t.Combine("loop-a")));
     }
 
     [UnixFact]

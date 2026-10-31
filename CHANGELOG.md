@@ -53,5 +53,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - CI on macOS: self-packaging failed with hundreds of CS0246/CS0234 errors. Root cause (reproduced on Linux): a standalone
   `dotnet restore` run through a **symlinked path** (macOS `/var` → `/private/var`, where the temp folder lives) writes an
   assets file without the project's ProjectReferences. The build engine now resolves workspace, project and publish
-  paths to real paths (`PathGuard.GetRealPath`) before invoking `dotnet`. Regression test included.
+  paths to real paths (`PathGuard.GetRealPath`, realpath semantics: link targets that pass through other links are
+  resolved fully; link loops are detected) before invoking `dotnet`. Regression tests run green with a normal and a
+  symlinked temp folder.
 - macOS has `false` at `/usr/bin/false`, not `/bin/false`; process tests now locate Unix tools portably.

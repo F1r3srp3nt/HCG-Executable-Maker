@@ -314,7 +314,7 @@ public class BuildServiceTests : IDisposable
         {
             Assert.DoesNotContain(linkRoot, c.WorkingDirectory!);
             Assert.All(c.Arguments.Where(a => a.StartsWith('/')), a => Assert.DoesNotContain(linkRoot, a));
-            Assert.StartsWith(realRoot, c.WorkingDirectory!);
+            Assert.StartsWith(PathGuard.GetRealPath(realRoot), c.WorkingDirectory!);
         });
     }
 

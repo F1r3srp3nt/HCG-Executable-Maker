@@ -66,8 +66,11 @@ public static class PathGuard
     /// that do not exist yet are appended unchanged. Builds must use real paths: the .NET SDK's standalone restore
     /// drops project references when a project is reached through a symlinked directory (e.g. macOS /var, /tmp).
     /// </summary>
-    public static string GetRealPath(string path)
+    public static string GetRealPath(string path) => GetRealPath(path, depth: 0);
+
+    private static string GetRealPath(string path, int depth)
     {
+        if (depth > 40) throw new IOException($"Too many levels of symbolic links: '{path}'.");
         var full = Path.GetFullPath(path);
         var root = Path.GetPathRoot(full) ?? "";
         var current = root;
@@ -81,8 +84,11 @@ public static class PathGuard
                 // Nothing below a missing component can be a link: append the rest verbatim.
                 return Path.Combine([current, .. parts[i..]]);
             }
-            if (info.LinkTarget is not null && info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
-                next = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
+            if (info.LinkTarget is { } target)
+            {
+                // A link's target may itself pass through other links (e.g. a target under macOS /var), so resolve it fully.
+                next = Path.TrimEndingDirectorySeparator(GetRealPath(Path.IsPathRooted(target) ? target : Path.Combine(current, target), depth + 1));
+            }
             current = next;
         }
         return current;
