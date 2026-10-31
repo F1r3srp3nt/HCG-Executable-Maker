@@ -14,14 +14,15 @@ Verification was done in a Linux x64 development container (see `ENVIRONMENT-REP
 | Functional .NET build with live logs, cancel, timeout | GUI build of the fixture for osx-arm64 succeeded (21.5 s, 4 artifacts); GUI cancellation mid-build terminated the process tree and recorded *Cancelled* |
 | Packaging + verification + checksums | End-to-end test builds the fixture for linux-x64, osx-arm64 and win-x64: ELF, Mach-O arm64 (signed ad-hoc) and PE x64 verified, `.app` Info.plist/icon/permissions checked, SHA-256 recorded |
 | Build history, artifacts, export | History/Artifacts pages show real records; repeat build, view log, delete, export with overwrite confirmation |
-| Automated tests | `dotnet test`: **154 passed, 0 failed, 0 skipped** (includes real `dotnet` builds) |
+| Automated tests | `dotnet test`: **162 passed, 0 failed, 0 skipped** (includes real `dotnet` builds) — green in CI on **Linux, macOS 26 (Apple Silicon) and Windows** |
+| Real-OS packaging (CI run #5) | HCG Executable Maker packaged itself on GitHub's runners: macOS → `.app` + **`.dmg` (arm64, x64), `hdiutil verify` passed**; Windows → x64/ARM64 ZIPs built on Windows (icon embedded in `.exe`); Linux → x64/ARM64 ZIPs |
 | HCG Executable Maker itself publishes for macOS & Windows | `dotnet publish -r osx-arm64` / `-r win-x64 --self-contained` succeed with native SQLite/Skia/HarfBuzz libraries |
 
 ## Implemented but NOT verified on a real target
 
-- `DmgPackager` (needs macOS + `hdiutil`): offered only on Mac hosts with hdiutil detected.
-- macOS/Windows toolchain probes (Xcode, codesign, notarytool, Windows SDK, signtool, vswhere/MSBuild, WiX, Inno Setup).
-- Running HCG Executable Maker on macOS and Windows desktops; launching produced `.app`/`.exe` files.
+- Running HCG Executable Maker's **GUI** on macOS and Windows desktops (CI exercises the engine, not the UI).
+- **Launching** produced `.app`/`.exe` files (never done automatically — it would execute project code).
+- macOS/Windows toolchain probes on a desktop (CI runs them only inside the test suite's host-detection test).
 
 ## Not implemented (by design labelled *Planned* / *Not implemented* in the UI)
 
