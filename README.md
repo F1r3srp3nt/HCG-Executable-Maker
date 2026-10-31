@@ -69,6 +69,7 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 
 ## Documentation
 
+- [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows
 - [`docs/STATUS.md`](docs/STATUS.md) — what is complete, what is not, verification evidence, continuation instructions
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — solution structure, data flow, extension points
 - [`docs/SECURITY.md`](docs/SECURITY.md) — trust boundary, import hardening, secrets, signing roadmap

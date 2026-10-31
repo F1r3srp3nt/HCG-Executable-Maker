@@ -32,6 +32,11 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   Windows application icon. The original artwork is preserved unmodified in `branding/`; derived assets (transparent
   wordmark, square app icon, `.ico`) are reproducible with `tools/branding/make_logo.py`.
 
+### Testing & distribution
+- `tools/self-package/self-package.cs`: HCG Executable Maker builds and packages **itself** through its own engine
+  (macOS arm64/x64 `.app` + transfer ZIPs, Windows x64 ZIP), verified and checksummed.
+- `docs/TESTING.md`: how to get a build, first launch of the unsigned app on macOS/Windows, and a 10-minute test script.
+
 ### Fixed during M0.1 verification
 - Path containment check mishandled file-system roots (`/`), breaking disk-space detection.
 - Cancelling a build during packaging left a partial output folder that blocked later builds; HCG now claims the folder
