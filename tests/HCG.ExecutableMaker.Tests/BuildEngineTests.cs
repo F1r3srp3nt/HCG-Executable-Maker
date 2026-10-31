@@ -37,9 +37,10 @@ public class BuildPlannerTests : IDisposable
         Assert.Equal([BuildStage.Restoring, BuildStage.Compiling, BuildStage.Publishing], steps.Select(s => s.Stage));
         Assert.All(steps, s => Assert.Equal(Fixtures.FakeDotNet, s.Process.Executable));
         Assert.All(steps, s => Assert.Equal(_t.Combine("src", "App"), s.Process.WorkingDirectory));
-        Assert.Equal(["restore", proj, "-r", "osx-arm64", "-nologo", "--disable-build-servers", "-tl:off", "-p:SelfContained=true", "-p:Version=1.2.3"], steps[0].Process.Arguments);
-        Assert.Equal(["build", proj, "-c", "Release", "-r", "osx-arm64", "--self-contained", "--no-restore", "-nologo", "--disable-build-servers", "-tl:off", "-p:Version=1.2.3"], steps[1].Process.Arguments);
-        Assert.Equal(["publish", proj, "-c", "Release", "-r", "osx-arm64", "--self-contained", "--no-restore", "-o", _t.Combine("publish"), "-nologo", "--disable-build-servers", "-tl:off", "-p:Version=1.2.3"], steps[2].Process.Arguments);
+        string[] common = ["-nologo", "--disable-build-servers", "-tl:off", "-p:UseSharedCompilation=false"];
+        Assert.Equal(["restore", proj, "-r", "osx-arm64", .. common, "-p:SelfContained=true", "-p:Version=1.2.3"], steps[0].Process.Arguments);
+        Assert.Equal(["build", proj, "-c", "Release", "-r", "osx-arm64", "--self-contained", "--no-restore", .. common, "-p:Version=1.2.3"], steps[1].Process.Arguments);
+        Assert.Equal(["publish", proj, "-c", "Release", "-r", "osx-arm64", "--self-contained", "--no-restore", "-o", _t.Combine("publish"), .. common, "-p:Version=1.2.3"], steps[2].Process.Arguments);
     }
 
     [Theory]
@@ -342,6 +343,56 @@ public class BuildServiceTests : IDisposable
         Assert.Equal(2, worker.Calls.Count); // publish never ran
         Assert.Empty(build.Artifacts);
     }
+
+    private const string LockLine =
+        "/x/AvaloniaBuildTasks.targets(176,5): error MSB4018: System.IO.IOException: The process cannot access the file '/x/obj/App.dll' because it is being used by another process. [/x/App.csproj]";
+
+    [Fact]
+    public async Task Transient_file_lock_is_retried_once_and_failed_attempt_diagnostics_are_discarded()
+    {
+        BuildService.TransientRetryDelay = TimeSpan.Zero;
+        var buildAttempts = 0;
+        var worker = new ScriptedWorker((s, o, c) =>
+        {
+            if (s.Arguments[0] == "build" && ++buildAttempts == 1)
+            {
+                o(OutputStream.StdOut, LockLine);
+                return Task.FromResult(new ProcessResult(1, TimeSpan.Zero, false, false));
+            }
+            return Ok(s, o, c);
+        });
+        var build = await Service(worker).RunAsync(Request(), new Observer(), CancellationToken.None);
+
+        Assert.True(build.Status == BuildStatus.Succeeded, build.FailureReason);
+        Assert.Equal(2, buildAttempts);
+        Assert.Equal(4, worker.Calls.Count);
+        Assert.Equal(0, build.ErrorCount);
+        Assert.DoesNotContain(build.Messages, m => m.Severity == DiagnosticSeverity.Error);
+        Assert.Contains("Retrying once", File.ReadAllText(build.LogPath!));
+    }
+
+    [Fact]
+    public async Task Persistent_file_lock_fails_after_one_retry()
+    {
+        BuildService.TransientRetryDelay = TimeSpan.Zero;
+        var worker = new ScriptedWorker((s, o, c) =>
+        {
+            if (s.Arguments[0] != "build") return Ok(s, o, c);
+            o(OutputStream.StdOut, LockLine);
+            return Task.FromResult(new ProcessResult(1, TimeSpan.Zero, false, false));
+        });
+        var build = await Service(worker).RunAsync(Request(), new Observer(), CancellationToken.None);
+        Assert.Equal(BuildStatus.Failed, build.Status);
+        Assert.Equal(3, worker.Calls.Count); // restore + 2 build attempts
+        Assert.Equal(1, build.ErrorCount);
+    }
+
+    [Theory]
+    [InlineData(LockLine, true)]
+    [InlineData("/src/App.cs(1,1): error CS1002: ; expected [/src/App.csproj]", false)]
+    [InlineData("warning: the file is being used by another process", false)]
+    public void Recognizes_only_transient_file_lock_errors(string line, bool expected) =>
+        Assert.Equal(expected, BuildService.IsTransientFileLock(line));
 
     [Fact]
     public async Task Exit_code_zero_without_expected_output_is_a_failure()

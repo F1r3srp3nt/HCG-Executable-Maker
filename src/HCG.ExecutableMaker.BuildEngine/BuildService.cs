@@ -147,23 +147,47 @@ public sealed class BuildService(
                 settings, request.Project.SourceDirectory, sdk.ExecutablePath, publishDir, host.Platform,
                 icons?.IcoPath, scrub.Environment));
 
-            var parser = new MsBuildOutputParser();
+            var parser = new MsBuildOutputParser(); // shared across steps: MSBuild repeats diagnostics in build and publish
             foreach (var step in steps)
             {
                 overall.Token.ThrowIfCancellationRequested();
                 observer.OnStage(step.Stage, step.Title);
-                Log(BuildLogKind.Command, step.Process.DisplayCommand);
-                var result = await worker.RunAsync(step.Process, (stream, text) =>
+                ProcessResult result = null!;
+                for (var attempt = 1; attempt <= 1 + MaxTransientRetries; attempt++)
                 {
-                    var message = parser.Parse(text);
-                    Log(message?.Severity switch
+                    var attemptParser = parser.Clone();
+                    var transientLock = false;
+                    int messagesBefore, warningsBefore, errorsBefore;
+                    lock (build.Messages) (messagesBefore, warningsBefore, errorsBefore) = (build.Messages.Count, build.WarningCount, build.ErrorCount);
+                    Log(BuildLogKind.Command, step.Process.DisplayCommand);
+                    result = await worker.RunAsync(step.Process, (stream, text) =>
                     {
-                        DiagnosticSeverity.Error => BuildLogKind.Error,
-                        DiagnosticSeverity.Warning => BuildLogKind.Warning,
-                        _ => stream == OutputStream.StdErr ? BuildLogKind.Error : BuildLogKind.Output,
-                    }, text);
-                    if (message is not null) AddMessage(message);
-                }, overall.Token).ConfigureAwait(false);
+                        if (IsTransientFileLock(text)) transientLock = true;
+                        var message = attemptParser.Parse(text);
+                        Log(message?.Severity switch
+                        {
+                            DiagnosticSeverity.Error => BuildLogKind.Error,
+                            DiagnosticSeverity.Warning => BuildLogKind.Warning,
+                            _ => stream == OutputStream.StdErr ? BuildLogKind.Error : BuildLogKind.Output,
+                        }, text);
+                        if (message is not null) AddMessage(message);
+                    }, overall.Token).ConfigureAwait(false);
+
+                    var retryable = result.ExitCode != 0 && transientLock && !result.Cancelled && !result.TimedOut && !overall.IsCancellationRequested;
+                    if (!retryable || attempt > MaxTransientRetries)
+                    {
+                        parser = attemptParser; // keep this attempt's de-duplication state
+                        break;
+                    }
+                    // Discard diagnostics from the failed attempt so a successful retry is not reported with phantom errors.
+                    lock (build.Messages)
+                    {
+                        build.Messages.RemoveRange(messagesBefore, build.Messages.Count - messagesBefore);
+                        (build.WarningCount, build.ErrorCount) = (warningsBefore, errorsBefore);
+                    }
+                    Log(BuildLogKind.Warning, $"{step.Title} failed because a build output file was briefly locked by another process. Retrying once.");
+                    await Task.Delay(TransientRetryDelay, overall.Token).ConfigureAwait(false);
+                }
 
                 build.ExitCode = result.ExitCode;
                 if (result.Cancelled || result.TimedOut || overall.IsCancellationRequested)
@@ -306,6 +330,18 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.Completed, build.Status.ToString());
         }
     }
+
+    /// <summary>Retries for a build step that failed only because an output file was transiently locked.</summary>
+    internal const int MaxTransientRetries = 1;
+    internal static TimeSpan TransientRetryDelay { get; set; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// Recognizes the IOException MSBuild tasks report when a just-written output file is momentarily locked
+    /// (observed on macOS with Avalonia's XAML compiler). Genuine compile errors never match.
+    /// </summary>
+    internal static bool IsTransientFileLock(string line) =>
+        line.Contains("because it is being used by another process", StringComparison.Ordinal) &&
+        (line.Contains("error MSB4018", StringComparison.Ordinal) || line.Contains("IOException", StringComparison.Ordinal));
 
     /// <summary>Base name shared by the per-build output folder and its artifacts, e.g. <c>MyApp-1.2.0-osx-arm64</c>.</summary>
     public static string ArtifactBaseName(BuildSettings s) =>

@@ -46,3 +46,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - Path containment check mishandled file-system roots (`/`), breaking disk-space detection.
 - Cancelling a build during packaging left a partial output folder that blocked later builds; HCG now claims the folder
   immediately and removes its own incomplete output.
+- First CI run on real macOS: cross-building a Windows app on a Mac failed when Avalonia's XAML compiler hit a transient
+  file lock on the freshly compiled DLL. Builds now always disable shared compilation, and a build step that fails
+  *only* with that file-lock signature is retried once (logged as a warning; diagnostics from the discarded attempt are
+  dropped). Any other failure still fails immediately.

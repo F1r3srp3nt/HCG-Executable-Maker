@@ -8,6 +8,14 @@ public sealed partial class MsBuildOutputParser
 {
     private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
 
+    /// <summary>Copy of the de-duplication state, used to roll back a discarded (retried) attempt.</summary>
+    public MsBuildOutputParser Clone()
+    {
+        var copy = new MsBuildOutputParser();
+        copy._seen.UnionWith(_seen);
+        return copy;
+    }
+
     public BuildMessage? Parse(string line)
     {
         var m = CanonicalRegex().Match(line);

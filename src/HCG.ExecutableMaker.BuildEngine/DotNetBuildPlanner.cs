@@ -61,7 +61,8 @@ public static partial class DotNetBuildPlanner
             Environment = input.Environment,
         };
 
-        string[] common = ["-nologo", "--disable-build-servers", "-tl:off"];
+        // No persistent compiler/MSBuild servers: they can outlive the build and hold its output files open.
+        string[] common = ["-nologo", "--disable-build-servers", "-tl:off", Property("UseSharedCompilation", "false")];
         return
         [
             new BuildStep(BuildStage.Restoring, "Restore dependencies",
