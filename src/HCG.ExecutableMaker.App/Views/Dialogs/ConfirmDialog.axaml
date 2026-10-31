@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="HCG.ExecutableMaker.App.Views.Dialogs.ConfirmDialog"
         Width="520" SizeToContent="Height" CanResize="False"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner" Icon="/Assets/Branding/hcg-app-icon.png" ShowInTaskbar="False"
         Title="HCG Executable Maker">
   <Border Padding="28" BorderThickness="0,2,0,0" BorderBrush="{DynamicResource Hcg.Brush.AccentGradient}">
     <StackPanel Spacing="18">

@@ -4,6 +4,7 @@
     <AssemblyName>HCGExecutableMaker</AssemblyName>
     <RootNamespace>HCG.ExecutableMaker.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Branding\hcg-app-icon.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
   <ItemGroup>

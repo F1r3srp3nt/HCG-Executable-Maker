@@ -78,8 +78,8 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 
 ## Branding
 
-No official HCG logo asset has been provided yet. The sidebar shows a clearly-marked text placeholder; drop the
-approved logo at `src/HCG.ExecutableMaker.App/Assets/Branding/hcg-logo.png` and it is used automatically
-(see [`Assets/Branding/README.md`](src/HCG.ExecutableMaker.App/Assets/Branding/README.md)).
+The app uses the founder-provided **temporary official HCG logo** (`branding/hcg-logo-temporary-original.png`,
+kept unmodified). In-app assets — a transparent-background wordmark and a square app icon — are derived from it by
+`tools/branding/make_logo.py`. To switch to the final logo, see [`branding/README.md`](branding/README.md).
 
 © Hakmi Capital Group.

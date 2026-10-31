@@ -27,6 +27,11 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - 154 automated tests including real end-to-end builds of an Avalonia fixture for linux-x64, osx-arm64 and win-x64.
 - Documentation: architecture, security model, environment report, status/continuation, HCG Mail validation workflow.
 
+### Branding
+- Installed the founder-provided temporary official HCG logo: sidebar wordmark, About card, window and dialog icons,
+  Windows application icon. The original artwork is preserved unmodified in `branding/`; derived assets (transparent
+  wordmark, square app icon, `.ico`) are reproducible with `tools/branding/make_logo.py`.
+
 ### Fixed during M0.1 verification
 - Path containment check mishandled file-system roots (`/`), breaking disk-space detection.
 - Cancelling a build during packaging left a partial output folder that blocked later builds; HCG now claims the folder

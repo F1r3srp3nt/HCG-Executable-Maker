@@ -1,12 +1,6 @@
-# HCG branding assets
+# In-app branding assets
 
-**No official HCG logo has been provided yet.** The sidebar currently shows a clearly-marked text placeholder
-(`Controls/BrandMark.axaml`), which is *not* the official logo and must not be represented as such.
+These files are **derived** from the temporary official HCG logo in [`/branding`](../../../../branding/README.md).
+Do not edit them by hand — regenerate them with `tools/branding/make_logo.py`.
 
-To install the approved logo:
-
-1. Export the official mark as a transparent PNG, ideally 512×512 px (square).
-2. Save it as `src/HCG.ExecutableMaker.App/Assets/Branding/hcg-logo.png`.
-3. Rebuild. `BrandMark` detects the file automatically and replaces the placeholder.
-
-The application window/dock icon should also use the official asset once provided (M0.2 task).
+If `hcg-logo.png` is ever missing, `Controls/BrandMark` shows a clearly-marked text placeholder instead of a logo.

@@ -5,6 +5,7 @@
         x:Class="HCG.ExecutableMaker.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="HCG Executable Maker"
+        Icon="/Assets/Branding/hcg-app-icon.png"
         Width="1440" Height="920" MinWidth="1100" MinHeight="700"
         WindowStartupLocation="CenterScreen">
   <Panel>
@@ -16,12 +17,12 @@
       <!-- ===== Sidebar ===== -->
       <Border Background="{DynamicResource Hcg.Brush.Sidebar}" BorderBrush="{DynamicResource Hcg.Brush.Divider}" BorderThickness="0,0,1,0">
         <DockPanel Margin="18,24,18,18">
-          <StackPanel DockPanel.Dock="Top" Spacing="20">
-            <StackPanel Orientation="Horizontal" Spacing="12" Margin="2,0,0,0">
-              <c:BrandMark VerticalAlignment="Center" />
-              <StackPanel VerticalAlignment="Center" Spacing="3">
-                <TextBlock Text="HCG EXECUTABLE MAKER" FontSize="12" FontWeight="Bold" LetterSpacing="1.1" Classes="metal" />
-                <TextBlock Text="HAKMI CAPITAL GROUP" FontSize="9.5" FontWeight="Medium" LetterSpacing="2.6"
+          <StackPanel DockPanel.Dock="Top" Spacing="18">
+            <StackPanel Spacing="10">
+              <c:BrandMark Height="94" HorizontalAlignment="Left" Margin="-8,-6,0,0" />
+              <StackPanel Spacing="3" Margin="4,0,0,0">
+                <TextBlock Text="HCG EXECUTABLE MAKER" FontSize="13" FontWeight="Bold" LetterSpacing="1.6" Classes="metal" />
+                <TextBlock Text="HAKMI CAPITAL GROUP" FontSize="9.5" FontWeight="Medium" LetterSpacing="2.8"
                            Foreground="{DynamicResource Hcg.Brush.TextMuted}" />
               </StackPanel>
             </StackPanel>

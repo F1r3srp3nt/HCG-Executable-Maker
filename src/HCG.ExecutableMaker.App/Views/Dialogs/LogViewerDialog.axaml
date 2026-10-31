@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="HCG.ExecutableMaker.App.Views.Dialogs.LogViewerDialog"
         Width="1000" Height="680" MinWidth="600" MinHeight="400"
-        WindowStartupLocation="CenterOwner" Title="Build log">
+        WindowStartupLocation="CenterOwner" Icon="/Assets/Branding/hcg-app-icon.png" Title="Build log">
   <DockPanel Margin="20">
     <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,14">
       <StackPanel Spacing="4">

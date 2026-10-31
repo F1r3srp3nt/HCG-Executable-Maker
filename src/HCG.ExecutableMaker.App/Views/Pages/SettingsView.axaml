@@ -108,6 +108,7 @@
       <Border Classes="card">
         <StackPanel Spacing="4">
           <TextBlock Classes="h2" Text="About" />
+          <Image Source="/Assets/Branding/hcg-logo.png" Height="64" HorizontalAlignment="Left" Margin="-4,6,0,4" Stretch="Uniform" />
           <TextBlock Text="{Binding Version, StringFormat='HCG Executable Maker {0} — Milestone 0.1'}" />
           <TextBlock Classes="muted" Text="© Hakmi Capital Group. Built with .NET 10 and Avalonia UI." />
         </StackPanel>

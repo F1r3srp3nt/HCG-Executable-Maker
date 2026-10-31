@@ -30,7 +30,7 @@ Verification was done in a Linux x64 development container (see `ENVIRONMENT-REP
 - Authenticode, Developer ID signing, notarization, Store signing (M0.4)
 - Linux AppImage/DEB/RPM, Android, non-.NET build pipelines (M0.5+)
 - Isolated/sandboxed build workers (the `IBuildWorker` abstraction exists; only local execution is implemented)
-- Official HCG logo (placeholder in use — asset needed) and application window icon
+- **Final** HCG logo: the founder-provided *temporary* official logo is installed (sidebar, About, window/app icon); replace it when the final artwork is approved
 - HCG Classic theme is a token-level *preview* (palette only)
 
 ## Known limitations
@@ -54,7 +54,8 @@ Suggested next steps, in order:
 
 1. **Founder review on real hardware:** run the app on a Mac and a Windows PC; build `tests/Fixtures/HelloAvalonia`
    for each, launch the outputs manually, and try `.dmg` creation on the Mac.
-2. **Provide the official HCG logo** (`Assets/Branding/hcg-logo.png`) and approve an app icon.
+2. **Final branding:** when the final HCG logo is approved, replace `branding/hcg-logo-temporary-original.png` and rerun
+   `tools/branding/make_logo.py` (see `branding/README.md`); approve the derived square app icon.
 3. **M0.2 Windows packaging:** add `InnoSetupPackager` (`IPackager`, uses detected `ISCC.exe`) and a WiX MSI packager;
    flip their `PackagingCatalog` entries to `Available` when the tool is detected; add installer metadata
    (publisher, version, shortcuts, uninstall) from `AppIdentity`; add Windows-host CI.
