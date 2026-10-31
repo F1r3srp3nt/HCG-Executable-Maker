@@ -1,0 +1,90 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+        xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+        x:Class="HCG.ExecutableMaker.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="HCG Executable Maker"
+        Width="1440" Height="920" MinWidth="1100" MinHeight="700"
+        WindowStartupLocation="CenterScreen">
+  <Panel>
+    <!-- Ambient lighting -->
+    <Border Background="{DynamicResource Hcg.Brush.GlowTopLeft}" IsHitTestVisible="False" />
+    <Border Background="{DynamicResource Hcg.Brush.GlowBottomRight}" IsHitTestVisible="False" />
+
+    <Grid ColumnDefinitions="284,*">
+      <!-- ===== Sidebar ===== -->
+      <Border Background="{DynamicResource Hcg.Brush.Sidebar}" BorderBrush="{DynamicResource Hcg.Brush.Divider}" BorderThickness="0,0,1,0">
+        <DockPanel Margin="18,24,18,18">
+          <StackPanel DockPanel.Dock="Top" Spacing="20">
+            <StackPanel Orientation="Horizontal" Spacing="12" Margin="2,0,0,0">
+              <c:BrandMark VerticalAlignment="Center" />
+              <StackPanel VerticalAlignment="Center" Spacing="3">
+                <TextBlock Text="HCG EXECUTABLE MAKER" FontSize="12" FontWeight="Bold" LetterSpacing="1.1" Classes="metal" />
+                <TextBlock Text="HAKMI CAPITAL GROUP" FontSize="9.5" FontWeight="Medium" LetterSpacing="2.6"
+                           Foreground="{DynamicResource Hcg.Brush.TextMuted}" />
+              </StackPanel>
+            </StackPanel>
+            <Border Classes="accentline" />
+          </StackPanel>
+
+          <!-- Footer -->
+          <Border DockPanel.Dock="Bottom" Classes="card compact" Padding="14" Margin="0,12,0,0">
+            <StackPanel Spacing="10">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="BUILD ENGINE" Classes="label" FontSize="10" LetterSpacing="1.6" />
+                <Ellipse Grid.Column="1" Width="8" Height="8"
+                         Classes.ok="{Binding EngineTone, Converter={x:Static vm:ToneConverters.IsSuccess}}">
+                  <Ellipse.Styles>
+                    <Style Selector="Ellipse">
+                      <Setter Property="Fill" Value="{DynamicResource Hcg.Brush.Warning}" />
+                    </Style>
+                    <Style Selector="Ellipse.ok">
+                      <Setter Property="Fill" Value="{DynamicResource Hcg.Brush.Success}" />
+                    </Style>
+                  </Ellipse.Styles>
+                </Ellipse>
+              </Grid>
+              <TextBlock Text="{Binding EngineStatus}" FontSize="12" TextWrapping="Wrap" />
+              <Border Classes="divider" />
+              <TextBlock Text="LOCAL ENVIRONMENT" Classes="label" FontSize="10" LetterSpacing="1.6" />
+              <TextBlock Text="{Binding EnvironmentStatus}" FontSize="12" TextWrapping="Wrap" />
+              <Border Classes="divider" />
+              <TextBlock Text="{Binding AppVersion}" Classes="muted" />
+              <TextBlock Text="{Binding MilestoneLabel}" Classes="muted" FontSize="10.5" Margin="0,-6,0,0" />
+            </StackPanel>
+          </Border>
+
+          <ListBox Classes="nav" ItemsSource="{Binding NavItems}" SelectedItem="{Binding SelectedNav}" Margin="0,18,0,0">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:NavItem">
+                <Grid ColumnDefinitions="3,Auto,*" Height="40">
+                  <Border Classes="indicator" Width="3" Height="18" CornerRadius="2" Background="{DynamicResource Hcg.Brush.Cyan}" />
+                  <PathIcon Grid.Column="1" Width="16" Height="16" Margin="12,0,12,0"
+                            Data="{Binding IconKey, Converter={x:Static vm:ToneConverters.IconFromKey}}" />
+                  <TextBlock Grid.Column="2" Classes="navtext" Text="{Binding Title}" FontSize="13.5" FontWeight="Medium" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+
+      <!-- ===== Content ===== -->
+      <DockPanel Grid.Column="1">
+        <Border DockPanel.Dock="Top" Padding="36,28,36,18" BorderBrush="{DynamicResource Hcg.Brush.Divider}" BorderThickness="0,0,0,1">
+          <StackPanel Spacing="6">
+            <TextBlock Classes="eyebrow" Text="{Binding SelectedNav.Title, StringFormat='HCG EXECUTABLE MAKER  /  {0}', FallbackValue=''}" />
+            <TextBlock Classes="h1" Text="{Binding CurrentPage.Title, FallbackValue=''}" />
+            <TextBlock Classes="secondary" FontSize="13.5" Text="{Binding CurrentPage.Subtitle, FallbackValue=''}" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+        <TransitioningContentControl Content="{Binding CurrentPage}">
+          <TransitioningContentControl.PageTransition>
+            <CrossFade Duration="0:0:0.18" />
+          </TransitioningContentControl.PageTransition>
+        </TransitioningContentControl>
+      </DockPanel>
+    </Grid>
+  </Panel>
+</Window>

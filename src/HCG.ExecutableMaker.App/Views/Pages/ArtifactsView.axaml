@@ -1,0 +1,59 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.ArtifactsView"
+             x:DataType="vm:ArtifactsViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="16">
+      <Border Classes="callout">
+        <TextBlock FontSize="12.5" TextWrapping="Wrap"
+                   Text="All artifacts are unsigned and not notarized. Checksums are SHA-256 of the file, or of a sorted per-file manifest for folders and .app bundles (the manifest is saved next to the artifact)." />
+      </Border>
+      <TextBlock Classes="muted" Text="{Binding TotalSize, StringFormat='Total size of artifacts present on disk: {0}'}" IsVisible="{Binding !IsEmpty}" />
+
+      <Border Classes="card" Padding="40" IsVisible="{Binding IsEmpty}">
+        <StackPanel Spacing="10" HorizontalAlignment="Center" MaxWidth="460">
+          <PathIcon Data="{StaticResource Icon.Artifacts}" Width="36" Height="36" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+          <TextBlock Classes="h2" Text="No artifacts yet" HorizontalAlignment="Center" />
+          <TextBlock Classes="body secondary" TextAlignment="Center" Text="Successful builds produce verified applications and packages. They will be listed here with sizes, checksums and verification status." />
+        </StackPanel>
+      </Border>
+
+      <ItemsControl ItemsSource="{Binding Artifacts}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ArtifactItem">
+            <Border Classes="card compact interactive" Margin="0,0,0,12">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource Hcg.Brush.CyanSoft}" VerticalAlignment="Top">
+                  <PathIcon Data="{StaticResource Icon.Artifacts}" Width="18" Height="18" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="14,0" Spacing="4">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Classes="h3" Text="{Binding Name}" />
+                    <c:StatusChip Status="{Binding Verification}" />
+                  </StackPanel>
+                  <TextBlock Classes="muted" Text="{Binding FormatName}" />
+                  <TextBlock Classes="muted" Text="{Binding Origin}" />
+                  <SelectableTextBlock Classes="mono" Text="{Binding Path}" TextWrapping="Wrap" />
+                  <SelectableTextBlock Classes="mono muted" Text="{Binding Sha256, StringFormat='SHA-256  {0}'}" TextWrapping="Wrap" />
+                  <TextBlock Classes="muted" Text="{Binding Size}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="8" MinWidth="150">
+                  <Button Classes="small" HorizontalAlignment="Stretch" Content="Open Folder"
+                          Command="{Binding $parent[UserControl].((vm:ArtifactsViewModel)DataContext).OpenFolderCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small" HorizontalAlignment="Stretch" Content="Copy Path"
+                          Command="{Binding $parent[UserControl].((vm:ArtifactsViewModel)DataContext).CopyPathCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small" HorizontalAlignment="Stretch" Content="Copy Checksum"
+                          Command="{Binding $parent[UserControl].((vm:ArtifactsViewModel)DataContext).CopyChecksumCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small primary" HorizontalAlignment="Stretch" Content="Export…" IsEnabled="{Binding Exists}"
+                          Command="{Binding $parent[UserControl].((vm:ArtifactsViewModel)DataContext).ExportCommand}" CommandParameter="{Binding}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

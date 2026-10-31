@@ -1,0 +1,682 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.BuildWizardView"
+             x:DataType="vm:BuildWizardViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.step">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="CornerRadius" Value="15" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Hcg.Brush.Divider}" />
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.Input}" />
+    </Style>
+    <Style Selector="Border.step.active">
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.AccentGradient}" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="BoxShadow" Value="{DynamicResource Hcg.Shadow.Glow}" />
+    </Style>
+    <Style Selector="Border.step.done">
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.CyanSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Hcg.Brush.Cyan}" />
+    </Style>
+    <Style Selector="Border.step TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextMuted}" />
+    </Style>
+    <Style Selector="Border.step.active TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.OnAccent}" />
+    </Style>
+    <Style Selector="TextBlock.steptitle">
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextMuted}" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="TextBlock.steptitle.active">
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextPrimary}" />
+    </Style>
+    <Style Selector="TextBlock.steptitle.done">
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Cyan}" />
+    </Style>
+    <Style Selector="Button.tile">
+      <Setter Property="Padding" Value="22" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="VerticalAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Top" />
+      <Setter Property="CornerRadius" Value="{DynamicResource Hcg.Radius.Card}" />
+    </Style>
+    <Style Selector="TextBlock.log">
+      <Setter Property="FontFamily" Value="{DynamicResource Hcg.Font.Mono}" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="#B7C4D1" />
+      <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <Style Selector="TextBlock.log.error"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Error}" /></Style>
+    <Style Selector="TextBlock.log.warning"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Warning}" /></Style>
+    <Style Selector="TextBlock.log.success"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Success}" /></Style>
+    <Style Selector="TextBlock.log.command"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Cyan}" /></Style>
+    <Style Selector="TextBlock.log.info"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Silver}" /></Style>
+    <Style Selector="TextBlock.formlabel">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextSecondary}" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="36,22,36,22">
+    <!-- ===== Step indicator ===== -->
+    <Border Classes="card compact" Padding="20,14">
+      <ItemsControl ItemsSource="{Binding Steps}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:StepItem">
+            <Grid ColumnDefinitions="Auto,Auto,*">
+              <Border Classes="step" Classes.active="{Binding IsActive}" Classes.done="{Binding IsDone}">
+                <Panel>
+                  <TextBlock Text="{Binding Number}" FontSize="12" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !IsDone}" />
+                  <PathIcon Data="{StaticResource Icon.Check}" Width="13" Height="13" Foreground="{DynamicResource Hcg.Brush.Cyan}" IsVisible="{Binding IsDone}" />
+                </Panel>
+              </Border>
+              <TextBlock Grid.Column="1" Classes="steptitle" Classes.active="{Binding IsActive}" Classes.done="{Binding IsDone}"
+                         Text="{Binding Title}" VerticalAlignment="Center" Margin="10,0,10,0" />
+              <Border Grid.Column="2" Classes="divider" VerticalAlignment="Center" Margin="0,0,10,0" IsVisible="{Binding !IsLast}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </Border>
+
+    <!-- ===== Step content ===== -->
+    <Panel Grid.Row="1" Margin="0,18,0,0">
+      <ScrollViewer IsVisible="{Binding !IsBuildStep}">
+        <StackPanel Spacing="18" Margin="0,0,6,0">
+
+          <!-- STEP 1 · IMPORT -->
+          <StackPanel Spacing="18" IsVisible="{Binding IsImportStep}">
+            <UniformGrid Columns="2">
+              <Button Classes="tile" Margin="0,0,9,0" Command="{Binding ImportZipCommand}" IsEnabled="{Binding !IsImporting}">
+                <Grid ColumnDefinitions="Auto,*">
+                  <Border Width="48" Height="48" CornerRadius="12" Background="{DynamicResource Hcg.Brush.CyanSoft}" VerticalAlignment="Top">
+                    <PathIcon Data="{StaticResource Icon.Zip}" Width="22" Height="22" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+                  </Border>
+                  <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="4">
+                    <TextBlock Classes="h2" Text="Import ZIP archive" />
+                    <TextBlock Classes="body secondary" Text="Validated for corruption, path traversal, symlinks and size limits, then extracted into an isolated workspace. The original archive is preserved." />
+                  </StackPanel>
+                </Grid>
+              </Button>
+              <Button Classes="tile" Margin="9,0,0,0" Command="{Binding ImportFolderCommand}" IsEnabled="{Binding !IsImporting}">
+                <Grid ColumnDefinitions="Auto,*">
+                  <Border Width="48" Height="48" CornerRadius="12" Background="{DynamicResource Hcg.Brush.CyanSoft}" VerticalAlignment="Top">
+                    <PathIcon Data="{StaticResource Icon.Folder}" Width="22" Height="22" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+                  </Border>
+                  <StackPanel Grid.Column="1" Margin="16,0,0,0" Spacing="4">
+                    <TextBlock Classes="h2" Text="Import project folder" />
+                    <TextBlock Classes="body secondary" Text="A snapshot copy is made (bin, obj and .git excluded). Builds never write into your original folder." />
+                  </StackPanel>
+                </Grid>
+              </Button>
+            </UniformGrid>
+
+            <Border Classes="card" IsVisible="{Binding IsImporting}">
+              <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Classes="h3" Text="Importing…" />
+                  <Button Grid.Column="1" Classes="small" Content="Cancel" Command="{Binding CancelImportCommand}" />
+                </Grid>
+                <ProgressBar IsIndeterminate="{Binding ImportIndeterminate}" Value="{Binding ImportPercent}" Maximum="100" />
+                <TextBlock Classes="muted mono" Text="{Binding ImportStatus}" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Border>
+
+            <Border Classes="callout error" IsVisible="{Binding ImportError, Converter={x:Static ObjectConverters.IsNotNull}}">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="h3 error" Text="Import rejected" />
+                <SelectableTextBlock Text="{Binding ImportError}" TextWrapping="Wrap" FontSize="12.5" />
+              </StackPanel>
+            </Border>
+
+            <Border Classes="callout success" IsVisible="{Binding HasProject}">
+              <Grid ColumnDefinitions="Auto,*">
+                <PathIcon Data="{StaticResource Icon.Check}" Foreground="{DynamicResource Hcg.Brush.Success}" Width="18" Height="18" VerticalAlignment="Top" Margin="0,2,12,0" />
+                <StackPanel Grid.Column="1" Spacing="4">
+                  <TextBlock Classes="h3" Text="{Binding ProjectTitle, StringFormat='Imported: {0}'}" />
+                  <TextBlock Classes="muted" Text="{Binding ProjectSource}" TextWrapping="Wrap" />
+                  <ItemsControl ItemsSource="{Binding ImportWarnings}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="x:String">
+                        <TextBlock Classes="warning" FontSize="12" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <Border Classes="card" IsVisible="{Binding HasRecentProjects}">
+              <StackPanel Spacing="12">
+                <TextBlock Classes="h2" Text="Previously imported" />
+                <ItemsControl ItemsSource="{Binding RecentProjects}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ProjectItem">
+                      <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,6">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                          <TextBlock Classes="muted" Text="{Binding Summary}" />
+                        </StackPanel>
+                        <c:StatusChip Grid.Column="1" Status="{Binding Status}" Margin="0,0,12,0" />
+                        <Button Grid.Column="2" Classes="small" Content="Use project"
+                                Command="{Binding $parent[UserControl].((vm:BuildWizardViewModel)DataContext).UseProjectCommand}" CommandParameter="{Binding}" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- STEP 2 · INSPECT -->
+          <Grid ColumnDefinitions="3*,2*" IsVisible="{Binding IsInspectStep}">
+            <StackPanel Spacing="18" Margin="0,0,9,0">
+              <Border Classes="card">
+                <StackPanel Spacing="14">
+                  <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Classes="h2" Text="Project analysis" VerticalAlignment="Center" />
+                    <c:StatusChip Grid.Column="1" Status="{Binding SupportTag}" Margin="0,0,10,0" />
+                    <Button Grid.Column="2" Classes="small" Command="{Binding ReinspectCommand}" IsEnabled="{Binding !IsInspecting}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <PathIcon Data="{StaticResource Icon.Refresh}" />
+                        <TextBlock Text="Re-inspect" />
+                      </StackPanel>
+                    </Button>
+                  </Grid>
+                  <TextBlock Classes="body secondary" Text="{Binding Analysis.SupportSummary, FallbackValue=''}" />
+                  <Border Classes="divider" />
+                  <ItemsControl ItemsSource="{Binding AnalysisRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:SummaryRow">
+                        <Grid ColumnDefinitions="170,*" Margin="0,4">
+                          <TextBlock Classes="label" Text="{Binding Label}" />
+                          <SelectableTextBlock Grid.Column="1" Text="{Binding Value}" FontSize="13" TextWrapping="Wrap" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Border Classes="divider" />
+                  <TextBlock Classes="formlabel" Text="PROJECT TO BUILD" Margin="0" />
+                  <ComboBox ItemsSource="{Binding ProjectOptions}" SelectedItem="{Binding SelectedProject}" PlaceholderText="No runnable application project found">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ProjectChoice">
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="{Binding Name}" />
+                          <TextBlock Classes="muted mono" Text="{Binding Path}" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Spacing="18" Margin="9,0,0,0">
+              <Border Classes="card">
+                <StackPanel Spacing="12">
+                  <TextBlock Classes="h2" Text="Required toolchains" />
+                  <ItemsControl ItemsSource="{Binding Requirements}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:RequirementItem">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,4">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                            <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <c:StatusChip Grid.Column="1" Status="{Binding Status}" VerticalAlignment="Top" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+              <Border Classes="callout warning" IsVisible="{Binding HasMissing}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="h3 warning" Text="Missing requirements" />
+                  <ItemsControl ItemsSource="{Binding MissingDependencies}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="x:String">
+                        <TextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock Classes="muted" Text="Install the missing tools (see the Toolchains page), then press Re-inspect." TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+              <Border Classes="card" IsVisible="{Binding HasDiagnostics}">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="h2" Text="Findings" />
+                  <ItemsControl ItemsSource="{Binding Diagnostics}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:DiagnosticItem">
+                        <Grid ColumnDefinitions="Auto,*" Margin="0,4">
+                          <c:StatusChip Status="{Binding Severity}" VerticalAlignment="Top" Margin="0,0,10,0" />
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="{Binding Message}" FontSize="12.5" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted mono" Text="{Binding Path}" IsVisible="{Binding HasPath}" />
+                          </StackPanel>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </Grid>
+
+          <!-- STEP 3 · CONFIGURE -->
+          <Grid ColumnDefinitions="*,*" IsVisible="{Binding IsConfigureStep}">
+            <Border Classes="card" Margin="0,0,9,0" VerticalAlignment="Top">
+              <StackPanel Spacing="14">
+                <StackPanel Spacing="2">
+                  <TextBlock Classes="h2" Text="Application identity" />
+                  <TextBlock Classes="muted" Text="Branding of the generated application — independent of HCG Executable Maker." />
+                </StackPanel>
+                <StackPanel>
+                  <TextBlock Classes="formlabel" Text="APPLICATION NAME" />
+                  <TextBox Text="{Binding AppName}" />
+                </StackPanel>
+                <UniformGrid Columns="2">
+                  <StackPanel Margin="0,0,6,0">
+                    <TextBlock Classes="formlabel" Text="PUBLISHER" />
+                    <TextBox Text="{Binding Publisher}" PlaceholderText="e.g. Hakmi Capital Group" />
+                  </StackPanel>
+                  <StackPanel Margin="6,0,0,0">
+                    <TextBlock Classes="formlabel" Text="VERSION" />
+                    <TextBox Text="{Binding Version}" PlaceholderText="1.0.0" />
+                  </StackPanel>
+                </UniformGrid>
+                <StackPanel>
+                  <TextBlock Classes="formlabel" Text="APPLICATION IDENTIFIER (REVERSE-DNS)" />
+                  <TextBox Text="{Binding AppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" PlaceholderText="com.company.app" />
+                </StackPanel>
+                <StackPanel>
+                  <TextBlock Classes="formlabel" Text="DESCRIPTION" />
+                  <TextBox Text="{Binding Description}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" />
+                </StackPanel>
+                <Border Classes="divider" />
+                <TextBlock Classes="formlabel" Text="APPLICATION ICON (PNG, ICO OR ICNS)" Margin="0" />
+                <Grid ColumnDefinitions="Auto,*">
+                  <Border Width="84" Height="84" Classes="inset" Padding="8">
+                    <Panel>
+                      <Image Source="{Binding IconPreview}" Stretch="Uniform" />
+                      <PathIcon Data="{StaticResource Icon.Image}" Width="26" Height="26" Foreground="{DynamicResource Hcg.Brush.TextMuted}"
+                                IsVisible="{Binding IconPreview, Converter={x:Static ObjectConverters.IsNull}}" />
+                    </Panel>
+                  </Border>
+                  <StackPanel Grid.Column="1" Margin="14,0,0,0" Spacing="6">
+                    <TextBlock Text="{Binding IconFileName}" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="muted" Text="{Binding IconSummary}" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Classes="small" Content="Choose icon…" Command="{Binding BrowseIconCommand}" />
+                      <Button Classes="small ghost" Content="Remove" Command="{Binding ClearIconCommand}" IsVisible="{Binding HasIcon}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Grid>
+                <ItemsControl ItemsSource="{Binding IconNotes}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:IconNote">
+                      <TextBlock FontSize="12" TextWrapping="Wrap" Margin="0,2" Text="{Binding Text, StringFormat='• {0}'}"
+                                 Classes.warning="{Binding IsWarning}" Classes.error="{Binding IsError}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="Your original icon file is never modified. Platform formats (.ico / .icns) are generated from it without distortion." />
+              </StackPanel>
+            </Border>
+
+            <StackPanel Grid.Column="1" Spacing="18" Margin="9,0,0,0">
+              <Border Classes="card">
+                <StackPanel Spacing="14">
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h2" Text="Target &amp; build" />
+                    <TextBlock Classes="muted" Text="Platforms this project does not support are shown but cannot be selected." />
+                  </StackPanel>
+                  <UniformGrid Columns="2">
+                    <StackPanel Margin="0,0,6,0">
+                      <TextBlock Classes="formlabel" Text="TARGET PLATFORM" />
+                      <ComboBox ItemsSource="{Binding PlatformOptions}" SelectedItem="{Binding SelectedPlatform}">
+                        <ComboBox.Styles>
+                          <!-- Unsupported targets stay visible (with the reason) but cannot be chosen. -->
+                          <Style Selector="ComboBoxItem">
+                            <Setter Property="IsEnabled" Value="{ReflectionBinding IsEnabled}" />
+                          </Style>
+                        </ComboBox.Styles>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Margin="6,0,0,0">
+                      <TextBlock Classes="formlabel" Text="ARCHITECTURE" />
+                      <ComboBox ItemsSource="{Binding ArchitectureOptions}" SelectedItem="{Binding SelectedArchitecture}" />
+                    </StackPanel>
+                  </UniformGrid>
+                  <Border Classes="callout" IsVisible="{Binding PlatformNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="{Binding PlatformNote}" FontSize="12" TextWrapping="Wrap" />
+                  </Border>
+                  <UniformGrid Columns="2">
+                    <StackPanel Margin="0,0,6,0">
+                      <TextBlock Classes="formlabel" Text="CONFIGURATION" />
+                      <ComboBox ItemsSource="{Binding ConfigurationOptions}" SelectedItem="{Binding SelectedConfiguration}" />
+                    </StackPanel>
+                    <StackPanel Margin="6,0,0,0">
+                      <TextBlock Classes="formlabel" Text="TIME LIMIT (MINUTES)" />
+                      <NumericUpDown Value="{Binding TimeoutMinutes}" Minimum="1" Maximum="720" Increment="5" FormatString="0" />
+                    </StackPanel>
+                  </UniformGrid>
+                  <CheckBox IsChecked="{Binding SelfContained}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="Self-contained" FontWeight="Medium" />
+                      <TextBlock Classes="muted" Text="Bundle the .NET runtime — no installation required on the target machine." TextWrapping="Wrap" />
+                    </StackPanel>
+                  </CheckBox>
+                  <CheckBox IsChecked="{Binding SingleFile}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="Single-file executable" FontWeight="Medium" />
+                      <TextBlock Classes="muted" Text="Package the app and its dependencies into one executable file." TextWrapping="Wrap" />
+                    </StackPanel>
+                  </CheckBox>
+                </StackPanel>
+              </Border>
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="h2" Text="Output" />
+                  <TextBlock Classes="formlabel" Text="OUTPUT DIRECTORY" Margin="0" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBox Text="{Binding OutputDirectory}" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" />
+                    <Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseOutputCommand}" />
+                  </Grid>
+                  <TextBlock Classes="muted" TextWrapping="Wrap" Text="Each build writes into its own sub-folder named after the app, version and runtime." />
+                </StackPanel>
+              </Border>
+              <Border Classes="callout error" IsVisible="{Binding HasConfigErrors}">
+                <ItemsControl ItemsSource="{Binding ConfigErrors}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                      <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="{Binding StringFormat='• {0}'}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Border>
+            </StackPanel>
+          </Grid>
+
+          <!-- STEP 4 · PACKAGE -->
+          <Border Classes="card" IsVisible="{Binding IsPackageStep}">
+            <StackPanel Spacing="14">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="h2" Text="Packaging formats" />
+                <TextBlock Classes="muted" Text="Packaging runs after a successful build. Formats that are not implemented or need different tooling are disabled with the reason." />
+              </StackPanel>
+              <ItemsControl ItemsSource="{Binding PackagingOptions}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PackagingOptionItem">
+                    <Border Classes="inset" Margin="0,0,0,10" Padding="16,14">
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsEnabled}" VerticalAlignment="Top" />
+                        <StackPanel Grid.Column="1" Spacing="3" Margin="4,0,12,0">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13.5" />
+                          <TextBlock Classes="secondary" FontSize="12.5" Text="{Binding Description}" TextWrapping="Wrap" />
+                          <TextBlock Classes="warning" FontSize="12" Text="{Binding Reason}" TextWrapping="Wrap" IsVisible="{Binding HasReason}" />
+                        </StackPanel>
+                        <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
+          <!-- STEP 6 · RESULTS -->
+          <StackPanel Spacing="18" IsVisible="{Binding IsResultsStep}">
+            <Border Classes="card" Padding="26">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="8">
+                  <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock Classes="h1" Text="{Binding ResultTitle}" />
+                    <c:StatusChip Status="{Binding ResultTag}" />
+                  </StackPanel>
+                  <SelectableTextBlock Text="{Binding ResultDetail}" TextWrapping="Wrap" FontSize="13" Foreground="{DynamicResource Hcg.Brush.TextSecondary}" />
+                  <StackPanel Orientation="Horizontal" Spacing="24" Margin="0,6,0,0">
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="label" Text="DURATION" />
+                      <TextBlock Text="{Binding ResultDuration}" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="label" Text="WARNINGS" />
+                      <TextBlock Text="{Binding Result.WarningCount, FallbackValue=0}" FontWeight="SemiBold" Classes="warning" />
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="label" Text="ERRORS" />
+                      <TextBlock Text="{Binding Result.ErrorCount, FallbackValue=0}" FontWeight="SemiBold" Classes="error" />
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="label" Text="OUTPUT" />
+                      <SelectableTextBlock Text="{Binding ResultOutput}" Classes="mono" />
+                    </StackPanel>
+                  </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="8" Margin="20,0,0,0" MinWidth="200">
+                  <Button Classes="primary" HorizontalAlignment="Stretch" Command="{Binding OpenOutputFolderCommand}" IsEnabled="{Binding HasResultArtifacts}">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                      <PathIcon Data="{StaticResource Icon.Open}" />
+                      <TextBlock Text="Open Output Folder" />
+                    </StackPanel>
+                  </Button>
+                  <Button HorizontalAlignment="Stretch" Command="{Binding ExportArtifactsCommand}" IsEnabled="{Binding HasResultArtifacts}">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                      <PathIcon Data="{StaticResource Icon.Export}" />
+                      <TextBlock Text="Export Artifacts…" />
+                    </StackPanel>
+                  </Button>
+                  <Button HorizontalAlignment="Stretch" Command="{Binding ViewBuildLogCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                      <PathIcon Data="{StaticResource Icon.Log}" />
+                      <TextBlock Text="View Build Log" />
+                    </StackPanel>
+                  </Button>
+                  <Button HorizontalAlignment="Stretch" Command="{Binding RebuildWithChangesCommand}" Content="Adjust &amp; Rebuild" />
+                  <Button HorizontalAlignment="Stretch" Classes="ghost" Command="{Binding StartNewBuildCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                      <PathIcon Data="{StaticResource Icon.NewBuild}" />
+                      <TextBlock Text="Start New Build" />
+                    </StackPanel>
+                  </Button>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <ItemsControl ItemsSource="{Binding ResultArtifacts}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ArtifactItem">
+                  <Border Classes="card" Margin="0,0,0,14">
+                    <StackPanel Spacing="10">
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource Hcg.Brush.CyanSoft}" VerticalAlignment="Top">
+                          <PathIcon Data="{StaticResource Icon.Artifacts}" Width="18" Height="18" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Margin="14,0" Spacing="2">
+                          <TextBlock Classes="h3" Text="{Binding Name}" />
+                          <TextBlock Classes="muted" Text="{Binding FormatName}" />
+                        </StackPanel>
+                        <c:StatusChip Grid.Column="2" Status="{Binding Verification}" VerticalAlignment="Top" />
+                      </Grid>
+                      <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto" Margin="54,0,0,0">
+                        <TextBlock Classes="label" Text="SIZE" Margin="0,3" />
+                        <TextBlock Grid.Column="1" Text="{Binding Size}" FontSize="12.5" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Classes="label" Text="LOCATION" Margin="0,3" />
+                        <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="{Binding Path}" TextWrapping="Wrap" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Classes="label" Text="{Binding ChecksumLabel}" Margin="0,3" TextWrapping="Wrap" />
+                        <SelectableTextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="{Binding Sha256}" TextWrapping="Wrap" Margin="0,3" />
+                      </Grid>
+                      <ItemsControl ItemsSource="{Binding Checks}" Margin="54,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:CheckItem">
+                            <Grid ColumnDefinitions="170,Auto,*" Margin="0,3">
+                              <TextBlock Text="{Binding Name}" FontSize="12" Classes="secondary" />
+                              <c:StatusChip Grid.Column="1" Status="{Binding Status}" Margin="0,0,10,0" />
+                              <TextBlock Grid.Column="2" Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <StackPanel Orientation="Horizontal" Spacing="8" Margin="54,4,0,0">
+                        <Button Classes="small" Command="{Binding $parent[UserControl].((vm:BuildWizardViewModel)DataContext).CopyArtifactPathCommand}" CommandParameter="{Binding}">
+                          <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Copy}" /><TextBlock Text="Copy Artifact Path" /></StackPanel>
+                        </Button>
+                        <Button Classes="small" Command="{Binding $parent[UserControl].((vm:BuildWizardViewModel)DataContext).CopyChecksumCommand}" CommandParameter="{Binding}">
+                          <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Copy}" /><TextBlock Text="Copy SHA-256" /></StackPanel>
+                        </Button>
+                      </StackPanel>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Border Classes="card" IsVisible="{Binding HasResultMessages}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="h2" Text="Warnings &amp; errors" />
+                <ItemsControl ItemsSource="{Binding ResultMessages}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MessageItem">
+                      <Grid ColumnDefinitions="Auto,Auto,*" Margin="0,4">
+                        <c:StatusChip Status="{Binding Severity}" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="1" Classes="mono muted" Text="{Binding Code}" Margin="10,2,10,0" VerticalAlignment="Top" />
+                        <StackPanel Grid.Column="2" Spacing="1">
+                          <SelectableTextBlock Text="{Binding Text}" FontSize="12.5" TextWrapping="Wrap" />
+                          <TextBlock Classes="muted mono" Text="{Binding Location}" />
+                        </StackPanel>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- STEP 5 · BUILD (log fills the remaining height) -->
+      <Grid RowDefinitions="Auto,*" IsVisible="{Binding IsBuildStep}">
+        <ScrollViewer MaxHeight="430" IsVisible="{Binding ShowTrustPanel}">
+          <Grid ColumnDefinitions="*,*" Margin="0,0,6,0">
+            <Border Classes="callout warning" Margin="0,0,9,0" Padding="20">
+              <StackPanel Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <PathIcon Data="{StaticResource Icon.Warning}" Foreground="{DynamicResource Hcg.Brush.Warning}" Width="18" Height="18" />
+                  <TextBlock Classes="h2" Text="{Binding TrustTitle}" />
+                </StackPanel>
+                <TextBlock Classes="body" Text="{Binding TrustExplanation}" />
+                <TextBlock Classes="body secondary" Text="{Binding SecretsStatement}" />
+                <Border Classes="chip warning">
+                  <TextBlock Text="{Binding IsolationDescription}" />
+                </Border>
+                <CheckBox IsChecked="{Binding TrustAcknowledged}" Margin="0,6,0,0">
+                  <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                </CheckBox>
+                <Button Classes="primary" HorizontalAlignment="Left" Command="{Binding StartBuildCommand}" Margin="0,4,0,0">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <PathIcon Data="{StaticResource Icon.Play}" />
+                    <TextBlock Text="Start Build" />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="1" Classes="card" Margin="9,0,0,0">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="h2" Text="Build summary" />
+                <ItemsControl ItemsSource="{Binding Summary}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SummaryRow">
+                      <Grid ColumnDefinitions="120,*" Margin="0,3">
+                        <TextBlock Classes="label" Text="{Binding Label}" />
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12.5" TextWrapping="Wrap" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </Grid>
+        </ScrollViewer>
+
+        <Border Classes="card compact" IsVisible="{Binding IsBuilding}">
+          <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+            <StackPanel Spacing="8" VerticalAlignment="Center">
+              <TextBlock Classes="eyebrow" Text="BUILD IN PROGRESS" />
+              <TextBlock Classes="h2" Text="{Binding CurrentStage}" />
+              <ProgressBar IsIndeterminate="True" MaxWidth="520" HorizontalAlignment="Left" Width="520" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="2" Margin="18,0" VerticalAlignment="Center">
+              <TextBlock Classes="label" Text="ELAPSED" />
+              <TextBlock Classes="mono" FontSize="18" Text="{Binding Elapsed}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="2" Margin="18,0" VerticalAlignment="Center">
+              <TextBlock Classes="label" Text="WARNINGS" />
+              <TextBlock Classes="warning" FontSize="18" Text="{Binding LiveWarnings}" />
+            </StackPanel>
+            <StackPanel Grid.Column="3" Spacing="2" Margin="18,0" VerticalAlignment="Center">
+              <TextBlock Classes="label" Text="ERRORS" />
+              <TextBlock Classes="error" FontSize="18" Text="{Binding LiveErrors}" />
+            </StackPanel>
+            <Button Grid.Column="4" Classes="danger" Command="{Binding CancelBuildCommand}" VerticalAlignment="Center" IsEnabled="{Binding !IsCancelling}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <PathIcon Data="{StaticResource Icon.Stop}" />
+                <TextBlock Text="Cancel Build" />
+              </StackPanel>
+            </Button>
+          </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Classes="card" Padding="0" Margin="0,14,0,0" ClipToBounds="True" IsVisible="{Binding HasBuildStarted}">
+          <DockPanel>
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="16,10">
+              <TextBlock Classes="label" Text="LIVE BUILD LOG" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Classes="muted" Text="Display limited to recent lines — full log is saved to disk" IsVisible="{Binding LogTruncated}" />
+            </Grid>
+            <ListBox x:Name="LogList" Classes="log" ItemsSource="{Binding LogLines}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:LogLineItem">
+                  <Grid ColumnDefinitions="70,*">
+                    <TextBlock Classes="log" Text="{Binding Time}" Opacity="0.45" />
+                    <TextBlock Grid.Column="1" Classes="log" Text="{Binding Text}"
+                               Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.success="{Binding IsSuccess}"
+                               Classes.command="{Binding IsCommand}" Classes.info="{Binding IsInfo}" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
+        </Border>
+      </Grid>
+    </Panel>
+
+    <!-- ===== Navigation bar ===== -->
+    <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" Margin="0,16,0,0">
+      <Button Command="{Binding BackCommand}" IsVisible="{Binding ShowBack}">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <PathIcon Data="{StaticResource Icon.ArrowLeft}" />
+          <TextBlock Text="Back" />
+        </StackPanel>
+      </Button>
+      <Button Grid.Column="2" Classes="primary" Command="{Binding NextCommand}" IsVisible="{Binding ShowNext}">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="Continue" />
+          <PathIcon Data="{StaticResource Icon.ArrowRight}" />
+        </StackPanel>
+      </Button>
+    </Grid>
+  </Grid>
+</UserControl>

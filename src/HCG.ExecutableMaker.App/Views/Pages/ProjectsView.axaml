@@ -1,0 +1,72 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.ProjectsView"
+             x:DataType="vm:ProjectsViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="secondary" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"
+                   Text="Reopen a project to configure a new build, re-run inspection, or remove its workspace." />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+          <Button Command="{Binding ImportFolderCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Folder}" /><TextBlock Text="Import Folder" /></StackPanel>
+          </Button>
+          <Button Classes="primary" Command="{Binding ImportZipCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Zip}" /><TextBlock Text="Import ZIP" /></StackPanel>
+          </Button>
+        </StackPanel>
+      </Grid>
+
+      <Border Classes="card" Padding="40" IsVisible="{Binding IsEmpty}">
+        <StackPanel Spacing="10" HorizontalAlignment="Center" MaxWidth="460">
+          <PathIcon Data="{StaticResource Icon.Projects}" Width="36" Height="36" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+          <TextBlock Classes="h2" Text="No imported projects" HorizontalAlignment="Center" />
+          <TextBlock Classes="body secondary" TextAlignment="Center"
+                     Text="Import a ZIP archive or a folder. HCG validates it, copies it into an isolated workspace, and inspects it statically — nothing from the project is executed during import." />
+        </StackPanel>
+      </Border>
+
+      <ItemsControl ItemsSource="{Binding Projects}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ProjectItem">
+            <Border Classes="card interactive" Margin="0,0,0,14">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <Border Width="44" Height="44" CornerRadius="11" Background="{DynamicResource Hcg.Brush.CyanSoft}" VerticalAlignment="Top">
+                  <PathIcon Data="{StaticResource Icon.Projects}" Width="20" Height="20" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+                </Border>
+                <StackPanel Grid.Column="1" Margin="16,0" Spacing="6">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Classes="h2" Text="{Binding Name}" />
+                    <c:StatusChip Status="{Binding Status}" />
+                  </StackPanel>
+                  <TextBlock Classes="secondary" FontSize="12.5" Text="{Binding Summary}" />
+                  <TextBlock Classes="muted" Text="{Binding Framework}" />
+                  <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto" Margin="0,6,0,0">
+                    <TextBlock Classes="label" Text="ORIGINAL" Margin="0,2" />
+                    <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding Source, StringFormat='{}{0}'}" TextWrapping="Wrap" Margin="0,2" />
+                    <TextBlock Grid.Row="1" Classes="label" Text="WORKSPACE" Margin="0,2" />
+                    <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="{Binding Workspace}" TextWrapping="Wrap" Margin="0,2" />
+                    <TextBlock Grid.Row="2" Classes="label" Text="IMPORTED" Margin="0,2" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" FontSize="12" Margin="0,2" Text="{Binding Imported}" />
+                  </Grid>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="8" MinWidth="170">
+                  <Button Classes="primary small" HorizontalAlignment="Stretch" Content="Configure Build"
+                          Command="{Binding $parent[UserControl].((vm:ProjectsViewModel)DataContext).OpenInWizardCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small" HorizontalAlignment="Stretch" Content="Re-inspect"
+                          Command="{Binding $parent[UserControl].((vm:ProjectsViewModel)DataContext).ReinspectCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small" HorizontalAlignment="Stretch" Content="Open Workspace"
+                          Command="{Binding $parent[UserControl].((vm:ProjectsViewModel)DataContext).OpenWorkspaceCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small danger" HorizontalAlignment="Stretch" Content="Remove…"
+                          Command="{Binding $parent[UserControl].((vm:ProjectsViewModel)DataContext).RemoveCommand}" CommandParameter="{Binding}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

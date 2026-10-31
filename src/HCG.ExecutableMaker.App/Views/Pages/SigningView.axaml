@@ -1,0 +1,71 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.SigningView"
+             x:DataType="vm:SigningViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18">
+      <Grid ColumnDefinitions="*,*">
+        <Border Classes="callout warning" Padding="20" Margin="0,0,9,0">
+          <StackPanel Spacing="10">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <PathIcon Data="{StaticResource Icon.Warning}" Foreground="{DynamicResource Hcg.Brush.Warning}" Width="18" Height="18" />
+              <TextBlock Classes="h2" Text="{Binding TrustTitle}" />
+            </StackPanel>
+            <TextBlock Classes="body" Text="{Binding TrustExplanation}" />
+            <Border Classes="chip warning"><TextBlock Text="{Binding IsolationDescription}" /></Border>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Classes="card" Margin="9,0,0,0">
+          <StackPanel Spacing="10">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <PathIcon Data="{StaticResource Icon.Security}" Foreground="{DynamicResource Hcg.Brush.Cyan}" Width="18" Height="18" />
+              <TextBlock Classes="h2" Text="Secrets never reach a build" />
+            </StackPanel>
+            <TextBlock Classes="body secondary" Text="{Binding SecretsStatement}" />
+            <TextBlock Classes="label" Text="ALWAYS REMOVED (PREFIXES)" Margin="0,4,0,0" />
+            <TextBlock Classes="mono muted" Text="{Binding BlockedPrefixes}" TextWrapping="Wrap" />
+            <TextBlock Classes="label" Text="REMOVED WHEN THE NAME CONTAINS" />
+            <TextBlock Classes="mono muted" Text="{Binding BlockedFragments}" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Signature status of generated artifacts" />
+          <TextBlock Classes="body secondary" Text="{Binding SignatureStatement}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="6">
+          <StackPanel Spacing="2" Margin="0,0,0,8">
+            <TextBlock Classes="h2" Text="Signing &amp; distribution roadmap" />
+            <TextBlock Classes="muted" Text="Tool availability is detected on this host. No signing operation is implemented in M0.1; signing and publication will always require explicit founder approval." TextWrapping="Wrap" />
+          </StackPanel>
+          <ItemsControl ItemsSource="{Binding Capabilities}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SigningCapabilityItem">
+                <StackPanel>
+                  <Grid ColumnDefinitions="220,90,*,Auto,Auto" Margin="0,10">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Platform}" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                      <TextBlock FontSize="12.5" Text="{Binding Description}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding StatusText}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <c:StatusChip Grid.Column="3" Status="{Binding ToolStatus}" Margin="12,0,8,0" />
+                    <c:StatusChip Grid.Column="4" Status="{Binding Status}" />
+                  </Grid>
+                  <Border Classes="divider" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

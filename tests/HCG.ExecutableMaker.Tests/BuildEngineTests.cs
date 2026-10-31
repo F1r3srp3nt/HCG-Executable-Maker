@@ -377,6 +377,40 @@ public class BuildServiceTests : IDisposable
         Assert.Equal(2, worker.Calls.Count);
     }
 
+    private sealed class BlockingPackager : IPackager
+    {
+        public TaskCompletionSource Started { get; } = new();
+        public PackagingFormat Format => PackagingFormat.PortableFolder;
+        public async Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken ct)
+        {
+            File.WriteAllText(Path.Combine(request.OutputRoot, "partial.bin"), "half-written");
+            Started.SetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return [];
+        }
+    }
+
+    [Fact]
+    public async Task Cancelling_during_packaging_removes_incomplete_output()
+    {
+        var packager = new BlockingPackager();
+        var svc = new BuildService(new ScriptedWorker((s, o, c) => Ok(s, o, c)), new FixedToolchains(Fixtures.Toolchains("10.0.114")), _builds,
+            new PackagingRegistry([packager]), _paths, TimeProvider.System);
+        using var cts = new CancellationTokenSource();
+        var settings = BuildPlannerTests.Settings(_t.Combine("out"));
+        var run = svc.RunAsync(Request(settings), new Observer(), cts.Token);
+        await packager.Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.True(File.Exists(Path.Combine(BuildService.OutputRootFor(settings), BuildService.OutputMarkerFile)));
+        cts.Cancel();
+        var build = await run;
+
+        Assert.Equal(BuildStatus.Cancelled, build.Status);
+        Assert.False(Directory.Exists(BuildService.OutputRootFor(settings)));
+        // A subsequent build to the same location is not blocked by leftovers.
+        var again = await Service(new ScriptedWorker((s, o, c) => Ok(s, o, c))).RunAsync(Request(settings), new Observer(), CancellationToken.None);
+        Assert.Equal(BuildStatus.Succeeded, again.Status);
+    }
+
     [Fact]
     public async Task Timeout_marks_build_timed_out()
     {

@@ -99,6 +99,7 @@ public sealed class BuildService(
         await builds.InsertAsync(build, CancellationToken.None).ConfigureAwait(false);
         observer.OnStarted(build);
 
+        string? createdOutputRoot = null;
         using var overall = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         overall.CancelAfter(settings.Timeout);
         var stopwatch = Stopwatch.StartNew();
@@ -185,8 +186,11 @@ public sealed class BuildService(
             Log(BuildLogKind.Success, $"Found application executable: {exeName}");
 
             observer.OnStage(BuildStage.Packaging, "Packaging artifacts");
-            var baseName = $"{PathGuard.SanitizeFileName(settings.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(settings.Identity.Version, "0")}-{settings.RuntimeIdentifier}";
+            var baseName = ArtifactBaseName(settings);
             var outputRoot = PrepareOutputRoot(settings.OutputDirectory, baseName, request.AllowOverwriteOutput);
+            createdOutputRoot = outputRoot;
+            // Claim the folder immediately so an interrupted build can be cleaned up or replaced later.
+            await File.WriteAllTextAsync(Path.Combine(outputRoot, OutputMarkerFile), HcgJson.Serialize(new { buildId = build.Id, complete = false }), overall.Token).ConfigureAwait(false);
             Log(BuildLogKind.Info, $"Output folder: {outputRoot}");
 
             var packagingRequest = new PackagingRequest
@@ -256,6 +260,7 @@ public sealed class BuildService(
                 settings.Identity.Version,
                 runtimeIdentifier = settings.RuntimeIdentifier,
                 createdAt = time.GetUtcNow(),
+                complete = true,
                 signed = false,
                 notarized = false,
             }), overall.Token).ConfigureAwait(false);
@@ -293,12 +298,21 @@ public sealed class BuildService(
         finally
         {
             stopwatch.Stop();
+            if (build.Status != BuildStatus.Succeeded && build.Artifacts.Count == 0 && createdOutputRoot is not null)
+                RemoveIncompleteOutput(createdOutputRoot, Log);
             build.EndedAt = time.GetUtcNow();
             Log(BuildLogKind.Info, $"Finished with status {build.Status} in {stopwatch.Elapsed:hh\\:mm\\:ss}.");
             await builds.UpdateAsync(build, CancellationToken.None).ConfigureAwait(false);
             observer.OnStage(BuildStage.Completed, build.Status.ToString());
         }
     }
+
+    /// <summary>Base name shared by the per-build output folder and its artifacts, e.g. <c>MyApp-1.2.0-osx-arm64</c>.</summary>
+    public static string ArtifactBaseName(BuildSettings s) =>
+        $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier}";
+
+    /// <summary>The per-build folder created inside the chosen output directory.</summary>
+    public static string OutputRootFor(BuildSettings s) => Path.Combine(Path.GetFullPath(s.OutputDirectory), ArtifactBaseName(s));
 
     /// <summary>Finds the native app host in publish output: assembly name first, then the runtimeconfig.json stem.</summary>
     internal static string? LocateExecutable(string publishDir, string? assemblyName, TargetPlatform platform)
@@ -329,6 +343,24 @@ public sealed class BuildService(
         }
         Directory.CreateDirectory(root);
         return root;
+    }
+
+    /// <summary>Deletes an output folder this build created but never completed (cancelled, timed out, or crashed).</summary>
+    private void RemoveIncompleteOutput(string outputRoot, Action<BuildLogKind, string> log)
+    {
+        try
+        {
+            if (Directory.Exists(outputRoot) && File.Exists(Path.Combine(outputRoot, OutputMarkerFile)))
+            {
+                Directory.Delete(outputRoot, recursive: true);
+                log(BuildLogKind.Info, $"Removed incomplete output folder {outputRoot}");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not remove incomplete output {Path}", outputRoot);
+            log(BuildLogKind.Warning, $"Incomplete output could not be removed: {outputRoot} ({ex.Message})");
+        }
     }
 
     private sealed class PackagingLog(Action<BuildLogKind, string> log) : IPackagingLog

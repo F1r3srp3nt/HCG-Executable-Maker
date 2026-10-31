@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HCG.ExecutableMaker.App.Controls.BrandMark"
+             Width="44" Height="44">
+  <!--
+    TEMPORARY BRANDING PLACEHOLDER.
+    This is NOT the official HCG logo. Drop the approved asset at Assets/Branding/hcg-logo.png
+    and it is used automatically (see BrandMark.axaml.cs).
+  -->
+  <Panel>
+    <Image x:Name="OfficialLogo" IsVisible="False" Stretch="Uniform" />
+    <Border x:Name="Placeholder"
+            CornerRadius="11"
+            BorderThickness="1"
+            BorderBrush="{DynamicResource Hcg.Brush.MetalBorder}"
+            Background="{DynamicResource Hcg.Brush.CyanFaint}"
+            ToolTip.Tip="Placeholder mark — official HCG logo asset not yet provided (Assets/Branding/hcg-logo.png)">
+      <TextBlock Text="HCG" FontSize="13" FontWeight="Bold" LetterSpacing="1.2"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                 Foreground="{DynamicResource Hcg.Brush.MetalText}" />
+    </Border>
+  </Panel>
+</UserControl>

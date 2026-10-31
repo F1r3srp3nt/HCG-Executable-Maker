@@ -1,0 +1,117 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:s="using:HCG.ExecutableMaker.App.Services"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.formlabel">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextSecondary}" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+  </UserControl.Styles>
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="h2" Text="Appearance" />
+          <ListBox Classes="plain selectable" ItemsSource="{Binding Themes}" SelectedItem="{Binding SelectedTheme}">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="s:ThemeOption">
+                <Border Classes="card compact interactive" Margin="0,0,10,0">
+                  <StackPanel Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Classes="h3" Text="{Binding Name}" />
+                      <Border Classes="chip info" IsVisible="{Binding IsPreview}"><TextBlock Text="Preview" /></Border>
+                    </StackPanel>
+                    <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="14">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="h2" Text="Import safety limits" />
+            <TextBlock Classes="muted" Text="Archives and folders exceeding these limits are rejected before anything is kept." />
+          </StackPanel>
+          <UniformGrid Columns="3">
+            <StackPanel Margin="0,0,8,0">
+              <TextBlock Classes="formlabel" Text="MAX TOTAL SIZE (GB)" />
+              <NumericUpDown Value="{Binding MaxImportGb}" Minimum="0.01" Maximum="200" Increment="0.5" FormatString="0.##" />
+            </StackPanel>
+            <StackPanel Margin="4,0,4,0">
+              <TextBlock Classes="formlabel" Text="MAX SINGLE FILE (GB)" />
+              <NumericUpDown Value="{Binding MaxFileGb}" Minimum="0.01" Maximum="100" Increment="0.5" FormatString="0.##" />
+            </StackPanel>
+            <StackPanel Margin="8,0,0,0">
+              <TextBlock Classes="formlabel" Text="MAX FILE COUNT" />
+              <NumericUpDown Value="{Binding MaxFiles}" Minimum="1" Maximum="1000000" Increment="1000" FormatString="0" />
+            </StackPanel>
+          </UniformGrid>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="14">
+          <TextBlock Classes="h2" Text="Build defaults" />
+          <UniformGrid Columns="3">
+            <StackPanel Margin="0,0,8,0">
+              <TextBlock Classes="formlabel" Text="BUILD TIME LIMIT (MINUTES)" />
+              <NumericUpDown Value="{Binding TimeoutMinutes}" Minimum="1" Maximum="720" Increment="5" FormatString="0" />
+            </StackPanel>
+          </UniformGrid>
+          <StackPanel>
+            <TextBlock Classes="formlabel" Text="DEFAULT OUTPUT DIRECTORY" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Text="{Binding DefaultOutput}" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" />
+              <Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseOutputCommand}" />
+            </Grid>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <Button Classes="primary" Content="Save Settings" Command="{Binding SaveCommand}" />
+            <TextBlock Classes="success" VerticalAlignment="Center" Text="{Binding StatusMessage}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Data locations" />
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto">
+            <TextBlock Classes="label" Text="DATA ROOT" Margin="0,3" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding DataRoot}" Margin="0,3" />
+            <TextBlock Grid.Row="1" Classes="label" Text="DATABASE" Margin="0,3" />
+            <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="{Binding DatabasePath}" Margin="0,3" />
+            <TextBlock Grid.Row="2" Classes="label" Text="WORKSPACES" Margin="0,3" />
+            <SelectableTextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="{Binding WorkspacesPath}" Margin="0,3" />
+            <TextBlock Grid.Row="3" Classes="label" Text="LOGS" Margin="0,3" />
+            <SelectableTextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding LogsPath}" Margin="0,3" />
+          </Grid>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="small" Content="Open Data Folder" Command="{Binding OpenDataFolderCommand}" />
+            <Button Classes="small" Content="Open Logs Folder" Command="{Binding OpenLogsFolderCommand}" />
+          </StackPanel>
+          <TextBlock Classes="muted" TextWrapping="Wrap" Text="The database stores metadata only (projects, builds, artifacts, checksums). It never stores passwords, certificates or private keys." />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="h2" Text="About" />
+          <TextBlock Text="{Binding Version, StringFormat='HCG Executable Maker {0} — Milestone 0.1'}" />
+          <TextBlock Classes="muted" Text="© Hakmi Capital Group. Built with .NET 10 and Avalonia UI." />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,88 @@
+<!-- HCG CLASSIC — understated professional tokens (preview). Every color in the UI comes from these keys. -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <x:String x:Key="Hcg.ThemeName">HCG Classic</x:String>
+
+  <!-- Palette -->
+  <Color x:Key="Hcg.Color.Background">#111315</Color>
+  <Color x:Key="Hcg.Color.BackgroundSecondary">#181B1F</Color>
+  <Color x:Key="Hcg.Color.Surface">#22262B</Color>
+  <Color x:Key="Hcg.Color.Cyan">#7FA7C9</Color>
+  <Color x:Key="Hcg.Color.Blue">#4F7AA3</Color>
+  <Color x:Key="Hcg.Color.Silver">#D9E2EB</Color>
+  <Color x:Key="Hcg.Color.TextPrimary">#F3F7FB</Color>
+  <Color x:Key="Hcg.Color.TextSecondary">#98A9BA</Color>
+  <Color x:Key="Hcg.Color.TextMuted">#64778B</Color>
+  <Color x:Key="Hcg.Color.Success">#27D6A0</Color>
+  <Color x:Key="Hcg.Color.Warning">#F0B94D</Color>
+  <Color x:Key="Hcg.Color.Error">#F16B75</Color>
+
+  <!-- Brushes -->
+  <SolidColorBrush x:Key="Hcg.Brush.Background" Color="#111315" />
+  <SolidColorBrush x:Key="Hcg.Brush.BackgroundSecondary" Color="#181B1F" />
+  <SolidColorBrush x:Key="Hcg.Brush.Surface" Color="#22262B" />
+  <SolidColorBrush x:Key="Hcg.Brush.SurfaceGlass" Color="#F01A1D21" />
+  <SolidColorBrush x:Key="Hcg.Brush.SurfaceGlassHover" Color="#F0212429" />
+  <SolidColorBrush x:Key="Hcg.Brush.Sidebar" Color="#FF14161A" />
+  <SolidColorBrush x:Key="Hcg.Brush.Input" Color="#0F1113" />
+  <SolidColorBrush x:Key="Hcg.Brush.Divider" Color="#1FD9E2EB" />
+  <SolidColorBrush x:Key="Hcg.Brush.Cyan" Color="#7FA7C9" />
+  <SolidColorBrush x:Key="Hcg.Brush.CyanSoft" Color="#1F7FA7C9" />
+  <SolidColorBrush x:Key="Hcg.Brush.CyanFaint" Color="#0F7FA7C9" />
+  <SolidColorBrush x:Key="Hcg.Brush.Blue" Color="#4F7AA3" />
+  <SolidColorBrush x:Key="Hcg.Brush.Silver" Color="#D9E2EB" />
+  <SolidColorBrush x:Key="Hcg.Brush.TextPrimary" Color="#F3F7FB" />
+  <SolidColorBrush x:Key="Hcg.Brush.TextSecondary" Color="#98A9BA" />
+  <SolidColorBrush x:Key="Hcg.Brush.TextMuted" Color="#64778B" />
+  <SolidColorBrush x:Key="Hcg.Brush.OnAccent" Color="#04121A" />
+  <SolidColorBrush x:Key="Hcg.Brush.Success" Color="#27D6A0" />
+  <SolidColorBrush x:Key="Hcg.Brush.SuccessSoft" Color="#1A27D6A0" />
+  <SolidColorBrush x:Key="Hcg.Brush.Warning" Color="#F0B94D" />
+  <SolidColorBrush x:Key="Hcg.Brush.WarningSoft" Color="#1AF0B94D" />
+  <SolidColorBrush x:Key="Hcg.Brush.Error" Color="#F16B75" />
+  <SolidColorBrush x:Key="Hcg.Brush.ErrorSoft" Color="#1AF16B75" />
+  <SolidColorBrush x:Key="Hcg.Brush.Neutral" Color="#98A9BA" />
+  <SolidColorBrush x:Key="Hcg.Brush.NeutralSoft" Color="#1498A9BA" />
+  <SolidColorBrush x:Key="Hcg.Brush.LogBackground" Color="#05080D" />
+
+  <!-- Metallic edge: silver catching light at the top-left, fading into graphite. -->
+  <LinearGradientBrush x:Key="Hcg.Brush.MetalBorder" StartPoint="0%,0%" EndPoint="100%,100%">
+    <GradientStop Offset="0" Color="#66D9E2EB" />
+    <GradientStop Offset="0.35" Color="#1FD9E2EB" />
+    <GradientStop Offset="0.7" Color="#144F7AA3" />
+    <GradientStop Offset="1" Color="#337FA7C9" />
+  </LinearGradientBrush>
+  <LinearGradientBrush x:Key="Hcg.Brush.MetalText" StartPoint="0%,0%" EndPoint="100%,100%">
+    <GradientStop Offset="0" Color="#FFFFFF" />
+    <GradientStop Offset="0.45" Color="#D9E2EB" />
+    <GradientStop Offset="0.55" Color="#9FB0C2" />
+    <GradientStop Offset="1" Color="#E8F0F7" />
+  </LinearGradientBrush>
+  <LinearGradientBrush x:Key="Hcg.Brush.AccentGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+    <GradientStop Offset="0" Color="#7FA7C9" />
+    <GradientStop Offset="1" Color="#4F7AA3" />
+  </LinearGradientBrush>
+  <LinearGradientBrush x:Key="Hcg.Brush.AccentLine" StartPoint="0%,0%" EndPoint="100%,0%">
+    <GradientStop Offset="0" Color="#00000000" />
+    <GradientStop Offset="0.5" Color="#807FA7C9" />
+    <GradientStop Offset="1" Color="#00000000" />
+  </LinearGradientBrush>
+  <RadialGradientBrush x:Key="Hcg.Brush.GlowTopLeft" Center="8%,0%" GradientOrigin="8%,0%" RadiusX="55%" RadiusY="55%">
+    <GradientStop Offset="0" Color="#00000000" />
+    <GradientStop Offset="1" Color="#00000000" />
+  </RadialGradientBrush>
+  <RadialGradientBrush x:Key="Hcg.Brush.GlowBottomRight" Center="100%,100%" GradientOrigin="100%,100%" RadiusX="60%" RadiusY="60%">
+    <GradientStop Offset="0" Color="#00000000" />
+    <GradientStop Offset="1" Color="#00000000" />
+  </RadialGradientBrush>
+
+  <!-- Geometry & spacing -->
+  <CornerRadius x:Key="Hcg.Radius.Card">14</CornerRadius>
+  <CornerRadius x:Key="Hcg.Radius.Control">8</CornerRadius>
+  <CornerRadius x:Key="Hcg.Radius.Pill">999</CornerRadius>
+  <Thickness x:Key="Hcg.Padding.Card">22</Thickness>
+  <Thickness x:Key="Hcg.Padding.Page">36,30,36,30</Thickness>
+  <BoxShadows x:Key="Hcg.Shadow.Card">0 12 32 0 #66000000</BoxShadows>
+  <BoxShadows x:Key="Hcg.Shadow.Glow">0 0 24 0 #00000000</BoxShadows>
+  <FontFamily x:Key="Hcg.Font.Mono">Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace</FontFamily>
+</ResourceDictionary>

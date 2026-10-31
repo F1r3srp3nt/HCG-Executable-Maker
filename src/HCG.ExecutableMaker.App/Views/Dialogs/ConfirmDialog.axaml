@@ -1,0 +1,18 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="HCG.ExecutableMaker.App.Views.Dialogs.ConfirmDialog"
+        Width="520" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Title="HCG Executable Maker">
+  <Border Padding="28" BorderThickness="0,2,0,0" BorderBrush="{DynamicResource Hcg.Brush.AccentGradient}">
+    <StackPanel Spacing="18">
+      <TextBlock x:Name="TitleText" Classes="h2" TextWrapping="Wrap" />
+      <SelectableTextBlock x:Name="MessageText" FontSize="13" LineHeight="20" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Hcg.Brush.TextSecondary}" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,6,0,0">
+        <Button x:Name="CancelButton" Content="Cancel" />
+        <Button x:Name="ConfirmButton" Classes="primary" Content="Confirm" IsDefault="True" />
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</Window>

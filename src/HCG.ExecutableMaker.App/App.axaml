@@ -1,0 +1,33 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HCG.ExecutableMaker.App.App"
+             RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- Index 0 is the active token set; ThemeService swaps it at runtime. -->
+        <ResourceInclude Source="avares://HCGExecutableMaker/Themes/Tokens.HcgFuture.axaml" />
+        <ResourceInclude Source="avares://HCGExecutableMaker/Themes/Icons.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Dark"
+                               Accent="#00D9FF"
+                               AltHigh="#080C12"
+                               RegionColor="#0B111A"
+                               ChromeAltLow="#D9E2EB"
+                               ChromeHigh="#2A3A4E"
+                               ChromeLow="#101722"
+                               ChromeMedium="#182331"
+                               ChromeMediumLow="#141D29"
+                               BaseHigh="#F3F7FB"
+                               BaseMedium="#98A9BA"
+                               ErrorText="#F16B75" />
+      </FluentTheme.Palettes>
+    </FluentTheme>
+    <StyleInclude Source="avares://HCGExecutableMaker/Themes/Controls.axaml" />
+  </Application.Styles>
+</Application>

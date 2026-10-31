@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>HCGExecutableMaker</AssemblyName>
+    <RootNamespace>HCG.ExecutableMaker.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.ExecutableMaker.Infrastructure\HCG.ExecutableMaker.Infrastructure.csproj" />
+    <ProjectReference Include="..\HCG.ExecutableMaker.ProjectInspection\HCG.ExecutableMaker.ProjectInspection.csproj" />
+    <ProjectReference Include="..\HCG.ExecutableMaker.BuildEngine\HCG.ExecutableMaker.BuildEngine.csproj" />
+  </ItemGroup>
+</Project>

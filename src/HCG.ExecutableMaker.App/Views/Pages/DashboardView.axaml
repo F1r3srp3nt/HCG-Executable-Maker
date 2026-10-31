@@ -1,0 +1,181 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.DashboardView"
+             x:DataType="vm:DashboardViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="22">
+
+      <!-- Hero -->
+      <Border Classes="card" Padding="28">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="8" VerticalAlignment="Center">
+            <TextBlock Classes="eyebrow" Text="UNIVERSAL APPLICATION BUILDER" />
+            <TextBlock Text="One project in. A distributable application out." FontSize="22" FontWeight="SemiBold" Classes="metal" />
+            <TextBlock Classes="body secondary" MaxWidth="640" HorizontalAlignment="Left"
+                       Text="Import a trusted .NET project, inspect it without running any code, then build and package it as a self-contained application for Windows or macOS — with checksums and verification for every artifact." />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="10" VerticalAlignment="Center" Margin="24,0,0,0" MinWidth="200">
+            <Button Classes="primary" Command="{Binding NewBuildCommand}" HorizontalAlignment="Stretch">
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <PathIcon Data="{StaticResource Icon.NewBuild}" />
+                <TextBlock Text="New Build" />
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding OpenProjectCommand}" HorizontalAlignment="Stretch">
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <PathIcon Data="{StaticResource Icon.Projects}" />
+                <TextBlock Text="Open Project" />
+              </StackPanel>
+            </Button>
+            <Button Command="{Binding ViewArtifactsCommand}" HorizontalAlignment="Stretch">
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <PathIcon Data="{StaticResource Icon.Artifacts}" />
+                <TextBlock Text="View Artifacts" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Statistics (real local data) -->
+      <UniformGrid Columns="4">
+        <Border Classes="card compact" Margin="0,0,8,0">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="label" Text="IMPORTED PROJECTS" />
+            <TextBlock Classes="stat" Text="{Binding ProjectCount}" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card compact" Margin="4,0,4,0">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="label" Text="BUILD ATTEMPTS" />
+            <TextBlock Classes="stat" Text="{Binding TotalBuilds}" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card compact" Margin="4,0,4,0">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="label" Text="SUCCESSFUL" />
+            <TextBlock Classes="stat success" Text="{Binding Succeeded}" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card compact" Margin="8,0,0,0">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="label" Text="FAILED / TIMED OUT" />
+            <TextBlock Classes="stat error" Text="{Binding Failed}" />
+          </StackPanel>
+        </Border>
+      </UniformGrid>
+
+      <Grid ColumnDefinitions="3*,2*">
+        <!-- Left column -->
+        <StackPanel Spacing="22" Margin="0,0,11,0">
+          <Border Classes="card">
+            <StackPanel Spacing="14">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Classes="h2" Text="Recent builds" />
+                <Button Grid.Column="1" Classes="ghost small" Content="View history" Command="{Binding ViewHistoryCommand}" />
+              </Grid>
+              <StackPanel IsVisible="{Binding !HasBuilds}" Spacing="10" Margin="0,8">
+                <PathIcon Data="{StaticResource Icon.History}" Width="28" Height="28" Foreground="{DynamicResource Hcg.Brush.TextMuted}" HorizontalAlignment="Left" />
+                <TextBlock Classes="h3" Text="No builds yet" />
+                <TextBlock Classes="body secondary" Text="Your build attempts — successful or not — will appear here with their status, duration and artifacts." />
+                <Button Classes="small" Content="Start your first build" Command="{Binding NewBuildCommand}" HorizontalAlignment="Left" />
+              </StackPanel>
+              <ItemsControl ItemsSource="{Binding RecentBuilds}" IsVisible="{Binding HasBuilds}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:BuildItem">
+                    <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,9" Margin="-10,0"
+                            Command="{Binding $parent[UserControl].((vm:DashboardViewModel)DataContext).OpenBuildCommand}" CommandParameter="{Binding}">
+                      <Grid ColumnDefinitions="*,Auto,Auto">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="{Binding AppName}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Hcg.Brush.TextPrimary}" />
+                          <TextBlock Classes="muted" Text="{Binding Target, StringFormat='{}{0}'}" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Started}" VerticalAlignment="Center" Margin="12,0" />
+                        <c:StatusChip Grid.Column="2" Status="{Binding Status}" />
+                      </Grid>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card">
+            <StackPanel Spacing="14">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Classes="h2" Text="Recent projects" />
+                <Button Grid.Column="1" Classes="ghost small" Content="All projects" Command="{Binding OpenProjectCommand}" />
+              </Grid>
+              <StackPanel IsVisible="{Binding !HasProjects}" Spacing="10" Margin="0,8">
+                <PathIcon Data="{StaticResource Icon.Projects}" Width="28" Height="28" Foreground="{DynamicResource Hcg.Brush.TextMuted}" HorizontalAlignment="Left" />
+                <TextBlock Classes="h3" Text="No projects imported" />
+                <TextBlock Classes="body secondary" Text="Import a ZIP archive or a project folder. HCG copies it into an isolated workspace and inspects it without executing anything." />
+              </StackPanel>
+              <ItemsControl ItemsSource="{Binding RecentProjects}" IsVisible="{Binding HasProjects}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ProjectItem">
+                    <Button Classes="ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,9" Margin="-10,0"
+                            Command="{Binding $parent[UserControl].((vm:DashboardViewModel)DataContext).OpenRecentProjectCommand}" CommandParameter="{Binding}">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource Hcg.Brush.TextPrimary}" />
+                          <TextBlock Classes="muted" Text="{Binding Summary}" />
+                        </StackPanel>
+                        <c:StatusChip Grid.Column="1" Status="{Binding Status}" />
+                      </Grid>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- Right column -->
+        <StackPanel Grid.Column="1" Spacing="22" Margin="11,0,0,0">
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <TextBlock Classes="h2" Text="Host environment" />
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                <PathIcon Data="{StaticResource Icon.Chip}" Width="20" Height="20" Foreground="{DynamicResource Hcg.Brush.Cyan}" Margin="0,2,12,0" VerticalAlignment="Top" />
+                <StackPanel Grid.Column="1" Spacing="2">
+                  <TextBlock Text="{Binding HostName}" FontWeight="SemiBold" />
+                  <TextBlock Classes="muted" Text="{Binding HostDetail}" TextWrapping="Wrap" />
+                </StackPanel>
+                <PathIcon Grid.Row="1" Data="{StaticResource Icon.Disk}" Width="20" Height="20" Foreground="{DynamicResource Hcg.Brush.Cyan}" Margin="0,14,12,0" VerticalAlignment="Top" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Classes="secondary" FontSize="12.5" Text="{Binding DiskFree}" Margin="0,14,0,0" TextWrapping="Wrap" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Classes="h2" Text="Build toolchains" />
+                  <TextBlock Classes="muted" Text="{Binding ToolchainSummary}" />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="ghost small" Content="Details" Command="{Binding ViewToolchainsCommand}" VerticalAlignment="Top" />
+              </Grid>
+              <ItemsControl ItemsSource="{Binding KeyToolchains}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ToolchainItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,5">
+                      <StackPanel Spacing="1">
+                        <TextBlock Text="{Binding Name}" FontSize="13" />
+                        <TextBlock Classes="muted" Text="{Binding Version}" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="1" Status="{Binding Status}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Grid>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

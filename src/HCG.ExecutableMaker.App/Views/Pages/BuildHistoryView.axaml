@@ -1,0 +1,136 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.BuildHistoryView"
+             x:DataType="vm:BuildHistoryViewModel">
+  <Grid Margin="{DynamicResource Hcg.Padding.Page}" RowDefinitions="Auto,*">
+    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+      <TextBlock Classes="secondary" FontSize="13" VerticalAlignment="Center" Text="Select a build to inspect its configuration, verification results, warnings and errors." />
+      <Button Grid.Column="1" Classes="danger small" Command="{Binding ClearAllCommand}" IsVisible="{Binding !IsEmpty}">
+        <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Trash}" /><TextBlock Text="Clear History…" /></StackPanel>
+      </Button>
+    </Grid>
+
+    <Border Grid.Row="1" Classes="card" Padding="40" VerticalAlignment="Top" IsVisible="{Binding IsEmpty}">
+      <StackPanel Spacing="10" HorizontalAlignment="Center" MaxWidth="460">
+        <PathIcon Data="{StaticResource Icon.History}" Width="36" Height="36" Foreground="{DynamicResource Hcg.Brush.Cyan}" />
+        <TextBlock Classes="h2" Text="No build history" HorizontalAlignment="Center" />
+        <TextBlock Classes="body secondary" TextAlignment="Center" Text="Builds are recorded here with their full configuration, toolchain versions, artifacts and checksums — including failed and cancelled attempts." />
+      </StackPanel>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="2*,3*" IsVisible="{Binding !IsEmpty}">
+      <ListBox Classes="plain selectable" ItemsSource="{Binding Builds}" SelectedItem="{Binding Selected}" Margin="0,0,9,0">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:BuildItem">
+            <Border Classes="card compact interactive">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="3">
+                  <TextBlock Text="{Binding AppName}" FontWeight="SemiBold" />
+                  <TextBlock Classes="muted" Text="{Binding Target}" />
+                  <TextBlock Classes="muted" Text="{Binding Started}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="6" HorizontalAlignment="Right">
+                  <c:StatusChip Status="{Binding Status}" HorizontalAlignment="Right" />
+                  <TextBlock Classes="muted" Text="{Binding Duration}" HorizontalAlignment="Right" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <ScrollViewer Grid.Column="1" Margin="9,0,0,0" IsVisible="{Binding HasSelection}">
+        <StackPanel Spacing="14" DataContext="{Binding Selected}" x:DataType="vm:BuildItem">
+          <Border Classes="card">
+            <StackPanel Spacing="12">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="3">
+                  <TextBlock Classes="h2" Text="{Binding AppName}" />
+                  <TextBlock Classes="muted" Text="{Binding ProjectName, StringFormat='Project: {0}'}" />
+                </StackPanel>
+                <c:StatusChip Grid.Column="1" Status="{Binding Status}" VerticalAlignment="Top" />
+              </Grid>
+              <Border Classes="callout error" IsVisible="{Binding HasFailure}">
+                <SelectableTextBlock Text="{Binding FailureReason}" TextWrapping="Wrap" FontSize="12.5" />
+              </Border>
+              <Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                <TextBlock Classes="label" Text="TARGET" Margin="0,3" />
+                <TextBlock Grid.Column="1" FontSize="12.5" Margin="0,3" Text="{Binding Target}" />
+                <TextBlock Grid.Row="1" Classes="label" Text="RUNTIME ID" Margin="0,3" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Margin="0,3" Text="{Binding Rid}" />
+                <TextBlock Grid.Row="2" Classes="label" Text="VERSION" Margin="0,3" />
+                <TextBlock Grid.Row="2" Grid.Column="1" FontSize="12.5" Margin="0,3" Text="{Binding Version}" />
+                <TextBlock Grid.Row="3" Classes="label" Text="STARTED" Margin="0,3" />
+                <TextBlock Grid.Row="3" Grid.Column="1" FontSize="12.5" Margin="0,3" Text="{Binding Started}" />
+                <TextBlock Grid.Row="4" Classes="label" Text="DURATION" Margin="0,3" />
+                <TextBlock Grid.Row="4" Grid.Column="1" FontSize="12.5" Margin="0,3" Text="{Binding Duration}" />
+                <TextBlock Grid.Row="5" Classes="label" Text="PACKAGING" Margin="0,3" />
+                <TextBlock Grid.Row="5" Grid.Column="1" FontSize="12.5" Margin="0,3" Text="{Binding Formats}" TextWrapping="Wrap" />
+                <TextBlock Grid.Row="6" Classes="label" Text="TOOLCHAINS" Margin="0,3" />
+                <TextBlock Grid.Row="6" Grid.Column="1" Classes="mono" Margin="0,3" Text="{Binding Toolchains}" TextWrapping="Wrap" />
+              </Grid>
+              <WrapPanel>
+                <Button Classes="small" Margin="0,0,8,8" Command="{Binding $parent[UserControl].((vm:BuildHistoryViewModel)DataContext).ViewLogCommand}" CommandParameter="{Binding}">
+                  <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Log}" /><TextBlock Text="View Log" /></StackPanel>
+                </Button>
+                <Button Classes="small" Margin="0,0,8,8" Command="{Binding $parent[UserControl].((vm:BuildHistoryViewModel)DataContext).OpenOutputCommand}" CommandParameter="{Binding}">
+                  <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Open}" /><TextBlock Text="Open Output" /></StackPanel>
+                </Button>
+                <Button Classes="small primary" Margin="0,0,8,8" Command="{Binding $parent[UserControl].((vm:BuildHistoryViewModel)DataContext).RepeatCommand}" CommandParameter="{Binding}">
+                  <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Repeat}" /><TextBlock Text="Repeat Build" /></StackPanel>
+                </Button>
+                <Button Classes="small danger" Margin="0,0,8,8" Command="{Binding $parent[UserControl].((vm:BuildHistoryViewModel)DataContext).DeleteCommand}" CommandParameter="{Binding}">
+                  <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Trash}" /><TextBlock Text="Delete Record" /></StackPanel>
+                </Button>
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <ItemsControl ItemsSource="{Binding Artifacts}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ArtifactItem">
+                <Border Classes="card compact" Margin="0,0,0,12">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Spacing="2">
+                        <TextBlock Classes="h3" Text="{Binding Name}" />
+                        <TextBlock Classes="muted" Text="{Binding FormatName}" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="1" Status="{Binding Verification}" VerticalAlignment="Top" />
+                    </Grid>
+                    <SelectableTextBlock Classes="mono" Text="{Binding Path}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="mono muted" Text="{Binding Sha256}" TextWrapping="Wrap" />
+                    <TextBlock Classes="muted" Text="{Binding Size}" />
+                    <Button Classes="small" HorizontalAlignment="Left" Content="Copy Artifact Path"
+                            Command="{Binding $parent[UserControl].((vm:BuildHistoryViewModel)DataContext).CopyPathCommand}" CommandParameter="{Binding}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Border Classes="card" IsVisible="{Binding HasMessages}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="h2" Text="{Binding Counts}" />
+              <ItemsControl ItemsSource="{Binding Messages}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:MessageItem">
+                    <Grid ColumnDefinitions="Auto,*" Margin="0,3">
+                      <c:StatusChip Status="{Binding Severity}" VerticalAlignment="Top" Margin="0,0,10,0" />
+                      <StackPanel Grid.Column="1" Spacing="1">
+                        <SelectableTextBlock FontSize="12.5" TextWrapping="Wrap" Text="{Binding Text}" />
+                        <TextBlock Classes="muted mono" Text="{Binding Location}" />
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+  </Grid>
+</UserControl>
