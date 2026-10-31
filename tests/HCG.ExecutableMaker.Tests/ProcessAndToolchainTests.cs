@@ -9,11 +9,15 @@ public class ProcessRunnerTests
 {
     private readonly ProcessRunner _runner = new();
 
+    /// <summary>Standard Unix tools live in /bin on Linux but some only in /usr/bin on macOS.</summary>
+    private static string Tool(string name) =>
+        new[] { "/bin/" + name, "/usr/bin/" + name }.FirstOrDefault(File.Exists) ?? throw new FileNotFoundException(name);
+
     [UnixFact]
     public async Task Passes_arguments_verbatim_without_a_shell()
     {
         var lines = new List<string>();
-        var r = await _runner.RunAsync(new ProcessSpec { Executable = "/bin/echo", Arguments = ["a b; $(whoami) `id` && rm -rf /tmp/nothing"] },
+        var r = await _runner.RunAsync(new ProcessSpec { Executable = Tool("echo"), Arguments = ["a b; $(whoami) `id` && rm -rf /tmp/nothing"] },
             (_, l) => lines.Add(l), CancellationToken.None);
         Assert.True(r.Succeeded);
         Assert.Equal(["a b; $(whoami) `id` && rm -rf /tmp/nothing"], lines);
@@ -21,14 +25,14 @@ public class ProcessRunnerTests
 
     [UnixFact]
     public async Task Reports_exit_code() =>
-        Assert.Equal(1, (await _runner.RunAsync(new ProcessSpec { Executable = "/bin/false" }, null, CancellationToken.None)).ExitCode);
+        Assert.Equal(1, (await _runner.RunAsync(new ProcessSpec { Executable = Tool("false") }, null, CancellationToken.None)).ExitCode);
 
     [UnixFact]
     public async Task Cancellation_kills_process_promptly()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var r = await _runner.RunAsync(new ProcessSpec { Executable = "/bin/sleep", Arguments = ["30"] }, null, cts.Token);
+        var r = await _runner.RunAsync(new ProcessSpec { Executable = Tool("sleep"), Arguments = ["30"] }, null, cts.Token);
         Assert.True(r.Cancelled);
         Assert.False(r.TimedOut);
         Assert.False(r.Succeeded);
@@ -38,7 +42,7 @@ public class ProcessRunnerTests
     [UnixFact]
     public async Task Timeout_kills_process()
     {
-        var r = await _runner.RunAsync(new ProcessSpec { Executable = "/bin/sleep", Arguments = ["30"], Timeout = TimeSpan.FromMilliseconds(300) }, null, CancellationToken.None);
+        var r = await _runner.RunAsync(new ProcessSpec { Executable = Tool("sleep"), Arguments = ["30"], Timeout = TimeSpan.FromMilliseconds(300) }, null, CancellationToken.None);
         Assert.True(r.TimedOut);
         Assert.False(r.Cancelled);
     }
@@ -47,7 +51,7 @@ public class ProcessRunnerTests
     public async Task Uses_only_the_given_environment()
     {
         var lines = new List<string>();
-        await _runner.RunAsync(new ProcessSpec { Executable = "/usr/bin/env", Environment = new Dictionary<string, string> { ["ONLY_ME"] = "1" } },
+        await _runner.RunAsync(new ProcessSpec { Executable = Tool("env"), Environment = new Dictionary<string, string> { ["ONLY_ME"] = "1" } },
             (_, l) => lines.Add(l), CancellationToken.None);
         Assert.Equal(["ONLY_ME=1"], lines);
     }
