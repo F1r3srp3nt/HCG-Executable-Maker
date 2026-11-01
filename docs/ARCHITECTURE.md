@@ -62,12 +62,36 @@ Builds run in `builds/<buildId>/publish` (HCG-owned staging). Packagers copy the
 - **Honest capability reporting.** `PackagingCatalog` is the single source of truth for which formats exist and why
   one is unavailable (`NotImplemented`, `MissingTool`, `RequiresDifferentHost`, `NotApplicable`).
 
+## Mobile Build Studio (M0.5)
+
+```
+ProjectInspection/Mobile   AndroidGradleAnalyzer · XcodeProjectAnalyzer (OpenStepPlist) · FlutterAnalyzer · MauiAnalyzer
+                           MobileProjectInspector · MobileArtifactProjectInspector · MobileCapabilities (single source
+                           of truth for which mobile outputs are offered, and why not) · AgpCompatibility
+Infrastructure/Toolchains  MobileToolchains.cs — JDK, Android SDK/build-tools/apksigner/zipalign/aapt2, bundletool,
+                           Xcode/iOS SDKs/signing identities/profiles, Flutter, MAUI workloads (detection only)
+Packaging/Mobile           MobileArtifactInspector — APK/AAB/APK set/IPA/xcarchive/.app static inspection:
+                           AndroidBinaryXml, ProtoXml, ApkSignature (signing block + PKCS#7), PlistReader, ZipIntegrity
+BuildEngine/Mobile         GradlePlanner · XcodePlanner · BundletoolPlanner · FlutterPlanner · MauiPlanner
+                           MobileBuildService (orchestration, history) · MobileArtifactVerifier (static + apksigner /
+                           bundletool validate / codesign) · MobileOutputParser
+App                        MobileBuildStudioViewModel / MobileBuildStudioView
+tools/mobile-build         CLI over the same MobileBuildService (used by CI)
+```
+
+Flow: import (folder / ZIP / single artifact) → static inspection → `MobileCapabilities.Evaluate` → planner builds
+`ProcessSpec`s (argument lists, scrubbed environment, HCG-managed Gradle/Android homes) → `IBuildWorker` runs them →
+products located by rule **and** freshness → (IPA: archive inspected, export refused if unsigned; AAB→APK:
+bundletool) → copied to `<output>/<Name>-<version>-<kind>/` → verified → SHA-256 → `BuildRecord` with
+`BuildSettings.Mobile` persisted in the existing history tables (no schema change was needed).
+
 ## Extension points
 
 | To add… | Implement | Register in |
 |---|---|---|
 | A language/framework inspector (Rust, Swift, …) | `IProjectInspector` (static only) — replace the matching `EcosystemSignatureInspector` | `Composition.cs` |
-| A build pipeline for another toolchain | a planner like `DotNetBuildPlanner` + branch in `BuildService` (M0.5 will generalize this into `IBuildPipeline`) | `Composition.cs` |
+| A build pipeline for another toolchain | a planner like `DotNetBuildPlanner` + branch in `BuildService` | `Composition.cs` |
+| A mobile framework | an analyzer + `MobileFramework` value, a planner in `BuildEngine/Mobile`, a branch in `MobileBuildService`, rules in `MobileCapabilities` | `Composition.cs` |
 | A packaging format (MSI, PKG, AppImage…) | `IPackager`; flip its `PackagingCatalog` entry to `Available` when the tool is detected | `Composition.cs` |
 | Isolated builds (container/VM/remote) | `IBuildWorker` with `IsolationLevel.Isolated` | `Composition.cs` |
 | A toolchain probe | `ToolchainDetector` + an id in `ToolchainIds` | — |

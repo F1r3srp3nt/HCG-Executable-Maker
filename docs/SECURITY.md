@@ -48,7 +48,30 @@ reports as *not Developer ID signed and not notarized*. HCG never creates certif
 will require explicit founder approval per operation, with credentials kept in the OS keychain/certificate store —
 never in HCG's database or passed into an untrusted build.
 
+## Mobile builds (M0.5)
+
+- **Same trust boundary.** Gradle wrappers and build scripts, Xcode run-script phases, Flutter/Dart hooks and MSBuild
+  targets run with the user's permissions; Mobile Build Studio asks for trust confirmation before **every** build
+  and the CLI requires `--trust`. The Gradle wrapper's distribution URL and wrapper-jar SHA-256 are logged; insecure or
+  unofficial distribution hosts and missing `distributionSha256Sum` are flagged.
+- **No shell, no interpolation.** Every tool (java + wrapper jar, xcodebuild, bundletool, flutter, dotnet, keytool) is
+  started with an argument list. Variants, schemes, configurations, team IDs and profile names are validated.
+- **No credential harvesting.** Secret-like variables are removed; `GRADLE_USER_HOME` and `ANDROID_USER_HOME` point to
+  HCG-managed folders so `~/.gradle/gradle.properties` and `~/.android` keystores are not read; proxy settings are
+  passed as host/port only.
+- **Signing.** HCG never creates production keystores, certificates or provisioning profiles and never asks for Apple
+  ID or keystore passwords. The only key HCG creates is a local Android *debug* keystore (public conventional
+  password, stored under HCG's data folder, never in a repository) used solely when the user picks *HCG local debug
+  key* or AAB → APK. Password-like arguments are masked in logs. Xcode's `-allowProvisioningUpdates` is off unless
+  explicitly enabled. IPA export of an archive without an Apple certificate is refused; `ExportOptions.plist` always
+  uses `destination=export` and is deleted after use.
+- **No uploads.** Nothing is sent to Google Play, TestFlight or App Store Connect.
+- **Artifact inspection** never executes or extracts artifacts (bounded, depth-limited parsers; traversal names,
+  CRC errors and decompression bombs are detected). Imported artifacts must be real ZIP packages.
+
 ## Known limitations
+
+- Mobile builds are local and not isolated, exactly like desktop builds.
 
 - Local builds are not isolated. Treat "Start Build" like running the project's own build script.
 - The secret filter is name-based; a secret stored under an innocuous variable name would not be detected. Prefer

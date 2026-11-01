@@ -9,9 +9,11 @@
 HCG Executable Maker imports a project (ZIP archive or folder), inspects it **without executing any of its code**,
 builds it with the real toolchain, packages it for distribution, and verifies every artifact with SHA-256 checksums.
 
-**Status: Milestone 0.1 — Functional Foundation.** .NET projects (including Avalonia desktop apps) can be built and
-packaged for **Windows**, **macOS** and **Linux (portable preview)**. See [`docs/STATUS.md`](docs/STATUS.md) for exactly
-what is and isn't implemented.
+**Status: Milestone 0.1 — Functional Foundation (released as 0.1.0 pre-release) · Milestone 0.5 — Mobile Build Studio
+in development on `feature/m0.5-mobile-build-studio`.** .NET projects (including Avalonia desktop apps) can be built and
+packaged for **Windows**, **macOS** and **Linux (portable preview)**; Android and iOS projects are built in
+**Mobile Build Studio** (see below). See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is and isn't implemented
+and verified.
 
 ![Dashboard](docs/screenshots/01-dashboard.png)
 
@@ -21,7 +23,7 @@ what is and isn't implemented.
 |---|---|
 | Import | ZIP archives and folders into isolated workspaces; rejects corrupt archives, path traversal, symlinks, duplicate entries, decompression bombs and oversize/over-count archives; preserves the original archive; never modifies your source |
 | Inspection | Static .NET analysis: `.sln`, `.slnx`, `.csproj/.fsproj/.vbproj`, `Directory.Build.props`, central package versions, `global.json` roll-forward, target frameworks, output types, RIDs, package/project references, entry points, icons, Avalonia/WPF/WinForms/MAUI/web detection, platform compatibility |
-| Other ecosystems | Rust, Node/Electron, Swift/Xcode, Python, Java, Kotlin/Android, Flutter, C/C++ are **recognized and reported as unsupported** — never faked |
+| Other ecosystems | Rust, Node/Electron, Python, Java, C/C++, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
 | Build | `dotnet restore` → `build` → `publish` with structured arguments (no shell), Release/Debug, runtime selection (win/osx/linux × x64/arm64), self-contained, single-file, live log, warning/error parsing, cancellation, timeouts |
 | Packaging | Portable folder · portable ZIP (Unix permissions preserved) · macOS `.app` bundle (Info.plist, `.icns`, exec bits) · `.dmg` on macOS hosts with `hdiutil` |
 | Verification | Executable present, PE/Mach-O/ELF format and CPU architecture, executable bit, bundle structure, code-signature presence, archive integrity, SHA-256 (+ per-file manifests for folders) |
@@ -30,9 +32,24 @@ what is and isn't implemented.
 | Toolchains | .NET SDK, Git, OS/CPU, disk space; macOS (Xcode CLT, Xcode, codesign, hdiutil, notarytool, productbuild); Windows (Windows SDK, signtool, MakeAppx, MSBuild, WiX, Inno Setup). Never installs anything |
 | Security | Explicit trust confirmation before every build; secrets scrubbed from the build environment; no credentials stored; signing capabilities reported honestly as **not implemented** |
 
+## Mobile Build Studio (M0.5, in development)
+
+| Area | Implemented |
+|---|---|
+| Projects | Native Android (Gradle, Java/Kotlin), native iOS (Xcode), Flutter, .NET MAUI — detected statically; React Native/Unity recognized as unsupported |
+| Android | Debug APK, release APK (unsigned / project signing / HCG local debug key), App Bundle (`.aab`) — through the project's own Gradle wrapper |
+| AAB → APK | Universal or device-targeted APK sets with Google's bundletool, from a build or an imported `.aab` |
+| iOS (Mac only) | Simulator build, `.xcarchive` (signed or unsigned), IPA export (`app-store-connect`, release testing, enterprise, development) — never uploaded |
+| Verification | APK/AAB/APK set/IPA/xcarchive/.app: integrity, manifest/Info.plist metadata, ABIs/architectures, signing state, provisioning profile, SHA-256; `apksigner`, `bundletool validate`, `codesign` when installed |
+
+Desktop executables are never "converted" into mobile apps, and APK → AAB is not offered (it is not possible).
+Details: [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md).
+
+![Mobile Build Studio](docs/screenshots/10-mobile-build-studio.png)
+
 **Not yet implemented** (shown in the UI as *Planned*, never as working): Windows installers (.exe/.msi/.msix — M0.2),
-macOS `.pkg`/App Store packaging (M0.3/M0.4), code signing and notarization (M0.4), Linux AppImage/DEB/RPM and
-Android (M0.5+), sandboxed build workers.
+macOS `.pkg`/App Store packaging (M0.3/M0.4), desktop code signing and notarization (M0.4), Linux AppImage/DEB/RPM,
+store uploads of any kind, sandboxed build workers.
 
 ## Requirements
 
@@ -78,6 +95,9 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 
 ## Documentation
 
+- [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md) — Mobile Build Studio overview, output matrix, signing modes, CLI
+- [`docs/ANDROID-BUILDING.md`](docs/ANDROID-BUILDING.md) · [`docs/IOS-BUILDING.md`](docs/IOS-BUILDING.md) ·
+  [`docs/MOBILE-ARTIFACT-VERIFICATION.md`](docs/MOBILE-ARTIFACT-VERIFICATION.md)
 - [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows
 - [`docs/STATUS.md`](docs/STATUS.md) — what is complete, what is not, verification evidence, continuation instructions
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — solution structure, data flow, extension points

@@ -9,8 +9,8 @@
 #   3. android  — Mobile Build Studio's engine builds tests/Fixtures/HelloAndroid with the project's Gradle wrapper on a
 #                 runner with the Android SDK: debug APK, unsigned release APK, release APK signed with HCG's local
 #                 debug key, App Bundle, and AAB → universal APK with bundletool; each verified (static + apksigner).
-#   4. ios      — on macOS with Xcode: Simulator build, unsigned archive, and the expected refusals (IPA export of an
-#                 unsigned archive; archive without a development team). No certificates are configured in CI and
+#   4. ios      — on macOS with Xcode: Simulator build, unsigned archive, and the expected refusals (IPA without
+#                 code-signing identities; signed archive without a development team). No certificates are configured in CI and
 #                 nothing is uploaded anywhere. Mobile outputs are workflow artifacts (7 days) for manual testing.
 # Pushing a tag like v0.1.0:
 #   5. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
@@ -201,10 +201,12 @@ jobs:
       - name: Unsigned device archive (.xcarchive, inspection only)
         run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT" --output ios-archive --signing unsigned --trust
 
-      - name: IPA export of an unsigned archive is refused
+      # CI has no Apple certificates, so HCG refuses the IPA before archiving (capability gate). The later refusal —
+      # inspecting an unsigned archive and declining to export it — is covered by MobileBuildServiceTests.
+      - name: IPA is refused without code-signing identities
         run: >
           dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-ipa
-          --signing unsigned --trust --expect-failure "not signed with an Apple development or distribution certificate"
+          --trust --expect-failure "No code-signing identities were found"
 
       - name: Signed archive without a development team fails honestly (no certificates in CI)
         run: >

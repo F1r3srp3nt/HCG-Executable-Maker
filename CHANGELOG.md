@@ -2,6 +2,32 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Milestone 0.5 "Mobile Build Studio" (branch `feature/m0.5-mobile-build-studio`, not merged)
+
+### Added
+- **Mobile project detection** (static): Android Gradle (Groovy/Kotlin DSL, version catalogs, flavors, signing
+  configs, AGP/Gradle/JDK compatibility table), Xcode projects/workspaces (OpenStep pbxproj parser, schemes, Swift
+  packages, CocoaPods), Flutter, .NET MAUI; React Native and Unity recognized as unsupported.
+- **Mobile toolchain detection**: JDK, Android SDK/build-tools/platforms/apksigner/zipalign/aapt2, bundletool, Xcode,
+  iOS SDKs, signing identities, provisioning profiles, Flutter, MAUI workloads. Nothing is installed automatically.
+- **Mobile build engine**: Gradle through the project's wrapper (java + wrapper jar, no shell, HCG-managed Gradle and
+  Android user homes), xcodebuild Simulator/archive/export (explicit signing modes, `destination=export`), bundletool
+  AAB → APK set (universal/device-targeted), Flutter and .NET MAUI planners; cancellation, timeouts, stale-output
+  protection, history.
+- **Mobile artifact verification**: APK, AAB, APK set, IPA, xcarchive, .app — integrity (CRC, traversal, bombs),
+  binary/protobuf manifests, plists, Mach-O architectures, signature schemes and signer, provisioning profiles; plus
+  `apksigner verify`, `bundletool validate`, `codesign --verify` when available.
+- **Artifact import**: `.apk/.aab/.apks/.ipa` imported as artifact projects (copied, never extracted; renamed
+  non-ZIP files rejected).
+- **Mobile Build Studio** page; New Build redirects mobile projects there; `tools/mobile-build` CLI.
+- CI: feature branches run the test matrix plus real Android (Ubuntu) and iOS (macOS) builds of the fixtures.
+- Fixtures `HelloAndroid` (Gradle 8.14.3 wrapper, AGP 8.7.3) and `HelloIOS` (SwiftUI).
+- Docs: MOBILE-BUILDS, ANDROID-BUILDING, IOS-BUILDING, MOBILE-ARTIFACT-VERIFICATION.
+
+### Changed
+- Flutter/Android/Xcode signatures moved from "recognized, unsupported" to Mobile Build Studio.
+- Self-packaging CI runs on main, tags and manual runs only (feature branches skip it).
+
 ## [0.1.0] — Milestone 0.1 "Functional Foundation" — 2026-10-31 (pre-release)
 
 ### Added
