@@ -1,10 +1,14 @@
 # HCG Executable Maker — continuous integration and releases.
 #
-# Every push to main / pull request:
+# Every push to main or a feature/** branch, and every pull request:
 #   1. test     — build + full test suite (incl. real end-to-end builds) on Linux, macOS and Windows.
 #   2. package  — HCG Executable Maker packages ITSELF on each real OS (tools/self-package/self-package.cs):
-#                 macOS → .dmg + .app.zip (arm64, x64) · Windows → .zip with embedded .exe icon (x64, arm64)
+#                 macOS → .dmg + .app.zip (arm64, x64) · Windows → Setup.exe installer + .zip (x64, arm64)
 #                 Linux → portable .zip (preview). Results are uploaded as workflow artifacts (14 days).
+#                 (main, tags and manual runs only.)
+#   windows-installer — every push: HCG builds its own Setup.exe on Windows with Inno Setup, then
+#                 tools/installer-test/Test-Installer.ps1 installs it (current user), checks files, shortcuts and the
+#                 uninstall registration, launches the app, uninstalls it and confirms cleanup.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -13,7 +17,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feature/**"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -46,11 +50,20 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # CI infrastructure installs the tool; HCG itself never installs toolchains.
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          (Get-Item "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe").VersionInfo.ProductVersion
+          "HCG_INSTALLER_TESTS=1" >> $env:GITHUB_ENV
+
       - name: Build
         run: dotnet build HCG.ExecutableMaker.slnx -c Release
 
       - name: Test (unit + end-to-end)
-        run: dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+        run: dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" --logger "console;verbosity=normal" --results-directory TestResults
 
       - name: Upload test results
         if: always()
@@ -63,6 +76,7 @@ jobs:
   package:
     name: Package (${{ matrix.name }})
     needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -73,6 +87,7 @@ jobs:
           - name: windows
             os: windows-latest
             targets: win-x64,win-arm64
+            extra: --installer
           - name: linux
             os: ubuntu-latest
             targets: linux-x64,linux-arm64
@@ -97,6 +112,11 @@ jobs:
           echo "VERSION=$version" >> "$GITHUB_ENV"
           echo "Packaging version $version"
 
+      - name: Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
       - name: Self-package with HCG Executable Maker
         shell: bash
         run: >
@@ -105,6 +125,7 @@ jobs:
           --targets "${{ matrix.targets }}"
           --version "$VERSION"
           --dist "${{ runner.temp }}/dist"
+          ${{ matrix.extra }}
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
@@ -113,6 +134,46 @@ jobs:
           path: ${{ runner.temp }}/dist/*
           if-no-files-found: error
           retention-days: 14
+
+  windows-installer:
+    name: Windows installer (build, install, launch, uninstall)
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          (Get-Item "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe").VersionInfo.ProductVersion
+
+      - name: HCG Executable Maker builds its own Setup.exe
+        shell: bash
+        run: >
+          dotnet run --no-cache tools/self-package/self-package.cs --
+          . "${{ runner.temp }}/selfpack" --targets win-x64 --version 0.2.0 --dist "${{ runner.temp }}/dist" --installer
+
+      - name: Install, verify, launch, uninstall, confirm cleanup
+        shell: pwsh
+        run: >
+          ./tools/installer-test/Test-Installer.ps1
+          -Setup "${{ runner.temp }}/dist/HCG-Executable-Maker-0.2.0-win-x64-Setup.exe"
+          -AppName "HCG Executable Maker" -ExeName HCGExecutableMaker.exe -Version 0.2.0
+
+      - name: Upload installer
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hcg-executable-maker-windows-setup
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: warn
+          retention-days: 7
 
   release:
     name: Publish pre-release
@@ -145,7 +206,8 @@ jobs:
           |---|---|
           | macOS (Apple Silicon) | \`*-osx-arm64.dmg\` (or \`.app.zip\`) |
           | macOS (Intel) | \`*-osx-x64.dmg\` (or \`.app.zip\`) |
-          | Windows x64 / ARM64 | \`*-win-x64.zip\` / \`*-win-arm64.zip\` |
+          | Windows x64 / ARM64 (installer) | \`*-win-x64-Setup.exe\` / \`*-win-arm64-Setup.exe\` |
+          | Windows x64 / ARM64 (portable) | \`*-win-x64.zip\` / \`*-win-arm64.zip\` |
           | Linux (preview) | \`*-linux-x64.zip\` / \`*-linux-arm64.zip\` |
 
           **Unsigned pre-release** — not code-signed or notarized (planned for M0.4).

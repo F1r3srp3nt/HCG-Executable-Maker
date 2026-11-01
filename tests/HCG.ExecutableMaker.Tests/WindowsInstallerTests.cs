@@ -339,7 +339,7 @@ public class WindowsInstallerEndToEndTests(ITestOutputHelper output) : IDisposab
         Assert.Contains(setup.Sha256, File.ReadAllText(Path.Combine(Path.GetDirectoryName(setup.Path)!, "SHA256SUMS.txt")));
         Assert.Contains(setup.Checks, c => c.Name == "Inno Setup data" && c.Status == VerificationStatus.Passed);
 
-        var installDir = _t.Combine("Installed App");
+        var installDir = _t.Combine("InstalledApp");
         var startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), appName + ".lnk");
         var desktop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), appName + ".lnk");
         var uninstallKey = $@"Software\Microsoft\Windows\CurrentVersion\Uninstall\{{{InnoSetupScript.AppId(settings.Identity.ApplicationId).ToString("D").ToUpperInvariant()}}}_is1";
@@ -412,5 +412,21 @@ public class WindowsInstallerEndToEndTests(ITestOutputHelper output) : IDisposab
     {
         var sw = Stopwatch.StartNew();
         while (!condition() && sw.Elapsed < timeout) await Task.Delay(500);
+    }
+}
+
+public class WindowsInstallerProjectConditionTests
+{
+    [Fact]
+    public void Installer_requires_a_self_contained_build()
+    {
+        var host = new HostEnvironment(TargetPlatform.Windows, TargetArchitecture.X64, "test", ".NET", "m");
+        var report = new ToolchainReport(host,
+            [new ToolchainInfo { Id = ToolchainIds.InnoSetup, DisplayName = "Inno", Category = "Windows", Status = ToolchainStatus.Installed, ExecutablePath = @"C:\ISCC.exe" }],
+            null, null, DateTimeOffset.UtcNow);
+        var frameworkDependent = PackagingCatalog.Evaluate(new PackagingContext(TargetPlatform.Windows, host, report, true, SelfContained: false))
+            .Single(o => o.Format == PackagingFormat.WindowsInstallerExe);
+        Assert.Equal(PackagingAvailability.NotApplicable, frameworkDependent.Availability);
+        Assert.Contains("Self-contained", frameworkDependent.Reason);
     }
 }

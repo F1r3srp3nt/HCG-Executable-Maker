@@ -435,6 +435,35 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+              <Border Classes="inset" Padding="18,16" IsVisible="{Binding ShowInstallerOptions}">
+                <StackPanel Spacing="12">
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h3" Text="Windows installer options" />
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="Name, publisher, version and icon come from Configure. The installer always creates a Start-menu shortcut and registers an uninstaller in Settings → Apps." />
+                  </StackPanel>
+                  <StackPanel>
+                    <TextBlock Classes="formlabel" Text="INSTALL FOR" />
+                    <ComboBox ItemsSource="{Binding InstallScopeOptions}" SelectedItem="{Binding SelectedInstallScope}" HorizontalAlignment="Stretch" />
+                  </StackPanel>
+                  <StackPanel>
+                    <TextBlock Classes="formlabel" Text="INSTALLATION FOLDER NAME" />
+                    <TextBox Text="{Binding InstallFolderName}" PlaceholderText="{Binding AppName}" />
+                  </StackPanel>
+                  <CheckBox IsChecked="{Binding OfferDesktopShortcut}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="Offer a desktop shortcut" FontWeight="Medium" />
+                      <TextBlock Classes="muted" Text="Shown as an optional checkbox in the setup wizard." TextWrapping="Wrap" />
+                    </StackPanel>
+                  </CheckBox>
+                  <CheckBox IsChecked="{Binding DesktopShortcutChecked}" IsEnabled="{Binding OfferDesktopShortcut}" Margin="28,0,0,0">
+                    <TextBlock Text="Desktop shortcut checked by default" />
+                  </CheckBox>
+                  <CheckBox IsChecked="{Binding OfferLaunchAfterInstall}">
+                    <TextBlock Text="Offer to launch the app when setup finishes" FontWeight="Medium" />
+                  </CheckBox>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </Border>
 

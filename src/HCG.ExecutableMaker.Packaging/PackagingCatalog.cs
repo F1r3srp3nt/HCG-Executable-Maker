@@ -20,7 +20,10 @@ public static class PackagingCatalog
                 Add(PackagingFormat.PortableFolder, "Self-contained folder with the .exe and all dependencies. No installation required.", PackagingAvailability.Available);
                 Add(PackagingFormat.PortableZip, "The portable folder compressed into a single ZIP for distribution.", PackagingAvailability.Available);
                 const string setupDesc = "Setup wizard (.exe, Inno Setup) that installs the app, adds a Start-menu shortcut and an optional desktop shortcut, and registers an uninstaller.";
-                if (ctx.Host.Platform != TargetPlatform.Windows)
+                if (!ctx.SelfContained)
+                    Add(PackagingFormat.WindowsInstallerExe, setupDesc, PackagingAvailability.NotApplicable,
+                        "Enable 'Self-contained' in Configure: the installer must carry the .NET runtime, otherwise the installed app cannot start on PCs without .NET.");
+                else if (ctx.Host.Platform != TargetPlatform.Windows)
                     Add(PackagingFormat.WindowsInstallerExe, setupDesc, PackagingAvailability.RequiresDifferentHost,
                         "The Inno Setup compiler (ISCC.exe) runs only on Windows. Build on a Windows PC, or use the Windows CI runner (docs/WINDOWS-INSTALLER.md).");
                 else if (ctx.Toolchains?.IsAvailable(ToolchainIds.InnoSetup) != true)
