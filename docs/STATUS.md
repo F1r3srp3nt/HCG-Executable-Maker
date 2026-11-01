@@ -1,3 +1,60 @@
+# Status — Milestone 0.5 (Mobile Build Studio) — in development
+
+Branch `feature/m0.5-mobile-build-studio` (not merged into `main`). Evidence below is from CI run #10
+(<https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/runs/41280121136>) and local runs in a Linux container
+that has a JDK but **no Android SDK** (Google's Maven/SDK hosts are blocked there) and no Xcode.
+
+## Verified with real toolchains
+
+| What | Where | Result |
+|---|---|---|
+| Android **debug APK** of `tests/Fixtures/HelloAndroid` via the project's Gradle 8.14.3 wrapper (AGP 8.7.3, JDK 17, SDK on the runner) | CI Ubuntu | Succeeded |
+| Android **release APK, unsigned** (no signing in the project) | CI Ubuntu | Succeeded |
+| Android **release APK signed with HCG's local debug key** (injected signing) | CI Ubuntu | Succeeded |
+| Android **App Bundle** `app-release.aab` — metadata `com.hakmicapital.hello 1.2.0 (3)`, minSdk 24, targetSdk 35, unsigned; `bundletool validate`: valid | CI Ubuntu | Succeeded |
+| **AAB → universal APK** with bundletool 1.18.1 from the project: `.apks` + `app-release-universal.apk`, debug-signed v2+v3, **`apksigner verify` passed** | CI Ubuntu | Succeeded |
+| **AAB → universal APK** from an **imported `.aab` artifact** (artifact project path) | CI Ubuntu | Succeeded |
+| iOS **Simulator build** of `tests/Fixtures/HelloIOS` (Xcode 26.6, iOS SDK 26.5) | CI macOS | Succeeded |
+| iOS **unsigned archive** `HelloIOS.xcarchive` — `com.hakmicapital.helloios 1.3.0 (7)`, min iOS 16.0, arm64, *Unsigned · not distributable*, exportability warning | CI macOS | Succeeded |
+| IPA refused without code-signing identities ("No code-signing identities were found in the keychain…") | CI macOS | Refused as expected |
+| Signed archive without a development team fails with xcodebuild's own error (no certificates in CI) | CI macOS | Failed honestly as expected |
+| Gradle wrapper started as `java -classpath gradle-wrapper.jar GradleWrapperMain` through the proxy translation; stops only at AGP resolution because Google Maven is blocked | Local container | As expected |
+| Each build persisted in SQLite history with artifacts, checksums and checks | CI + local | Verified |
+| Mobile Build Studio page renders with honest availability reasons (screenshot `docs/screenshots/10-mobile-build-studio.png`) | Local, Xvfb | Verified |
+
+Automated tests: **260 passed, 0 failed, 0 skipped** locally (Linux, including real desktop end-to-end builds);
+green on Linux, macOS and Windows in CI. Mobile coverage: detection/parsers (MobileInspectionTests), artifact
+inspection incl. corrupt/traversal/CRC/fat Mach-O/expired profiles and a real `jarsigner` cross-check
+(MobileArtifactTests), argument construction for Gradle/xcodebuild/bundletool/Flutter/MAUI, masking, output parsing
+(MobilePlannerTests), and the orchestrator with cancellation, timeouts, missing SDK, wrong host, stale outputs,
+unsigned-archive export refusal, export-options cleanup and history (MobileBuildServiceTests), artifact import
+(MobileArtifactImportTests).
+
+## Implemented but NOT verified with real toolchains
+
+- **Signed IPA export** (automatic/manual signing, all export methods): requires an Apple Developer account and
+  certificates on a Mac — never configured by HCG or CI. Covered by unit tests only.
+- **Flutter** and **.NET MAUI** builds: planners and capability rules are unit-tested; no Flutter SDK or MAUI workloads
+  were installed in CI.
+- **Device-targeted APK sets** (`--device-spec`): unit-tested only.
+- Release builds using a project's **own release signingConfig**: not exercised (the fixture has none).
+- Mobile Build Studio **GUI build run** on a machine with the SDK (CI drives the same engine through the CLI).
+- Installing the produced APKs on a device/emulator and running the Simulator app (never done automatically).
+
+## Not implemented / not offered (by design)
+
+APK → AAB conversion; desktop-to-mobile "conversion"; uploads to Google Play, TestFlight or App Store Connect;
+creation of production keystores, certificates or provisioning profiles; React Native, Unity, Electron/Capacitor
+builds; MAUI separate `.xcarchive` output; Flutter builds on Windows hosts.
+
+## Remaining before merge (founder decision)
+
+1. Founder review of the branch and of the CI-built fixture outputs (workflow artifacts, 7-day retention).
+2. Optional: verify a signed IPA on a Mac with a real Apple Developer team, and a Flutter/MAUI project.
+3. Merge to `main` only with explicit founder approval.
+
+---
+
 # Status — Milestone 0.1 (Functional Foundation)
 
 ## Complete and verified
