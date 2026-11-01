@@ -33,6 +33,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private readonly IDialogService _dialogs;
     private readonly IPlatformShell _shell;
     private readonly ArtifactExporter _exporter;
+    private readonly NavigationService _navigation;
     private readonly ConcurrentQueue<BuildLogLine> _pendingLog = new();
     private readonly DispatcherTimer _uiTimer;
     private readonly Stopwatch _buildClock = new();
@@ -41,8 +42,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private string? _identityPrefilledFor;
 
     public BuildWizardViewModel(ProjectService projectService, IProjectRepository projects, BuildService buildService, IToolchainService toolchains,
-        ISettingsStore settings, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, ArtifactExporter exporter)
+        ISettingsStore settings, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, ArtifactExporter exporter, NavigationService navigation)
     {
+        _navigation = navigation;
         _projectService = projectService;
         _projects = projects;
         _buildService = buildService;
@@ -180,7 +182,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     public bool HasProject => Project is not null;
     public string ProjectTitle => Project?.Name ?? "";
-    public string ProjectSource => Project is null ? "" : $"{(Project.SourceKind == ProjectSourceKind.ZipArchive ? "ZIP archive" : "Folder")} · {Project.SourceLocation}";
+    public string ProjectSource => Project is null ? "" : $"{Format.Label(Project.SourceKind)} · {Project.SourceLocation}";
 
     private async Task LoadRecentProjectsAsync()
     {
@@ -285,7 +287,15 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     // ───────────── Step 2: Inspect ─────────────
 
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasAnalysis))] private ProjectAnalysis? _analysis;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasAnalysis), nameof(IsMobileProject))] private ProjectAnalysis? _analysis;
+    /// <summary>Mobile projects and artifacts are built in Mobile Build Studio, not in this desktop wizard.</summary>
+    public bool IsMobileProject => Analysis?.Mobile is not null;
+
+    [RelayCommand]
+    private void OpenInMobileStudio()
+    {
+        if (Project is not null) _navigation.Navigate("mobile", Project);
+    }
     [ObservableProperty] private StatusTag _supportTag = new("—", "neutral");
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(NextCommand))] private ProjectChoice? _selectedProject;
     [ObservableProperty] private bool _isInspecting;

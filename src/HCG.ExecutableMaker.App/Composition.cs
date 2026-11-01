@@ -71,6 +71,7 @@ public static class Composition
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<DashboardViewModel>();
         services.AddSingleton<BuildWizardViewModel>();
+        services.AddSingleton<MobileBuildStudioViewModel>();
         services.AddSingleton<ProjectsViewModel>();
         services.AddSingleton<BuildHistoryViewModel>();
         services.AddSingleton<ArtifactsViewModel>();

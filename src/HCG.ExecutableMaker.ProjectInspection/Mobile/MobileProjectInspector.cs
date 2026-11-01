@@ -52,7 +52,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             !hasBuildable ? (SupportLevel.RequiresConfiguration, "A mobile project structure was found, but no buildable application target or module.")
             : available.Count > 0 ? (SupportLevel.Supported, $"Buildable here: {string.Join(", ", available.Select(o => o.DisplayName))}.")
             : hostBlocked.Count == options.Count ? (SupportLevel.RequiresDifferentHost, "iOS builds require a Mac with Xcode.")
-            : (SupportLevel.MissingToolchain, "Mobile project recognized, but required toolchains are missing. See Mobile Build Studio for details.");
+            : (SupportLevel.MissingToolchain, "Mobile project recognized, but required toolchains are missing on this computer.");
 
         var name = mobile.Flutter?.Name ?? mobile.Maui?.ApplicationTitle ?? Path.GetFileNameWithoutExtension(mobile.Maui?.ProjectPath)
                    ?? mobile.Android?.AppModules.FirstOrDefault()?.ApplicationId?.Split('.').Last()

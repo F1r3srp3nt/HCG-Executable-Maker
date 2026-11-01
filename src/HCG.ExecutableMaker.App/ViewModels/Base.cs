@@ -102,6 +102,30 @@ public static class Format
         _ => s.ToString(),
     };
 
+    public static string Label(ProjectSourceKind k) => k switch
+    {
+        ProjectSourceKind.ZipArchive => "ZIP archive",
+        ProjectSourceKind.Artifact => "Mobile artifact",
+        _ => "Folder",
+    };
+
+    public static string Label(MobileSigningMode m) => m switch
+    {
+        MobileSigningMode.ProjectDefault => "Project signing configuration",
+        MobileSigningMode.Unsigned => "Unsigned",
+        MobileSigningMode.DebugKeystore => "HCG local debug key (testing)",
+        MobileSigningMode.AppleAutomatic => "Xcode automatic signing",
+        _ => "Xcode manual signing (provisioning profile)",
+    };
+
+    public static string Label(IosExportMethod m) => m switch
+    {
+        IosExportMethod.AppStoreConnect => "App Store Connect (export only — never uploaded)",
+        IosExportMethod.ReleaseTesting => "Release testing (ad hoc)",
+        IosExportMethod.Enterprise => "Enterprise",
+        _ => "Development (debugging)",
+    };
+
     public static string Label(PackagingAvailability a) => a switch
     {
         PackagingAvailability.Available => "Available",

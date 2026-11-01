@@ -7,7 +7,7 @@ public sealed class ProjectItem(ProjectRecord project)
     public ProjectRecord Project { get; } = project;
     public string Name => Project.Name;
     public string Source => Project.SourceLocation;
-    public string SourceKind => Project.SourceKind == ProjectSourceKind.ZipArchive ? "ZIP archive" : "Folder";
+    public string SourceKind => Format.Label(Project.SourceKind);
     public string Imported => Format.When(Project.ImportedAt);
     public string LastOpened => Format.When(Project.LastOpenedAt ?? Project.ImportedAt);
     public string Workspace => Project.WorkspacePath;
@@ -21,8 +21,8 @@ public sealed class BuildItem(BuildRecord build)
     public BuildRecord Build { get; } = build;
     public string ProjectName => Build.ProjectName;
     public string AppName => Build.Settings.Identity.ApplicationName;
-    public string Target => $"{Build.Settings.Platform.DisplayName()} {Build.Settings.Architecture.DisplayName()}";
-    public string Rid => Build.Settings.RuntimeIdentifier ?? "—";
+    public string Target => Build.Settings.Mobile is { } m ? $"{m.Output.DisplayName()}" : $"{Build.Settings.Platform.DisplayName()} {Build.Settings.Architecture.DisplayName()}";
+    public string Rid => Build.Settings.Mobile is { } m ? m.Framework.DisplayName() : Build.Settings.RuntimeIdentifier ?? "—";
     public string Version => Build.Settings.Identity.Version;
     public string Started => Format.When(Build.StartedAt);
     public string Duration => Format.Duration(Build.Duration);
@@ -31,7 +31,7 @@ public sealed class BuildItem(BuildRecord build)
     public string ArtifactSummary => Build.Artifacts.Count == 0 ? "No artifacts" : $"{Build.Artifacts.Count} artifact{(Build.Artifacts.Count == 1 ? "" : "s")}";
     public string? FailureReason => Build.FailureReason;
     public bool HasFailure => !string.IsNullOrEmpty(Build.FailureReason) && Build.Status != BuildStatus.Succeeded;
-    public string Formats => string.Join(", ", Build.Settings.PackagingFormats.Select(f => f.DisplayName()));
+    public string Formats => Build.Settings.Mobile is { } m ? $"{m.Output.DisplayName()} · signing: {Format.Label(m.Signing)}" : string.Join(", ", Build.Settings.PackagingFormats.Select(f => f.DisplayName()));
     public IReadOnlyList<ArtifactItem> Artifacts => Build.Artifacts.Select(a => new ArtifactItem(a, Build)).ToList();
     public IReadOnlyList<MessageItem> Messages => Build.Messages.Select(m => new MessageItem(m)).ToList();
     public bool HasMessages => Build.Messages.Count > 0;
@@ -50,7 +50,7 @@ public sealed class ArtifactItem(ArtifactRecord artifact, BuildRecord? build = n
     public string ShortSha => Artifact.Sha256.Length > 16 ? Artifact.Sha256[..16] + "…" : Artifact.Sha256;
     public string ChecksumLabel => Artifact.Kind == ArtifactKind.Directory ? "SHA-256 (file manifest)" : "SHA-256";
     public string Created => Format.When(Artifact.CreatedAt);
-    public string? Origin => build is null ? null : $"{build.ProjectName} · {build.Settings.RuntimeIdentifier}";
+    public string? Origin => build is null ? null : $"{build.ProjectName} · {build.Settings.Mobile?.Output.DisplayName() ?? build.Settings.RuntimeIdentifier}";
     public bool Exists => Artifact.Kind == ArtifactKind.Directory ? Directory.Exists(Artifact.Path) : File.Exists(Artifact.Path);
     public StatusTag Verification => Exists
         ? new StatusTag(Format.Label(Artifact.Verification), Format.Tone(Artifact.Verification))

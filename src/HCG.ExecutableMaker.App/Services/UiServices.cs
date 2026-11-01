@@ -54,6 +54,8 @@ public interface IPlatformShell
     Task<string?> PickZipAsync();
     Task<string?> PickFolderAsync(string title);
     Task<string?> PickIconAsync();
+    /// <summary>Picks a file matching the given patterns (e.g. *.apk). Returns a local path or null.</summary>
+    Task<string?> PickFileAsync(string title, string typeName, params string[] patterns);
     Task CopyAsync(string text);
     Task<bool> OpenFolderAsync(string path);
 }
@@ -89,6 +91,18 @@ public sealed class PlatformShell(MainWindowProvider owner) : IPlatformShell
             Title = "Choose application icon",
             AllowMultiple = false,
             FileTypeFilter = [new FilePickerFileType("Icons (PNG, ICO, ICNS)") { Patterns = ["*.png", "*.ico", "*.icns"] }],
+        });
+        return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+    }
+
+    public async Task<string?> PickFileAsync(string title, string typeName, params string[] patterns)
+    {
+        if (Top is null) return null;
+        var files = await Top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType(typeName) { Patterns = patterns }],
         });
         return files.Count > 0 ? files[0].TryGetLocalPath() : null;
     }

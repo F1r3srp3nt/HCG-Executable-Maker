@@ -26,6 +26,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         [
             new("dashboard", "Dashboard", "Icon.Dashboard", typeof(DashboardViewModel)),
             new("new-build", "New Build", "Icon.NewBuild", typeof(BuildWizardViewModel)),
+            new("mobile", "Mobile Build Studio", "Icon.Mobile", typeof(MobileBuildStudioViewModel)),
             new("projects", "Projects", "Icon.Projects", typeof(ProjectsViewModel)),
             new("history", "Build History", "Icon.History", typeof(BuildHistoryViewModel)),
             new("artifacts", "Artifacts", "Icon.Artifacts", typeof(ArtifactsViewModel)),
@@ -37,7 +38,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public ObservableCollection<NavItem> NavItems { get; }
     public string AppVersion => $"Version {HostInfo.ProductVersion}";
-    public string MilestoneLabel => "Milestone 0.1 · Functional Foundation";
+    public string MilestoneLabel => "Milestone 0.5 · in development";
     public string DataDirectory { get; }
 
     [ObservableProperty] private NavItem? _selectedNav;

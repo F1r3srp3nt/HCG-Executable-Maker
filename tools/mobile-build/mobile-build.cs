@@ -11,6 +11,7 @@
 //        [--signing project|unsigned|debug-key|automatic|manual] [--team ABCDE12345] [--profile NAME]
 //        [--export app-store-connect|release-testing|enterprise|debugging] [--variant release] [--module :app]
 //        [--apks universal|device --device-spec spec.json] [--timeout-minutes 30] [--trust] [--expect-failure "text"]
+//   dotnet run --no-cache tools/mobile-build/mobile-build.cs -- <project-dir|artifact> <output-dir> --inspect-only
 //   kinds: android-debug-apk | android-release-apk | android-aab | aab-to-apk | ios-simulator | ios-archive | ios-ipa
 //
 // --trust is REQUIRED: building executes the project's build scripts (Gradle wrapper, Xcode run phases).
@@ -30,7 +31,8 @@ using HCG.ExecutableMaker.ProjectInspection.Ecosystems;
 using HCG.ExecutableMaker.ProjectInspection.Mobile;
 using Microsoft.Extensions.Logging.Abstractions;
 
-if (args.Length < 2 || Option("--output") is null)
+var inspectOnly = args.Contains("--inspect-only");
+if (args.Length < 2 || (Option("--output") is null && !inspectOnly))
 {
     Console.Error.WriteLine("Usage: mobile-build.cs <project-dir|artifact> <output-dir> --output <kind> [--trust] [options]  (see header)");
     return 2;
@@ -38,15 +40,18 @@ if (args.Length < 2 || Option("--output") is null)
 string? Option(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
 var input = Path.GetFullPath(args[0]);
 var output = Path.GetFullPath(args[1]);
-if (!args.Contains("--trust"))
+if (!args.Contains("--trust") && !inspectOnly)
 {
     Console.Error.WriteLine("Refusing to build without --trust: building runs the project's own build scripts with your permissions.");
     return 2;
 }
-var kind = Option("--output")!;
+var kind = Option("--output") ?? "";
 var expectFailure = Option("--expect-failure");
 
-var paths = new AppPaths(Path.Combine(Path.GetTempPath(), "hcg-mobile-" + Guid.NewGuid().ToString("N")[..8]));
+// A throw-away data folder unless HCG_EXECUTABLE_MAKER_HOME points at a real one (then imports appear in the app).
+var paths = string.IsNullOrEmpty(Environment.GetEnvironmentVariable(AppPaths.RootOverrideVariable))
+    ? new AppPaths(Path.Combine(Path.GetTempPath(), "hcg-mobile-" + Guid.NewGuid().ToString("N")[..8]))
+    : AppPaths.CreateDefault();
 paths.EnsureCreated();
 var db = new SqliteDatabase(paths);
 var runner = new ProcessRunner();
@@ -79,6 +84,7 @@ if (analysis.Mobile is not { } mobile)
 }
 foreach (var o in MobileCapabilities.Evaluate(mobile, report))
     Console.WriteLine($"  {(o.IsAvailable ? "✓" : "✗")} {o.DisplayName}{(o.Reason is null ? "" : " — " + o.Reason)}");
+if (inspectOnly) return 0;
 
 var outputKind = kind switch
 {

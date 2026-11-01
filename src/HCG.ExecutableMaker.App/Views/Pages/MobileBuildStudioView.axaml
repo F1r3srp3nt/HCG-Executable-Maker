@@ -1,0 +1,356 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.MobileBuildStudioView"
+             x:DataType="vm:MobileBuildStudioViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.formlabel">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextSecondary}" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="TextBlock.log">
+      <Setter Property="FontFamily" Value="{DynamicResource Hcg.Font.Mono}" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="#B7C4D1" />
+      <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+    <Style Selector="TextBlock.log.error"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Error}" /></Style>
+    <Style Selector="TextBlock.log.warning"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Warning}" /></Style>
+    <Style Selector="TextBlock.log.success"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Success}" /></Style>
+    <Style Selector="TextBlock.log.command"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Cyan}" /></Style>
+    <Style Selector="TextBlock.log.info"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Silver}" /></Style>
+  </UserControl.Styles>
+
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18">
+
+      <!-- Honesty statement -->
+      <Border Classes="callout" Padding="16,12">
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <PathIcon Data="{StaticResource Icon.Info}" Foreground="{DynamicResource Hcg.Brush.Cyan}" Width="16" Height="16" VerticalAlignment="Top" />
+          <TextBlock Classes="body secondary" Text="{Binding HonestyNote}" TextWrapping="Wrap" MaxWidth="1100" />
+        </StackPanel>
+      </Border>
+
+      <!-- 1 · PROJECT -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="1 · PROJECT" />
+              <TextBlock Classes="h2" Text="Mobile project or artifact" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <Button Command="{Binding ImportFolderCommand}" IsEnabled="{Binding !IsBuilding}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Folder}" /><TextBlock Text="Import Folder" /></StackPanel>
+              </Button>
+              <Button Command="{Binding ImportZipCommand}" IsEnabled="{Binding !IsBuilding}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Zip}" /><TextBlock Text="Import ZIP" /></StackPanel>
+              </Button>
+              <Button Command="{Binding ImportArtifactCommand}" IsEnabled="{Binding !IsBuilding}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Artifacts}" /><TextBlock Text="Import .apk / .aab / .ipa" /></StackPanel>
+              </Button>
+              <Button Command="{Binding RefreshCommand}" ToolTip.Tip="Re-detect toolchains and re-inspect">
+                <PathIcon Data="{StaticResource Icon.Refresh}" />
+              </Button>
+            </StackPanel>
+          </Grid>
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsImporting}" />
+          <Border Classes="callout error" Padding="12" IsVisible="{Binding ImportError, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <TextBlock Text="{Binding ImportError}" TextWrapping="Wrap" />
+          </Border>
+          <Grid ColumnDefinitions="360,*">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="formlabel" Text="IMPORTED MOBILE PROJECTS" />
+              <ComboBox ItemsSource="{Binding MobileProjects}" SelectedItem="{Binding SelectedProject}" HorizontalAlignment="Stretch"
+                        PlaceholderText="No mobile projects imported yet" IsEnabled="{Binding !IsBuilding}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ProjectItem">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                      <TextBlock Classes="muted" Text="{Binding Summary}" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                <c:StatusChip Status="{Binding SupportTag}" />
+              </StackPanel>
+              <TextBlock Classes="muted" Text="{Binding SupportSummary}" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="4" IsVisible="{Binding HasProject}">
+              <ItemsControl ItemsSource="{Binding ProjectRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:SummaryRow">
+                    <Grid ColumnDefinitions="150,*" Margin="0,3">
+                      <TextBlock Classes="muted" Text="{Binding Label}" />
+                      <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" FontSize="12.5" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <ItemsControl ItemsSource="{Binding Diagnostics}" Margin="0,6,0,0">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:DiagnosticItem">
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,2" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <Grid ColumnDefinitions="*,*">
+        <!-- 2 · TARGET PLATFORM + 3 · BUILD OUTPUT -->
+        <Border Classes="card" Margin="0,0,9,0">
+          <StackPanel Spacing="12">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="2 · TARGET PLATFORM" />
+              <TextBlock Classes="h2" Text="Platform and output" />
+            </StackPanel>
+            <ComboBox ItemsSource="{Binding Platforms}" SelectedItem="{Binding SelectedPlatform}" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsBuilding}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:PlatformChoice">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                    <TextBlock Classes="muted" Text="{Binding Detail}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBlock Classes="label" Text="3 · BUILD OUTPUT" Margin="0,8,0,0" />
+            <TextBlock Classes="muted" Text="Select a project to see the outputs it supports on this computer." IsVisible="{Binding !HasOutputs}" TextWrapping="Wrap" />
+            <ItemsControl ItemsSource="{Binding Outputs}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:MobileOutputItem">
+                  <Border Classes="inset" Margin="0,0,0,8" Padding="14,12">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <RadioButton GroupName="MobileOutput" IsChecked="{Binding IsSelected, Mode=OneWay}" IsEnabled="{Binding IsEnabled}" VerticalAlignment="Top"
+                                   Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).SelectOutputCommand}" CommandParameter="{Binding}" />
+                      <StackPanel Grid.Column="1" Spacing="3" Margin="4,0,12,0">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13.5" />
+                        <TextBlock Classes="secondary" FontSize="12.5" Text="{Binding Description}" TextWrapping="Wrap" />
+                        <TextBlock Classes="warning" FontSize="12" Text="{Binding Reason}" TextWrapping="Wrap" IsVisible="{Binding HasReason}" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <!-- 4 · BUILD CONFIGURATION -->
+        <Border Grid.Column="1" Classes="card" Margin="9,0,0,0">
+          <StackPanel Spacing="12" IsEnabled="{Binding !IsBuilding}">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="4 · BUILD CONFIGURATION" />
+              <TextBlock Classes="h2" Text="Configuration and signing" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding ShowModules}">
+              <TextBlock Classes="formlabel" Text="APP MODULE" />
+              <ComboBox ItemsSource="{Binding Modules}" SelectedItem="{Binding SelectedModule}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding ShowSchemes}">
+              <TextBlock Classes="formlabel" Text="SCHEME" />
+              <ComboBox ItemsSource="{Binding Schemes}" SelectedItem="{Binding SelectedScheme}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding ShowVariants}">
+              <TextBlock Classes="formlabel" Text="VARIANT / CONFIGURATION" />
+              <ComboBox ItemsSource="{Binding Variants}" SelectedItem="{Binding SelectedVariant}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding ShowSigning}" Spacing="6">
+              <TextBlock Classes="formlabel" Text="SIGNING" />
+              <ComboBox ItemsSource="{Binding SigningModes}" SelectedItem="{Binding SelectedSigning}" HorizontalAlignment="Stretch" />
+              <TextBlock Classes="muted" FontSize="12" Text="{Binding SigningExplanation}" TextWrapping="Wrap" />
+            </StackPanel>
+            <UniformGrid Columns="2" IsVisible="{Binding ShowTeam}">
+              <StackPanel Margin="0,0,6,0">
+                <TextBlock Classes="formlabel" Text="APPLE TEAM ID" />
+                <TextBox Text="{Binding DevelopmentTeam}" PlaceholderText="ABCDE12345" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+              </StackPanel>
+              <StackPanel Margin="6,0,0,0" IsVisible="{Binding ShowProfile}">
+                <TextBlock Classes="formlabel" Text="PROVISIONING PROFILE (NAME)" />
+                <TextBox Text="{Binding ProvisioningProfile}" PlaceholderText="Installed profile name" />
+              </StackPanel>
+            </UniformGrid>
+            <CheckBox IsChecked="{Binding AllowProvisioningUpdates}" IsVisible="{Binding ShowProvisioningUpdates}">
+              <StackPanel Spacing="1">
+                <TextBlock Text="Allow Xcode to update provisioning (-allowProvisioningUpdates)" FontWeight="Medium" />
+                <TextBlock Classes="muted" Text="Xcode may contact Apple with the account signed in to Xcode. Off by default." TextWrapping="Wrap" />
+              </StackPanel>
+            </CheckBox>
+            <StackPanel IsVisible="{Binding ShowExport}">
+              <TextBlock Classes="formlabel" Text="IPA EXPORT METHOD" />
+              <ComboBox ItemsSource="{Binding ExportMethods}" SelectedItem="{Binding SelectedExportMethod}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding ShowApkSet}" Spacing="6">
+              <TextBlock Classes="formlabel" Text="APK SET MODE (BUNDLETOOL)" />
+              <ComboBox ItemsSource="{Binding ApkSetModes}" SelectedItem="{Binding SelectedApkSetMode}" HorizontalAlignment="Stretch" />
+              <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding ShowDeviceSpec}">
+                <TextBox Text="{Binding DeviceSpecPath}" IsReadOnly="True" PlaceholderText="device-spec.json (bundletool get-device-spec)" />
+                <Button Grid.Column="1" Margin="8,0,0,0" Content="Choose…" Command="{Binding ChooseDeviceSpecCommand}" />
+              </Grid>
+            </StackPanel>
+            <UniformGrid Columns="2">
+              <StackPanel Margin="0,0,6,0">
+                <TextBlock Classes="formlabel" Text="NAME (OUTPUT FOLDER)" />
+                <TextBox Text="{Binding AppName}" />
+              </StackPanel>
+              <StackPanel Margin="6,0,0,0">
+                <TextBlock Classes="formlabel" Text="VERSION LABEL" />
+                <TextBox Text="{Binding AppVersion}" />
+              </StackPanel>
+            </UniformGrid>
+            <StackPanel>
+              <TextBlock Classes="formlabel" Text="OUTPUT DIRECTORY" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox Text="{Binding OutputDirectory}" />
+                <Button Grid.Column="1" Margin="8,0,0,0" Content="Browse…" Command="{Binding ChooseOutputDirectoryCommand}" />
+              </Grid>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <!-- 5 · BUILD STATUS -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="5 · BUILD STATUS" />
+              <TextBlock Classes="h2" Text="{Binding CurrentStage}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+              <TextBlock Classes="muted" Text="{Binding Elapsed}" VerticalAlignment="Center" />
+              <TextBlock Classes="muted" VerticalAlignment="Center">
+                <Run Text="{Binding LiveWarnings}" /><Run Text=" warnings · " /><Run Text="{Binding LiveErrors}" /><Run Text=" errors" />
+              </TextBlock>
+              <c:StatusChip Status="{Binding ResultTag}" />
+            </StackPanel>
+          </Grid>
+          <ItemsControl ItemsSource="{Binding Summary}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SummaryRow">
+                <Grid ColumnDefinitions="150,*" Margin="0,2">
+                  <TextBlock Classes="muted" Text="{Binding Label}" />
+                  <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" FontSize="12.5" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Classes="callout warning" Padding="16" IsVisible="{Binding !IsBuilding}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="h3" Text="{Binding TrustTitle}" />
+              <TextBlock Classes="body secondary" Text="{Binding TrustExplanation}" TextWrapping="Wrap" />
+              <TextBlock Classes="muted" Text="{Binding IsolationDescription}" TextWrapping="Wrap" />
+              <CheckBox IsChecked="{Binding TrustAcknowledged}">
+                <TextBlock Text="I trust this project and want to run its build scripts on this computer." TextWrapping="Wrap" FontWeight="SemiBold" />
+              </CheckBox>
+            </StackPanel>
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Button Classes="primary" Command="{Binding StartBuildCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Play}" /><TextBlock Text="Start Mobile Build" /></StackPanel>
+            </Button>
+            <Button Classes="danger" Command="{Binding CancelBuildCommand}" IsVisible="{Binding IsBuilding}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Stop}" /><TextBlock Text="Cancel" /></StackPanel>
+            </Button>
+          </StackPanel>
+          <Border Classes="callout" Padding="12" IsVisible="{Binding ResultDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding ResultDetail}" TextWrapping="Wrap" />
+          </Border>
+          <ListBox x:Name="LogList" Classes="log" ItemsSource="{Binding LogLines}" Height="300" IsVisible="{Binding HasBuildStarted}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:LogLineItem">
+                <Grid ColumnDefinitions="70,*">
+                  <TextBlock Classes="log" Text="{Binding Time}" Opacity="0.45" />
+                  <TextBlock Grid.Column="1" Classes="log" Text="{Binding Text}"
+                             Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.success="{Binding IsSuccess}"
+                             Classes.command="{Binding IsCommand}" Classes.info="{Binding IsInfo}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+      </Border>
+
+      <!-- 6 · ARTIFACTS -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="6 · ARTIFACTS" />
+              <TextBlock Classes="h2" Text="Artifacts and verification" />
+              <TextBlock Classes="muted" Text="Integrity, metadata and signing checks. Passing them does not mean Google Play or App Store approval." TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" VerticalAlignment="Center" Command="{Binding VerifyArtifactFileCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Check}" /><TextBlock Text="Verify an .apk / .aab / .ipa…" /></StackPanel>
+            </Button>
+          </Grid>
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsVerifying}" />
+          <ItemsControl ItemsSource="{Binding BuiltArtifacts}" IsVisible="{Binding HasBuiltArtifacts}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ArtifactItem">
+                <Border Classes="inset" Margin="0,0,0,10" Padding="14">
+                  <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                      <StackPanel Spacing="1">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                        <TextBlock Classes="muted mono" Text="{Binding Path}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Size}" VerticalAlignment="Center" Margin="12,0" />
+                      <c:StatusChip Grid.Column="2" Status="{Binding Verification}" VerticalAlignment="Center" />
+                      <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0">
+                        <Button ToolTip.Tip="Copy SHA-256" Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).CopyChecksumCommand}" CommandParameter="{Binding}">
+                          <PathIcon Data="{StaticResource Icon.Copy}" />
+                        </Button>
+                        <Button ToolTip.Tip="Open folder" Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).OpenArtifactFolderCommand}" CommandParameter="{Binding}">
+                          <PathIcon Data="{StaticResource Icon.Open}" />
+                        </Button>
+                      </StackPanel>
+                    </Grid>
+                    <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Sha256}" />
+                    <ItemsControl ItemsSource="{Binding Checks}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:CheckItem">
+                          <Grid ColumnDefinitions="170,*,Auto" Margin="0,2">
+                            <TextBlock Classes="muted" Text="{Binding Name}" />
+                            <TextBlock Grid.Column="1" FontSize="12" Text="{Binding Detail}" TextWrapping="Wrap" />
+                            <c:StatusChip Grid.Column="2" Status="{Binding Status}" Margin="8,0,0,0" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Spacing="6" IsVisible="{Binding ArtifactReportTitle, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="h3" Text="{Binding ArtifactReportTitle}" />
+              <c:StatusChip Grid.Column="1" Status="{Binding ArtifactReportTag}" />
+            </Grid>
+            <ItemsControl ItemsSource="{Binding ArtifactChecks}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:CheckItem">
+                  <Grid ColumnDefinitions="170,*,Auto" Margin="0,3">
+                    <TextBlock Classes="muted" Text="{Binding Name}" />
+                    <TextBlock Grid.Column="1" FontSize="12.5" Text="{Binding Detail}" TextWrapping="Wrap" />
+                    <c:StatusChip Grid.Column="2" Status="{Binding Status}" Margin="8,0,0,0" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

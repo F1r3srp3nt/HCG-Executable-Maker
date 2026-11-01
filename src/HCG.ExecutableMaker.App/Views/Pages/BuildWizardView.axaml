@@ -196,6 +196,9 @@
                     </Button>
                   </Grid>
                   <TextBlock Classes="body secondary" Text="{Binding Analysis.SupportSummary, FallbackValue=''}" />
+                  <Button Classes="primary" HorizontalAlignment="Left" Margin="0,8,0,0" Command="{Binding OpenInMobileStudioCommand}" IsVisible="{Binding IsMobileProject}">
+                    <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Open in Mobile Build Studio" /></StackPanel>
+                  </Button>
                   <Border Classes="divider" />
                   <ItemsControl ItemsSource="{Binding AnalysisRows}">
                     <ItemsControl.ItemTemplate>
