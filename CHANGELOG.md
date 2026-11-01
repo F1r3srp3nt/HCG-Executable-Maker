@@ -2,6 +2,27 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Milestone 0.2 "Windows installer" (branch `feature/m0.2-windows-installer`, not merged)
+
+### Added
+- **Windows Setup.exe installer** (Inno Setup 6): name, publisher, version, icon, per-user (default) or all-users
+  installation folder, Start-menu shortcut, optional desktop shortcut, launch after install, uninstaller registered in
+  Settings → Apps, stable AppId for in-place upgrades, all self-contained publish files bundled. The generated `.iss`
+  script is kept next to the installer; ISCC output is part of the build log; artifacts are verified and checksummed.
+- New Build wizard: the installer option is enabled only on Windows hosts with Inno Setup 6 and for self-contained
+  builds (otherwise disabled with the reason); installer options panel; summary row.
+- Inno Setup version detection (Program Files, Program Files (x86), per-user install, PATH).
+- `tools/installer-test/Test-Installer.ps1`: install → verify files/shortcuts/registration → launch → uninstall →
+  confirm cleanup.
+- CI: Windows test job runs the real installer end-to-end test; `windows-installer` job builds and tests HCG's own
+  Setup.exe; release packaging includes `*-Setup.exe`.
+- `self-package.cs --installer`.
+- Docs: `docs/WINDOWS-INSTALLER.md` (incl. the MSI/WiX plan for M0.2b).
+
+### Changed
+- "Needs macOS host" label generalized to "Needs another host".
+- Self-packaging CI runs on main, tags and manual runs; feature branches run tests and installer verification.
+
 ## [0.1.0] — Milestone 0.1 "Functional Foundation" — 2026-10-31 (pre-release)
 
 ### Added
