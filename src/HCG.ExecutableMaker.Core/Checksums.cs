@@ -12,6 +12,12 @@ public static class Checksums
         return Convert.ToHexStringLower(hash);
     }
 
+    public static string Sha256File(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
+    }
+
     public static string Sha256(ReadOnlySpan<byte> data) => Convert.ToHexStringLower(SHA256.HashData(data));
 
     /// <summary>

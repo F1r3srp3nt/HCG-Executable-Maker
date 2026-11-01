@@ -13,7 +13,7 @@ public class MobileInspectionTests : IDisposable
     private readonly TempDir _t = new();
     public void Dispose() => _t.Dispose();
 
-    private static ProjectInspectionService Service() => new(
+    internal static ProjectInspectionService Service() => new(
         new IProjectInspector[] { new DotNetProjectInspector(TimeProvider.System), new MobileProjectInspector(TimeProvider.System) }
             .Concat(EcosystemSignatureInspector.CreateDefaults(TimeProvider.System)),
         TimeProvider.System);

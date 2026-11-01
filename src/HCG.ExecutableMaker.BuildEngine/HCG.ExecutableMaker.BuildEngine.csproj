@@ -3,6 +3,7 @@
     <ProjectReference Include="..\HCG.ExecutableMaker.Core\HCG.ExecutableMaker.Core.csproj" />
     <ProjectReference Include="..\HCG.ExecutableMaker.Security\HCG.ExecutableMaker.Security.csproj" />
     <ProjectReference Include="..\HCG.ExecutableMaker.Packaging\HCG.ExecutableMaker.Packaging.csproj" />
+    <ProjectReference Include="..\HCG.ExecutableMaker.ProjectInspection\HCG.ExecutableMaker.ProjectInspection.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />

@@ -38,7 +38,8 @@ public static class MobileCapabilities
                 list.Add(new MobileOutputOption(o, reasons.Count == 0, desc, reasons.Count == 0 ? null : string.Join(" ", reasons)));
             }
             AddIos(MobileOutput.IosSimulatorApp, "Builds for the iOS Simulator. Simulator builds are NOT distributable and cannot run on devices.");
-            AddIos(MobileOutput.IosArchive, "Device archive (.xcarchive). Signed with your team, or unsigned for inspection only.");
+            AddIos(MobileOutput.IosArchive, "Device archive (.xcarchive). Signed with your team, or unsigned for inspection only.",
+                mobile.Framework == MobileFramework.DotNetMaui ? [".NET MAUI publishes an .ipa directly; a separate archive output is not offered."] : []);
             AddIos(MobileOutput.IosIpa, "Archives and exports a signed .ipa (App Store Connect, release testing, enterprise or development).",
                 report?.IsAvailable(ToolchainIds.AppleSigningIdentities) == true || report?.Host.Platform != TargetPlatform.MacOS
                     ? []

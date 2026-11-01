@@ -170,6 +170,11 @@ public sealed record MobileBuildOptions
     /// <summary>Provisioning profile name or UUID for manual signing. Not a secret.</summary>
     public string? ProvisioningProfile { get; init; }
     public IosExportMethod? ExportMethod { get; init; }
+    /// <summary>
+    /// Passes -allowProvisioningUpdates (automatic signing only): Xcode may contact Apple using the account signed in to
+    /// Xcode to create or renew profiles. Off unless the user explicitly enables it.
+    /// </summary>
+    public bool AllowProvisioningUpdates { get; init; }
     public ApkSetMode ApkSetMode { get; init; } = ApkSetMode.Universal;
     /// <summary>Device spec JSON (absolute path) for device-targeted APK sets.</summary>
     public string? DeviceSpecPath { get; init; }
