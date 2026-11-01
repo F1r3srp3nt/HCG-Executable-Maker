@@ -2,9 +2,15 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — Milestone 0.2 "Windows installer" (branch `feature/m0.2-windows-installer`, not merged)
+## [0.2.0] — 2026-11-01 (pre-release)
 
-### Added
+Unsigned pre-release. Adds the Windows Setup.exe installer (M0.2) and Mobile Build Studio (M0.5). Verified in CI: real
+install → launch → uninstall on Windows; real Android APK/AAB builds on Ubuntu; iOS Simulator build and unsigned
+archive on macOS (signed IPA export not verified — no Apple certificates in CI).
+
+### Milestone 0.2 — Windows installer
+
+#### Added
 - **Windows Setup.exe installer** (Inno Setup 6): name, publisher, version, icon, per-user (default) or all-users
   installation folder, Start-menu shortcut, optional desktop shortcut, launch after install, uninstaller registered in
   Settings → Apps, stable AppId for in-place upgrades, all self-contained publish files bundled. The generated `.iss`
@@ -19,12 +25,12 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - `self-package.cs --installer`.
 - Docs: `docs/WINDOWS-INSTALLER.md` (incl. the MSI/WiX plan for M0.2b).
 
-### Changed
+#### Changed
 - "Needs macOS host" label generalized to "Needs another host".
 - Self-packaging CI runs on main, tags and manual runs; feature branches run tests and installer verification.
-## [Unreleased] — Milestone 0.5 "Mobile Build Studio" (branch `feature/m0.5-mobile-build-studio`, not merged)
+### Milestone 0.5 — Mobile Build Studio
 
-### Added
+#### Added
 - **Mobile project detection** (static): Android Gradle (Groovy/Kotlin DSL, version catalogs, flavors, signing
   configs, AGP/Gradle/JDK compatibility table), Xcode projects/workspaces (OpenStep pbxproj parser, schemes, Swift
   packages, CocoaPods), Flutter, .NET MAUI; React Native and Unity recognized as unsupported.
@@ -44,7 +50,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - Fixtures `HelloAndroid` (Gradle 8.14.3 wrapper, AGP 8.7.3) and `HelloIOS` (SwiftUI).
 - Docs: MOBILE-BUILDS, ANDROID-BUILDING, IOS-BUILDING, MOBILE-ARTIFACT-VERIFICATION.
 
-### Changed
+#### Changed
 - Flutter/Android/Xcode signatures moved from "recognized, unsupported" to Mobile Build Studio.
 - Self-packaging CI runs on main, tags and manual runs only (feature branches skip it).
 

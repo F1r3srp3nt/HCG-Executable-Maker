@@ -8,7 +8,7 @@ on Linux, macOS and Windows, then has HCG Executable Maker package itself on eac
 | Runner | Files |
 |---|---|
 | macOS | `HCG-Executable-Maker-<version>-osx-arm64.dmg` / `.app.zip`, same for `osx-x64` |
-| Windows | `HCG-Executable-Maker-<version>-win-x64.zip`, `…-win-arm64.zip` (`.exe` icon embedded) |
+| Windows | **`HCG-Executable-Maker-<version>-win-x64-Setup.exe`** (installer), `…-win-arm64-Setup.exe`, portable `…-win-x64.zip`, `…-win-arm64.zip` (`.exe` icon embedded) |
 | Linux | `HCG-Executable-Maker-<version>-linux-x64.zip`, `…-linux-arm64.zip` (preview) |
 
 - Every push to `main`: download from **Actions → Build & Release → latest run → Artifacts** (kept 14 days;
@@ -55,7 +55,8 @@ xattr -cr "/Applications/HCG Executable Maker.app"
 
 Then right-click the app → **Open**. If it is still blocked: System Settings → Privacy & Security → **Open Anyway**.
 
-**Windows** — Extract All, then run `HCGExecutableMaker.exe`. If SmartScreen appears: **More info → Run anyway**.
+**Windows** — Run `…-Setup.exe` (installs for the current user; Start-menu shortcut; uninstall from Settings → Apps), or
+Extract All from the ZIP and run `HCGExecutableMaker.exe`. If SmartScreen appears: **More info → Run anyway**.
 The `.exe` file icon is generic when built on a non-Windows host; the window icon shows the logo.
 
 ## Test script (≈10 minutes)

@@ -1,6 +1,10 @@
-# Status — Milestone 0.2 (Windows installer) — complete on branch, awaiting founder review
+# Status — 0.2.0 pre-release
 
-Branch `feature/m0.2-windows-installer` (from `main` 0.1.0; not merged). Evidence: CI run #13
+0.2.0 contains M0.1, M0.2 (Windows installer) and M0.5 (Mobile Build Studio), merged into `main` with founder approval.
+
+# Milestone 0.2 (Windows installer)
+
+Evidence: CI run #13
 (<https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/runs/41299757852>) — all jobs green.
 
 ## Verified on a real Windows machine (GitHub `windows-latest`, Inno Setup 6 installed by CI)
@@ -26,9 +30,12 @@ Windows-only installer test).
 ## Not implemented
 
 MSI (WiX) — next milestone M0.2b; MSIX; Authenticode signing (M0.4).
-# Status — Milestone 0.5 (Mobile Build Studio) — in development
 
-Branch `feature/m0.5-mobile-build-studio` (not merged into `main`). Evidence below is from CI run #10
+---
+
+# Milestone 0.5 (Mobile Build Studio)
+
+Evidence below is from CI run #10
 (<https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/runs/41280121136>) and local runs in a Linux container
 that has a JDK but **no Android SDK** (Google's Maven/SDK hosts are blocked there) and no Xcode.
 
@@ -75,15 +82,14 @@ APK → AAB conversion; desktop-to-mobile "conversion"; uploads to Google Play, 
 creation of production keystores, certificates or provisioning profiles; React Native, Unity, Electron/Capacitor
 builds; MAUI separate `.xcarchive` output; Flutter builds on Windows hosts.
 
-## Remaining before merge (founder decision)
+## Follow-ups
 
-1. Founder review of the branch and of the CI-built fixture outputs (workflow artifacts, 7-day retention).
-2. Optional: verify a signed IPA on a Mac with a real Apple Developer team, and a Flutter/MAUI project.
-3. Merge to `main` only with explicit founder approval.
+1. Verify a signed IPA on a Mac with a real Apple Developer team, and a Flutter/.NET MAUI project.
+2. Install a CI-built fixture APK on a device or emulator.
 
 ---
 
-# Status — Milestone 0.1 (Functional Foundation)
+# Milestone 0.1 (Functional Foundation)
 
 ## Complete and verified
 

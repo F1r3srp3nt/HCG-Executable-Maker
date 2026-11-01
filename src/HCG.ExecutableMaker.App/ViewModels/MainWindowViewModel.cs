@@ -38,7 +38,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public ObservableCollection<NavItem> NavItems { get; }
     public string AppVersion => $"Version {HostInfo.ProductVersion}";
-    public string MilestoneLabel => "Milestone 0.5 · in development";
+    public string MilestoneLabel => "Windows installer · Mobile Build Studio";
     public string DataDirectory { get; }
 
     [ObservableProperty] private NavItem? _selectedNav;

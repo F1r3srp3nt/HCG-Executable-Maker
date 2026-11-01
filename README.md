@@ -9,10 +9,10 @@
 HCG Executable Maker imports a project (ZIP archive or folder), inspects it **without executing any of its code**,
 builds it with the real toolchain, packages it for distribution, and verifies every artifact with SHA-256 checksums.
 
-**Status: Milestone 0.1 — Functional Foundation (released as 0.1.0 pre-release) · Milestone 0.5 — Mobile Build Studio
-in development on `feature/m0.5-mobile-build-studio`.** .NET projects (including Avalonia desktop apps) can be built and
-packaged for **Windows**, **macOS** and **Linux (portable preview)**; Android and iOS projects are built in
-**Mobile Build Studio** (see below). See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is and isn't implemented
+**Status: 0.2.0 pre-release — M0.1 Functional Foundation, M0.2 Windows installer, M0.5 Mobile Build Studio.**
+.NET projects (including Avalonia desktop apps) can be built and packaged for **Windows** (portable or **Setup.exe
+installer**), **macOS** and **Linux (portable preview)**; Android and iOS projects are built in **Mobile Build Studio**
+(see below). See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is and isn't implemented
 and verified.
 
 ![Dashboard](docs/screenshots/01-dashboard.png)
