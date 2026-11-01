@@ -52,6 +52,7 @@ public static class Composition
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();
         services.AddSingleton<IPackager, DmgPackager>();
+        services.AddSingleton<IPackager, InnoSetupPackager>();
         services.AddSingleton<PackagingRegistry>();
         services.AddSingleton<BuildService>();
 

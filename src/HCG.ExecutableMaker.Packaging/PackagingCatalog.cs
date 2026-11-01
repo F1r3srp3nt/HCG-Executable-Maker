@@ -19,8 +19,16 @@ public static class PackagingCatalog
             case TargetPlatform.Windows:
                 Add(PackagingFormat.PortableFolder, "Self-contained folder with the .exe and all dependencies. No installation required.", PackagingAvailability.Available);
                 Add(PackagingFormat.PortableZip, "The portable folder compressed into a single ZIP for distribution.", PackagingAvailability.Available);
-                Add(PackagingFormat.WindowsInstallerExe, "Setup wizard (.exe) with Start-menu shortcuts and uninstaller.", PackagingAvailability.NotImplemented, "Installer generation is planned for M0.2.", "M0.2");
-                Add(PackagingFormat.WindowsMsi, "Windows Installer package for managed deployment.", PackagingAvailability.NotImplemented, "MSI generation (WiX) is planned for M0.2.", "M0.2");
+                const string setupDesc = "Setup wizard (.exe, Inno Setup) that installs the app, adds a Start-menu shortcut and an optional desktop shortcut, and registers an uninstaller.";
+                if (ctx.Host.Platform != TargetPlatform.Windows)
+                    Add(PackagingFormat.WindowsInstallerExe, setupDesc, PackagingAvailability.RequiresDifferentHost,
+                        "The Inno Setup compiler (ISCC.exe) runs only on Windows. Build on a Windows PC, or use the Windows CI runner (docs/WINDOWS-INSTALLER.md).");
+                else if (ctx.Toolchains?.IsAvailable(ToolchainIds.InnoSetup) != true)
+                    Add(PackagingFormat.WindowsInstallerExe, setupDesc, PackagingAvailability.MissingTool,
+                        "Inno Setup 6 was not detected. Install it from https://jrsoftware.org/isinfo.php, then refresh Toolchains.");
+                else
+                    Add(PackagingFormat.WindowsInstallerExe, setupDesc, PackagingAvailability.Available);
+                Add(PackagingFormat.WindowsMsi, "Windows Installer package for managed deployment.", PackagingAvailability.NotImplemented, "MSI generation with the WiX Toolset is the next milestone (M0.2b).", "M0.2b");
                 Add(PackagingFormat.WindowsMsix, "MSIX package for the Microsoft Store.", PackagingAvailability.NotImplemented, "MSIX packaging and Store signing are planned for M0.2/M0.4.", "M0.4");
                 break;
 

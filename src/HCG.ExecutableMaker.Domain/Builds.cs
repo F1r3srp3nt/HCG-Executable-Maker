@@ -38,8 +38,32 @@ public sealed record BuildSettings
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(30);
     public required AppIdentity Identity { get; init; }
     public IReadOnlyList<PackagingFormat> PackagingFormats { get; init; } = [PackagingFormat.PortableFolder];
+    /// <summary>Options for the Windows Setup.exe installer (used when <see cref="PackagingFormat.WindowsInstallerExe"/> is selected).</summary>
+    public WindowsInstallerOptions WindowsInstaller { get; init; } = new();
 
     public string? RuntimeIdentifier => PlatformNames.ToRuntimeIdentifier(Platform, Architecture);
+}
+
+public enum InstallScope
+{
+    /// <summary>Installs for the current user only (no administrator rights; %LOCALAPPDATA%\Programs).</summary>
+    CurrentUser,
+    /// <summary>Installs for all users (requires administrator rights; Program Files).</summary>
+    AllUsers,
+}
+
+/// <summary>Windows Setup.exe settings. Name, publisher, version and icon come from <see cref="AppIdentity"/>.</summary>
+public sealed record WindowsInstallerOptions
+{
+    /// <summary>Folder name under Program Files / %LOCALAPPDATA%\Programs. Defaults to the application name.</summary>
+    public string? InstallFolderName { get; init; }
+    public InstallScope Scope { get; init; } = InstallScope.CurrentUser;
+    /// <summary>Offer an optional "Create a desktop shortcut" task in the setup wizard.</summary>
+    public bool OfferDesktopShortcut { get; init; } = true;
+    /// <summary>Whether that task is checked by default.</summary>
+    public bool DesktopShortcutCheckedByDefault { get; init; }
+    /// <summary>Offer "Launch &lt;app&gt;" on the final wizard page.</summary>
+    public bool OfferLaunchAfterInstall { get; init; } = true;
 }
 
 public sealed record BuildMessage(DiagnosticSeverity Severity, string Text, string? Code = null, string? File = null, int? Line = null);

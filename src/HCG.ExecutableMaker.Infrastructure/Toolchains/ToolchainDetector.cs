@@ -224,10 +224,29 @@ public sealed partial class ToolchainDetector(
             ? Task.FromResult(Missing(ToolchainIds.WixToolset, "WiX Toolset (MSI)", cat, "Install WiX v5+: dotnet tool install --global wix"))
             : ProbeVersionAsync(ToolchainIds.WixToolset, "WiX Toolset (MSI)", cat, wix, ["--version"], AnyVersionRegex(), null, ct);
 
-        var iscc = locator.Find("ISCC", [Path.Combine(pf86, "Inno Setup 6", "ISCC.exe")]);
+        var iscc = locator.Find("ISCC", [
+            Path.Combine(pf86, "Inno Setup 6", "ISCC.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Inno Setup 6", "ISCC.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Inno Setup 6", "ISCC.exe"),
+        ]);
         yield return Task.FromResult(iscc is null
             ? Missing(ToolchainIds.InnoSetup, "Inno Setup (installer .exe)", cat, "Install Inno Setup 6 from https://jrsoftware.org/isinfo.php.")
-            : new ToolchainInfo { Id = ToolchainIds.InnoSetup, DisplayName = "Inno Setup (installer .exe)", Category = cat, Status = ToolchainStatus.Installed, ExecutablePath = iscc });
+            : InnoSetupInfo(iscc, cat));
+    }
+
+    /// <summary>Reads ISCC's file version (no process is started). Inno Setup 5 is reported but not accepted.</summary>
+    private static ToolchainInfo InnoSetupInfo(string iscc, string cat)
+    {
+        var raw = System.Diagnostics.FileVersionInfo.GetVersionInfo(iscc).ProductVersion?.Trim();
+        var version = raw is null ? null : AnyVersionRegex().Match(raw) is { Success: true } m ? m.Value : raw;
+        var major = version is not null && int.TryParse(version.Split('.')[0], out var mj) ? mj : 0;
+        return new ToolchainInfo
+        {
+            Id = ToolchainIds.InnoSetup, DisplayName = "Inno Setup (installer .exe)", Category = cat, ExecutablePath = iscc, Version = version,
+            Status = major is 0 or >= 6 ? ToolchainStatus.Installed : ToolchainStatus.ValidationFailed,
+            Detail = major is > 0 and < 6 ? $"Inno Setup {version} is too old; version 6 is required." : "ISCC.exe",
+            InstallHint = "Install Inno Setup 6 from https://jrsoftware.org/isinfo.php.",
+        };
     }
 
     private async Task<ToolchainInfo> DetectMsBuildAsync(string pf86, CancellationToken ct)
