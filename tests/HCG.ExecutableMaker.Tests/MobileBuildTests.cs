@@ -128,7 +128,7 @@ public class MobilePlannerTests : IDisposable
         Assert.Equal(dir, step.Process.WorkingDirectory);
         var env = step.Process.Environment!;
         Assert.Equal(_k.Sdk, env["ANDROID_HOME"]);
-        Assert.Equal(Path.GetDirectoryName(Path.GetDirectoryName(_k.Java)), env["JAVA_HOME"]);
+        Assert.Equal(Path.GetDirectoryName(Path.GetDirectoryName(PathGuard.GetRealPath(_k.Java))), env["JAVA_HOME"]); // symlink-free (macOS /var → /private/var)
         Assert.Equal(Path.Combine(_k.ToolHome, "gradle"), env["GRADLE_USER_HOME"]); // never ~/.gradle (credentials)
         Assert.Equal(Path.Combine(_k.ToolHome, "android"), env["ANDROID_USER_HOME"]);
         var rule = Assert.Single(plan.Outputs);

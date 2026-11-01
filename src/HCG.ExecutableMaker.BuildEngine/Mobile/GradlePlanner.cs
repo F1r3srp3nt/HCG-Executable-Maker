@@ -11,8 +11,8 @@ namespace HCG.ExecutableMaker.BuildEngine.Mobile;
 /// </summary>
 public static class GradlePlanner
 {
-    public const string WrapperJar = "gradle/wrapper/gradle-wrapper.jar";
-    public const string WrapperProperties = "gradle/wrapper/gradle-wrapper.properties";
+    public static readonly string WrapperJar = Path.Combine("gradle", "wrapper", "gradle-wrapper.jar");
+    public static readonly string WrapperProperties = Path.Combine("gradle", "wrapper", "gradle-wrapper.properties");
 
     public sealed record WrapperInfo(string JarPath, string? DistributionUrl, string? DistributionSha256, string JarSha256);
 
