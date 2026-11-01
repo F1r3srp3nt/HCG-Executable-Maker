@@ -130,7 +130,7 @@ public static class Format
     {
         PackagingAvailability.Available => "Available",
         PackagingAvailability.MissingTool => "Tool missing",
-        PackagingAvailability.RequiresDifferentHost => "Needs macOS host",
+        PackagingAvailability.RequiresDifferentHost => "Needs another host",
         PackagingAvailability.NotImplemented => "Planned",
         _ => "Not applicable",
     };

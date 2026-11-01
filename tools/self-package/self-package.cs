@@ -8,13 +8,14 @@
 //
 // Usage:
 //   dotnet run --no-cache tools/self-package/self-package.cs -- <repo-root> <output-dir> [--targets osx-arm64,win-x64,...]
-//                                                    [--version 0.1.0] [--dist <dir>]
+//                                                    [--version 0.1.0] [--dist <dir>] [--installer]
 //
 // <output-dir> must be outside the repository (the repository is what gets imported).
 // --no-cache matters: file-based apps do not notice changes in #:project sources and would run a stale engine.
 // --dist collects the distributable files (.zip/.dmg) into one flat folder with release-friendly names.
 // Formats are chosen per target from PackagingCatalog: macOS → .app (+ .dmg when this host can make one),
-// Windows/Linux → portable ZIP. Exit code is non-zero if any build fails.
+// Windows/Linux → portable ZIP; --installer adds a Windows Setup.exe (Inno Setup; Windows host with ISCC required —
+// the build fails with the reason instead of silently skipping it). Exit code is non-zero if any build fails.
 using HCG.ExecutableMaker.BuildEngine;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -39,6 +40,7 @@ string? Option(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDef
 var targets = (Option("--targets") ?? "osx-arm64,osx-x64,win-x64").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 var version = Option("--version") ?? "0.1.0";
 var dist = Option("--dist") is { } d ? Path.GetFullPath(d) : null;
+var installer = args.Contains("--installer");
 if (PathGuard.IsWithin(repo, output) || (dist is not null && PathGuard.IsWithin(repo, dist)))
 {
     Console.Error.WriteLine("Choose output and dist directories outside the repository (they would be imported on the next run).");
@@ -53,7 +55,7 @@ var projects = new ProjectService(new ProjectImporter(paths, TimeProvider.System
     new ProjectInspectionService([new DotNetProjectInspector(TimeProvider.System)], TimeProvider.System),
     new SqliteProjectRepository(db), new SqliteSettingsStore(db), toolchains, paths, TimeProvider.System, NullLogger<ProjectService>.Instance);
 var builds = new BuildService(new LocalProcessBuildWorker(runner), toolchains, new SqliteBuildRepository(db),
-    new PackagingRegistry([new PortableFolderPackager(), new PortableZipPackager(), new MacAppBundlePackager(), new DmgPackager(runner)]),
+    new PackagingRegistry([new PortableFolderPackager(), new PortableZipPackager(), new MacAppBundlePackager(), new DmgPackager(runner), new InnoSetupPackager(runner)]),
     paths, TimeProvider.System);
 
 var report = await toolchains.GetAsync();
@@ -76,6 +78,17 @@ foreach (var rid in targets)
     var options = PackagingCatalog.Evaluate(new PackagingContext(platform, report.Host, report, IsGuiApplication: true));
     PackagingFormat[] wanted = platform == TargetPlatform.MacOS ? [PackagingFormat.MacAppBundle, PackagingFormat.MacDmg] : [PackagingFormat.PortableZip];
     var formats = wanted.Where(f => options.Any(o => o.Format == f && o.IsAvailable)).ToList();
+    if (installer && platform == TargetPlatform.Windows)
+    {
+        var setup = options.First(o => o.Format == PackagingFormat.WindowsInstallerExe);
+        if (!setup.IsAvailable)
+        {
+            Console.Error.WriteLine($"{rid}: Windows installer requested but unavailable — {setup.Reason}");
+            failures++;
+            continue;
+        }
+        formats.Add(PackagingFormat.WindowsInstallerExe);
+    }
     var settings = new BuildSettings
     {
         ProjectRelativePath = analysis.PrimaryProjectPath,
@@ -112,7 +125,8 @@ async Task CollectAsync(BuildRecord build, BuildSettings settings, string distDi
     var baseName = $"HCG-Executable-Maker-{settings.Identity.Version}-{settings.RuntimeIdentifier}";
     foreach (var art in build.Artifacts.Where(a => a.Kind == ArtifactKind.File))
     {
-        var suffix = art.Path.EndsWith(".app.zip", StringComparison.Ordinal) ? ".app.zip" : Path.GetExtension(art.Path);
+        var suffix = art.Path.EndsWith(".app.zip", StringComparison.Ordinal) ? ".app.zip"
+            : art.Path.EndsWith("-Setup.exe", StringComparison.Ordinal) ? "-Setup.exe" : Path.GetExtension(art.Path);
         File.Copy(art.Path, Path.Combine(distDir, baseName + suffix), overwrite: true);
     }
     // On a Mac host the bundle packager emits no transfer ZIP; create one with ditto (preserves permissions and xattrs).

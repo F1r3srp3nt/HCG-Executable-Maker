@@ -190,12 +190,13 @@ public class PackagingCatalogTests
         new(target, new HostEnvironment(host, TargetArchitecture.X64, "test", ".NET", "m"), Fixtures.Toolchains("10.0.114"), gui);
 
     [Fact]
-    public void Windows_installers_are_not_offered_as_implemented()
+    public void Windows_msi_and_msix_are_not_offered_as_implemented_and_setup_needs_a_windows_host()
     {
         var o = PackagingCatalog.Evaluate(Ctx(TargetPlatform.Windows));
         Assert.True(o.Single(x => x.Format == PackagingFormat.PortableFolder).IsAvailable);
         Assert.True(o.Single(x => x.Format == PackagingFormat.PortableZip).IsAvailable);
-        foreach (var f in new[] { PackagingFormat.WindowsInstallerExe, PackagingFormat.WindowsMsi, PackagingFormat.WindowsMsix })
+        Assert.Equal(PackagingAvailability.RequiresDifferentHost, o.Single(x => x.Format == PackagingFormat.WindowsInstallerExe).Availability);
+        foreach (var f in new[] { PackagingFormat.WindowsMsi, PackagingFormat.WindowsMsix })
         {
             var opt = o.Single(x => x.Format == f);
             Assert.Equal(PackagingAvailability.NotImplemented, opt.Availability);

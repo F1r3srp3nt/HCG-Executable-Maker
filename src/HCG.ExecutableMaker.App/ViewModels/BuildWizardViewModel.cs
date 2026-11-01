@@ -60,6 +60,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             new(WizardStep.Package, "Package"), new(WizardStep.Build, "Build"), new(WizardStep.Results, "Results"),
         ];
         _uiTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(120), DispatcherPriority.Background, (_, _) => FlushLog());
+        SelectedInstallScope = InstallScopeOptions[0];
         UpdateSteps();
     }
 
@@ -446,6 +447,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         SelectedConfiguration = ConfigurationOptions.First(c => c.Value == s.Configuration);
         SelfContained = s.SelfContained;
         SingleFile = s.SingleFile;
+        SelectedInstallScope = InstallScopeOptions.First(o => o.Value == s.WindowsInstaller.Scope);
+        InstallFolderName = s.WindowsInstaller.InstallFolderName ?? "";
+        OfferDesktopShortcut = s.WindowsInstaller.OfferDesktopShortcut;
+        DesktopShortcutChecked = s.WindowsInstaller.DesktopShortcutCheckedByDefault;
+        OfferLaunchAfterInstall = s.WindowsInstaller.OfferLaunchAfterInstall;
         OutputDirectory = s.OutputDirectory;
         TimeoutMinutes = (decimal)s.Timeout.TotalMinutes;
         Validate();
@@ -547,6 +553,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         OutputDirectory = OutputDirectory.Trim(),
         Timeout = TimeSpan.FromMinutes((double)(TimeoutMinutes ?? 30)),
         PackagingFormats = formats,
+        WindowsInstaller = CreateInstallerOptions(),
         Identity = new AppIdentity
         {
             ApplicationName = AppName.Trim(),
@@ -566,7 +573,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         var detected = SelectedProject?.Project;
         var isGui = detected is not null && (detected.IsAvalonia || string.Equals(detected.OutputType, "WinExe", StringComparison.OrdinalIgnoreCase));
-        var ctx = new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui);
+        var ctx = new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained);
         foreach (var old in PackagingOptions) old.PropertyChanged -= OnPackagingOptionChanged;
         PackagingOptions.Clear();
         var recommended = preselect ?? Analysis?.RecommendedFormats ?? [];
@@ -580,7 +587,33 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         NextCommand.NotifyCanExecuteChanged();
     }
 
-    private void OnPackagingOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => NextCommand.NotifyCanExecuteChanged();
+    private void OnPackagingOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        NextCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(ShowInstallerOptions));
+    }
+
+    // Windows Setup.exe options (shown when the installer format is selected).
+    public bool ShowInstallerOptions => PackagingOptions.Any(o => o.IsSelected && o.IsEnabled && o.Option.Format == PackagingFormat.WindowsInstallerExe);
+    public IReadOnlyList<Choice<InstallScope>> InstallScopeOptions { get; } =
+    [
+        new(InstallScope.CurrentUser, "Current user — no administrator rights (%LOCALAPPDATA%\\Programs)"),
+        new(InstallScope.AllUsers, "All users — requires administrator rights (Program Files)"),
+    ];
+    [ObservableProperty] private Choice<InstallScope>? _selectedInstallScope;
+    [ObservableProperty] private string _installFolderName = "";
+    [ObservableProperty] private bool _offerDesktopShortcut = true;
+    [ObservableProperty] private bool _desktopShortcutChecked;
+    [ObservableProperty] private bool _offerLaunchAfterInstall = true;
+
+    private WindowsInstallerOptions CreateInstallerOptions() => new()
+    {
+        Scope = SelectedInstallScope?.Value ?? InstallScope.CurrentUser,
+        InstallFolderName = string.IsNullOrWhiteSpace(InstallFolderName) ? null : InstallFolderName.Trim(),
+        OfferDesktopShortcut = OfferDesktopShortcut,
+        DesktopShortcutCheckedByDefault = OfferDesktopShortcut && DesktopShortcutChecked,
+        OfferLaunchAfterInstall = OfferLaunchAfterInstall,
+    };
 
     private IReadOnlyList<PackagingFormat> SelectedFormats() =>
         PackagingOptions.Where(o => o.IsSelected && o.IsEnabled).Select(o => o.Option.Format).ToList();
@@ -621,6 +654,12 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         Summary.Add(new("Target", $"{s.Platform.DisplayName()} {s.Architecture.DisplayName()} ({s.RuntimeIdentifier})"));
         Summary.Add(new("Configuration", $"{s.Configuration} · {(s.SelfContained ? "self-contained" : "framework-dependent")}{(s.SingleFile ? " · single file" : "")}"));
         Summary.Add(new("Packaging", string.Join(", ", PackagingCatalog.WithDependencies(s.PackagingFormats).Select(f => f.DisplayName()))));
+        if (s.PackagingFormats.Contains(PackagingFormat.WindowsInstallerExe))
+        {
+            var w = s.WindowsInstaller;
+            Summary.Add(new("Installer", $"{(w.Scope == InstallScope.AllUsers ? "All users (admin)" : "Current user")} · folder “{w.InstallFolderName ?? s.Identity.ApplicationName}” · Start-menu shortcut" +
+                $"{(w.OfferDesktopShortcut ? $" · optional desktop shortcut ({(w.DesktopShortcutCheckedByDefault ? "on" : "off")} by default)" : "")}{(w.OfferLaunchAfterInstall ? " · launch after install" : "")} · uninstaller"));
+        }
         Summary.Add(new("Icon", s.Identity.IconSourcePath is null ? "None" : Path.GetFileName(s.Identity.IconSourcePath)));
         Summary.Add(new("Output", BuildService.OutputRootFor(s)));
         Summary.Add(new("Time limit", $"{s.Timeout.TotalMinutes:0} minutes"));

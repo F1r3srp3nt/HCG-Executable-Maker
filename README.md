@@ -25,14 +25,21 @@ and verified.
 | Inspection | Static .NET analysis: `.sln`, `.slnx`, `.csproj/.fsproj/.vbproj`, `Directory.Build.props`, central package versions, `global.json` roll-forward, target frameworks, output types, RIDs, package/project references, entry points, icons, Avalonia/WPF/WinForms/MAUI/web detection, platform compatibility |
 | Other ecosystems | Rust, Node/Electron, Python, Java, C/C++, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
 | Build | `dotnet restore` → `build` → `publish` with structured arguments (no shell), Release/Debug, runtime selection (win/osx/linux × x64/arm64), self-contained, single-file, live log, warning/error parsing, cancellation, timeouts |
-| Packaging | Portable folder · portable ZIP (Unix permissions preserved) · macOS `.app` bundle (Info.plist, `.icns`, exec bits) · `.dmg` on macOS hosts with `hdiutil` |
+| Packaging | Portable folder · portable ZIP (Unix permissions preserved) · **Windows Setup.exe installer** (Inno Setup, Windows hosts — M0.2, see below) · macOS `.app` bundle (Info.plist, `.icns`, exec bits) · `.dmg` on macOS hosts with `hdiutil` |
 | Verification | Executable present, PE/Mach-O/ELF format and CPU architecture, executable bit, bundle structure, code-signature presence, archive integrity, SHA-256 (+ per-file manifests for folders) |
 | Icons | PNG/ICO/ICNS inspection (size, aspect, transparency), aspect-preserving ICO/ICNS generation, original never modified |
 | History | SQLite with migrations: projects, builds, settings, messages, artifacts, checksums, toolchain versions; repeat builds, view logs, delete history, remove workspaces |
 | Toolchains | .NET SDK, Git, OS/CPU, disk space; macOS (Xcode CLT, Xcode, codesign, hdiutil, notarytool, productbuild); Windows (Windows SDK, signtool, MakeAppx, MSBuild, WiX, Inno Setup). Never installs anything |
 | Security | Explicit trust confirmation before every build; secrets scrubbed from the build environment; no credentials stored; signing capabilities reported honestly as **not implemented** |
 
-## Mobile Build Studio (M0.5, in development)
+## Windows installer (M0.2)
+
+A standard **Setup.exe** built with Inno Setup 6: Start-menu shortcut, optional desktop shortcut, per-user or
+all-users install, uninstaller in Settings → Apps, in-place upgrades. Requires a Windows build host with Inno Setup 6
+and a self-contained build; from macOS/Linux use the Windows CI runner. Verified by really installing, launching and
+uninstalling on Windows. Details: [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md).
+
+## Mobile Build Studio (M0.5)
 
 | Area | Implemented |
 |---|---|
@@ -47,7 +54,7 @@ Details: [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md).
 
 ![Mobile Build Studio](docs/screenshots/10-mobile-build-studio.png)
 
-**Not yet implemented** (shown in the UI as *Planned*, never as working): Windows installers (.exe/.msi/.msix — M0.2),
+**Not yet implemented** (shown in the UI as *Planned*, never as working): Windows MSI (WiX — M0.2b) and MSIX,
 macOS `.pkg`/App Store packaging (M0.3/M0.4), desktop code signing and notarization (M0.4), Linux AppImage/DEB/RPM,
 store uploads of any kind, sandboxed build workers.
 
@@ -98,6 +105,7 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 - [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md) — Mobile Build Studio overview, output matrix, signing modes, CLI
 - [`docs/ANDROID-BUILDING.md`](docs/ANDROID-BUILDING.md) · [`docs/IOS-BUILDING.md`](docs/IOS-BUILDING.md) ·
   [`docs/MOBILE-ARTIFACT-VERIFICATION.md`](docs/MOBILE-ARTIFACT-VERIFICATION.md)
+- [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md) — Windows Setup.exe: features, requirements, CI route, tests
 - [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows
 - [`docs/STATUS.md`](docs/STATUS.md) — what is complete, what is not, verification evidence, continuation instructions
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — solution structure, data flow, extension points

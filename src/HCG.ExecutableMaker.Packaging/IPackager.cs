@@ -37,4 +37,4 @@ public interface IPackager
 }
 
 /// <summary>Context used to decide which packaging formats are offered for a build.</summary>
-public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Host, ToolchainReport? Toolchains, bool IsGuiApplication);
+public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Host, ToolchainReport? Toolchains, bool IsGuiApplication, bool SelfContained = true);

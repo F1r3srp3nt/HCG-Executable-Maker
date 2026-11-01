@@ -1,3 +1,31 @@
+# Status — Milestone 0.2 (Windows installer) — complete on branch, awaiting founder review
+
+Branch `feature/m0.2-windows-installer` (from `main` 0.1.0; not merged). Evidence: CI run #13
+(<https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/runs/41299757852>) — all jobs green.
+
+## Verified on a real Windows machine (GitHub `windows-latest`, Inno Setup 6 installed by CI)
+
+| What | Result |
+|---|---|
+| `WindowsInstallerEndToEndTests`: HelloAvalonia fixture built for win-x64 → portable ZIP + **Setup.exe** (icon, name, publisher, version) → SHA-256 recorded in `SHA256SUMS.txt` → silent per-user install → every published file + `unins000.exe` present → Start-menu and desktop shortcuts present → uninstall registration (name 1.4.2, publisher, UninstallString) → **installed app launched and kept running** → silent uninstall → folder, both shortcuts and registration removed | **Passed** (1 min 39 s) |
+| `windows-installer` job: HCG Executable Maker builds **its own** `HCG-Executable-Maker-0.2.0-win-x64-Setup.exe` with `self-package.cs --installer`, then `Test-Installer.ps1`: install (252 files), shortcuts exist and point to `HCGExecutableMaker.exe`, registration `{8ABCE15B-…}_is1` "HCG Executable Maker 0.2.0 — Hakmi Capital Group", app launched and running after 8 s, uninstaller exit 0, folder/shortcuts/registration removed | **All checks passed** |
+| Portable folder / ZIP for Windows (desktop end-to-end test) | Unchanged, passing |
+| Full test suite on Windows / macOS / Linux | 179 tests; Windows 169 passed, 10 skipped (Unix-only tests) |
+
+Local (Linux container): 175 passed, 4 skipped (3 integration tests skipped with `HCG_SKIP_INTEGRATION=1`, plus the
+Windows-only installer test).
+
+## Not verified
+
+- Clicking through the New Build wizard on a Windows desktop to produce a Setup.exe (CI exercises the same
+  `BuildService` + `InnoSetupPackager` path headlessly; the wizard option is disabled on this Linux host, by design).
+- All-users (administrator) installation — implemented (`PrivilegesRequired=admin`), not exercised in CI.
+- ARM64 installers — produced by the `package` job on main/tags only; not installed on ARM64 hardware.
+- Installing on a clean consumer PC (SmartScreen prompt, since the installer is unsigned).
+
+## Not implemented
+
+MSI (WiX) — next milestone M0.2b; MSIX; Authenticode signing (M0.4).
 # Status — Milestone 0.5 (Mobile Build Studio) — in development
 
 Branch `feature/m0.5-mobile-build-studio` (not merged into `main`). Evidence below is from CI run #10
