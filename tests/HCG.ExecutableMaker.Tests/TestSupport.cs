@@ -95,3 +95,35 @@ public sealed class UnixFactAttribute : FactAttribute
         if (OperatingSystem.IsWindows()) Skip = "Requires a Unix host (symlinks / file modes / sleep).";
     }
 }
+
+/// <summary>Skips when the JDK tools (keytool, jarsigner) are not available.</summary>
+public sealed class RequiresJdkFactAttribute : FactAttribute
+{
+    public RequiresJdkFactAttribute()
+    {
+        if (JdkTools.Find("keytool") is null || JdkTools.Find("jarsigner") is null) Skip = "JDK keytool/jarsigner not found (JAVA_HOME or PATH).";
+    }
+}
+
+public static class JdkTools
+{
+    public static string? Find(string tool)
+    {
+        var exe = OperatingSystem.IsWindows() ? tool + ".exe" : tool;
+        var dirs = new List<string>();
+        if (Environment.GetEnvironmentVariable("JAVA_HOME") is { Length: > 0 } home) dirs.Add(System.IO.Path.Combine(home, "bin"));
+        dirs.AddRange((Environment.GetEnvironmentVariable("PATH") ?? "").Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries));
+        return dirs.Select(d => System.IO.Path.Combine(d, exe)).FirstOrDefault(File.Exists);
+    }
+
+    public static void Run(string tool, params string[] args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(Find(tool)!) { RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEndAsync();
+        var stderr = p.StandardError.ReadToEnd();
+        if (!p.WaitForExit(120_000)) { p.Kill(true); throw new TimeoutException(tool + " timed out"); }
+        if (p.ExitCode != 0) throw new InvalidOperationException($"{tool} failed ({p.ExitCode}): {stderr} {stdout.Result}");
+    }
+}
