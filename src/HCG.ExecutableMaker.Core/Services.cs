@@ -7,6 +7,8 @@ public interface IProjectImporter
 {
     Task<ImportResult> ImportZipAsync(string zipPath, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken);
     Task<ImportResult> ImportDirectoryAsync(string directory, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken);
+    /// <summary>Copies a single mobile artifact (.apk/.aab/.apks/.ipa) into a workspace without extracting it.</summary>
+    Task<ImportResult> ImportArtifactAsync(string file, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken);
 }
 
 /// <summary>Static analysis of a workspace. Must never execute imported code.</summary>

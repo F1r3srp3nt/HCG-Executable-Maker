@@ -28,6 +28,13 @@ public sealed class ProjectService(
         return await FinishImportAsync(result, progress, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<ImportResult> ImportArtifactAsync(string file, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
+    {
+        var limits = (await settings.LoadAsync(cancellationToken).ConfigureAwait(false)).ImportLimits;
+        var result = await importer.ImportArtifactAsync(file, limits, progress, cancellationToken).ConfigureAwait(false);
+        return await FinishImportAsync(result, progress, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<ImportResult> FinishImportAsync(ImportResult result, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
     {
         progress?.Report(new ImportProgress("Inspecting project", result.FileCount, result.FileCount, result.TotalBytes, null));

@@ -18,3 +18,4 @@ tests/Fixtures/**/build/
 tests/Fixtures/**/DerivedData/
 *.xcuserstate
 xcuserdata/
+mobile-out/

@@ -691,3 +691,55 @@ public class MobileBuildServiceTests : IDisposable
         }));
     }
 }
+
+public class MobileArtifactImportTests : IDisposable
+{
+    private readonly TempDir _t = new();
+    public void Dispose() => _t.Dispose();
+
+    private HCG.ExecutableMaker.Infrastructure.Import.ProjectImporter Importer()
+    {
+        var paths = new AppPaths(_t.Combine("app"));
+        paths.EnsureCreated();
+        return new(paths, TimeProvider.System);
+    }
+
+    [Fact]
+    public async Task Artifacts_are_copied_unextracted_into_an_artifact_workspace()
+    {
+        var aab = MobileSamples.Aab(_t.Combine("My App.aab"), signer: null);
+        var result = await Importer().ImportArtifactAsync(aab, new ImportLimits(), null, CancellationToken.None);
+        Assert.Equal(ProjectSourceKind.Artifact, result.Project.SourceKind);
+        var copied = Assert.Single(Directory.GetFiles(result.Project.SourceDirectory));
+        Assert.Equal(File.ReadAllBytes(aab), File.ReadAllBytes(copied));
+
+        var analysis = await MobileInspectionTests.Service().InspectAsync(result.Project.SourceDirectory, null, CancellationToken.None);
+        Assert.Equal("mobile-artifact", analysis.InspectorId);
+        Assert.Equal(Path.GetFileName(copied), analysis.Mobile!.ArtifactPath);
+        Assert.Equal([TargetPlatform.Android], analysis.Mobile.Platforms);
+        var option = Assert.Single(HCG.ExecutableMaker.ProjectInspection.Mobile.MobileCapabilities.Evaluate(analysis.Mobile, null));
+        Assert.Equal(MobileOutput.AndroidAabToApk, option.Output);
+        Assert.False(option.IsAvailable);
+    }
+
+    [Fact]
+    public async Task Apk_artifacts_offer_no_conversion_outputs()
+    {
+        var apk = MobileSamples.Apk(_t.Combine("app.apk"), debuggable: true, signer: null);
+        var result = await Importer().ImportArtifactAsync(apk, new ImportLimits(), null, CancellationToken.None);
+        var analysis = await MobileInspectionTests.Service().InspectAsync(result.Project.SourceDirectory, null, CancellationToken.None);
+        Assert.Empty(HCG.ExecutableMaker.ProjectInspection.Mobile.MobileCapabilities.Evaluate(analysis.Mobile!, null)); // APK → AAB is not offered
+        Assert.Contains("cannot be turned into an App Bundle", analysis.SupportSummary);
+    }
+
+    [Fact]
+    public async Task Renamed_files_and_other_types_are_rejected()
+    {
+        var fake = _t.Write("not-really.apk", "MZ this is a renamed program");
+        var ex = await Assert.ThrowsAsync<ImportRejectedException>(() => Importer().ImportArtifactAsync(fake, new ImportLimits(), null, CancellationToken.None));
+        Assert.Contains("renaming a file does not convert it", ex.Message);
+        await Assert.ThrowsAsync<ImportRejectedException>(() => Importer().ImportArtifactAsync(_t.Write("app.exe", "MZ"), new ImportLimits(), null, CancellationToken.None));
+        var big = MobileSamples.Apk(_t.Combine("big.apk"), debuggable: true, signer: null);
+        await Assert.ThrowsAsync<ImportRejectedException>(() => Importer().ImportArtifactAsync(big, new ImportLimits { MaxFileBytes = 100 }, null, CancellationToken.None));
+    }
+}

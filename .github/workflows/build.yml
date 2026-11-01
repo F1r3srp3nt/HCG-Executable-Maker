@@ -1,19 +1,26 @@
 # HCG Executable Maker — continuous integration and releases.
 #
-# Every push to main / pull request:
+# Every push to main or a feature/** branch, and every pull request:
 #   1. test     — build + full test suite (incl. real end-to-end builds) on Linux, macOS and Windows.
 #   2. package  — HCG Executable Maker packages ITSELF on each real OS (tools/self-package/self-package.cs):
 #                 macOS → .dmg + .app.zip (arm64, x64) · Windows → .zip with embedded .exe icon (x64, arm64)
 #                 Linux → portable .zip (preview). Results are uploaded as workflow artifacts (14 days).
+#                 (main, tags and manual runs only — feature branches skip self-packaging.)
+#   3. android  — Mobile Build Studio's engine builds tests/Fixtures/HelloAndroid with the project's Gradle wrapper on a
+#                 runner with the Android SDK: debug APK, unsigned release APK, release APK signed with HCG's local
+#                 debug key, App Bundle, and AAB → universal APK with bundletool; each verified (static + apksigner).
+#   4. ios      — on macOS with Xcode: Simulator build, unsigned archive, and the expected refusals (IPA export of an
+#                 unsigned archive; archive without a development team). No certificates are configured in CI and
+#                 nothing is uploaded anywhere. Mobile outputs are workflow artifacts (7 days) for manual testing.
 # Pushing a tag like v0.1.0:
-#   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
+#   5. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
 
 name: Build & Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feature/**"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -63,6 +70,7 @@ jobs:
   package:
     name: Package (${{ matrix.name }})
     needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +121,104 @@ jobs:
           path: ${{ runner.temp }}/dist/*
           if-no-files-found: error
           retention-days: 14
+
+  android:
+    name: Mobile — Android (real Gradle builds)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}/mobile-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Toolchain (JDK 17, Android SDK from the runner image, bundletool)
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms"
+          # CI infrastructure downloads Google's bundletool; HCG itself never downloads tools.
+          curl -fsSL -o "$RUNNER_TEMP/bundletool-all-1.18.1.jar" https://github.com/google/bundletool/releases/download/1.18.1/bundletool-all-1.18.1.jar
+          sha256sum "$RUNNER_TEMP/bundletool-all-1.18.1.jar"
+          echo "BUNDLETOOL_JAR=$RUNNER_TEMP/bundletool-all-1.18.1.jar" >> "$GITHUB_ENV"
+
+      - name: Debug APK
+        run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT" --output android-debug-apk --trust
+
+      - name: Release APK (unsigned — no signing configured in the project)
+        run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT" --output android-release-apk --signing unsigned --trust
+
+      - name: Release APK signed with HCG's local debug key
+        run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT/debug-key" --output android-release-apk --signing debug-key --trust
+
+      - name: Android App Bundle (.aab)
+        run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT" --output android-aab --trust
+
+      - name: AAB → universal APK (bundletool), from the project
+        run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT" --output aab-to-apk --trust
+
+      - name: AAB → universal APK (bundletool), from an imported .aab artifact
+        run: |
+          aab=$(find "$OUT" -path '*android-aab*' -name '*.aab' | head -1)
+          echo "Input: $aab"
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- "$aab" "$OUT/from-artifact" --output aab-to-apk --trust
+
+      - name: Upload Android outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-android-fixture-outputs
+          path: ${{ github.workspace }}/mobile-out
+          if-no-files-found: warn
+          retention-days: 7
+
+  ios:
+    name: Mobile — iOS (real Xcode builds)
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}/mobile-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Xcode
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
+
+      - name: iOS Simulator build
+        run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT" --output ios-simulator --trust
+
+      - name: Unsigned device archive (.xcarchive, inspection only)
+        run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT" --output ios-archive --signing unsigned --trust
+
+      - name: IPA export of an unsigned archive is refused
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-ipa
+          --signing unsigned --trust --expect-failure "not signed with an Apple development or distribution certificate"
+
+      - name: Signed archive without a development team fails honestly (no certificates in CI)
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-archive
+          --trust --expect-failure "failed with exit code"
+
+      - name: Upload iOS outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-ios-fixture-outputs
+          path: ${{ github.workspace }}/mobile-out
+          if-no-files-found: warn
+          retention-days: 7
 
   release:
     name: Publish pre-release

@@ -334,6 +334,49 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
         }
     }
 
+    /// <summary>File extensions accepted as mobile artifacts. Content is checked too (ZIP signature), not just the name.</summary>
+    public static readonly IReadOnlySet<string> ArtifactExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".apk", ".aab", ".apks", ".ipa" };
+
+    public async Task<ImportResult> ImportArtifactAsync(string file, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
+    {
+        file = Path.GetFullPath(file);
+        var info = new FileInfo(file);
+        if (!info.Exists) throw new ImportRejectedException($"The file '{file}' does not exist.");
+        if (info.LinkTarget is not null) throw new ImportRejectedException("Symbolic links are not imported; choose the artifact file itself.");
+        if (!ArtifactExtensions.Contains(info.Extension))
+            throw new ImportRejectedException("Only Android (.apk, .aab, .apks) and iOS (.ipa) artifacts can be imported as files.");
+        if (info.Length > limits.MaxFileBytes) throw new ImportRejectedException($"The artifact exceeds the file size limit of {limits.MaxFileBytes:N0} bytes.");
+        var header = new byte[4];
+        await using (var probe = File.OpenRead(file))
+            if (await probe.ReadAtLeastAsync(header, 4, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false) < 4 || header is not [0x50, 0x4B, 0x03, 0x04])
+                throw new ImportRejectedException($"'{info.Name}' is not a ZIP-based package, so it is not a valid {info.Extension} file (renaming a file does not convert it).");
+
+        var id = Guid.NewGuid();
+        var staging = CreateStaging(id);
+        try
+        {
+            var name = PathGuard.SanitizeFileName(Path.GetFileNameWithoutExtension(info.Name), "artifact") + info.Extension.ToLowerInvariant();
+            var sourceDir = Path.Combine(staging, "source");
+            Directory.CreateDirectory(sourceDir);
+            progress?.Report(new ImportProgress("Copying artifact", 0, 1, 0, name));
+            await using (var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, useAsync: true))
+            await using (var output = new FileStream(Path.Combine(sourceDir, name), FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true))
+                await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+            progress?.Report(new ImportProgress("Copying artifact", 1, 1, info.Length, name));
+            var workspace = Commit(staging, id);
+            var project = new ProjectRecord
+            {
+                Id = id, Name = info.Name, SourceKind = ProjectSourceKind.Artifact, SourceLocation = file, WorkspacePath = workspace, ImportedAt = time.GetUtcNow(),
+            };
+            return new ImportResult(project, 1, info.Length, []);
+        }
+        catch
+        {
+            TryDelete(staging);
+            throw;
+        }
+    }
+
     private string CreateStaging(Guid id)
     {
         paths.EnsureCreated();

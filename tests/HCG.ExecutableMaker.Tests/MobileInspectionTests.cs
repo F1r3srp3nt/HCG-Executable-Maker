@@ -14,7 +14,7 @@ public class MobileInspectionTests : IDisposable
     public void Dispose() => _t.Dispose();
 
     internal static ProjectInspectionService Service() => new(
-        new IProjectInspector[] { new DotNetProjectInspector(TimeProvider.System), new MobileProjectInspector(TimeProvider.System) }
+        new IProjectInspector[] { new DotNetProjectInspector(TimeProvider.System), new MobileProjectInspector(TimeProvider.System), new MobileArtifactProjectInspector(TimeProvider.System) }
             .Concat(EcosystemSignatureInspector.CreateDefaults(TimeProvider.System)),
         TimeProvider.System);
 

@@ -11,6 +11,24 @@ public static class MobileCapabilities
     public static IReadOnlyList<MobileOutputOption> Evaluate(MobileAnalysis mobile, ToolchainReport? report)
     {
         var list = new List<MobileOutputOption>();
+        if (mobile.ArtifactPath is { } artifact)
+        {
+            // An imported artifact is never recompiled. The only transformation offered is Google's own AAB → APK set.
+            if (artifact.EndsWith(".aab", StringComparison.OrdinalIgnoreCase))
+            {
+                var reasons = new List<string>();
+                if (report is null) reasons.Add("Toolchains have not been detected yet.");
+                else
+                {
+                    if (!report.IsAvailable(ToolchainIds.Jdk)) reasons.Add("A JDK (17 or newer) is required to run bundletool.");
+                    if (!report.IsAvailable(ToolchainIds.Bundletool)) reasons.Add("bundletool was not found (set BUNDLETOOL_JAR or install bundletool).");
+                }
+                list.Add(new MobileOutputOption(MobileOutput.AndroidAabToApk, reasons.Count == 0,
+                    "Generates a universal or device-targeted APK set from this App Bundle with bundletool (signed with HCG's local debug key, for testing).",
+                    reasons.Count == 0 ? null : string.Join(" ", reasons)));
+            }
+            return list;
+        }
         var android = mobile.Platforms.Contains(TargetPlatform.Android);
         var ios = mobile.Platforms.Contains(TargetPlatform.IOS);
 

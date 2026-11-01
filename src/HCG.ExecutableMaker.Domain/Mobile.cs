@@ -150,6 +150,8 @@ public sealed record MobileAnalysis
     public FlutterProjectInfo? Flutter { get; init; }
     public MauiProjectInfo? Maui { get; init; }
     public IReadOnlyList<string> ApplicationIds { get; init; } = [];
+    /// <summary>For imported artifacts (.apk/.aab/.apks/.ipa): the file, relative to the workspace source.</summary>
+    public string? ArtifactPath { get; init; }
 }
 
 /// <summary>Mobile-specific build settings, persisted with the build record.</summary>

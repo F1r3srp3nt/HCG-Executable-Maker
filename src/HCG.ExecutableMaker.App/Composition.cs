@@ -42,6 +42,7 @@ public static class Composition
         services.AddSingleton<IProjectImporter, ProjectImporter>();
         services.AddSingleton<IProjectInspector, DotNetProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector>();
+        services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileArtifactProjectInspector>();
         foreach (var inspector in EcosystemSignatureInspector.CreateDefaults(TimeProvider.System))
             services.AddSingleton(inspector);
         services.AddSingleton<IProjectInspectionService, ProjectInspectionService>();
@@ -55,6 +56,8 @@ public static class Composition
         services.AddSingleton<IPackager, DmgPackager>();
         services.AddSingleton<PackagingRegistry>();
         services.AddSingleton<BuildService>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileArtifactVerifier>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileBuildService>();
 
         // UI services
         services.AddSingleton<MainWindowProvider>();
