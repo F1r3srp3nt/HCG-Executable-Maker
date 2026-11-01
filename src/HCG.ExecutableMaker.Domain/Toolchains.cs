@@ -51,4 +51,19 @@ public static class ToolchainIds
     public const string MakeAppx = "makeappx";
     public const string WixToolset = "wix";
     public const string InnoSetup = "inno-setup";
+
+    // Mobile
+    public const string Jdk = "jdk";
+    public const string AndroidSdk = "android-sdk";
+    public const string AndroidBuildTools = "android-build-tools";
+    public const string AndroidPlatforms = "android-platforms";
+    public const string Apksigner = "apksigner";
+    public const string Zipalign = "zipalign";
+    public const string Aapt2 = "aapt2";
+    public const string Bundletool = "bundletool";
+    public const string IosSdk = "ios-sdk";
+    public const string AppleSigningIdentities = "apple-signing-identities";
+    public const string ProvisioningProfiles = "provisioning-profiles";
+    public const string Flutter = "flutter";
+    public const string MauiWorkloads = "maui-workloads";
 }

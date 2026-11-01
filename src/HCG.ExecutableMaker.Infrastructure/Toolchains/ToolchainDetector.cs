@@ -32,7 +32,8 @@ public sealed partial class ToolchainDetector(
         };
         tasks.AddRange(MacTools(cancellationToken));
         tasks.AddRange(WindowsTools(cancellationToken));
-        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+        var mobileTask = DetectMobileAsync(cancellationToken);
+        var results = (await Task.WhenAll(tasks).ConfigureAwait(false)).Concat(await mobileTask.ConfigureAwait(false)).ToList();
         var (free, diskPath) = GetDiskSpace();
         return new ToolchainReport(Host, results, free, diskPath, time.GetUtcNow());
     }

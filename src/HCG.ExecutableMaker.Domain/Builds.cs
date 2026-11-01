@@ -38,6 +38,8 @@ public sealed record BuildSettings
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(30);
     public required AppIdentity Identity { get; init; }
     public IReadOnlyList<PackagingFormat> PackagingFormats { get; init; } = [PackagingFormat.PortableFolder];
+    /// <summary>Set for Mobile Build Studio builds; null for desktop builds.</summary>
+    public MobileBuildOptions? Mobile { get; init; }
 
     public string? RuntimeIdentifier => PlatformNames.ToRuntimeIdentifier(Platform, Architecture);
 }

@@ -4,6 +4,8 @@ public enum ProjectSourceKind
 {
     ZipArchive,
     Directory,
+    /// <summary>A built mobile artifact (.apk/.aab/.ipa) copied into a workspace for inspection or conversion.</summary>
+    Artifact,
 }
 
 /// <summary>A project imported into an isolated HCG workspace.</summary>

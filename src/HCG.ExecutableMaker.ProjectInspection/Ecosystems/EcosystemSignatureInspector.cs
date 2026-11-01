@@ -56,12 +56,11 @@ public sealed class EcosystemSignatureInspector(
     /// <summary>The set of ecosystems recognized (but not built) in M0.1.</summary>
     public static IEnumerable<IProjectInspector> CreateDefaults(TimeProvider time) =>
     [
-        new EcosystemSignatureInspector("flutter", "Flutter", "Dart", "Flutter", 60,
-            idx => idx.Named("pubspec.yaml").Where(f => ContainsText(idx, f, "flutter")).ToList(), time),
-        new EcosystemSignatureInspector("android", "Kotlin / Android", "Kotlin/Java", "Android Gradle", 55,
-            idx => idx.Named("build.gradle", "build.gradle.kts").Where(f => ContainsText(idx, f, "com.android.application")).ToList(), time),
-        new EcosystemSignatureInspector("xcode", "Swift / Xcode", "Swift", "Xcode", 50,
-            idx => idx.Files.Where(f => f.EndsWith(".xcodeproj/project.pbxproj", StringComparison.OrdinalIgnoreCase)).Concat(idx.Named("Package.swift")).ToList(), time),
+        // Android, Xcode, Flutter and .NET MAUI are handled by MobileProjectInspector (real support).
+        new EcosystemSignatureInspector("react-native", "React Native", "JavaScript/TypeScript", "React Native", 48,
+            idx => idx.Named("package.json").Where(f => ContainsText(idx, f, "\"react-native\"")).ToList(), time),
+        new EcosystemSignatureInspector("unity", "Unity", "C#", "Unity", 47,
+            idx => idx.Files.Where(f => f.EndsWith("ProjectSettings/ProjectVersion.txt", StringComparison.Ordinal)).ToList(), time),
         new EcosystemSignatureInspector("rust", "Rust / Cargo", "Rust", "Cargo", 45, Files("Cargo.toml"), time),
         new EcosystemSignatureInspector("electron", "Electron", "JavaScript/TypeScript", "Electron", 42,
             idx => idx.Named("package.json").Where(f => ContainsText(idx, f, "\"electron\"")).ToList(), time),

@@ -11,7 +11,7 @@ public class InspectionTests : IDisposable
     public void Dispose() => _t.Dispose();
 
     private ProjectInspectionService Service() => new(
-        new IProjectInspector[] { new DotNetProjectInspector(TimeProvider.System) }.Concat(EcosystemSignatureInspector.CreateDefaults(TimeProvider.System)),
+        new IProjectInspector[] { new DotNetProjectInspector(TimeProvider.System), new HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector(TimeProvider.System) }.Concat(EcosystemSignatureInspector.CreateDefaults(TimeProvider.System)),
         TimeProvider.System);
 
     private const string AvaloniaCsproj = """
@@ -196,10 +196,10 @@ public class InspectionTests : IDisposable
     [InlineData("Cargo.toml", "[package]", "rust")]
     [InlineData("package.json", "{\"devDependencies\":{\"electron\":\"30\"}}", "electron")]
     [InlineData("package.json", "{\"name\":\"x\"}", "node")]
-    [InlineData("pubspec.yaml", "dependencies:\n  flutter:\n    sdk: flutter", "flutter")]
+    [InlineData("package.json", "{\"dependencies\":{\"react-native\":\"0.80\"}}", "react-native")]
+    [InlineData("ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 6000.0", "unity")]
     [InlineData("pyproject.toml", "[project]", "python")]
     [InlineData("CMakeLists.txt", "project(x)", "cpp")]
-    [InlineData("App.xcodeproj/project.pbxproj", "// !$*UTF8*$!", "xcode")]
     public async Task Other_ecosystems_are_recognized_but_unsupported(string file, string content, string inspector)
     {
         _t.Write(file, content);

@@ -11,3 +11,10 @@ artifacts/
 /out/
 /screenshots-tmp/
 .DS_Store
+
+# Mobile build outputs (fixtures and imported projects)
+.gradle/
+tests/Fixtures/**/build/
+tests/Fixtures/**/DerivedData/
+*.xcuserstate
+xcuserdata/

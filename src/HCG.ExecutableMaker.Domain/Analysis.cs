@@ -78,6 +78,8 @@ public sealed record ProjectAnalysis
     public IReadOnlyList<string> MissingDependencies { get; init; } = [];
     public IReadOnlyList<PackagingFormat> RecommendedFormats { get; init; } = [];
     public IReadOnlyList<string> DetectedIcons { get; init; } = [];
+    /// <summary>Mobile-specific facts when the project is an Android/iOS/Flutter/MAUI app (null for desktop projects).</summary>
+    public MobileAnalysis? Mobile { get; init; }
     public IReadOnlyList<AnalysisDiagnostic> Diagnostics { get; init; } = [];
     public required DateTimeOffset AnalyzedAt { get; init; }
 }

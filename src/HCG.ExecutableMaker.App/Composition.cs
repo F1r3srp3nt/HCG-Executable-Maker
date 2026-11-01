@@ -41,6 +41,7 @@ public static class Composition
         // Import & inspection
         services.AddSingleton<IProjectImporter, ProjectImporter>();
         services.AddSingleton<IProjectInspector, DotNetProjectInspector>();
+        services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector>();
         foreach (var inspector in EcosystemSignatureInspector.CreateDefaults(TimeProvider.System))
             services.AddSingleton(inspector);
         services.AddSingleton<IProjectInspectionService, ProjectInspectionService>();

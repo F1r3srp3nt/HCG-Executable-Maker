@@ -18,6 +18,14 @@ public enum PackagingFormat
     LinuxRpm,
     AndroidApk,
     AndroidAab,
+    /// <summary>APK set (.apks) produced by bundletool from an App Bundle.</summary>
+    AndroidApkSet,
+    /// <summary>iOS Simulator .app build. Not distributable and not installable on devices.</summary>
+    IosSimulatorApp,
+    /// <summary>Xcode archive (.xcarchive).</summary>
+    IosArchive,
+    /// <summary>iOS App Store Package (.ipa) exported from an archive.</summary>
+    IosIpa,
 }
 
 public enum PackagingAvailability
@@ -58,6 +66,10 @@ public static class PackagingFormatNames
         PackagingFormat.LinuxRpm => "RPM package (.rpm)",
         PackagingFormat.AndroidApk => "Android APK",
         PackagingFormat.AndroidAab => "Android App Bundle (.aab)",
+        PackagingFormat.AndroidApkSet => "Android APK set (.apks)",
+        PackagingFormat.IosSimulatorApp => "iOS Simulator app (.app)",
+        PackagingFormat.IosArchive => "Xcode archive (.xcarchive)",
+        PackagingFormat.IosIpa => "iOS app package (.ipa)",
         _ => format.ToString(),
     };
 }
