@@ -102,7 +102,16 @@ public sealed class PlatformShell(MainWindowProvider owner) : IPlatformShell
         {
             Title = title,
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType(typeName) { Patterns = patterns }],
+            FileTypeFilter = [new FilePickerFileType(typeName)
+            {
+                Patterns = patterns,
+                AppleUniformTypeIdentifiers = patterns switch
+                {
+                    ["*.app"] => ["com.apple.application-bundle"],
+                    ["*.xcodeproj"] => ["com.apple.xcode.project"],
+                    _ => null,
+                },
+            }],
         });
         return files.Count > 0 ? files[0].TryGetLocalPath() : null;
     }

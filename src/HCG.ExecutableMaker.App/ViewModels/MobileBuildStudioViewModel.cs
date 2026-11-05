@@ -79,6 +79,8 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public override string Title => "Mobile Build Studio";
     public override string Subtitle => "Android APK / App Bundle and iOS builds from real project toolchains — verified, never faked.";
 
+    public bool IsMacHost => OperatingSystem.IsMacOS();
+
     public string HonestyNote =>
         "Mobile apps are built from their own Android, iOS, Flutter or .NET MAUI projects. Desktop executables cannot be converted into " +
         "iOS or Android apps, renaming a file is not a conversion, and an APK cannot be turned into an App Bundle. Nothing is uploaded to " +
@@ -132,6 +134,67 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         SupportSummary = "Import an Android, iOS, Flutter or .NET MAUI project — or an .apk / .aab / .ipa to verify.";
         SupportTag = new StatusTag("No project", "neutral");
         OnPropertyChanged(nameof(HasOutputs));
+    }
+
+    [ObservableProperty] private string? _portResult;
+
+    [RelayCommand]
+    private async Task PortMacProjectAsync() => await PortAsync(null);
+
+    [RelayCommand]
+    private async Task PortMacAppAsync()
+    {
+        PortResult = null;
+        var app = await _shell.PickFileAsync("Select the Mac application", "Mac applications", "*.app");
+        if (app is null) return;
+        var info = Path.Combine(app, "Contents", "Info.plist");
+        if (!File.Exists(info))
+        {
+            PortResult = "Choose a macOS .app containing Contents/Info.plist.";
+            return;
+        }
+        try
+        {
+            // plutil reads binary and XML Info.plists without launching the application.
+            var start = new ProcessStartInfo("/usr/bin/plutil") { RedirectStandardOutput = true, UseShellExecute = false };
+            foreach (var arg in new[] { "-extract", "CFBundleIdentifier", "raw", "-o", "-", "--", info })
+                start.ArgumentList.Add(arg);
+            using var process = Process.Start(start) ?? throw new IOException("Could not start plutil.");
+            var id = (await process.StandardOutput.ReadToEndAsync()).Trim();
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0 || string.IsNullOrEmpty(id))
+                throw new InvalidDataException("Could not read the Mac app’s bundle identifier.");
+            PortResult = $"Source required for {id}. Select the corresponding macOS Xcode project to create its iOS port.";
+            await PortAsync(id);
+        }
+        catch (Exception ex) { PortResult = "Mac app inspection failed: " + ex.Message; }
+    }
+
+    private async Task PortAsync(string? bundleId)
+    {
+        if (bundleId is null) PortResult = null;
+        var selected = await _shell.PickFileAsync("Select the source .xcodeproj", "Xcode projects", "*.xcodeproj");
+        if (selected is null) return;
+        var source = Path.GetDirectoryName(selected);
+        if (source is null || !File.Exists(Path.Combine(selected, "project.pbxproj")))
+        {
+            PortResult = "Select a source .xcodeproj containing project.pbxproj.";
+            return;
+        }
+        IsImporting = true;
+        try
+        {
+            MacProjectPort.Result? port = null;
+            var result = await Task.Run(() => _projectService.ImportDirectoryAsync(source, null, CancellationToken.None,
+                copy => port = MacProjectPort.PrepareCopy(copy, Path.GetFileName(selected), bundleId)));
+            await LoadProjectsAsync(result.Project);
+            PortResult = $"Created an editable iPhone and iPad project at {Path.GetDirectoryName(port!.ProjectFile)}. Review macOS-only APIs, linked frameworks, signing and entitlements, then build the Simulator output below.";
+            if (port.ReviewFiles.Count > 0)
+                PortResult += "\nReview platform-specific references or resources in " + string.Join(", ", port.ReviewFiles);
+            await _shell.OpenFolderAsync(result.Project.SourceDirectory);
+        }
+        catch (Exception ex) { PortResult = "Project port failed: " + ex.Message; }
+        finally { IsImporting = false; }
     }
 
     [RelayCommand]

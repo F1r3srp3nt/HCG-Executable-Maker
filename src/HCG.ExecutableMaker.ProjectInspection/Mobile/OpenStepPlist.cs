@@ -10,13 +10,22 @@ public sealed class OpenStepPlist
 {
     private readonly string _s;
     private int _i;
+    // Only supplied by the port editor. Offsets let it replace individual settings while
+    // preserving every other byte, including comments and escaped or binary plist values.
+    private readonly Action<Dictionary<string, object>, string?, int, int>? _entry;
     private const int MaxDepth = 64;
 
-    private OpenStepPlist(string text) => _s = text;
-
-    public static object Parse(string text)
+    private OpenStepPlist(string text, Action<Dictionary<string, object>, string?, int, int>? entry)
     {
-        var p = new OpenStepPlist(text);
+        _s = text;
+        _entry = entry;
+    }
+
+    public static object Parse(string text) => Parse(text, null);
+
+    internal static object Parse(string text, Action<Dictionary<string, object>, string?, int, int>? entry)
+    {
+        var p = new OpenStepPlist(text, entry);
         if (p._s.StartsWith("// !$*UTF8*$!", StringComparison.Ordinal)) p._i = p._s.IndexOf('\n') + 1;
         var value = p.ParseValue(0);
         p.SkipTrivia();
@@ -42,11 +51,13 @@ public sealed class OpenStepPlist
     {
         _i++;
         var d = new Dictionary<string, object>(StringComparer.Ordinal);
+        _entry?.Invoke(d, null, _i, _i);
         while (true)
         {
             SkipTrivia();
             if (_i >= _s.Length) throw new FormatException("Unterminated dictionary.");
             if (_s[_i] == '}') { _i++; return d; }
+            var start = _i;
             var key = ParseValue(depth + 1) as string ?? throw new FormatException("Dictionary key must be a string.");
             SkipTrivia();
             Expect('=');
@@ -54,6 +65,7 @@ public sealed class OpenStepPlist
             SkipTrivia();
             Expect(';');
             d[key] = value;
+            _entry?.Invoke(d, key, start, _i);
         }
     }
 
