@@ -329,6 +329,17 @@ jobs:
           cp -R "$src" "$OUT/HelloMac-iOS"
           (cd "$OUT/HelloMac-iOS" && git init -q && git add -A && git -c user.name=ci -c user.email=ci@localhost commit -qm "port as generated")
 
+      - name: Prove each source change is needed (rebuild with only the AppKit import guarded)
+        run: |
+          cp -R "$OUT/HelloMac-iOS" "$OUT/HelloMac-iOS-importonly"
+          perl -0pi -e 's/import AppKit\n/#if canImport(AppKit)\nimport AppKit\n#endif\n/' "$OUT/HelloMac-iOS-importonly/HelloMac/ContentView.swift"
+          set +e
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- "$OUT/HelloMac-iOS-importonly" "$OUT/importonly" --output ios-simulator --trust \
+            > "$OUT/1b-import-guard-only.log" 2>&1
+          echo "Exit code with only the import guarded: $?"
+          set -e
+          grep -E "error:" "$OUT/1b-import-guard-only.log" | sed -E 's#^.*/(HelloMac/[A-Za-z]+\.swift)#\1#' | sort -u | head -20 || true
+
       - name: Apply the source changes iOS needs, then rebuild in Mobile Build Studio
         run: |
           patch -p1 -d "$OUT/HelloMac-iOS" < tools/ios-port-check/HelloMac-ios-source-changes.patch
@@ -358,6 +369,17 @@ jobs:
           ls -la "$OUT/shots"
           xcrun xcresulttool get test-results summary --path "$OUT/probe.xcresult" | tee "$OUT/4-ui-test-summary.json"
           grep -qE '"result" ?: ?"Passed"' "$OUT/4-ui-test-summary.json"
+
+      - name: Screenshots into the log (base64), for environments that cannot download artifacts
+        run: |
+          cd "$OUT/shots"
+          /usr/bin/python3 -c 'import json,os,shutil; m=json.load(open("manifest.json")); [shutil.copy(a["exportedFileName"], a["suggestedHumanReadableName"].split("_")[0]+".png") for t in m for a in t["attachments"]]'
+          ls
+          swift "$GITHUB_WORKSPACE/tools/ios-port-check/compose.swift" "$OUT/shots/composite.jpg" 900 \
+            0-simctl-launched.png 2-added-three-times.png 3-step-two-and-copied.png 4-reset.png
+          for f in composite.jpg 3-step-two-and-copied.png; do
+            echo "=====BEGIN $f====="; base64 -i "$f" | fold -w 4000; echo "=====END $f====="
+          done
 
       - name: Upload port, logs and screenshots
         if: always()
