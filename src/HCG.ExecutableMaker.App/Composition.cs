@@ -43,6 +43,7 @@ public static class Composition
         services.AddSingleton<IProjectInspector, DotNetProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileArtifactProjectInspector>();
+        services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Swift.SwiftProjectInspector>();
         foreach (var inspector in EcosystemSignatureInspector.CreateDefaults(TimeProvider.System))
             services.AddSingleton(inspector);
         services.AddSingleton<IProjectInspectionService, ProjectInspectionService>();
@@ -54,9 +55,12 @@ public static class Composition
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();
         services.AddSingleton<IPackager, DmgPackager>();
+        services.AddSingleton<IPackager, SwiftAppBundlePackager>();
+        services.AddSingleton<IPackager, SwiftAppZipPackager>();
         services.AddSingleton<IPackager, InnoSetupPackager>();
         services.AddSingleton<PackagingRegistry>();
         services.AddSingleton<BuildService>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileArtifactVerifier>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileBuildService>();
 

@@ -7,6 +7,7 @@ namespace HCG.ExecutableMaker.Packaging.Packagers;
 public sealed class PortableZipPackager : IPackager
 {
     public PackagingFormat Format => PackagingFormat.PortableZip;
+    public bool Handles(BuildSettings settings) => settings.Swift is not { Kind: SwiftAppKind.GuiApp }; // Swift GUI apps: SwiftAppZipPackager
 
     public Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken) => Task.Run(() =>
     {

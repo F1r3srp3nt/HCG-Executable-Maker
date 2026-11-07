@@ -112,6 +112,37 @@ public static partial class XcodeProjectAnalyzer
         catch (System.Xml.XmlException) { return []; }
     }
 
+    /// <summary>
+    /// True when every SDKROOT / SUPPORTED_PLATFORMS value in the project is macOS: a desktop project, not an iOS one.
+    /// Projects with no SDK information, or any iOS/watchOS/tvOS/visionOS value, are not macOS-only.
+    /// </summary>
+    public static bool IsMacOnlyProject(SourceIndex index, string projectPath)
+    {
+        try
+        {
+            var root = (Dictionary<string, object>)OpenStepPlist.Parse(AndroidGradleAnalyzer.Read(index, projectPath + "/project.pbxproj"));
+            var objects = (Dictionary<string, object>)root["objects"];
+            var values = new List<string>();
+            foreach (var o in objects.Values.OfType<Dictionary<string, object>>().Where(o => o.GetValueOrDefault("isa") as string == "XCBuildConfiguration"))
+                if (o.GetValueOrDefault("buildSettings") is Dictionary<string, object> bs)
+                    foreach (var key in new[] { "SDKROOT", "SUPPORTED_PLATFORMS" })
+                        switch (bs.GetValueOrDefault(key))
+                        {
+                            case string s: values.AddRange(s.Split(' ', StringSplitOptions.RemoveEmptyEntries)); break;
+                            case List<object> l: values.AddRange(l.OfType<string>()); break;
+                        }
+            return values.Count > 0 && values.All(v => v is "macosx" or "auto" or "$(inherited)") && values.Contains("macosx");
+        }
+        catch (Exception ex) when (ex is FormatException or KeyNotFoundException or InvalidCastException) { return false; }
+    }
+
+    /// <summary>Projects that are not macOS-only (iOS and multiplatform projects belong to Mobile Build Studio).</summary>
+    public static IReadOnlyList<string> FindMobileProjects(SourceIndex index) =>
+        FindProjects(index).Where(p => !IsMacOnlyProject(index, p)).ToList();
+
+    public static bool IsIosAppPackage(SourceIndex index, string manifestPath) =>
+        IosAppProductRegex().IsMatch(AndroidGradleAnalyzer.Read(index, manifestPath));
+
     /// <summary>Swift package manifests declaring an iOS application product (Swift Playgrounds-style app packages).</summary>
     public static IReadOnlyList<string> FindAppPackages(SourceIndex index) =>
         index.Named("Package.swift")

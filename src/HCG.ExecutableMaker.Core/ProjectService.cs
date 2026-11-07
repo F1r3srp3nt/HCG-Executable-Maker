@@ -56,6 +56,13 @@ public sealed class ProjectService(
         return analysis;
     }
 
+    /// <summary>Persists an analysis refined after import (e.g. a Swift package evaluated on this Mac after trust).</summary>
+    public async Task UpdateAnalysisAsync(ProjectRecord project, ProjectAnalysis analysis, CancellationToken cancellationToken = default)
+    {
+        project.Analysis = analysis;
+        await projects.UpsertAsync(project, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task MarkOpenedAsync(ProjectRecord project, CancellationToken cancellationToken = default)
     {
         project.LastOpenedAt = time.GetUtcNow();

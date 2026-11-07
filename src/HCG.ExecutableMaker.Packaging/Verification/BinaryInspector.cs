@@ -90,6 +90,14 @@ public static class BinaryInspector
         var info = Inspect(path);
         if (info.Platform != platform)
             return new VerificationCheck("Executable format", VerificationStatus.Failed, $"Expected a {platform.DisplayName()} executable but found {info.Format}.");
+        if (info.Format == BinaryFormat.MachOUniversal || (platform == TargetPlatform.MacOS && arch == TargetArchitecture.Universal))
+        {
+            var slices = MachO.ReadSlices(path).Select(s => s.Architecture).ToList();
+            var missing = MachO.ExpectedSlices(arch).Except(slices).ToList();
+            return missing.Count == 0
+                ? new VerificationCheck("Executable format", VerificationStatus.Passed, $"Mach-O {(slices.Count > 1 ? "universal " : "")}({string.Join(", ", slices)}) executable for {platform.DisplayName()}.")
+                : new VerificationCheck("Executable format", VerificationStatus.Failed, $"Expected {arch.DisplayName()} ({string.Join(", ", MachO.ExpectedSlices(arch))}) but the executable contains: {(slices.Count == 0 ? "no readable slices" : string.Join(", ", slices))}.");
+        }
         if (info.Architecture is { } a && a != arch)
             return new VerificationCheck("Executable format", VerificationStatus.Failed, $"Expected {arch.DisplayName()} but the executable targets {a.DisplayName()}.");
         if (info.Architecture is null)

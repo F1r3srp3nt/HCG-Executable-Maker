@@ -2,7 +2,7 @@ using HCG.ExecutableMaker.Domain;
 
 namespace HCG.ExecutableMaker.Packaging.Packagers;
 
-internal static class FileOps
+public static class FileOps
 {
     public static void CopyDirectory(string source, string destination, CancellationToken ct)
     {

@@ -31,6 +31,7 @@ public sealed partial class ToolchainDetector(
             DetectGitAsync(cancellationToken),
         };
         tasks.AddRange(MacTools(cancellationToken));
+        tasks.AddRange(SwiftTools(cancellationToken));
         tasks.AddRange(WindowsTools(cancellationToken));
         var mobileTask = DetectMobileAsync(cancellationToken);
         var results = (await Task.WhenAll(tasks).ConfigureAwait(false)).Concat(await mobileTask.ConfigureAwait(false)).ToList();
@@ -154,7 +155,7 @@ public sealed partial class ToolchainDetector(
             var (r, stdout, _) = await runner.CaptureAsync(new ProcessSpec { Executable = exe, Arguments = ["-p"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
             var dir = stdout.Trim();
             return r.Succeeded && Directory.Exists(dir)
-                ? new ToolchainInfo { Id = ToolchainIds.XcodeCommandLineTools, DisplayName = "Xcode Command Line Tools", Category = "macOS", Status = ToolchainStatus.Installed, ExecutablePath = dir, Detail = "Developer directory selected" }
+                ? new ToolchainInfo { Id = ToolchainIds.XcodeCommandLineTools, DisplayName = "Xcode Command Line Tools", Category = "macOS", Status = ToolchainStatus.Installed, ExecutablePath = dir, Version = DescribeDeveloperDirectory(dir).Split(' ')[0], Detail = "Selected developer directory: " + DescribeDeveloperDirectory(dir) }
                 : Missing(ToolchainIds.XcodeCommandLineTools, "Xcode Command Line Tools", "macOS", hint);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

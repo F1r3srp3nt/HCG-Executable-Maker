@@ -42,6 +42,8 @@ public sealed record BuildSettings
     public WindowsInstallerOptions WindowsInstaller { get; init; } = new();
     /// <summary>Set for Mobile Build Studio builds; null for desktop builds.</summary>
     public MobileBuildOptions? Mobile { get; init; }
+    /// <summary>Set for Swift package builds; null otherwise.</summary>
+    public SwiftBuildOptions? Swift { get; init; }
 
     public string? RuntimeIdentifier => PlatformNames.ToRuntimeIdentifier(Platform, Architecture);
 }

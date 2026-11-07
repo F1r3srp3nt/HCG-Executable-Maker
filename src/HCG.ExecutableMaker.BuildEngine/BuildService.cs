@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using HCG.ExecutableMaker.BuildEngine.Swift;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
 using HCG.ExecutableMaker.Packaging;
@@ -109,22 +110,47 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.Preparing, "Validating configuration and toolchains");
             Log(BuildLogKind.Info, $"HCG Executable Maker {HostInfo.ProductVersion} — build {build.Id}");
             Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
-            Log(BuildLogKind.Info, $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} ({settings.RuntimeIdentifier}), {settings.Configuration}, {(settings.SelfContained ? "self-contained" : "framework-dependent")}{(settings.SingleFile ? ", single-file" : "")}");
+            Log(BuildLogKind.Info, settings.Swift is { } sw
+                ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()}, {settings.Configuration} · Swift package {(sw.PackageDirectory.Length == 0 ? "(root)" : sw.PackageDirectory)} · product {sw.Product} ({(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")})"
+                : $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} ({settings.RuntimeIdentifier}), {settings.Configuration}, {(settings.SelfContained ? "self-contained" : "framework-dependent")}{(settings.SingleFile ? ", single-file" : "")}");
             Log(BuildLogKind.Warning, $"Isolation: {worker.Description}");
 
             var report = await toolchains.GetAsync(cancellationToken: overall.Token).ConfigureAwait(false);
             var host = report.Host;
             build.ToolchainVersions["host"] = $"{host.DisplayName} ({host.OsDescription})";
-            var sdk = report.Find(ToolchainIds.DotNetSdk);
-            if (sdk is not { IsAvailable: true, ExecutablePath: not null })
+            var isSwift = settings.Swift is not null;
+            ToolchainInfo? sdk = null, swiftTool = null;
+            if (isSwift)
             {
-                Fail(BuildStatus.Failed, "The .NET SDK was not found. Install the .NET SDK and refresh the Toolchains page.");
-                return build;
+                if (host.Platform != TargetPlatform.MacOS)
+                {
+                    Fail(BuildStatus.Failed, $"Swift macOS apps can only be built on a Mac. This computer runs {host.Platform.DisplayName()}.");
+                    return build;
+                }
+                swiftTool = report.Find(ToolchainIds.Swift);
+                if (swiftTool is not { IsAvailable: true, ExecutablePath: not null })
+                {
+                    Fail(BuildStatus.Failed, "The Swift compiler was not found. " + HCG.ExecutableMaker.ProjectInspection.Swift.SwiftCapabilities.DeveloperDirHint);
+                    return build;
+                }
+                build.ToolchainVersions["swift"] = swiftTool.Version ?? "unknown";
+                if (report.Find(ToolchainIds.MacOSSdk) is { IsAvailable: true, Version: { } sdkVersion }) build.ToolchainVersions["macos-sdk"] = sdkVersion;
+                if (report.Find(ToolchainIds.MacOSVersion) is { IsAvailable: true, Version: { } macVersion }) build.ToolchainVersions["macos"] = macVersion;
+                if (report.Find(ToolchainIds.XcodeCommandLineTools) is { IsAvailable: true, ExecutablePath: { } devDir }) build.ToolchainVersions["developer-dir"] = devDir;
+                SwiftBuildPlanner.Validate(settings, host.Platform);
             }
-            build.ToolchainVersions["dotnet-sdk"] = sdk.Version ?? "unknown";
+            else
+            {
+                sdk = report.Find(ToolchainIds.DotNetSdk);
+                if (sdk is not { IsAvailable: true, ExecutablePath: not null })
+                {
+                    Fail(BuildStatus.Failed, "The .NET SDK was not found. Install the .NET SDK and refresh the Toolchains page.");
+                    return build;
+                }
+                build.ToolchainVersions["dotnet-sdk"] = sdk.Version ?? "unknown";
+                DotNetBuildPlanner.Validate(settings);
+            }
             if (report.Find(ToolchainIds.Git) is { IsAvailable: true, Version: { } gitVersion }) build.ToolchainVersions["git"] = gitVersion;
-
-            DotNetBuildPlanner.Validate(settings);
             var scrub = worker.CreateEnvironment();
             if (scrub.RemovedNames.Count > 0)
                 Log(BuildLogKind.Info, $"Removed {scrub.RemovedNames.Count} sensitive environment variable(s) from the build environment: {string.Join(", ", scrub.RemovedNames)}");
@@ -145,11 +171,17 @@ public sealed class BuildService(
             // Real (symlink-free) paths only: see PathGuard.GetRealPath.
             var publishDir = Path.Combine(PathGuard.GetRealPath(buildDir), "publish");
             var sourceDir = PathGuard.GetRealPath(request.Project.SourceDirectory);
-            var steps = DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
-                settings, sourceDir, sdk.ExecutablePath, publishDir, host.Platform,
-                icons?.IcoPath, scrub.Environment));
+            // SwiftPM scratch space lives in HCG's per-build folder, never inside the imported source.
+            var swiftScratch = Path.Combine(PathGuard.GetRealPath(buildDir), "swiftpm");
+            var steps = isSwift
+                ? SwiftBuildPlanner.Plan(new SwiftBuildPlanner.PlanInput(settings, sourceDir, swiftTool!.ExecutablePath!, swiftScratch, scrub.Environment))
+                : DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
+                    settings, sourceDir, sdk!.ExecutablePath!, publishDir, host.Platform,
+                    icons?.IcoPath, scrub.Environment));
 
-            var parser = new MsBuildOutputParser(); // shared across steps: MSBuild repeats diagnostics in build and publish
+            // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
+            IBuildOutputParser parser = isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
+            var captured = new List<string>();
             foreach (var step in steps)
             {
                 overall.Token.ThrowIfCancellationRequested();
@@ -164,6 +196,7 @@ public sealed class BuildService(
                     Log(BuildLogKind.Command, step.Process.DisplayCommand);
                     result = await worker.RunAsync(step.Process, (stream, text) =>
                     {
+                        if (step.CaptureStdout && stream == OutputStream.StdOut) lock (captured) captured.Add(text);
                         if (IsTransientFileLock(text)) transientLock = true;
                         var message = attemptParser.Parse(text);
                         Log(message?.Severity switch
@@ -203,7 +236,26 @@ public sealed class BuildService(
             }
 
             observer.OnStage(BuildStage.VerifyingOutput, "Verifying publish output");
-            var exeName = LocateExecutable(publishDir, request.AssemblyName, settings.Platform);
+            string? exeName;
+            if (isSwift)
+            {
+                var binPath = captured.Select(l => l.Trim()).LastOrDefault(l => l.StartsWith('/'));
+                if (binPath is null || !Directory.Exists(binPath))
+                {
+                    Fail(BuildStatus.Failed, "swift build reported success, but did not report an existing bin path (--show-bin-path).");
+                    return build;
+                }
+                Log(BuildLogKind.Info, $"SwiftPM products: {binPath}");
+                var (stagedExe, bundles) = SwiftBuildPlanner.Stage(binPath, settings.Swift!.Product, publishDir);
+                exeName = stagedExe;
+                if (bundles.Count > 0) Log(BuildLogKind.Info, $"SwiftPM resource bundles: {string.Join(", ", bundles)}");
+                try { Directory.Delete(swiftScratch, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove SwiftPM scratch space {swiftScratch}: {ex.Message}"); }
+            }
+            else
+            {
+                exeName = LocateExecutable(publishDir, request.AssemblyName, settings.Platform);
+            }
             if (exeName is null)
             {
                 Fail(BuildStatus.Failed, $"The build reported success, but no {settings.Platform.DisplayName()} executable was found in the publish output ({publishDir}).");
@@ -232,9 +284,9 @@ public sealed class BuildService(
             };
             var packagingLog = new PackagingLog(Log);
             var outputs = new List<PackagedOutput>();
-            foreach (var format in PackagingCatalog.WithDependencies(settings.PackagingFormats))
+            foreach (var format in PackagingCatalog.WithDependencies(settings.PackagingFormats, settings))
             {
-                var packager = packagers.Get(format) ?? throw new InvalidOperationException($"{format.DisplayName()} is not implemented in this version.");
+                var packager = packagers.Get(format, settings) ?? throw new InvalidOperationException($"{format.DisplayName()} is not implemented in this version.");
                 Log(BuildLogKind.Info, $"Packaging: {format.DisplayName()}");
                 outputs.AddRange(await packager.PackageAsync(packagingRequest, packagingLog, overall.Token).ConfigureAwait(false));
             }
@@ -347,7 +399,7 @@ public sealed class BuildService(
 
     /// <summary>Base name shared by the per-build output folder and its artifacts, e.g. <c>MyApp-1.2.0-osx-arm64</c>.</summary>
     public static string ArtifactBaseName(BuildSettings s) =>
-        $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier}";
+        $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier ?? (s.Platform == TargetPlatform.MacOS ? "osx" : s.Platform.ToString().ToLowerInvariant()) + "-" + s.Architecture.ToString().ToLowerInvariant()}";
 
     /// <summary>The per-build folder created inside the chosen output directory.</summary>
     public static string OutputRootFor(BuildSettings s) => Path.Combine(Path.GetFullPath(s.OutputDirectory), ArtifactBaseName(s));

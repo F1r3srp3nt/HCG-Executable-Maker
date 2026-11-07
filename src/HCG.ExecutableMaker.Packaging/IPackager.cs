@@ -33,8 +33,14 @@ public interface IPackagingLog
 public interface IPackager
 {
     PackagingFormat Format { get; }
+    /// <summary>
+    /// Whether this packager produces <see cref="Format"/> for these settings. Several packagers may share a format
+    /// (e.g. the .NET and Swift .app bundle packagers); the registry picks the one that handles the build.
+    /// </summary>
+    bool Handles(BuildSettings settings) => true;
     Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken);
 }
 
 /// <summary>Context used to decide which packaging formats are offered for a build.</summary>
-public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Host, ToolchainReport? Toolchains, bool IsGuiApplication, bool SelfContained = true);
+/// <param name="SwiftKind">Set for Swift packages: GUI apps become .app bundles, command-line tools portable folders/ZIPs.</param>
+public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Host, ToolchainReport? Toolchains, bool IsGuiApplication, bool SelfContained = true, SwiftAppKind? SwiftKind = null);
