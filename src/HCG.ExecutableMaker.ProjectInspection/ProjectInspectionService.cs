@@ -37,6 +37,18 @@ public sealed class ProjectInspectionService(IEnumerable<IProjectInspector> insp
         var analysis = await ranked[0].Inspector.InspectAsync(index, toolchains, cancellationToken).ConfigureAwait(false);
         var others = ranked.Skip(1).Select(r => r.Inspector.DisplayName).Distinct().ToList();
         var extra = new List<AnalysisDiagnostic>();
+        // Node.js projects are reported whichever ecosystem leads, so an Electron app inside another repository is visible.
+        if (analysis.Node is null && index.Named("package.json").Any())
+        {
+            var node = Node.NodeProjectInspector.Analyze(index);
+            if (node.Projects.Count > 0)
+            {
+                analysis = analysis with { Node = node };
+                foreach (var p in node.Projects.Where(p => p.Kind == NodeProjectKind.ElectronDesktop))
+                    extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info,
+                        $"Electron desktop app {p.DisplayName} found in {p.DisplayDirectory}. This build uses the {analysis.Framework} project; import {p.DisplayDirectory} on its own to build the Electron app.", p.ManifestPath));
+            }
+        }
         if (others.Count > 0)
             extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info, $"Also found files for: {string.Join(", ", others)}. These are not part of this build."));
         if (index.Truncated)

@@ -44,6 +44,8 @@ public sealed record BuildSettings
     public MobileBuildOptions? Mobile { get; init; }
     /// <summary>Set for Swift package builds; null otherwise.</summary>
     public SwiftBuildOptions? Swift { get; init; }
+    /// <summary>Set for Electron desktop builds; null otherwise.</summary>
+    public ElectronBuildOptions? Electron { get; init; }
     /// <summary>macOS signing (ad hoc / Developer ID), installer and Mac App Store settings.</summary>
     public MacDistributionOptions MacDistribution { get; init; } = new();
 

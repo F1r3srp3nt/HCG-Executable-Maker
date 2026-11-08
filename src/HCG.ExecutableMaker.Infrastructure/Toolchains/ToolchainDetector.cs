@@ -37,8 +37,10 @@ public sealed partial class ToolchainDetector(
         var saved = settings is null ? new AppSettings() : await settings.LoadAsync(cancellationToken).ConfigureAwait(false);
         var xcodeTask = Host.Platform == TargetPlatform.MacOS ? DetectXcodeAsync(cancellationToken) : null;
         var mobileTask = DetectMobileAsync(saved, xcodeTask, cancellationToken);
+        var nodeTask = new NodeDiscovery(runner).DiscoverAsync(Host.Platform, cancellationToken);
         var mobile = await mobileTask.ConfigureAwait(false);
-        var results = (await Task.WhenAll(tasks).ConfigureAwait(false)).Concat(mobile.Rows).ToList();
+        var node = await nodeTask.ConfigureAwait(false);
+        var results = (await Task.WhenAll(tasks).ConfigureAwait(false)).Concat(mobile.Rows).Concat(NodeDiscovery.Rows(node)).ToList();
         XcodeStatus? xcode = null;
         if (xcodeTask is not null)
         {
@@ -49,6 +51,7 @@ public sealed partial class ToolchainDetector(
         return new ToolchainReport(Host, results, free, diskPath, time.GetUtcNow())
         {
             Xcode = xcode, Java = mobile.Java, AndroidSdk = mobile.Android, AppleIdentities = mobile.Identities, IosProfiles = mobile.Profiles,
+            NodeInstallations = node.Installations,
         };
     }
 

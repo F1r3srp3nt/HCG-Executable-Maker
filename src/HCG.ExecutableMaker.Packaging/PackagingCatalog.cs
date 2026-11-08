@@ -15,6 +15,11 @@ public static class PackagingCatalog
         void Add(PackagingFormat f, string desc, PackagingAvailability a, string? reason = null, string? milestone = null) =>
             list.Add(new PackagingOption(f, f.DisplayName(), desc, a, reason, milestone));
 
+        if (ctx.IsElectron)
+        {
+            EvaluateElectron(ctx, Add);
+            return list;
+        }
         if (ctx.SwiftKind is { } swiftKind)
         {
             EvaluateSwift(ctx, swiftKind, Add);
@@ -133,6 +138,47 @@ public static class PackagingCatalog
         }
     }
 
+    /// <summary>
+    /// Electron apps: electron-builder produces the app; HCG runs its dir/zip/dmg targets and verifies them. Only the
+    /// combinations HCG implements (and has verified) are Available; electron-builder's other targets are listed with why.
+    /// </summary>
+    private static void EvaluateElectron(PackagingContext ctx, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
+    {
+        const string otherTargets = "electron-builder can produce this, but HCG does not run or verify that target in this version.";
+        switch (ctx.Target)
+        {
+            case TargetPlatform.MacOS when ctx.Host.Platform != TargetPlatform.MacOS:
+                foreach (var f in new[] { PackagingFormat.MacAppBundle, PackagingFormat.PortableZip, PackagingFormat.MacDmg })
+                    add(f, "macOS Electron app.", PackagingAvailability.RequiresDifferentHost,
+                        "HCG packages Electron apps for macOS on a Mac (electron-builder signs the app and builds the dmg with macOS tools).", null);
+                break;
+            case TargetPlatform.MacOS:
+                add(PackagingFormat.MacAppBundle, "The .app electron-builder builds (target dir), signed as the electron-builder configuration says (mac.identity).", PackagingAvailability.Available, null, null);
+                add(PackagingFormat.PortableZip, "electron-builder's zip target: the .app as a ZIP for sharing.", PackagingAvailability.Available, null, null);
+                if (ctx.Toolchains?.IsAvailable(ToolchainIds.Hdiutil) != true)
+                    add(PackagingFormat.MacDmg, "electron-builder's dmg target.", PackagingAvailability.MissingTool, "hdiutil was not detected on this Mac (it ships with macOS in /usr/bin).", null);
+                else
+                    add(PackagingFormat.MacDmg, "electron-builder's dmg target: a disk image with the app and an Applications shortcut.", PackagingAvailability.Available, null, null);
+                add(PackagingFormat.PortableFolder, "Loose folder.", PackagingAvailability.NotApplicable, "A macOS Electron app runs from its .app bundle. Use the .app or its ZIP.", null);
+                add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, PackagingAvailability.NotImplemented, otherTargets + " (electron-builder's mas target needs a sandboxed build and App Store provisioning.)", null);
+                break;
+            case TargetPlatform.Linux when ctx.Host.Platform != TargetPlatform.Linux:
+                add(PackagingFormat.PortableFolder, "Linux Electron app.", PackagingAvailability.RequiresDifferentHost, "HCG packages Linux Electron apps on a Linux host.", null);
+                break;
+            case TargetPlatform.Linux:
+                add(PackagingFormat.PortableFolder, "electron-builder's unpacked app folder (target dir) with the app executable.", PackagingAvailability.Available, null, null);
+                add(PackagingFormat.PortableZip, "ZIP archive.", PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.LinuxAppImage, "AppImage.", PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.LinuxDeb, "Debian/Ubuntu package.", PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.LinuxRpm, "Fedora/RHEL package.", PackagingAvailability.NotImplemented, otherTargets, null);
+                break;
+            default:
+                add(PackagingFormat.WindowsInstallerExe, "Windows installer.", PackagingAvailability.NotImplemented, "Electron packaging for Windows is not implemented in HCG in this version.", null);
+                break;
+        }
+    }
+
     /// <summary>Formats that must also be produced because a selected format depends on them.</summary>
     public static IReadOnlyList<PackagingFormat> WithDependencies(IEnumerable<PackagingFormat> selected) => WithDependencies(selected, null);
 
@@ -143,6 +189,9 @@ public static class PackagingCatalog
     public static IReadOnlyList<PackagingFormat> WithDependencies(IEnumerable<PackagingFormat> selected, BuildSettings? settings)
     {
         var set = selected.ToList();
+        // Electron (macOS): the .app is always produced and verified; electron-builder builds the zip/dmg from it.
+        if (settings?.Electron is not null && settings.Platform == TargetPlatform.MacOS && !set.Contains(PackagingFormat.MacAppBundle))
+            set.Insert(0, PackagingFormat.MacAppBundle);
         var swiftGui = settings?.Swift?.Kind == SwiftAppKind.GuiApp;
         var needsBundle = set.Contains(PackagingFormat.MacDmg) || set.Contains(PackagingFormat.MacPkg) || set.Contains(PackagingFormat.MacAppStore)
                           || (swiftGui && set.Contains(PackagingFormat.PortableZip));

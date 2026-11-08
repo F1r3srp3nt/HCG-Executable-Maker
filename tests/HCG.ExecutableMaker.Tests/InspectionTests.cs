@@ -194,8 +194,6 @@ public class InspectionTests : IDisposable
 
     [Theory]
     [InlineData("Cargo.toml", "[package]", "rust")]
-    [InlineData("package.json", "{\"devDependencies\":{\"electron\":\"30\"}}", "electron")]
-    [InlineData("package.json", "{\"name\":\"x\"}", "node")]
     [InlineData("package.json", "{\"dependencies\":{\"react-native\":\"0.80\"}}", "react-native")]
     [InlineData("ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 6000.0", "unity")]
     [InlineData("pyproject.toml", "[project]", "python")]

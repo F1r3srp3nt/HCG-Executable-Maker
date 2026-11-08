@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using HCG.ExecutableMaker.BuildEngine.Electron;
 using HCG.ExecutableMaker.BuildEngine.Swift;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -110,7 +111,9 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.Preparing, "Validating configuration and toolchains");
             Log(BuildLogKind.Info, $"HCG Executable Maker {HostInfo.ProductVersion} — build {build.Id}");
             Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
-            Log(BuildLogKind.Info, settings.Swift is { } sw
+            Log(BuildLogKind.Info, settings.Electron is { } el
+                ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · Electron app {(el.ProjectDirectory.Length == 0 ? "(root)" : el.ProjectDirectory)} · electron-builder --{el.Platform} {string.Join(' ', el.Targets)}{(el.PackagingScript is null ? "" : $" (following script \"{el.PackagingScript}\")")}"
+                : settings.Swift is { } sw
                 ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()}, {settings.Configuration} · Swift package {(sw.PackageDirectory.Length == 0 ? "(root)" : sw.PackageDirectory)} · product {sw.Product} ({(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")})"
                 : $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} ({settings.RuntimeIdentifier}), {settings.Configuration}, {(settings.SelfContained ? "self-contained" : "framework-dependent")}{(settings.SingleFile ? ", single-file" : "")}");
             Log(BuildLogKind.Warning, $"Isolation: {worker.Description}");
@@ -130,8 +133,41 @@ public sealed class BuildService(
                     Log(BuildLogKind.Info, $"Xcode: {x.Diagnosis}");
             }
             var isSwift = settings.Swift is not null;
+            var isElectron = settings.Electron is not null;
             ToolchainInfo? sdk = null, swiftTool = null;
-            if (isSwift)
+            NodeInstallation? node = null;
+            string? electronDir = null;
+            ElectronBuildPlanner.Manifest? nodeManifest = null;
+            if (isElectron)
+            {
+                var source = PathGuard.GetRealPath(request.Project.SourceDirectory);
+                ElectronBuildPlanner.Validate(settings, host, source);
+                electronDir = ElectronBuildPlanner.ProjectDirectory(settings, source);
+                nodeManifest = ElectronBuildPlanner.ReadManifest(electronDir);
+                string detail;
+                (node, detail) = HCG.ExecutableMaker.ProjectInspection.Node.NodeCapabilities.SelectNode(report, nodeManifest.EnginesNode);
+                if (node is null)
+                {
+                    Fail(BuildStatus.Failed, detail);
+                    return build;
+                }
+                if (node.NpmCli is null)
+                {
+                    Fail(BuildStatus.Failed, $"npm was not found next to Node.js {node.Version} ({node.NodePath}). Reinstall Node.js, which includes npm.");
+                    return build;
+                }
+                if (nodeManifest.EnginesNpm is { } wantNpm && node.NpmVersion is { } haveNpm
+                    && HCG.ExecutableMaker.ProjectInspection.Node.NodeVersionRange.Check(haveNpm, wantNpm) == HCG.ExecutableMaker.ProjectInspection.Node.NodeVersionRange.Result.NotSatisfied)
+                {
+                    Fail(BuildStatus.Failed, $"The project requires npm {wantNpm}; Node.js {node.Version} ships npm {haveNpm}.");
+                    return build;
+                }
+                build.ToolchainVersions["node"] = $"{node.Version} ({node.NodePath})";
+                build.ToolchainVersions["npm"] = node.NpmVersion ?? "unknown";
+                Log(BuildLogKind.Info, $"Node.js: {detail}{(nodeManifest.EnginesNode is null ? "" : $"; package.json requires {nodeManifest.EnginesNode}")}");
+                Log(BuildLogKind.Info, $"npm: {node.NpmVersion ?? "(version unknown)"} ({node.NpmCli})");
+            }
+            else if (isSwift)
             {
                 if (host.Platform != TargetPlatform.MacOS)
                 {
@@ -168,7 +204,9 @@ public sealed class BuildService(
 
             // Icons are generated before compilation so the Windows icon can be embedded.
             GeneratedIcons? icons = null;
-            if (settings.Identity.IconSourcePath is { } iconSource)
+            if (isElectron && settings.Identity.IconSourcePath is not null)
+                Log(BuildLogKind.Warning, "The icon chosen in HCG is not used for Electron apps: electron-builder takes the icon from its configuration (mac.icon / buildResources).");
+            else if (settings.Identity.IconSourcePath is { } iconSource)
             {
                 Log(BuildLogKind.Info, $"Processing icon {Path.GetFileName(iconSource)}");
                 icons = IconGenerator.Generate(iconSource, Path.Combine(buildDir, "icons"), "AppIcon",
@@ -184,19 +222,29 @@ public sealed class BuildService(
             var sourceDir = PathGuard.GetRealPath(request.Project.SourceDirectory);
             // SwiftPM scratch space lives in HCG's per-build folder, never inside the imported source.
             var swiftScratch = Path.Combine(PathGuard.GetRealPath(buildDir), "swiftpm");
-            var steps = isSwift
+            // electron-builder writes into HCG's per-build folder (never into the imported source's release/dist folder).
+            var electronOut = Path.Combine(PathGuard.GetRealPath(buildDir), "electron-out");
+            var steps = isElectron
+                ? ElectronBuildPlanner.Plan(new ElectronBuildPlanner.PlanInput(settings, sourceDir, node!, electronOut, ElectronBuildPlanner.Environment(scrub.Environment, node!)))
+                : isSwift
                 ? SwiftBuildPlanner.Plan(new SwiftBuildPlanner.PlanInput(settings, sourceDir, swiftTool!.ExecutablePath!, swiftScratch, scrub.Environment))
                 : DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
                     settings, sourceDir, sdk!.ExecutablePath!, publishDir, host.Platform,
                     icons?.IcoPath, scrub.Environment));
 
             // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
-            IBuildOutputParser parser = isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
+            IBuildOutputParser parser = isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
             var captured = new List<string>();
             foreach (var step in steps)
             {
                 overall.Token.ThrowIfCancellationRequested();
                 observer.OnStage(step.Stage, step.Title);
+                var missingInput = step.RequiredFiles.FirstOrDefault(r => !File.Exists(r.Path));
+                if (missingInput.Path is not null)
+                {
+                    Fail(BuildStatus.Failed, missingInput.Message);
+                    return build;
+                }
                 ProcessResult result = null!;
                 for (var attempt = 1; attempt <= 1 + MaxTransientRetries; attempt++)
                 {
@@ -214,7 +262,7 @@ public sealed class BuildService(
                         {
                             DiagnosticSeverity.Error => BuildLogKind.Error,
                             DiagnosticSeverity.Warning => BuildLogKind.Warning,
-                            _ => stream == OutputStream.StdErr ? BuildLogKind.Error : BuildLogKind.Output,
+                            _ => stream == OutputStream.StdErr && !step.StdErrIsProgress ? BuildLogKind.Error : BuildLogKind.Output,
                         }, text);
                         if (message is not null) AddMessage(message);
                     }, overall.Token).ConfigureAwait(false);
@@ -248,7 +296,24 @@ public sealed class BuildService(
 
             observer.OnStage(BuildStage.VerifyingOutput, "Verifying publish output");
             string? exeName;
-            if (isSwift)
+            var packagingInput = publishDir;
+            if (isElectron)
+            {
+                var (relative, problem) = ElectronBuildPlanner.Discover(electronOut, settings, settings.Electron!.ProductName is { Length: > 0 } pn ? pn : nodeManifest!.ProductName ?? settings.Identity.ApplicationName);
+                if (relative is null)
+                {
+                    Fail(BuildStatus.Failed, problem!);
+                    return build;
+                }
+                exeName = relative;
+                packagingInput = electronOut;
+                foreach (var pkg in new[] { "electron", "electron-builder" })
+                    if (ElectronBuildPlanner.InstalledVersion(electronDir!, pkg) is { } v) build.ToolchainVersions[pkg] = v;
+                Log(BuildLogKind.Info, $"electron-builder output: {electronOut}");
+                foreach (var entry in Directory.EnumerateFileSystemEntries(electronOut).Order(StringComparer.Ordinal))
+                    Log(BuildLogKind.Info, $"  {Path.GetFileName(entry)}{(Directory.Exists(entry) ? "/" : "")}");
+            }
+            else if (isSwift)
             {
                 var binPath = captured.Select(l => l.Trim()).LastOrDefault(l => l.StartsWith('/'));
                 if (binPath is null || !Directory.Exists(binPath))
@@ -286,7 +351,7 @@ public sealed class BuildService(
             var packagingRequest = new PackagingRequest
             {
                 Settings = settings,
-                PublishDirectory = publishDir,
+                PublishDirectory = packagingInput,
                 ExecutableFileName = exeName,
                 OutputRoot = outputRoot,
                 ArtifactBaseName = baseName,
@@ -339,6 +404,12 @@ public sealed class BuildService(
                     $"{Path.GetFileName(output.Path)} — {size:N0} bytes — SHA-256 {sha} — verification {status}");
                 foreach (var check in output.Checks.Where(c => c.Status != VerificationStatus.Passed))
                     Log(check.Status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Warning, $"  {check.Name}: {check.Detail}");
+            }
+            if (isElectron)
+            {
+                // The verified copies are in the output folder; electron-builder's staging copy is not kept.
+                try { Directory.Delete(electronOut, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {electronOut}: {ex.Message}"); }
             }
             if (sums.Length > 0)
                 await File.WriteAllTextAsync(Path.Combine(outputRoot, "SHA256SUMS.txt"), sums.ToString(), overall.Token).ConfigureAwait(false);
