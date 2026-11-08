@@ -291,6 +291,41 @@
                       <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Libraries and tests are not built into an app; only executable products are offered." />
                     </StackPanel>
                   </StackPanel>
+                  <!-- Electron app: what it is, what it still needs, and the build stages HCG will run -->
+                  <StackPanel Spacing="12" IsVisible="{Binding IsElectronBuild}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="Electron desktop app" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding ElectronTag}" />
+                    </Grid>
+                    <TextBlock Classes="body secondary" Text="{Binding ElectronStatus}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding ElectronFacts}" TextWrapping="Wrap" />
+                    <Border Classes="callout warning" IsVisible="{Binding HasElectronRemediation}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Missing before HCG can build the desktop app" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ElectronRemediation}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding ElectronNotes}" IsVisible="{Binding HasElectronNotes}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <TextBlock Classes="muted" FontSize="12" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Border Classes="inset" Padding="16,12" IsVisible="{Binding ElectronWorkflow, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBlock FontSize="12.5" Text="{Binding ElectronWorkflow}" TextWrapping="Wrap" />
+                    </Border>
+                  </StackPanel>
+                  <StackPanel Spacing="6" IsVisible="{Binding OtherNodeProjectsText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Classes="formlabel" Text="OTHER NODE.JS PROJECTS (NOT DESKTOP APPS)" Margin="0" />
+                    <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding OtherNodeProjectsText}" TextWrapping="Wrap" />
+                  </StackPanel>
                   <Border Classes="callout warning" IsVisible="{Binding HasMacXcodeProjects}">
                     <SelectableTextBlock FontSize="12.5" Text="{Binding MacXcodeProjectsText}" TextWrapping="Wrap" />
                   </Border>
@@ -359,9 +394,13 @@
                   <TextBlock Classes="h2" Text="Application identity" />
                   <TextBlock Classes="muted" Text="Branding of the generated application — independent of HCG Executable Maker." />
                 </StackPanel>
+                <Border Classes="callout" IsVisible="{Binding IsElectronBuild}">
+                  <TextBlock FontSize="12" TextWrapping="Wrap"
+                             Text="Electron app: electron-builder takes the name, version, app id, icon and signing identity from the project's configuration (electron-builder.yml or package.json). They are shown here for the output folder name; change them in the project." />
+                </Border>
                 <StackPanel>
                   <TextBlock Classes="formlabel" Text="APPLICATION NAME" />
-                  <TextBox Text="{Binding AppName}" />
+                  <TextBox Text="{Binding AppName}" IsReadOnly="{Binding IsElectronBuild}" />
                 </StackPanel>
                 <UniformGrid Columns="2">
                   <StackPanel Margin="0,0,6,0">
@@ -370,20 +409,20 @@
                   </StackPanel>
                   <StackPanel Margin="6,0,0,0">
                     <TextBlock Classes="formlabel" Text="VERSION" />
-                    <TextBox Text="{Binding Version}" PlaceholderText="1.0.0" />
+                    <TextBox Text="{Binding Version}" PlaceholderText="1.0.0" IsReadOnly="{Binding IsElectronBuild}" />
                   </StackPanel>
                 </UniformGrid>
                 <StackPanel>
                   <TextBlock Classes="formlabel" Text="APPLICATION IDENTIFIER (REVERSE-DNS)" />
-                  <TextBox Text="{Binding AppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" PlaceholderText="com.company.app" />
+                  <TextBox Text="{Binding AppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" PlaceholderText="com.company.app" IsReadOnly="{Binding IsElectronBuild}" />
                 </StackPanel>
                 <StackPanel>
                   <TextBlock Classes="formlabel" Text="DESCRIPTION" />
                   <TextBox Text="{Binding Description}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" />
                 </StackPanel>
                 <Border Classes="divider" />
-                <TextBlock Classes="formlabel" Text="APPLICATION ICON (PNG, ICO OR ICNS)" Margin="0" />
-                <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Classes="formlabel" Text="APPLICATION ICON (PNG, ICO OR ICNS)" Margin="0" IsVisible="{Binding IdentityEditable}" />
+                <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IdentityEditable}">
                   <Border Width="84" Height="84" Classes="inset" Padding="8">
                     <Panel>
                       <Image Source="{Binding IconPreview}" Stretch="Uniform" />
@@ -400,7 +439,7 @@
                     </StackPanel>
                   </StackPanel>
                 </Grid>
-                <ItemsControl ItemsSource="{Binding IconNotes}">
+                <ItemsControl ItemsSource="{Binding IconNotes}" IsVisible="{Binding IdentityEditable}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:IconNote">
                       <TextBlock FontSize="12" TextWrapping="Wrap" Margin="0,2" Text="{Binding Text, StringFormat='• {0}'}"
@@ -408,7 +447,7 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <TextBlock Classes="muted" TextWrapping="Wrap" Text="Your original icon file is never modified. Platform formats (.ico / .icns) are generated from it without distortion." />
+                <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding IdentityEditable}" Text="Your original icon file is never modified. Platform formats (.ico / .icns) are generated from it without distortion." />
               </StackPanel>
             </Border>
 
@@ -440,7 +479,7 @@
                     <TextBlock Text="{Binding PlatformNote}" FontSize="12" TextWrapping="Wrap" />
                   </Border>
                   <UniformGrid Columns="2">
-                    <StackPanel Margin="0,0,6,0">
+                    <StackPanel Margin="0,0,6,0" IsVisible="{Binding IdentityEditable}">
                       <TextBlock Classes="formlabel" Text="CONFIGURATION" />
                       <ComboBox ItemsSource="{Binding ConfigurationOptions}" SelectedItem="{Binding SelectedConfiguration}" />
                     </StackPanel>

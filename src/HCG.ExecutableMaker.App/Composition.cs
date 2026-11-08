@@ -54,6 +54,11 @@ public static class Composition
 
         // Build & packaging
         services.AddSingleton<IBuildWorker, LocalProcessBuildWorker>();
+        // Electron packagers first: they handle only builds with Electron options (electron-builder output).
+        services.AddSingleton<IPackager, ElectronAppBundlePackager>();
+        services.AddSingleton<IPackager, ElectronZipPackager>();
+        services.AddSingleton<IPackager, ElectronDmgPackager>();
+        services.AddSingleton<IPackager, ElectronFolderPackager>();
         services.AddSingleton<IPackager, PortableFolderPackager>();
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();

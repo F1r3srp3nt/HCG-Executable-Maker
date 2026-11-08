@@ -1,5 +1,7 @@
 # HCG Executable Maker
 
+![HCG Executable Maker — One project in. A distributable application out.](docs/branding/hcg-executable-maker-banner.webp)
+
 [![Build & Release](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml/badge.svg)](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml)
 
 **Hakmi Capital Group · Software Engineering & Distribution Infrastructure**
@@ -25,7 +27,8 @@ and verified.
 |---|---|
 | Import | ZIP archives and folders into isolated workspaces; rejects corrupt archives, path traversal, symlinks, duplicate entries, decompression bombs and oversize/over-count archives; preserves the original archive; never modifies your source |
 | Inspection | Static .NET analysis: `.sln`, `.slnx`, `.csproj/.fsproj/.vbproj`, `Directory.Build.props`, central package versions, `global.json` roll-forward, target frameworks, output types, RIDs, package/project references, entry points, icons, Avalonia/WPF/WinForms/MAUI/web detection, platform compatibility |
-| Other ecosystems | Rust, Node/Electron, Python, Java, C/C++, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
+| Node.js / Electron | Every `package.json` is classified (Electron desktop app, browser app, service, library). **Electron apps packaged with electron-builder are built** with the project's own workflow (see below); web-only projects get the exact list of what is missing |
+| Other ecosystems | Rust, Python, Java, C/C++, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
 | Build | `dotnet restore` → `build` → `publish` with structured arguments (no shell), Release/Debug, runtime selection (win/osx/linux × x64/arm64), self-contained, single-file, live log, warning/error parsing, cancellation, timeouts |
 | Packaging | Portable folder · portable ZIP (Unix permissions preserved) · **Windows Setup.exe installer** (Inno Setup, Windows hosts — M0.2, see below) · macOS `.app` bundle (Info.plist, `.icns`, exec bits) · `.dmg` on macOS hosts with `hdiutil` |
 | Verification | Executable present, PE/Mach-O/ELF format and CPU architecture, executable bit, bundle structure, code-signature presence, archive integrity, SHA-256 (+ per-file manifests for folders) |
@@ -61,6 +64,21 @@ launching Distil.app and Relay.app from the pinned Oslo-Sprint repository. Detai
 [`docs/SWIFT-MACOS.md`](docs/SWIFT-MACOS.md).
 
 ![Swift package in the wizard](docs/screenshots/11-swift-inspect-relay.jpg)
+
+## Electron desktop apps (unreleased, `feature/electron`)
+
+Electron apps packaged with **electron-builder** are built through the New Build wizard:
+
+1. Import a folder or ZIP, then choose the Electron app (nested projects included).
+2. Inspection reads `package.json`, the lockfile and the electron-builder configuration without running anything. It
+   shows what the project is and what is missing.
+3. Build runs three stages:
+   - `npm ci`;
+   - the project's compile script (e.g. `npm run desktop:build`);
+   - electron-builder with the project's configuration (`--publish never`).
+4. The `.app` (and zip/dmg) or the Linux app folder are found and verified (signature, architecture, app.asar contents).
+
+Offered on macOS (arm64/x64 `.app`, zip, dmg) and Linux (unpacked app). Details: [`docs/ELECTRON.md`](docs/ELECTRON.md).
 
 ## Mobile Build Studio (M0.5)
 
@@ -129,6 +147,8 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 - [`docs/ANDROID-BUILDING.md`](docs/ANDROID-BUILDING.md) · [`docs/IOS-BUILDING.md`](docs/IOS-BUILDING.md) ·
   [`docs/MOBILE-ARTIFACT-VERIFICATION.md`](docs/MOBILE-ARTIFACT-VERIFICATION.md)
 - [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md) — Windows Setup.exe: features, requirements, CI route, tests
+- [`docs/ELECTRON.md`](docs/ELECTRON.md) — Electron apps: inspection, electron-builder stages, verification, offered targets
+- [`docs/TOOLCHAINS.md`](docs/TOOLCHAINS.md) — toolchain discovery (Xcode, Java, Android SDK, Node.js) and readiness
 - [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows
 - [`docs/STATUS.md`](docs/STATUS.md) — what is complete, what is not, verification evidence, continuation instructions
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — solution structure, data flow, extension points

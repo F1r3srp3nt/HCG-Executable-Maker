@@ -69,6 +69,8 @@ public sealed record ToolchainReport(
     public IReadOnlyList<SigningIdentity> AppleIdentities { get; init; } = [];
     /// <summary>iOS provisioning profiles (*.mobileprovision) on this Mac.</summary>
     public IReadOnlyList<IosProvisioningProfile> IosProfiles { get; init; } = [];
+    /// <summary>Node.js installations found (PATH and the usual install locations), newest first.</summary>
+    public IReadOnlyList<NodeInstallation> NodeInstallations { get; init; } = [];
 }
 
 public static class ToolchainIds
@@ -109,4 +111,8 @@ public static class ToolchainIds
     public const string MacOSVersion = "macos-version";
     /// <summary>XCTest for the selected developer directory: needed to RUN Swift tests, not to build or package apps.</summary>
     public const string XcTest = "xctest";
+
+    // Node.js / Electron
+    public const string Node = "node";
+    public const string Npm = "npm";
 }

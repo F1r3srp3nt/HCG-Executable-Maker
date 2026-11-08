@@ -2,7 +2,44 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — `feature/toolchain-setup` (local, not pushed)
+## [Unreleased] — `feature/electron` (local, not pushed)
+
+### Added — Electron desktop apps ([docs/ELECTRON.md](docs/ELECTRON.md))
+- **Capability-based Node.js inspection** replaces the "planned for a later milestone" placeholder for every
+  `package.json`:
+  - each project is classified as an Electron desktop app, a browser app, a Node service/CLI or a library;
+  - nested projects are listed and selectable, and build-output copies are ignored;
+  - nothing is run during inspection: no npm, no scripts, no JavaScript configs.
+- **electron-builder configuration** is read from YAML, JSON, `package.json` "build" or `--config`. Packaging scripts
+  are split into shell-free compile steps and the electron-builder flags.
+- **Precise gaps** are listed for web-only projects, Electron Forge / `@electron/packager`, yarn/pnpm/bun, missing or
+  unbuilt main entries, and scripts HCG cannot follow.
+- **Node.js and npm discovery** works from Finder (Homebrew, nvm, Volta, fnm, asdf, /opt). Each candidate is run.
+  `engines.node`, `engines.npm` and the `packageManager` pin are validated per project.
+- **Build stages:**
+  - **Install:** `npm ci`.
+  - **Compile:** the project's own script.
+  - **Package:** electron-builder with `--publish never`, output in HCG's build folder.
+  - Preconditions, streamed logs, cancellation and real exit codes.
+- **Artifact discovery and verification:**
+  - the `.app`: Info.plist, Mach-O architecture, app.asar package.json and main entry, `codesign --verify`;
+  - the zip contents;
+  - `hdiutil verify`;
+  - the Linux unpacked app.
+- **Offered combinations:** only what is implemented. macOS arm64/x64 (`.app`, zip, dmg) on a Mac, the unpacked app on
+  Linux. Other electron-builder targets are listed as not run.
+- **New Build wizard:**
+  - an Electron panel: what it is, what is missing, the stages HCG will run;
+  - identity is read from the project's configuration;
+  - HCG's re-signing options are hidden.
+- **Verification:**
+  - Presentation Studio was built through the wizard on Linux and passed its own packaged-app test (15/15);
+  - the `electron-macos` CI job builds the arm64 `.app`/zip/dmg, launches it and runs the same test.
+
+### Security
+- `CSC_*` / `WIN_CSC_*` (electron-builder signing certificates and passwords) are removed from every build environment.
+
+## [Unreleased] — `feature/toolchain-setup` (pushed)
 
 ### Fixed — toolchain discovery and setup ([docs/TOOLCHAINS.md](docs/TOOLCHAINS.md))
 - **Java:**

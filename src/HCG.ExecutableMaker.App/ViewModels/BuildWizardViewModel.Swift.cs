@@ -73,7 +73,7 @@ public sealed partial class BuildWizardViewModel
 
     /// <summary>Configure/Package/Build steps work on a Swift package product rather than a .NET project.</summary>
     public bool IsSwiftBuild => HasSelectedSwiftPackage && SelectedSwiftProduct is not null;
-    public bool IsDotNetBuild => !IsSwiftBuild;
+    public bool IsDotNetBuild => !IsSwiftBuild && !IsElectronBuild;
 
     private bool SwiftReadyToConfigure =>
         SelectedSwiftPackage is { Evaluated: not null } pkg && SelectedSwiftProduct is not null && !IsEvaluatingSwift

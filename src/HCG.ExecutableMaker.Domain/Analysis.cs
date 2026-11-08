@@ -82,6 +82,8 @@ public sealed record ProjectAnalysis
     public MobileAnalysis? Mobile { get; init; }
     /// <summary>Swift package / macOS Xcode facts when the workspace is a Swift desktop project.</summary>
     public SwiftAnalysis? Swift { get; init; }
+    /// <summary>Node.js / Electron projects in the workspace (also attached when another ecosystem leads the analysis).</summary>
+    public NodeAnalysis? Node { get; init; }
     public IReadOnlyList<AnalysisDiagnostic> Diagnostics { get; init; } = [];
     public required DateTimeOffset AnalyzedAt { get; init; }
 }

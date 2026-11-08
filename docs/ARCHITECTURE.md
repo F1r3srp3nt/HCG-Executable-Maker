@@ -12,7 +12,8 @@ src/
   HCG.ExecutableMaker.Infrastructure     ProcessRunner, SQLite (migrations + repositories), ProjectImporter,
                                          ToolchainDetector, FileLoggerProvider
   HCG.ExecutableMaker.ProjectInspection  IProjectInspector, SourceIndex, DotNetProjectInspector (+ MSBuild/sln/slnx/
-                                         global.json parsers), EcosystemSignatureInspector (recognize-only)
+                                         global.json parsers), Node/ (NodeProjectInspector: Electron/web/service/library,
+                                         electron-builder config, packaging scripts, engines), EcosystemSignatureInspector (recognize-only)
   HCG.ExecutableMaker.Packaging          IPackager, PackagingCatalog, packagers (portable folder/zip, .app, .dmg),
                                          icon engine (SkiaSharp), BinaryInspector, verification checks
   HCG.ExecutableMaker.BuildEngine        DotNetBuildPlanner, MsBuildOutputParser, IBuildWorker, BuildService

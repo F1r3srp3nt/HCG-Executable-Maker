@@ -122,8 +122,9 @@ unsigned-archive export refusal, export-options cleanup and history (MobileBuild
 ## Not implemented / not offered (by design)
 
 APK → AAB conversion; desktop-to-mobile "conversion"; uploads to Google Play, TestFlight or App Store Connect;
-creation of production keystores, certificates or provisioning profiles; React Native, Unity, Electron/Capacitor
-builds; MAUI separate `.xcarchive` output; Flutter builds on Windows hosts.
+creation of production keystores, certificates or provisioning profiles; React Native, Unity and Capacitor builds;
+Electron apps packaged with Electron Forge or @electron/packager, or installed with yarn/pnpm/bun (recognized and
+explained; electron-builder + npm is implemented, see docs/ELECTRON.md); Electron packaging on Windows hosts; MAUI separate `.xcarchive` output; Flutter builds on Windows hosts.
 
 ## Follow-ups
 

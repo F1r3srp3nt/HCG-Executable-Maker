@@ -12,6 +12,7 @@ namespace HCG.ExecutableMaker.Packaging.Packagers;
 public sealed class DmgPackager(IProcessRunner runner) : IPackager
 {
     public PackagingFormat Format => PackagingFormat.MacDmg;
+    public bool Handles(BuildSettings settings) => settings.Electron is null; // Electron: electron-builder's dmg (ElectronDmgPackager)
 
     public async Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken)
     {

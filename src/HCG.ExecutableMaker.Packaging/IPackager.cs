@@ -56,4 +56,6 @@ public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Hos
     public bool HasRootResourceBundles { get; init; }
     public IReadOnlyList<EntitlementEvidence> Evidence { get; init; } = [];
     public DateTimeOffset Now { get; init; } = DateTimeOffset.UtcNow;
+    /// <summary>An Electron app packaged by electron-builder (only the combinations HCG implements are offered).</summary>
+    public bool IsElectron { get; init; }
 }

@@ -330,11 +330,14 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     public bool CanConfigure => IsSwiftProject
         ? SwiftReadyToConfigure
+        : IsNodeProject
+        ? ElectronReadyToConfigure
         : Analysis?.Support == SupportLevel.Supported && SelectedProject?.Project.CompatiblePlatforms.Count > 0;
 
     partial void OnSelectedProjectChanged(ProjectChoice? value)
     {
         RefreshSwiftPackage();
+        RefreshElectronProject();
         OnPropertyChanged(nameof(CanConfigure));
     }
 
@@ -362,7 +365,12 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         AnalysisRows.Add(new("Framework", a.Framework));
         AnalysisRows.Add(new("Runtime", a.Runtime ?? "—"));
         AnalysisRows.Add(new("Application type", a.ApplicationType));
-        if (a.Swift is { } sa)
+        if (a is { InspectorId: "node", Node: { } na })
+        {
+            AnalysisRows.Add(new("Node.js projects", string.Join("\n", na.Projects.Select(p =>
+                $"{p.DisplayDirectory} — {HCG.ExecutableMaker.ProjectInspection.Node.NodeProjectInspector.KindLabel(p.Kind)}"))));
+        }
+        else if (a.Swift is { } sa)
         {
             AnalysisRows.Add(new("Swift packages", sa.Packages.Count > 0 ? string.Join(", ", sa.Packages.Select(p => p.DisplayDirectory)) : "None"));
             if (sa.MacXcodeProjects.Count > 0) AnalysisRows.Add(new("macOS Xcode projects", string.Join(", ", sa.MacXcodeProjects) + " (not built in this version)"));
@@ -380,7 +388,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         foreach (var p in a.Projects.Where(p => p.IsRunnableApplication)) ProjectOptions.Add(new ProjectChoice(p));
         // Several Swift packages: the user chooses (never silently the first). Otherwise keep the existing behaviour.
         SelectedProject = ProjectOptions.FirstOrDefault(p => p.Path == a.PrimaryProjectPath)
-                          ?? (a.Swift is { Packages.Count: > 0 } ? null : ProjectOptions.FirstOrDefault());
+                          ?? (a.Swift is { Packages.Count: > 0 } || (a.InspectorId == "node" && ProjectOptions.Count > 1) ? null : ProjectOptions.FirstOrDefault());
 
         Diagnostics.Clear();
         foreach (var d in a.Diagnostics.OrderByDescending(d => d.Severity)) Diagnostics.Add(new DiagnosticItem(d));
@@ -391,6 +399,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         foreach (var m in a.MissingDependencies) MissingDependencies.Add(m);
         HasMissing = MissingDependencies.Count > 0;
         RefreshSwiftPackage();
+        RefreshElectronProject();
         OnPropertyChanged(nameof(CanConfigure));
         NextCommand.NotifyCanExecuteChanged();
     }
@@ -431,12 +440,26 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (detected is null) return;
         var settings = await _settings.LoadAsync();
         var swift = IsSwiftBuild;
-        SetArchitectureOptions(swift);
+        if (!IsElectronBuild) SetArchitectureOptions(swift);
         OnPropertyChanged(nameof(IsSwiftBuild));
         OnPropertyChanged(nameof(IsDotNetBuild));
         OnPropertyChanged(nameof(IsSwiftGui));
         var key = Project?.Id + "|" + detected.RelativePath + (swift ? "|" + SelectedSwiftProduct?.Name : "");
-        if (_identityPrefilledFor != key && swift)
+        OnPropertyChanged(nameof(IsElectronBuild));
+        OnPropertyChanged(nameof(IdentityEditable));
+        if (IsElectronBuild)
+        {
+            if (_identityPrefilledFor != key)
+            {
+                _identityPrefilledFor = key;
+                Publisher = settings.LastPublisher ?? "";
+                OutputDirectory = settings.DefaultOutputDirectory ?? _paths.DefaultOutputDirectory;
+                TimeoutMinutes = Math.Max(settings.BuildTimeoutMinutes, 45);
+                PrepareElectronConfiguration(prefillIdentity: true);
+            }
+            else PrepareElectronConfiguration(prefillIdentity: false);
+        }
+        else if (_identityPrefilledFor != key && swift)
         {
             _identityPrefilledFor = key;
             Publisher = settings.LastPublisher ?? "";
@@ -535,6 +558,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                 "Cross-building for Windows from this host: the .exe is produced, but its embedded file icon requires a Windows build host.",
             TargetPlatform.MacOS when HostInfo.CurrentPlatform != TargetPlatform.MacOS =>
                 "Cross-building for macOS: a valid .app bundle is assembled and structurally verified; launch testing and DMG creation require a Mac.",
+            TargetPlatform.Linux when IsElectronBuild => "Linux output is electron-builder's unpacked app folder (its dir target). AppImage, deb and rpm targets are not run by HCG in this version.",
+            TargetPlatform.MacOS when IsElectronBuild => "electron-builder builds the .app (and the zip/dmg you choose) with the project's configuration, including its signing identity.",
             TargetPlatform.Linux => "Linux output is a portable self-contained folder/ZIP. AppImage, DEB and RPM are planned.",
             _ => "",
         };
@@ -550,7 +575,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (SelectedArchitecture is null) ConfigErrors.Add("Choose a target architecture.");
         if (TimeoutMinutes is not (>= 1 and <= 720)) ConfigErrors.Add("Timeout must be between 1 and 720 minutes.");
         if (IconNotes.Any(n => n.IsError)) ConfigErrors.Add("The selected icon is invalid.");
-        if (ConfigErrors.Count == 0 && SelectedProject is not null && IsSwiftBuild)
+        if (ConfigErrors.Count == 0 && SelectedProject is not null && IsElectronBuild)
+        {
+            ValidateElectron();
+        }
+        else if (ConfigErrors.Count == 0 && SelectedProject is not null && IsSwiftBuild)
         {
             ValidateSwift(CreateSettings([PackagingFormat.MacAppBundle]));
         }
@@ -613,6 +642,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         PackagingFormats = formats,
         WindowsInstaller = CreateInstallerOptions(),
         Swift = CreateSwiftOptions(),
+        Electron = CreateElectronOptions(formats),
         MacDistribution = CreateDistributionOptions(),
         Identity = new AppIdentity
         {
@@ -635,7 +665,10 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var isGui = detected is not null && (detected.IsAvalonia || string.Equals(detected.OutputType, "WinExe", StringComparison.OrdinalIgnoreCase));
         var swiftKind = IsSwiftBuild ? SelectedSwiftKind?.Value ?? SwiftAppKind.GuiApp : (SwiftAppKind?)null;
         if (swiftKind is { } k) isGui = k == SwiftAppKind.GuiApp;
-        return new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained, swiftKind);
+        return new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained, swiftKind)
+        {
+            IsElectron = IsElectronBuild,
+        };
     }
 
     private void PreparePackaging(IReadOnlyList<PackagingFormat>? preselect = null)
@@ -645,6 +678,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var ctx = DistributionContext(baseCtx);
         OnPropertyChanged(nameof(ShowDistribution));
         OnPropertyChanged(nameof(IsSwiftGui));
+        if (IsElectronBuild)
+            preselect ??= DefaultElectronFormats();
         if (swiftKind is not null)
             preselect ??= swiftKind == SwiftAppKind.GuiApp ? [PackagingFormat.MacAppBundle] : [PackagingFormat.PortableZip];
         foreach (var old in PackagingOptions) old.PropertyChanged -= OnPackagingOptionChanged;
@@ -739,7 +774,16 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         Summary.Add(new("Application", $"{s.Identity.ApplicationName} {s.Identity.Version}"));
         Summary.Add(new("Identifier", s.Identity.ApplicationId));
         Summary.Add(new("Target", TargetLabel(s)));
-        if (s.Swift is { } sw)
+        if (s.Electron is { } el)
+        {
+            Summary.Add(new("Electron app", el.ProjectDirectory.Length == 0 ? "(workspace root)" : el.ProjectDirectory + "/"));
+            Summary.Add(new("Stages", $"{(el.UseLockfile ? "npm ci" : "npm install")} → {(el.CompileSteps.Count == 0 ? "no compile step" : string.Join(" && ", el.CompileSteps.Select(c => c.Display)))} → electron-builder --{el.Platform} {string.Join(' ', el.Targets)} --publish never"));
+            Summary.Add(new("Workflow", el.PackagingScript is { } ps ? $"Follows package.json script \"{ps}\" and {(el.ConfigPath ?? "the project's electron-builder configuration")}" : "electron-builder with the project's configuration (no packaging script)"));
+            Summary.Add(new("Signing", s.Platform == TargetPlatform.MacOS
+                ? "As the electron-builder configuration says (mac.identity); HCG verifies the signature and does not re-sign."
+                : "Not code-signed (Linux)."));
+        }
+        else if (s.Swift is { } sw)
         {
             Summary.Add(new("Swift package", $"{(sw.PackageDirectory.Length == 0 ? "(workspace root)" : sw.PackageDirectory + "/")} · product {sw.Product} · {(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")}"));
             Summary.Add(new("Configuration", $"{s.Configuration} · build number {sw.BuildNumber} · minimum macOS {sw.MinimumMacOS ?? "from the executable"}{(sw.Category is { } c ? " · " + c : "")}"));
@@ -929,11 +973,12 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var notarized = build.Artifacts.Any(a => a.Checks.Any(c => c.Name == "Notarization" && c.Status == VerificationStatus.Passed));
         ResultDetail = build.Status == BuildStatus.Succeeded
             ? $"{build.Artifacts.Count} artifact(s) generated and verified · {build.WarningCount} warning(s). " +
-              (build.Settings.Swift is null ? "Artifacts are unsigned (ad-hoc)."
+              (build.Settings.Electron is not null ? "Built with the project's electron-builder workflow" + (build.Settings.Platform == TargetPlatform.MacOS ? "; signed as its configuration says (see each artifact's Code signature check)." : ".")
+               : build.Settings.Swift is null ? "Artifacts are unsigned (ad-hoc)."
                : build.Settings.MacDistribution.SigningMode == MacSigningMode.DeveloperId
                    ? notarized ? "Developer ID signed and notarized (see each artifact's checks)." : "Developer ID signed; not notarized yet (Notarize below)."
                    : "Ad-hoc signed only: not Developer ID signed or notarized.") +
-              " Installation and launch are tested only when you run Test install."
+              (build.Settings.Electron is null ? " Installation and launch are tested only when you run Test install." : " Launching the app is not part of the build.")
             : build.FailureReason ?? "The build did not complete.";
         _ = PrepareDistributionActionsAsync(build);
         ResultDuration = Format.Duration(build.Duration);

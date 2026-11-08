@@ -1,0 +1,58 @@
+# Desktop packaging for Presentation Studio (electron-builder).
+# Build the inputs first with `npm run desktop:build` (the npm scripts do this for you).
+appId: com.oslosprint.presentationstudio
+productName: Presentation Studio
+copyright: Oslo Sprint 2026
+
+directories:
+  output: release
+  buildResources: desktop/build
+
+# Everything the app needs is bundled into dist/ and desktop-dist/ by scripts/build-desktop.mjs,
+# so no node_modules are shipped.
+files:
+  - dist/**
+  - desktop-dist/**
+  - package.json
+  - "!**/node_modules/**"
+asar: true
+extraMetadata:
+  main: desktop-dist/main.mjs
+
+# Electron fuses: the packaged app cannot be repurposed as a generic Node runtime and only loads its own app.asar.
+# Inspector CLI flags stay enabled so the automated end-to-end test (Playwright) can drive the packaged app.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  onlyLoadAppFromAsar: true
+  enableCookieEncryption: true
+  enableNodeCliInspectArguments: true
+
+mac:
+  category: public.app-category.productivity
+  icon: desktop/build/icon.icns
+  target:
+    - target: zip
+      arch: [arm64]
+    - target: dmg
+      arch: [arm64]
+  # Ad hoc signature: required for Apple Silicon to run the app. Not notarized (see README).
+  identity: "-"
+  hardenedRuntime: false
+  minimumSystemVersion: "12.0"
+  artifactName: Presentation-Studio-${version}-mac-arm64.${ext}
+  darkModeSupport: true
+  extendInfo:
+    NSMicrophoneUsageDescription: Presentation Studio records only while you press Start recording, to transcribe a spoken brief with ElevenLabs.
+    NSHumanReadableCopyright: Oslo Sprint 2026
+
+dmg:
+  title: Presentation Studio
+  artifactName: Presentation-Studio-${version}-arm64.dmg
+
+linux:
+  # Used for automated testing of the packaged app on Linux CI and in this repository's container.
+  target: [dir]
+  category: Office
+  icon: desktop/build/icon.png
+  executableName: presentation-studio
