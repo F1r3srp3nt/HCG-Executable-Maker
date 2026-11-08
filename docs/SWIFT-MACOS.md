@@ -10,6 +10,18 @@ HCG Executable Maker builds **Swift Package Manager** packages into macOS apps o
 Reference projects: [Oslo-Sprint](https://github.com/F1r3srp3nt/Oslo-Sprint): `distil/` (product `TokenLab`, shipped as
 **Distil.app**) and `relay/` (products `Relay`, a SwiftUI app, and `relay-runner`, a command-line tool).
 
+## Which build am I running?
+
+Settings › About this build shows the version, the git commit (`+uncommitted` if the tree had changes), the build
+time, the executable and the `.app` path. The sidebar footer shows the version and commit. From a terminal,
+`HCGExecutableMaker --version` prints the same without opening a window.
+
+The message "Detected a Swift / Xcode project… support is planned for a later milestone (M0.5+)" comes from builds
+before Swift support. It exists up to commit `b1a9e43`, which includes the v0.1.0 release.
+
+To build this checkout as an app on your Mac, run `bash tools/build-local-mac.sh`. It prints the exact `.app` to
+open. Add `--verify <Oslo-Sprint path>` to also run the Distil/Relay checks below on your Mac.
+
 ## Workflow in the New Build wizard
 
 1. **Import** the repository as a folder or ZIP. A ZIP whose content sits in a wrapping folder (GitHub's
@@ -63,14 +75,57 @@ Reference projects: [Oslo-Sprint](https://github.com/F1r3srp3nt/Oslo-Sprint): `d
 `SwiftAppBundlePackager` is used whenever the build is a Swift GUI app; `MacAppBundlePackager` (.NET) is never applied
 to Swift builds:
 
-- `Contents/MacOS` contains **only** the executable. SwiftPM resource bundles go to `Contents/Resources`, the only
-  place `codesign --strict` accepts nested bundles.
+- `Contents/MacOS` contains **only** the executable.
 - `LSMinimumSystemVersion` comes from the configured or package minimum. Without one, it comes from the deployment
   target the linker recorded in the executable (`LC_BUILD_VERSION`). The .NET default of 11.0/10.15 is not used.
-- No `NSPrincipalClass` (SwiftUI/AppKit entry points don't need it). Privacy usage descriptions and
-  `LSApplicationCategoryType` are written.
-- The whole bundle is signed ad hoc (`codesign --force --sign - --timestamp=none`), so Info.plist and resources are
-  sealed.
+- No `NSPrincipalClass`. Privacy usage descriptions and `LSApplicationCategoryType` are written.
+- `Contents` is signed ad hoc (`codesign --force --sign - --timestamp=none`).
+
+### SwiftPM resources
+
+SwiftPM's generated `Bundle.module` accessor looks for a resource bundle at
+`Bundle.main.bundleURL/<Package>_<Target>.bundle`, which is the **root of the .app**. If the bundle is not there, it
+falls back to an absolute path inside the build folder. It never looks inside `Contents/` (see SwiftPM's
+`SwiftModuleBuildDescription.generateResourceAccessor`). This holds for library and app targets alike.
+
+HCG therefore:
+1. signs `Contents` first;
+2. places each `*.bundle` at the app root, so `Bundle.module` finds it on any Mac;
+3. verifies the signature of `Contents` on a copy without those bundles.
+
+**Trade-off:** macOS code signing seals only `Contents`, so a whole-bundle `codesign --verify` reports "unsealed contents
+present in the bundle root". Gatekeeper rejects a *downloaded* copy of such an app. Local use works. For
+distribution, load resources from `Bundle.main` (`Contents/Resources`) or build with Xcode, which generates a
+different accessor.
+
+Packages without resources (Distil, Relay) are unaffected: their apps are fully sealed. Putting the bundles in
+`Contents/Resources`, as the Oslo-Sprint scripts would if a target declared resources, makes `Bundle.module` fail at
+launch.
+
+### Preserving the project's configured identity
+
+When a package has its own packaging script (e.g. `scripts/build-macos.sh` writing an Info.plist), HCG reads it as
+text, never running it, and prefills from it:
+- the display name, bundle id, version and build number;
+- the minimum macOS version and the category;
+- the privacy texts.
+
+It only uses a script that packages the selected product, and the Configure step says which script it read. Values
+the script computes at build time are not reproduced, and the wizard says so. Examples are `DistilGitCommit` and
+`RelayBuildDate`.
+
+### Tests
+
+HCG builds the selected product only. Test targets are neither compiled nor run, and every build log says so. XCTest
+is detected and reported separately as a *test* prerequisite. It is missing with only the Command Line Tools, in which
+case `swift test` fails with "no such module 'XCTest'". A missing XCTest never marks a package as unbuildable.
+
+### Working copies
+
+Generated folders are never imported: `.build`, `.swiftpm` and `DerivedData`, from folders and from ZIPs.
+Discovery ignores these too, along with `build`, `dist` and dependency checkouts. A working copy that has already been
+built with the project's own script (`.build/`, `dist/Distil.app`, Xcode's `.swiftpm/` workspace) is recognised as the
+Swift package it is.
 
 ### Verification (per build)
 
@@ -115,8 +170,7 @@ HCG never installs tools.
 - Developer ID signing, hardened runtime, entitlements, notarization, `.pkg` and the Mac App Store. Apps are
   **ad-hoc signed**: other Macs show a Gatekeeper warning (right-click → Open).
 - Building Swift macOS apps on Windows/Linux, and Swift on Linux/Windows targets.
-- Resource bundles: they are placed in `Contents/Resources`. Older SwiftPM `Bundle.module` accessors look next to
-  the `.app` instead; the verifier warns, and only a launch confirms it. The reference projects have no resources.
+- Fully sealed apps that also use SwiftPM resources through `Bundle.module` (see "SwiftPM resources" above).
 
 ## Verification in CI (`swift-macos` job)
 

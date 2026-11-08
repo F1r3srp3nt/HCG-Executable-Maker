@@ -11,7 +11,20 @@ exe="$app/Contents/MacOS/$exe_name"
 echo "== $app"
 plutil -lint "$plist"
 plutil -p "$plist"
-codesign --verify --strict --deep --verbose=2 "$app"
+shopt -s nullglob
+root_bundles=("$app"/*.bundle)
+shopt -u nullglob
+if [ ${#root_bundles[@]} -gt 0 ]; then
+  # SwiftPM's Bundle.module looks for resource bundles at the app root, outside the signed Contents folder.
+  echo "Root-level SwiftPM resource bundles: ${root_bundles[*]##*/}"
+  codesign --verify --strict --verbose=2 "$app" 2>&1 || echo "(whole-bundle check reports the root resource bundles as unsealed — expected)"
+  sealed="$(mktemp -d)/$(basename "$app")"
+  ditto "$app" "$sealed"
+  for b in "${root_bundles[@]}"; do rm -rf "$sealed/$(basename "$b")"; done
+  codesign --verify --strict --deep --verbose=2 "$sealed"
+else
+  codesign --verify --strict --deep --verbose=2 "$app"
+fi
 codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Identifier|Format|Signature|TeamIdentifier|Sealed' || true
 spctl --assess --type execute -vv "$app" 2>&1 || echo "(Gatekeeper rejects ad-hoc signed apps from other Macs: expected, not notarized)"
 archs="$(lipo -archs "$exe")"

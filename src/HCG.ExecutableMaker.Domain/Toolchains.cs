@@ -71,4 +71,6 @@ public static class ToolchainIds
     public const string Swift = "swift";
     public const string MacOSSdk = "macos-sdk";
     public const string MacOSVersion = "macos-version";
+    /// <summary>XCTest for the selected developer directory: needed to RUN Swift tests, not to build or package apps.</summary>
+    public const string XcTest = "xctest";
 }

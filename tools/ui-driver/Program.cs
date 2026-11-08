@@ -211,8 +211,10 @@ internal static class Program
         wizard.OutputDirectory = Path.Combine(output, "artifacts");
         var detectedUsages = wizard.SwiftUsageDescriptions.Select(u => u.Key).ToList();
         Log("Privacy keys requested by the wizard: " + (detectedUsages.Count == 0 ? "none" : string.Join(", ", detectedUsages)));
-        if (detectedUsages.Count > 0)
+        Log("Prefill: " + wizard.SwiftPrefillNote);
+        if (wizard.SwiftUsageDescriptions.Any(u => u.Text.Trim().Length == 0))
             Check(wizard.HasConfigErrors, "Empty privacy descriptions block the build");
+        foreach (var u in wizard.SwiftUsageDescriptions.Where(u => u.Text.Length > 0)) Log($"  {u.Key} prefilled: {u.Text}");
         foreach (var usage in _args.Where(a => a.Key.StartsWith("usage", StringComparison.Ordinal)).Select(a => a.Value))
         {
             var eq = usage.IndexOf('=');
@@ -220,6 +222,9 @@ internal static class Program
             Check(item is not null, $"Wizard asks for {usage[..eq]}");
             if (item is not null) item.Text = usage[(eq + 1)..];
         }
+        if (Arg("expect-bundle-id") is { } eb) Check(wizard.AppId == eb, $"Bundle id {wizard.AppId} (expected {eb}, from the project's packaging script)");
+        if (Arg("expect-version") is { } ev) Check($"{wizard.Version} ({wizard.SwiftBuildNumber})" == ev, $"Version {wizard.Version} ({wizard.SwiftBuildNumber}) (expected {ev})");
+        if (Arg("expect-name") is { } en) Check(wizard.AppName == en, $"Display name {wizard.AppName} (expected {en})");
         foreach (var err in wizard.ConfigErrors) Log("Config error: " + err);
         Check(wizard.ConfigErrors.Count == 0, "Configuration valid");
         Shot("configure");

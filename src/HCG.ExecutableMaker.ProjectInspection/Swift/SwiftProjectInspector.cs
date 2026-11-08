@@ -69,6 +69,12 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
                 "Package.swift is Swift code and was NOT executed. Its products are confirmed by evaluating it on this Mac after you trust the project (Inspect step → Evaluate package)." +
                 (p.HasConditionalDeclarations ? " It declares some products conditionally (#if os(…)), so the product list depends on the build host." : ""),
                 p.ManifestPath));
+            if (p.SourceFacts.Count > 0 && toolchains?.Host.Platform == TargetPlatform.MacOS)
+                diagnostics.Add(new(DiagnosticSeverity.Info,
+                    toolchains.IsAvailable(ToolchainIds.XcTest)
+                        ? "Tests: HCG builds the selected product only; test targets are not compiled or run. XCTest is available if you run them yourself (swift test)."
+                        : "Tests: HCG builds the selected product only; test targets are not compiled or run. XCTest was not found in the selected developer directory — that affects only `swift test`, not building or packaging the app.",
+                    p.ManifestPath));
             if (p.HasPackageDependencies)
                 diagnostics.Add(new(DiagnosticSeverity.Info, "This package depends on other packages; SwiftPM downloads them during the build (network access required).", p.ManifestPath));
             if (p.ToolsVersion is null)

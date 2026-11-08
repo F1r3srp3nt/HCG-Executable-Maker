@@ -6,7 +6,9 @@ using HCG.ExecutableMaker.BuildEngine;
 using HCG.ExecutableMaker.BuildEngine.Swift;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.ProjectInspection;
 using HCG.ExecutableMaker.ProjectInspection.Swift;
+using System.Text.RegularExpressions;
 
 namespace HCG.ExecutableMaker.App.ViewModels;
 
@@ -276,21 +278,39 @@ public sealed partial class BuildWizardViewModel
     }
 
     /// <summary>Prefills the macOS app options for the chosen product (only when the product changes).</summary>
+    /// <summary>Where the prefilled identity came from (e.g. the package's own packaging script).</summary>
+    [ObservableProperty] private string _swiftPrefillNote = "";
+
     private void PrefillSwift(SwiftPackageInfo pkg, SwiftProductChoice product)
     {
-        AppName = product.Name;
-        Version = "1.0.0";
+        // Preserve the identity the project already ships with: its own packaging script (read as text, never run).
+        PackagingScriptHints? hints = null;
+        if (Project is not null)
+        {
+            try { hints = PackagingScriptHints.Read(SourceIndex.Build(Project.SourceDirectory), pkg.Directory, product.Name); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { hints = null; }
+        }
+        AppName = hints?.DisplayName ?? product.Name;
+        Version = hints?.Version is { } v && Regex.IsMatch(v, @"^\d+(\.\d+){0,2}$") ? v : "1.0.0";
         Description = "";
-        AppId = SuggestAppId(Publisher, product.Name);
-        SwiftBuildNumber = "1";
-        SwiftMinimumMacOS = pkg.Evaluated?.MinimumMacOS ?? "";
-        SelectedSwiftCategory = SwiftCategoryOptions[0];
+        AppId = hints?.BundleId ?? SuggestAppId(Publisher, product.Name);
+        SwiftBuildNumber = hints?.BuildNumber is { } bn && Regex.IsMatch(bn, @"^\d+(\.\d+){0,2}$") ? bn : "1";
+        SwiftMinimumMacOS = hints?.MinimumMacOS ?? pkg.Evaluated?.MinimumMacOS ?? "";
+        SelectedSwiftCategory = SwiftCategoryOptions.FirstOrDefault(c => c.Value == (hints?.Category ?? "")) ?? SwiftCategoryOptions[0];
         SelectedSwiftKind = SwiftKindOptions.First(k => k.Value == product.SuggestedKind);
         foreach (var old in SwiftUsageDescriptions) old.PropertyChanged -= OnUsageChanged;
         SwiftUsageDescriptions.Clear();
         foreach (var u in product.Facts?.PrivacyUsages ?? [])
-            AddUsage(new SwiftUsageItem(u.InfoPlistKey, u.Purpose, u.Evidence, ""));
+            AddUsage(new SwiftUsageItem(u.InfoPlistKey, u.Purpose, u.Evidence, hints?.UsageDescriptions.GetValueOrDefault(u.InfoPlistKey) ?? ""));
+        // Usage keys the script declares that the source scan did not detect are kept too (the script knows best).
+        foreach (var (key, text) in hints?.UsageDescriptions ?? new Dictionary<string, string>())
+            if (SwiftUsageDescriptions.All(x => x.Key != key)) AddUsage(new SwiftUsageItem(key, key, "declared in " + hints!.Script, text));
         HasSwiftUsageDescriptions = SwiftUsageDescriptions.Count > 0;
+        SwiftPrefillNote = hints is null
+            ? "No packaging script with an app identity was found; the identity below is a suggestion."
+            : $"Prefilled from the project's own packaging script {hints.Script} (read, not run): bundle id {hints.BundleId}" +
+              (hints.Version is null ? "" : $", version {hints.Version} ({hints.BuildNumber})") + "." +
+              (hints.ComputedCustomKeys.Count > 0 ? $" That script also writes {string.Join(", ", hints.ComputedCustomKeys)} at build time (e.g. its git commit); HCG does not add those keys, so the app shows them as missing." : "");
     }
 
     private void AddUsage(SwiftUsageItem item)

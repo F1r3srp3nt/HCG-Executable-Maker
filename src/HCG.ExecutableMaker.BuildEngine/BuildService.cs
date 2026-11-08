@@ -249,6 +249,7 @@ public sealed class BuildService(
                 var (stagedExe, bundles) = SwiftBuildPlanner.Stage(binPath, settings.Swift!.Product, publishDir);
                 exeName = stagedExe;
                 if (bundles.Count > 0) Log(BuildLogKind.Info, $"SwiftPM resource bundles: {string.Join(", ", bundles)}");
+                Log(BuildLogKind.Info, "Tests were not run: HCG builds the selected product only (test targets are neither compiled nor run).");
                 try { Directory.Delete(swiftScratch, recursive: true); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove SwiftPM scratch space {swiftScratch}: {ex.Message}"); }
             }

@@ -469,6 +469,9 @@
                     <TextBlock Classes="h2" Text="macOS app (Swift package)" />
                     <TextBlock Classes="muted" TextWrapping="Wrap" Text="Written to the .app's Info.plist. The application name above is the display name (e.g. Distil); the executable keeps the product name." />
                   </StackPanel>
+                  <Border Classes="callout" Padding="10">
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SwiftPrefillNote}" />
+                  </Border>
                   <StackPanel>
                     <TextBlock Classes="formlabel" Text="DELIVER AS" />
                     <ComboBox ItemsSource="{Binding SwiftKindOptions}" SelectedItem="{Binding SelectedSwiftKind}" HorizontalAlignment="Stretch" />

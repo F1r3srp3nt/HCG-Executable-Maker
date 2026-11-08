@@ -109,8 +109,20 @@
         <StackPanel Spacing="4">
           <TextBlock Classes="h2" Text="About" />
           <Image Source="/Assets/Branding/hcg-logo.png" Height="64" HorizontalAlignment="Left" Margin="-4,6,0,4" Stretch="Uniform" />
-          <TextBlock Text="{Binding Version, StringFormat='HCG Executable Maker {0} — Milestone 0.1'}" />
-          <TextBlock Classes="muted" Text="© Hakmi Capital Group. Built with .NET 10 and Avalonia UI." />
+          <TextBlock Text="{Binding Version, StringFormat='HCG Executable Maker {0}'}" />
+          <TextBlock Classes="formlabel" Text="ABOUT THIS BUILD" Margin="0,10,0,4" />
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto">
+            <TextBlock Classes="muted" Text="Commit" />
+            <SelectableTextBlock Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding Commit}" />
+            <TextBlock Grid.Row="1" Classes="muted" Text="Built (UTC)" />
+            <SelectableTextBlock Grid.Row="1" Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding BuildDate}" />
+            <TextBlock Grid.Row="2" Classes="muted" Text="Executable" />
+            <SelectableTextBlock Grid.Row="2" Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding ExecutablePath}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="3" Classes="muted" Text="App bundle" />
+            <SelectableTextBlock Grid.Row="3" Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding AppBundlePath}" TextWrapping="Wrap" />
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" Text="From a terminal: &lt;executable&gt; --version prints the same identity without opening the window." />
+          <TextBlock Classes="muted" Text="© Hakmi Capital Group. Built with .NET 10 and Avalonia UI." Margin="0,6,0,0" />
         </StackPanel>
       </Border>
     </StackPanel>

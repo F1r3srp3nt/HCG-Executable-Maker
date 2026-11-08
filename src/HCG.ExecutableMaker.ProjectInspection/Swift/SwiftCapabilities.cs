@@ -55,6 +55,11 @@ public static class SwiftCapabilities
         requirements.Add(new ToolchainRequirement(ToolchainIds.Codesign, "codesign (ad-hoc signing)", null, codesign?.IsAvailable == true, codesign?.ExecutablePath));
         if (codesign?.IsAvailable != true) fixes.Add("codesign was not found: Apple Silicon Macs refuse unsigned executables. Install the Command Line Tools: xcode-select --install");
 
+        // Test prerequisites are reported separately: they never make a buildable package "unsupported".
+        var xctest = report.Find(ToolchainIds.XcTest);
+        requirements.Add(new ToolchainRequirement(ToolchainIds.XcTest, "XCTest — only to run tests (HCG builds without running tests)", null,
+            xctest?.IsAvailable == true, xctest?.IsAvailable == true ? xctest.ExecutablePath : (xctest?.InstallHint ?? "Not detected")));
+
         return fixes.Count == 0
             ? new Assessment(SupportLevel.Supported, $"Buildable on this Mac with Swift {swift!.Version}.", [], requirements)
             : new Assessment(SupportLevel.MissingToolchain, "Supported Swift package, but this Mac is missing required tools.", fixes, requirements);

@@ -37,7 +37,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     public ObservableCollection<NavItem> NavItems { get; }
-    public string AppVersion => $"Version {HostInfo.ProductVersion}";
+    public string AppVersion => $"Version {HostInfo.ProductVersion} · {HostInfo.ProductCommit}";
     public string MilestoneLabel => "Windows installer · Mobile Build Studio";
     public string DataDirectory { get; }
 

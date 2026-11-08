@@ -30,6 +30,11 @@ public sealed partial class SettingsViewModel(
     public string WorkspacesPath => paths.WorkspacesDirectory;
     public string LogsPath => paths.LogsDirectory;
     public string Version => HostInfo.ProductVersion;
+    public string Commit => HostInfo.ProductCommit;
+    public string BuildDate => HostInfo.BuildDate;
+    public string ExecutablePath => HostInfo.ExecutablePath;
+    public string AppBundlePath => HostInfo.AppBundlePath ?? "Not running from an .app bundle";
+    public string BuildIdentity => HostInfo.BuildIdentity;
 
     private AppSettings _loaded = new();
 

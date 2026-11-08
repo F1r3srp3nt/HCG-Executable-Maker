@@ -38,6 +38,32 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - macOS-only Xcode projects were claimed by the iOS (Mobile) inspector.
 - Results page: long output paths no longer run under the action buttons.
 
+## [Unreleased] — `fix/swift-macos-native` (local, not pushed)
+
+### Fixed
+- **SwiftPM resources:** resource bundles are now placed where SwiftPM's `Bundle.module` actually looks, the `.app`
+  root. Before, they went in `Contents/Resources`, where `Bundle.module` fails at launch. `Contents` is signed and
+  verified separately, and the unsealed root bundles are reported.
+- Folder and ZIP imports skip SwiftPM/Xcode generated folders (`.build`, `.swiftpm`, `DerivedData`). Built working
+  copies previously copied the whole build tree into the workspace and could exceed the import limits.
+
+### Added
+- Build identity: the version, git commit, build time, executable and `.app` path are shown in Settings › About this
+  build and in the footer, and printed by `HCGExecutableMaker --version`. `self-package` passes the commit through
+  `HCG_SOURCE_REVISION`.
+- The Configure step preserves a package's configured identity by reading its own packaging script (never running
+  it). For Distil, Relay and similar packages that means the bundle id, display name, version, build number, minimum
+  macOS, category and privacy texts.
+- An XCTest probe, reported only as a test prerequisite. Build logs state that tests were not run.
+- `tools/build-local-mac.sh` builds this checkout as an app on your Mac and prints the exact path. `--verify` runs the
+  Distil/Relay/parent-repo/resource checks.
+- CI `swift-macos` for current Oslo-Sprint (`b5d8697`, product `Distil`):
+  - first builds both packages with their own scripts, then imports `distil/` and `relay/` separately, the parent
+    repository as a folder and as a ZIP, and a resource fixture;
+  - checks that the identity was preserved, launches every app, verifies resource loading, and compares Info.plist
+    keys with the scripts' apps.
+- Fixture `ResourceProbe`: a library and an app target, both with resources.
+
 ## [0.2.0] — 2026-11-01 (pre-release)
 
 Unsigned pre-release. Adds the Windows Setup.exe installer (M0.2) and Mobile Build Studio (M0.5). Verified in CI: real
