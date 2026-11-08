@@ -11,6 +11,8 @@
 //       [--expect-products TokenLab] [--expect-libraries TokenLabCore] [--expect-tests TokenLabCoreTests]
 //       --output <dir> --screenshots <dir> [--prefix distil]
 //   --expect-blocked-host: on Windows/Linux, prove the wizard refuses to evaluate/build the package and explains why.
+//   Distribution (macOS): --formats …,pkg,mas  --select-xcode <Xcode.app> (HCG-only selection via Toolchains › Browse…)
+//       --expect-xcode-state Ready  --signing adhoc|devid  --confirm-entitlements  --test-install [launch]
 using System.Diagnostics;
 using System.Text.Json;
 using Avalonia;
@@ -110,6 +112,19 @@ internal static class Program
         Log($"Screenshot: {path}");
     }
 
+    /// <summary>Scrolls the page to its end (the Distribution section sits below the formats), captures, scrolls back.</summary>
+    private static void ShotScrolledToEnd(string name)
+    {
+        if (_window is null) return;
+        var scrollers = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(_window).OfType<Avalonia.Controls.ScrollViewer>()
+            .Where(sv => sv.IsEffectivelyVisible && sv.Extent.Height > sv.Viewport.Height).ToList();
+        var saved = scrollers.Select(sv => sv.Offset).ToList();
+        foreach (var sv in scrollers) sv.Offset = new Vector(sv.Offset.X, sv.Extent.Height);
+        Dispatcher.UIThread.RunJobs();
+        Shot(name);
+        for (var i = 0; i < scrollers.Count; i++) scrollers[i].Offset = saved[i];
+    }
+
     private static async Task WaitUntil(Func<bool> condition, TimeSpan timeout, string what)
     {
         var sw = Stopwatch.StartNew();
@@ -131,6 +146,30 @@ internal static class Program
         await main.InitializeAsync();
         var host = HostInfo.Detect();
         Log($"Host: {host.DisplayName} ({host.OsDescription}) · footer: {main.EngineStatus}");
+
+        // Optional: select an Xcode for HCG only (Toolchains › Xcode › Browse…), as a user would, before building.
+        await main.NavigateAsync("toolchains", null);
+        var toolchainsPage = (ToolchainsViewModel)main.CurrentPage!;
+        if (Arg("select-xcode") is { } xcodePath)
+        {
+            Log($"Selecting Xcode for HCG: {xcodePath}");
+            await toolchainsPage.BrowseXcodeCommand.ExecuteAsync(null);
+            await WaitUntil(() => !toolchainsPage.IsBusy, TimeSpan.FromMinutes(3), "toolchain re-detection");
+            Check(toolchainsPage.HcgSelectionActive, "Xcode selected for HCG only: " + toolchainsPage.XcodeMessage);
+            Check(Environment.GetEnvironmentVariable("DEVELOPER_DIR")?.StartsWith(xcodePath.TrimEnd('/'), StringComparison.Ordinal) == true,
+                $"DEVELOPER_DIR for HCG's processes is {Environment.GetEnvironmentVariable("DEVELOPER_DIR")}");
+        }
+        if (toolchainsPage.HasXcodePanel)
+        {
+            Log($"Xcode: [{toolchainsPage.XcodeState.Text}] {toolchainsPage.XcodeDiagnosis}");
+            Log($"Xcode active: {toolchainsPage.XcodeActivePath} · {toolchainsPage.XcodeSource} · {toolchainsPage.XcodeVersion}");
+            Log($"Xcode SDKs: {toolchainsPage.XcodeSdks}");
+            foreach (var i in toolchainsPage.XcodeInstallations) Log($"Xcode installed: {i.Title} {i.Path}{(i.IsActive ? " (active)" : "")}");
+            if (toolchainsPage.HasXcodeAction) Log("Xcode action: " + toolchainsPage.XcodeAction);
+            Shot("toolchains-xcode");
+            if (Arg("expect-xcode-state") is { } expectedState)
+                Check(toolchainsPage.XcodeState.Text == expectedState, $"Xcode state: expected {expectedState}, got {toolchainsPage.XcodeState.Text}");
+        }
 
         // 1. Import through the wizard's own "Import ZIP" / "Import folder" commands (scripted picker returns --source).
         var source = _args["source"];
@@ -238,12 +277,29 @@ internal static class Program
             .Select(f => f switch
             {
                 "app" => PackagingFormat.MacAppBundle, "zip" => PackagingFormat.PortableZip, "dmg" => PackagingFormat.MacDmg,
-                "folder" => PackagingFormat.PortableFolder, _ => throw new ArgumentException("Unknown format " + f),
+                "folder" => PackagingFormat.PortableFolder, "pkg" => PackagingFormat.MacPkg, "mas" => PackagingFormat.MacAppStore,
+                _ => throw new ArgumentException("Unknown format " + f),
             }).ToHashSet();
+        if (wizard.ShowDistribution)
+        {
+            await WaitUntil(() => wizard.SigningInventoryNote.Length > 0, TimeSpan.FromMinutes(1), "signing inventory");
+            Log("Signing inventory: " + wizard.SigningInventoryNote);
+            if (Arg("signing") == "devid") wizard.SelectedSigningMode = wizard.SigningModeOptions.First(o => o.Value == MacSigningMode.DeveloperId);
+            Log($"Developer ID: [{wizard.DeveloperIdState.Text}] {wizard.DeveloperIdReason}");
+            Log($"Mac App Store: [{wizard.AppStoreState.Text}] {wizard.AppStoreReason}");
+            foreach (var ent in wizard.DeveloperIdEntitlements) Log($"Hardened-runtime entitlement proposed: {ent.Key} — {ent.Evidence}");
+            foreach (var ent in wizard.AppStoreEntitlements) Log($"Sandbox entitlement proposed: {ent.Key} — {ent.Evidence}");
+            foreach (var r in wizard.AppStoreReviews) Log("Sandbox review: " + r);
+            foreach (var b in wizard.AppStoreBlockers) Log("Sandbox blocker: " + b);
+            if (Arg("confirm-entitlements") is not null) wizard.EntitlementsConfirmed = true;
+        }
+        Check(wizard.PackagingOptions.All(o => o.Option.Availability != PackagingAvailability.NotImplemented), "No format is a milestone placeholder");
         foreach (var o in wizard.PackagingOptions) o.IsSelected = o.IsEnabled && formats.Contains(o.Option.Format);
         foreach (var f in formats)
             Check(wizard.PackagingOptions.Any(o => o.Option.Format == f && o.IsSelected), $"Format {f.DisplayName()} available and selected");
         Shot("package");
+        foreach (var de in wizard.DistributionErrors) Log("Distribution: " + de);
+        if (wizard.ShowDistribution) ShotScrolledToEnd("distribution");
 
         // 6. Build (trust confirmation required), then results.
         await wizard.NextCommand.ExecuteAsync(null);
@@ -263,6 +319,17 @@ internal static class Program
             Log($"Artifact {a.Format.DisplayName()}: {a.Path} · {a.SizeBytes:N0} bytes · sha256 {a.Sha256} · {a.Verification}");
             foreach (var c in a.Checks) Log($"    [{c.Status}] {c.Name}: {c.Detail}");
             if (a.Verification == VerificationStatus.Failed) Failures.Add($"Artifact {a.Path} failed verification");
+        }
+        // Optional explicit distribution step, exactly as the Results page runs it (confirmation dialog answered "yes").
+        if (Arg("test-install") is { } testInstall)
+        {
+            await WaitUntil(() => wizard.CanTestInstall || !OperatingSystem.IsMacOS(), TimeSpan.FromSeconds(30), "Test install availability");
+            Check(wizard.CanTestInstall, "Test install offered for the .pkg");
+            wizard.LaunchAfterTestInstall = testInstall == "launch";
+            await wizard.TestInstallCommand.ExecuteAsync(null);
+            foreach (var step in wizard.DistributionResults) Log($"Test install {step.Name}: [{step.Status.Text}] {step.Detail}");
+            Check(wizard.DistributionResults.Count > 0 && wizard.DistributionResults.All(x => x.Status.Tone != "error"), "Test install: every step passed");
+            Shot("test-install");
         }
         File.WriteAllText(Path.Combine(output, $"{_prefix}-build.json"), JsonSerializer.Serialize(new
         {
@@ -288,7 +355,7 @@ internal static class Program
         public Task<string?> PickFileAsync(string title, string typeName, params string[] patterns) => Task.FromResult<string?>(null);
         public Task CopyAsync(string text) => Task.CompletedTask;
         public Task<bool> OpenFolderAsync(string path) => Task.FromResult(Directory.Exists(path));
-        public Task<string?> PickApplicationAsync(string title) => Task.FromResult(Arg("--select-xcode"));
+        public Task<string?> PickApplicationAsync(string title) => Task.FromResult(Arg("select-xcode"));
         public Task<bool> OpenApplicationAsync(string appPath) => Task.FromResult(false);
     }
 

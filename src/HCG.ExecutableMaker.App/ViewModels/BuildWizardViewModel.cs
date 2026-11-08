@@ -33,6 +33,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private readonly IDialogService _dialogs;
     private readonly IPlatformShell _shell;
     private readonly ArtifactExporter _exporter;
+    private readonly HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningInventoryReader _signingReader;
+    private readonly HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService _notarization;
+    private readonly HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller _pkgTester;
+    private readonly HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService _validator;
+    private MacDistributionOptions? _repeatDistribution;
     private readonly NavigationService _navigation;
     private readonly HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator _swiftEvaluator;
     private readonly ConcurrentQueue<BuildLogLine> _pendingLog = new();
@@ -44,8 +49,16 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     public BuildWizardViewModel(ProjectService projectService, IProjectRepository projects, BuildService buildService, IToolchainService toolchains,
         ISettingsStore settings, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, ArtifactExporter exporter, NavigationService navigation,
-        HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator swiftEvaluator)
+        HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator swiftEvaluator,
+        HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningInventoryReader signingReader,
+        HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService notarization,
+        HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller pkgTester,
+        HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService validator)
     {
+        _signingReader = signingReader;
+        _notarization = notarization;
+        _pkgTester = pkgTester;
+        _validator = validator;
         _swiftEvaluator = swiftEvaluator;
         _navigation = navigation;
         _projectService = projectService;
@@ -108,7 +121,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         WizardStep.Import => Project is not null && !IsImporting,
         WizardStep.Inspect => CanConfigure,
         WizardStep.Configure => ConfigErrors.Count == 0,
-        WizardStep.Package => PackagingOptions.Any(o => o.IsSelected && o.IsEnabled),
+        WizardStep.Package => PackagingOptions.Any(o => o.IsSelected && o.IsEnabled) && !HasDistributionErrors,
         _ => false,
     };
 
@@ -483,6 +496,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         IconPath = s.Identity.IconSourcePath is { } i && File.Exists(i) ? i : null;
         SelectedPlatform = PlatformOptions.FirstOrDefault(p => p.Value == s.Platform && p.IsEnabled) ?? SelectedPlatform;
         if (s.Swift is { } swiftOptions) ApplySwiftSettings(swiftOptions);
+        _repeatDistribution = s.MacDistribution;
         SelectedArchitecture = ArchitectureOptions.FirstOrDefault(a => a.Value == s.Architecture) ?? SelectedArchitecture;
         SelectedConfiguration = ConfigurationOptions.First(c => c.Value == s.Configuration);
         SelfContained = s.SelfContained;
@@ -599,6 +613,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         PackagingFormats = formats,
         WindowsInstaller = CreateInstallerOptions(),
         Swift = CreateSwiftOptions(),
+        MacDistribution = CreateDistributionOptions(),
         Identity = new AppIdentity
         {
             ApplicationName = AppName.Trim(),
@@ -614,13 +629,22 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     public ObservableCollection<PackagingOptionItem> PackagingOptions { get; } = [];
 
-    private void PreparePackaging(IReadOnlyList<PackagingFormat>? preselect = null)
+    private PackagingContext BasePackagingContext()
     {
         var detected = SelectedProject?.Project;
         var isGui = detected is not null && (detected.IsAvalonia || string.Equals(detected.OutputType, "WinExe", StringComparison.OrdinalIgnoreCase));
         var swiftKind = IsSwiftBuild ? SelectedSwiftKind?.Value ?? SwiftAppKind.GuiApp : (SwiftAppKind?)null;
         if (swiftKind is { } k) isGui = k == SwiftAppKind.GuiApp;
-        var ctx = new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained, swiftKind);
+        return new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained, swiftKind);
+    }
+
+    private void PreparePackaging(IReadOnlyList<PackagingFormat>? preselect = null)
+    {
+        var baseCtx = BasePackagingContext();
+        var swiftKind = baseCtx.SwiftKind;
+        var ctx = DistributionContext(baseCtx);
+        OnPropertyChanged(nameof(ShowDistribution));
+        OnPropertyChanged(nameof(IsSwiftGui));
         if (swiftKind is not null)
             preselect ??= swiftKind == SwiftAppKind.GuiApp ? [PackagingFormat.MacAppBundle] : [PackagingFormat.PortableZip];
         foreach (var old in PackagingOptions) old.PropertyChanged -= OnPackagingOptionChanged;
@@ -634,10 +658,24 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         }
         if (!PackagingOptions.Any(o => o.IsSelected) && PackagingOptions.FirstOrDefault(o => o.IsEnabled) is { } first) first.IsSelected = true;
         NextCommand.NotifyCanExecuteChanged();
+        if (ShowDistribution)
+        {
+            var keep = _repeatDistribution ?? CreateDistributionOptions();
+            _repeatDistribution = null;
+            if (_signing is null) _ = RefreshSigningThenApplyAsync(keep);
+            else PopulateDistributionChoices(keep);
+        }
+    }
+
+    private async Task RefreshSigningThenApplyAsync(MacDistributionOptions keep)
+    {
+        await RefreshSigningAsync();
+        PopulateDistributionChoices(keep);
     }
 
     private void OnPackagingOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (Step == WizardStep.Package && ShowDistribution) { ValidateDistribution(); OnPropertyChanged(nameof(ShowPkgOptions)); }
         NextCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(ShowInstallerOptions));
     }
@@ -706,7 +744,17 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             Summary.Add(new("Swift package", $"{(sw.PackageDirectory.Length == 0 ? "(workspace root)" : sw.PackageDirectory + "/")} · product {sw.Product} · {(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")}"));
             Summary.Add(new("Configuration", $"{s.Configuration} · build number {sw.BuildNumber} · minimum macOS {sw.MinimumMacOS ?? "from the executable"}{(sw.Category is { } c ? " · " + c : "")}"));
             if (sw.UsageDescriptions.Count > 0) Summary.Add(new("Privacy keys", string.Join(", ", sw.UsageDescriptions.Keys)));
-            Summary.Add(new("Signing", "Ad-hoc (codesign --sign -). Not Developer ID signed, not notarized."));
+            var d = s.MacDistribution;
+            Summary.Add(new("Signing", d.SigningMode == MacSigningMode.DeveloperId
+                ? $"Developer ID ({SelectedDeveloperIdIdentity?.Label}), hardened runtime, secure timestamp · entitlements: {(d.DeveloperIdEntitlements.Count == 0 ? "none" : string.Join(", ", d.DeveloperIdEntitlements))} · notarization is a separate, explicit step after the build"
+                : "Ad-hoc (codesign --sign -). Not Developer ID signed, not notarized."));
+            if (s.PackagingFormats.Contains(PackagingFormat.MacPkg))
+                Summary.Add(new("Installer", d.PkgInstallerName is { } inst ? $"Signed with {inst}" : "Unsigned .pkg — local testing only"));
+            if (s.PackagingFormats.Contains(PackagingFormat.MacAppStore))
+                Summary.Add(new("Mac App Store", $"Apple Distribution ({SelectedAppStoreIdentity?.Label}) · installer {d.AppStoreInstallerName} · profile {SelectedAppStoreProfile?.Profile.Name} · " +
+                                                 $"sandbox entitlements: {string.Join(", ", new[] { "com.apple.security.app-sandbox" }.Concat(d.AppStoreEntitlements))} · validation and upload stay manual"));
+            var disabled = DisabledFeatures().ToList();
+            if (disabled.Count > 0) Summary.Add(new("Disabled features", string.Join("; ", disabled)));
         }
         else
         {
@@ -878,10 +926,16 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             BuildStatus.TimedOut => "Build timed out",
             _ => "Build failed",
         };
+        var notarized = build.Artifacts.Any(a => a.Checks.Any(c => c.Name == "Notarization" && c.Status == VerificationStatus.Passed));
         ResultDetail = build.Status == BuildStatus.Succeeded
             ? $"{build.Artifacts.Count} artifact(s) generated and verified · {build.WarningCount} warning(s). " +
-              (build.Settings.Swift is not null ? "Ad-hoc signed only: not Developer ID signed or notarized." : "Artifacts are unsigned.")
+              (build.Settings.Swift is null ? "Artifacts are unsigned (ad-hoc)."
+               : build.Settings.MacDistribution.SigningMode == MacSigningMode.DeveloperId
+                   ? notarized ? "Developer ID signed and notarized (see each artifact's checks)." : "Developer ID signed; not notarized yet (Notarize below)."
+                   : "Ad-hoc signed only: not Developer ID signed or notarized.") +
+              " Installation and launch are tested only when you run Test install."
             : build.FailureReason ?? "The build did not complete.";
+        _ = PrepareDistributionActionsAsync(build);
         ResultDuration = Format.Duration(build.Duration);
         ResultOutput = build.Artifacts.Count > 0 ? BuildService.OutputRootFor(build.Settings) : "No output produced";
         ResultArtifacts.Clear();

@@ -118,6 +118,17 @@ public sealed class BuildService(
             var report = await toolchains.GetAsync(cancellationToken: overall.Token).ConfigureAwait(false);
             var host = report.Host;
             build.ToolchainVersions["host"] = $"{host.DisplayName} ({host.OsDescription})";
+            if (host.Platform == TargetPlatform.MacOS)
+            {
+                // Every tool this build starts inherits HCG's environment, so this is the Xcode/CLT the whole build uses.
+                var developerDir = Environment.GetEnvironmentVariable("DEVELOPER_DIR");
+                build.ToolchainVersions["developer-dir"] = developerDir ?? "xcode-select";
+                Log(BuildLogKind.Info, developerDir is { Length: > 0 }
+                    ? $"Developer directory: {developerDir} (DEVELOPER_DIR, applies to every tool this build runs; the system setting is unchanged)"
+                    : "Developer directory: the system setting (xcode-select -p)");
+                if (report.Xcode is { } x)
+                    Log(BuildLogKind.Info, $"Xcode: {x.Diagnosis}");
+            }
             var isSwift = settings.Swift is not null;
             ToolchainInfo? sdk = null, swiftTool = null;
             if (isSwift)

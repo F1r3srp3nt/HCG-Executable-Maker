@@ -176,12 +176,14 @@ public class SecurityTests
     }
 
     [Fact]
-    public void Signing_capabilities_are_never_reported_as_implemented()
+    public void Signing_capabilities_report_exactly_what_is_implemented()
     {
         var caps = SigningCapabilityCatalog.Evaluate(Fixtures.Toolchains("10.0.114"));
-        Assert.NotEmpty(caps);
-        Assert.All(caps, c => Assert.Equal(SigningImplementationStatus.NotImplemented, c.Implementation));
-        Assert.All(caps, c => Assert.StartsWith("Not implemented", c.StatusText));
+        // macOS Developer ID, notarization and Mac App Store pipelines exist; Windows signing does not.
+        Assert.Equal(["developer-id", "mac-app-store", "notarization"],
+            caps.Where(c => c.Implementation == SigningImplementationStatus.Implemented).Select(c => c.Id).Order());
+        Assert.All(caps.Where(c => c.Platform == TargetPlatform.Windows), c => Assert.StartsWith("Not implemented", c.StatusText));
+        Assert.All(caps.Where(c => c.Implementation == SigningImplementationStatus.Implemented), c => Assert.DoesNotContain("Not implemented", c.StatusText));
     }
 
     [Fact]

@@ -301,10 +301,17 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Toolchain (Swift, SDK, developer directory, XCTest)
+      - name: Toolchain (Swift, SDK, developer directory, XCTest); pick an Xcode for HCG that is NOT the system one
         run: |
           sw_vers
           xcode-select -p
+          sys="$(cd "$(xcode-select -p)" && pwd -P)"
+          echo "SYSTEM_DEVDIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          ls -d /Applications/Xcode*.app
+          alt=""
+          for a in /Applications/Xcode_*.app; do [ "$(cd "$a/Contents/Developer" && pwd -P)" != "$sys" ] && alt="$a"; done
+          echo "HCG_XCODE=${alt:-$(dirname "$(dirname "$sys")")}" >> "$GITHUB_ENV"
+          echo "System developer directory: $sys · Xcode selected for HCG only: ${alt:-same as system (no other Xcode installed)}"
           swift --version
           xcrun --sdk macosx --show-sdk-version
           ls "$(xcrun --sdk macosx --show-sdk-platform-path)/Developer/Library/Frameworks" | grep -i xctest || echo "XCTest not found (only affects tests)"
@@ -328,8 +335,34 @@ jobs:
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint/distil" --package ""
           --product Distil --expect-name Distil --expect-bundle-id dev.tokenlab.prototype --expect-version "0.5.0 (5)"
-          --arch arm64 --formats app,zip,dmg --expect-products Distil --expect-libraries TokenLabCore --expect-tests TokenLabCoreTests
+          --arch arm64 --formats app,zip,dmg,pkg --expect-products Distil --expect-libraries TokenLabCore --expect-tests TokenLabCoreTests
+          --select-xcode "$HCG_XCODE" --expect-xcode-state Ready --test-install launch
           --output "$OUT/distil" --screenshots "$OUT/screens" --prefix distil
+
+      - name: Xcode selection applied to HCG only; the build used it; the system setting is unchanged
+        run: |
+          echo "xcode-select -p now: $(xcode-select -p) (before: $SYSTEM_DEVDIR)"
+          [ "$(xcode-select -p)" = "$SYSTEM_DEVDIR" ]
+          used="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ToolchainVersions"]["developer-dir"])' "$OUT/distil/distil-build.json")"
+          echo "Developer directory recorded by the build: $used"
+          [ "$used" = "$HCG_XCODE/Contents/Developer" ]
+          exe="$(find "$OUT/distil/artifacts" -path '*Distil.app/Contents/MacOS/Distil' -type f | head -1)"
+          echo "SDK recorded in the executable:"; vtool -show-build "$exe" | grep -i sdk
+          echo "SDK of the selected Xcode: $(DEVELOPER_DIR="$HCG_XCODE/Contents/Developer" xcrun --sdk macosx --show-sdk-version)"
+          vtool -show-build "$exe" | grep -qi "sdk $(DEVELOPER_DIR="$HCG_XCODE/Contents/Developer" xcrun --sdk macosx --show-sdk-version)"
+
+      - name: Installer package — inspect, install on this disposable runner, launch, remove
+        run: |
+          pkg="$(find "$OUT/distil/artifacts" -maxdepth 3 -name '*.pkg' | head -1)"
+          app="$(find "$OUT/distil/artifacts" -maxdepth 3 -name Distil.app -type d | head -1)"
+          pkgutil --check-signature "$pkg" || true
+          pkgutil --payload-files "$pkg" | head -20
+          sudo installer -pkg "$pkg" -target /
+          diff -r "$app" /Applications/Distil.app && echo "Installed app is identical to the built app"
+          codesign --verify --strict --deep --verbose=2 /Applications/Distil.app
+          tools/ui-driver/verify-macos-app.sh /Applications/Distil.app "$OUT/screens/launch-installed-distil.png" arm64
+          sudo rm -rf /Applications/Distil.app
+          sudo pkgutil --forget dev.tokenlab.prototype
 
       - name: Relay — import relay/ alone; microphone text comes from its own script
         run: >
@@ -447,7 +480,7 @@ jobs:
           | Windows x64 / ARM64 (portable) | \`*-win-x64.zip\` / \`*-win-arm64.zip\` |
           | Linux (preview) | \`*-linux-x64.zip\` / \`*-linux-arm64.zip\` |
 
-          **Unsigned pre-release** — not code-signed or notarized (planned for M0.4).
+          **Unsigned pre-release** — HCG itself is not code-signed or notarized.
           - macOS first launch: \`xattr -cr "/Applications/HCG Executable Maker.app"\`, then right-click → Open.
           - Windows: SmartScreen → More info → Run anyway.
 
