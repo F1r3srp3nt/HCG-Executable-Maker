@@ -598,6 +598,41 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  hcg-website-package:
+    name: HCG account — website/ERP package on PostgreSQL + C# contract test (mock identity)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: exm-local-test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Website package tests (migration, API handler, storage policies, staff desk) on PostgreSQL 16
+        working-directory: integration/hcg-website
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+      - name: Cross-language contract test (C# client ↔ handler ↔ migration; MOCK identity tokens)
+        run: |
+          dotnet build tests/HCG.ExecutableMaker.Tests -c Release
+          (cd integration/hcg-website && node --experimental-strip-types --no-warnings test/contract-server.mjs "$RUNNER_TEMP/exm-contract.json" &)
+          for i in $(seq 1 60); do [ -f "$RUNNER_TEMP/exm-contract.json" ] && break; sleep 0.5; done
+          HCG_EXM_CONTRACT_SERVER_INFO="$RUNNER_TEMP/exm-contract.json" dotnet test tests/HCG.ExecutableMaker.Tests -c Release --no-build \
+            --filter "FullyQualifiedName~HcgContractTests" --logger "console;verbosity=normal" | tee "$RUNNER_TEMP/contract.txt"
+          grep -q "Passed:     3" "$RUNNER_TEMP/contract.txt"
+
   release:
     name: Publish pre-release
     if: startsWith(github.ref, 'refs/tags/v')

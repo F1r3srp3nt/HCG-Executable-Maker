@@ -1,0 +1,90 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:s="using:HCG.ExecutableMaker.Account.Support"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.MyRequestsView"
+             x:DataType="vm:MyRequestsViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18">
+      <Border Classes="card">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="label" Text="HCG SUPPORT" />
+            <TextBlock Classes="h2" Text="My requests" />
+            <TextBlock Classes="body secondary" TextWrapping="Wrap" Text="{Binding State}" IsVisible="{Binding State, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+            <Button Classes="small ghost" Command="{Binding LoadCommand}"><StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Refresh}" Width="14" /><TextBlock Text="Refresh" /></StackPanel></Button>
+            <Button Classes="small" Content="New request" Command="{Binding NewRequestCommand}" />
+            <Button Classes="small ghost" Content="Account" Command="{Binding OpenAccountCommand}" IsVisible="{Binding !CanLoad}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+      <Border Classes="callout error" IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+        <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" />
+      </Border>
+      <Grid ColumnDefinitions="2*,3*" IsVisible="{Binding CanLoad}">
+        <Border Classes="card" Margin="0,0,9,0" VerticalAlignment="Top">
+          <ListBox Classes="plain selectable" ItemsSource="{Binding Requests}" SelectedItem="{Binding Selected}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:RequestRow">
+                <Grid ColumnDefinitions="*,Auto" Margin="4,6">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding Title}" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <c:StatusChip Grid.Column="1" Status="{Binding Status}" VerticalAlignment="Top" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Border>
+        <Border Grid.Column="1" Classes="card" Margin="9,0,0,0" VerticalAlignment="Top" IsVisible="{Binding Detail, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <StackPanel Spacing="12">
+            <SelectableTextBlock Text="{Binding DetailSummary}" TextWrapping="Wrap" FontSize="12.5" />
+            <TextBlock Classes="h3" Text="Conversation with HCG" />
+            <ItemsControl ItemsSource="{Binding Messages}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:MessageRow">
+                  <Border Classes="inset" Padding="10,8" Margin="0,3" Classes.accent="{Binding FromStaff}">
+                    <StackPanel Spacing="3">
+                      <TextBlock Classes="muted" FontSize="11"><Run Text="{Binding Author}" FontWeight="SemiBold" /><Run Text=" · " /><Run Text="{Binding When}" /><Run Text="  " /><Run Text="{Binding Kind}" /></TextBlock>
+                      <SelectableTextBlock Text="{Binding Body}" TextWrapping="Wrap" FontSize="12.5" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <StackPanel Spacing="6" IsVisible="{Binding CanReply}">
+              <TextBox Text="{Binding Reply}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" MaxLength="4000" PlaceholderText="Reply to HCG support…" />
+              <Button Classes="primary small" Content="Send reply" Command="{Binding SendReplyCommand}" HorizontalAlignment="Left" />
+            </StackPanel>
+            <TextBlock Classes="h3" Text="Attachments" />
+            <ItemsControl ItemsSource="{Binding Attachments}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:AttachmentRow">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                    <StackPanel><TextBlock Text="{Binding Name}" /><TextBlock Classes="muted" FontSize="11.5" Text="{Binding Detail}" TextWrapping="Wrap" /></StackPanel>
+                    <Button Grid.Column="1" Classes="small ghost" Content="Download" IsVisible="{Binding CanDownload}"
+                            Command="{Binding $parent[UserControl].((vm:MyRequestsViewModel)DataContext).DownloadCommand}" CommandParameter="{Binding}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Expander Header="Diagnostics you sent" HorizontalAlignment="Stretch">
+              <ItemsControl ItemsSource="{Binding SentDiagnostics}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="s:DiagnosticEntry">
+                    <SelectableTextBlock Classes="mono" FontSize="11" TextWrapping="Wrap"><Run Text="{Binding Label}" FontWeight="SemiBold" /><Run Text=": " /><Run Text="{Binding Value}" /></SelectableTextBlock>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Expander>
+            <Button Classes="small ghost" Content="Withdraw request" Command="{Binding WithdrawCommand}" IsVisible="{Binding CanWithdraw}" HorizontalAlignment="Left" />
+          </StackPanel>
+        </Border>
+      </Grid>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

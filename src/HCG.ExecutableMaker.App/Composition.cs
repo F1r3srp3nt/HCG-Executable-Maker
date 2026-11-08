@@ -88,6 +88,27 @@ public static class Composition
         services.AddSingleton<ArtifactExporter>();
 
         // View models (pages are singletons so a running build survives navigation)
+        // HCG account (sign-in, ERP App Access, support requests, HCG AI). Public client: no secret exists anywhere.
+        var (hcgConfig, hcgConfigProblem) = HCG.ExecutableMaker.Account.HcgConnectConfiguration.Load(paths.Root);
+        var (credentialStore, storeProblem) = HCG.ExecutableMaker.Account.SecureCredentialStores.ForCurrentPlatform();
+        var hcgHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        hcgHttp.DefaultRequestHeaders.UserAgent.ParseAdd($"HCGExecutableMaker/{HostInfo.ProductVersion}");
+        var uploadHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+        services.AddSingleton(hcgConfig);
+        services.AddSingleton(credentialStore);
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAuthClient(hcgHttp, hcgConfig, TimeProvider.System));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAccountService(hcgConfig, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAuthClient>(),
+            credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>()));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgApiClient(hcgHttp, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>()));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AppAccessService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), TimeProvider.System));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Support.SupportService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), uploadHttp));
+        // HCG AI: no verified gateway contract exists yet, so the "Not connected" adapter is used (never simulated answers).
+        services.AddSingleton<HCG.ExecutableMaker.Account.Ai.IHcgAiGateway, HCG.ExecutableMaker.Account.Ai.NotConnectedAiGateway>();
+        services.AddSingleton<HCG.ExecutableMaker.Account.Ai.AiAssistant>();
+        services.AddSingleton<AccountViewModel>();
+        services.AddSingleton<SupportViewModel>();
+        services.AddSingleton<MyRequestsViewModel>();
+        services.AddSingleton<AiAssistantViewModel>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<DashboardViewModel>();
         services.AddSingleton<BuildWizardViewModel>();

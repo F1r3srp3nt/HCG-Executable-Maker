@@ -1,0 +1,146 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:s="using:HCG.ExecutableMaker.Account.Support"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.SupportView"
+             x:DataType="vm:SupportViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.formlabel">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextSecondary}" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+  </UserControl.Styles>
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18" MaxWidth="1100" HorizontalAlignment="Left">
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="label" Text="HCG SUPPORT" />
+          <TextBlock Classes="h2" Text="Request support for a project" />
+          <TextBlock Classes="body secondary" Text="{Binding HowItWorks}" TextWrapping="Wrap" />
+          <Border Classes="callout" IsVisible="{Binding !CanUseSupport}">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{Binding Availability}" FontSize="12.5" TextWrapping="Wrap" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="small" Content="Go to Account" Command="{Binding OpenAccountCommand}" />
+                <Button Classes="small ghost" Content="My requests" Command="{Binding OpenMyRequestsCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <TextBlock Classes="muted" Text="{Binding Availability}" IsVisible="{Binding CanUseSupport}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Grid ColumnDefinitions="*,*">
+        <Border Classes="card" Margin="0,0,9,0" VerticalAlignment="Top">
+          <StackPanel Spacing="12">
+            <TextBlock Classes="h2" Text="Describe it" />
+            <TextBlock Classes="muted" Text="{Binding ProjectName, StringFormat='Project: {0}'}" />
+            <StackPanel><TextBlock Classes="formlabel" Text="TITLE" /><TextBox Text="{Binding RequestTitle}" MaxLength="200" /></StackPanel>
+            <StackPanel><TextBlock Classes="formlabel" Text="WHAT ARE YOU TRYING TO BUILD?" /><TextBox Text="{Binding Goal}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" MaxLength="2000" /></StackPanel>
+            <StackPanel><TextBlock Classes="formlabel" Text="LANGUAGE / FRAMEWORK (IF KNOWN)" /><TextBox Text="{Binding LanguageFramework}" PlaceholderText="e.g. Dart / Flutter, Unity, Rust + Tauri" /></StackPanel>
+            <UniformGrid Columns="2">
+              <StackPanel Margin="0,0,6,0"><TextBlock Classes="formlabel" Text="DESIRED OPERATING SYSTEM" /><AutoCompleteBox Text="{Binding TargetOs}" ItemsSource="{Binding OsOptions}" FilterMode="Contains" /></StackPanel>
+              <StackPanel Margin="6,0,0,0"><TextBlock Classes="formlabel" Text="OUTPUT FORMAT" /><TextBox Text="{Binding OutputFormat}" PlaceholderText="e.g. .app, Setup.exe, .apk" /></StackPanel>
+            </UniformGrid>
+            <StackPanel><TextBlock Classes="formlabel" Text="WHAT FAILED OR IS UNSUPPORTED?" /><TextBox Text="{Binding Problem}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" MaxLength="4000" /></StackPanel>
+          </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Column="1" Margin="9,0,0,0" Spacing="18">
+          <Border Classes="card">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="h2" Text="What to send" />
+              <RadioButton GroupName="mode" IsChecked="{Binding DiagnosticsOnly}">
+                <StackPanel Spacing="1"><TextBlock Text="A. Diagnostics only" FontWeight="Medium" /><TextBlock Classes="muted" Text="The items listed below. No project files." TextWrapping="Wrap" /></StackPanel>
+              </RadioButton>
+              <RadioButton GroupName="mode" IsChecked="{Binding IncludeFiles}" IsEnabled="{Binding HasProjectFolder}">
+                <StackPanel Spacing="1"><TextBlock Text="B. Diagnostics plus files you select" FontWeight="Medium" /><TextBlock Classes="muted" Text="Files from the imported project, as one ZIP. You choose each file." TextWrapping="Wrap" /></StackPanel>
+              </RadioButton>
+              <TextBlock Classes="muted" FontSize="12" Text="Option B needs an imported project (open this form from the project's inspection results)." IsVisible="{Binding !HasProjectFolder}" TextWrapping="Wrap" />
+              <TextBlock Classes="formlabel" Text="DIAGNOSTICS THAT WILL BE SENT (SECRETS MASKED, HOME FOLDER SHOWN AS ~)" Margin="0,6,0,0" />
+              <Border Classes="inset" Padding="10" MaxHeight="220">
+                <ScrollViewer>
+                  <ItemsControl ItemsSource="{Binding Diagnostics}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="s:DiagnosticEntry">
+                        <SelectableTextBlock Classes="mono" FontSize="11" TextWrapping="Wrap" Margin="0,1">
+                          <Run Text="{Binding Section}" Foreground="{DynamicResource Hcg.Brush.Accent}" /><Run Text=" · " /><Run Text="{Binding Label}" FontWeight="SemiBold" /><Run Text=": " /><Run Text="{Binding Value}" />
+                        </SelectableTextBlock>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Border>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Grid>
+
+      <Border Classes="card" IsVisible="{Binding IncludeFiles}">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="h2" Text="Files that will be sent" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Credentials, .env files, keys, certificates and signing material are never sent. Dependency folders, build output and version-control data are excluded. Files that look like they contain secrets are unticked and explained. The scan finds common credential formats only and cannot guarantee that no secret remains, so review the list." />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="small ghost" Content="Untick all flagged" Command="{Binding ExcludeAllFlaggedCommand}" VerticalAlignment="Top" />
+          </Grid>
+          <Border Classes="inset" Padding="6" MaxHeight="320">
+            <ScrollViewer>
+              <ItemsControl ItemsSource="{Binding Files}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PlannedFileItem">
+                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
+                      <CheckBox IsChecked="{Binding Included}" IsEnabled="{Binding CanInclude}" VerticalAlignment="Top" />
+                      <StackPanel Grid.Column="1" Spacing="0">
+                        <TextBlock Classes="mono" FontSize="11.5" Text="{Binding Path}" />
+                        <TextBlock FontSize="11" Text="{Binding Explanation}" Classes.warning="{Binding IsFlagged}" Classes="muted" IsVisible="{Binding IsExcludedByDefault}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="2" Classes="muted" FontSize="11" Text="{Binding Size}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Border>
+          <ItemsControl ItemsSource="{Binding SkippedFolders}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String"><TextBlock Classes="muted mono" FontSize="11" Text="{Binding}" /></DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <CheckBox IsChecked="{Binding FlaggedAcknowledged}" IsVisible="{Binding HasFlaggedIncluded}">
+            <TextBlock TextWrapping="Wrap" Text="I have checked the flagged files I ticked and want to send them anyway." />
+          </CheckBox>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Review and submit" />
+          <TextBlock Text="{Binding Destination}" TextWrapping="Wrap" FontSize="12.5" />
+          <TextBlock Classes="secondary" Text="{Binding Summary}" TextWrapping="Wrap" FontSize="12.5" />
+          <Border Classes="callout error" IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding ValidationError}" TextWrapping="Wrap" FontSize="12.5" />
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="primary" Content="Submit to HCG" Command="{Binding SubmitCommand}" />
+            <Button Classes="ghost" Content="Cancel upload" Command="{Binding CancelSubmitCommand}" IsVisible="{Binding IsSubmitting}" />
+          </StackPanel>
+          <StackPanel Spacing="4" IsVisible="{Binding IsSubmitting}">
+            <ProgressBar Value="{Binding UploadPercent}" Maximum="100" />
+            <TextBlock Classes="muted" Text="{Binding UploadStatus}" />
+          </StackPanel>
+          <Border Classes="callout" IsVisible="{Binding ResultMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <StackPanel Spacing="6">
+              <TextBlock Text="{Binding ResultMessage}" TextWrapping="Wrap" FontSize="12.5" />
+              <Button Classes="small" Content="Open My requests" Command="{Binding OpenMyRequestsCommand}" HorizontalAlignment="Left" IsVisible="{Binding ResultSucceeded}" />
+            </StackPanel>
+          </Border>
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Nothing is sent until you press Submit. Importing or building a project never uploads it." />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>
