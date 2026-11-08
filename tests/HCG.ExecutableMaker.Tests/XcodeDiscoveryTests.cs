@@ -45,6 +45,38 @@ public sealed class XcodeDiscoveryTests
     }
 
     [Fact]
+    public void Version_comes_from_version_plist_when_Info_plist_is_binary()
+    {
+        using var dir = new TempDir();
+        var app = FakeXcode(dir, "Xcode_26.5.app", "26.5", "17F42");
+        // Real Xcode ships a binary Info.plist; only version.plist is XML.
+        File.WriteAllBytes(Path.Combine(app, "Contents", "Info.plist"), [.. "bplist00"u8.ToArray(), 0, 1, 2, 3]);
+        File.WriteAllText(Path.Combine(app, "Contents", "version.plist"), """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>26.5</string><key>ProductBuildVersion</key><string>17F42</string></dict></plist>
+            """);
+        var x = XcodeDiscovery.Read(app)!;
+        Assert.Equal(("26.5", "17F42"), (x.Version, x.BuildVersion));
+        Assert.StartsWith("Xcode 26.5 (17F42)", x.Display);
+    }
+
+    [UnixFact]
+    public void Symlinked_names_of_the_same_Xcode_are_listed_once_keeping_the_active_name()
+    {
+        using var dir = new TempDir();
+        var real = FakeXcode(dir, "Xcode_26.6.0.app", "26.6", "17F113");
+        FakeXcode(dir, "Xcode_26.5.app", "26.5", "17F42");
+        Directory.CreateSymbolicLink(dir.Combine("Xcode.app"), real);
+        Directory.CreateSymbolicLink(dir.Combine("Xcode_26.6.app"), real);
+
+        var plain = XcodeDiscovery.FindInstallations([dir.Path]);
+        Assert.Equal([real, dir.Combine("Xcode_26.5.app")], plain.Select(x => x.AppPath));
+
+        var activeAlias = XcodeDiscovery.FindInstallations([dir.Path], [dir.Combine("Xcode.app", "Contents", "Developer")], dir.Combine("Xcode.app", "Contents", "Developer"));
+        Assert.Equal([dir.Combine("Xcode.app"), dir.Combine("Xcode_26.5.app")], activeAlias.Select(x => x.AppPath));
+    }
+
+    [Fact]
     public void Read_accepts_the_app_or_its_developer_directory_and_deduplicates()
     {
         using var dir = new TempDir();

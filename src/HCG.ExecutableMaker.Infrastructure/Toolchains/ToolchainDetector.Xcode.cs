@@ -41,7 +41,7 @@ public sealed partial class ToolchainDetector
         var extra = new List<string>();
         if (UseSpotlight) extra.AddRange(await SpotlightXcodesAsync(ct).ConfigureAwait(false));
         if (active is not null && active.EndsWith(".app/Contents/Developer", StringComparison.Ordinal)) extra.Add(active);
-        var installed = XcodeDiscovery.FindInstallations(XcodeSearchFolders ?? XcodeDiscovery.DefaultSearchFolders().ToList(), extra);
+        var installed = XcodeDiscovery.FindInstallations(XcodeSearchFolders ?? XcodeDiscovery.DefaultSearchFolders().ToList(), extra, active);
 
         int versionExit = -1;
         string versionOut = "", versionErr = "";
