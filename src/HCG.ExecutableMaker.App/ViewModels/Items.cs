@@ -84,8 +84,14 @@ public sealed class DiagnosticItem(AnalysisDiagnostic d)
     public StatusTag Severity => new(d.Severity.ToString(), d.Severity switch { DiagnosticSeverity.Error => "error", DiagnosticSeverity.Warning => "warning", _ => "info" });
 }
 
-public sealed class ToolchainItem(ToolchainInfo info)
+public sealed class ToolchainItem(ToolchainInfo info, bool optional = false)
 {
+    /// <summary>The tool is only needed for some kinds of project (Android, iOS, Flutter, MAUI) or another host.</summary>
+    public bool Optional { get; } = optional;
+    public string Source => Info.Source is { Length: > 0 } src ? "Found via " + src : "";
+    public bool HasSource => Source.Length > 0;
+    public string? SetupUrl => Info.SetupUrl;
+    public bool HasSetupUrl => !string.IsNullOrEmpty(Info.SetupUrl) && Info.Status != ToolchainStatus.Installed;
     public ToolchainInfo Info { get; } = info;
     public string Name => Info.DisplayName;
     public string Category => Info.Category;
@@ -97,10 +103,32 @@ public sealed class ToolchainItem(ToolchainInfo info)
     public bool HasHint => !string.IsNullOrEmpty(Hint);
     public string Others => Info.AdditionalVersions.Count > 1 ? "All installed: " + string.Join(", ", Info.AdditionalVersions) : "";
     public bool HasOthers => Info.AdditionalVersions.Count > 1;
-    public StatusTag Status => new(Format.Label(Info.Status), Format.Tone(Info.Status));
+    public StatusTag Status => Optional && Info.Status is ToolchainStatus.Missing or ToolchainStatus.UnsupportedOnHost
+        ? new(Info.Status == ToolchainStatus.Missing ? "Not set up" : "Other host", "neutral")
+        : new(Format.Label(Info.Status), Format.Tone(Info.Status));
 }
 
-public sealed record ToolchainGroup(string Category, IReadOnlyList<ToolchainItem> Items);
+public sealed record ToolchainGroup(string Category, IReadOnlyList<ToolchainItem> Items)
+{
+    /// <summary>What this group is for, so a missing optional SDK is not read as a broken machine.</summary>
+    public string Note { get; init; } = "";
+    public bool HasNote => Note.Length > 0;
+}
+
+/// <summary>One readiness row for a specific build: tool, state, why, and the exact fix.</summary>
+public sealed class ReadinessRow(ReadinessItem item)
+{
+    public ReadinessItem Item { get; } = item;
+    public string Tool => Item.Tool;
+    public string Detail => Item.Detail;
+    public string? Fix => Item.Fix;
+    public bool HasFix => !string.IsNullOrEmpty(Item.Fix) && Item.State is not (ReadinessState.Ready or ReadinessState.NotNeeded);
+    public string Location => string.Join(" · ", new[] { Item.Path, Item.Version is null ? null : "version " + Item.Version }.Where(x => !string.IsNullOrEmpty(x)));
+    public bool HasLocation => Location.Length > 0;
+    public string? SetupUrl => Item.SetupUrl;
+    public bool HasSetupUrl => !string.IsNullOrEmpty(Item.SetupUrl) && Item.State is not (ReadinessState.Ready or ReadinessState.NotNeeded);
+    public StatusTag Status => new(Format.Label(Item.State), Format.Tone(Item.State, Item.Required));
+}
 
 public sealed class RequirementItem(ToolchainRequirement r)
 {

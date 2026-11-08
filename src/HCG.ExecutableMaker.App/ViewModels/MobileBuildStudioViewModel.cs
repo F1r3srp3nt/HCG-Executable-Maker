@@ -438,10 +438,47 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     partial void OnOutputDirectoryChanged(string value) => PrepareSummary();
     partial void OnAppNameChanged(string value) => PrepareSummary();
     partial void OnAppVersionChanged(string value) => PrepareSummary();
+    partial void OnSelectedOutputChanged(MobileOutputItem? value) => PrepareSummary();
+    partial void OnSelectedExportMethodChanged(Choice<IosExportMethod>? value) => PrepareSummary();
+    partial void OnProvisioningProfileChanged(string value) => PrepareSummary();
+    partial void OnAllowProvisioningUpdatesChanged(bool value) => PrepareSummary();
+
+    // ───────────── Readiness for the chosen project + output + signing ─────────────
+
+    public ObservableCollection<ReadinessRow> ReadinessRequired { get; } = [];
+    public ObservableCollection<ReadinessRow> ReadinessOptional { get; } = [];
+    [ObservableProperty] private StatusTag _readinessTag = new("—", "neutral");
+    [ObservableProperty] private string _readinessSummary = "";
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand))] private bool _readinessCanBuild;
+    [ObservableProperty] private bool _hasReadiness;
+
+    [RelayCommand] private async Task OpenSetupUrlAsync(ReadinessRow? row) { if (row?.SetupUrl is { } u) await _shell.OpenUrlAsync(u); }
+
+    private void UpdateReadiness(MobileBuildOptions? o)
+    {
+        ReadinessRequired.Clear();
+        ReadinessOptional.Clear();
+        if (Mobile is not { } m || o is null)
+        {
+            HasReadiness = false;
+            ReadinessCanBuild = false;
+            return;
+        }
+        var r = MobileReadiness.Evaluate(m, o.Output, o, _report);
+        foreach (var i in r.Items.Where(i => i.Required)) ReadinessRequired.Add(new ReadinessRow(i));
+        foreach (var i in r.Items.Where(i => !i.Required)) ReadinessOptional.Add(new ReadinessRow(i));
+        HasReadiness = true;
+        ReadinessCanBuild = r.CanBuild;
+        ReadinessTag = r.CanBuild ? new StatusTag("Can build", "success") : new StatusTag($"{r.Blockers.Count()} blocker(s)", "error");
+        ReadinessSummary = r.CanBuild
+            ? r.Items.Any(i => i.Required && i.State == ReadinessState.NotVerifiable) ? "Everything required is present; items marked “Not verifiable” are confirmed by the build itself." : "Everything this build needs is ready."
+            : "Fix the required items below, then press Refresh on the Toolchains page (or here).";
+    }
 
     private void PrepareSummary()
     {
         Summary.Clear();
+        UpdateReadiness(CreateOptions());
         if (CreateOptions() is not { } o) return;
         var s = CreateSettings(o);
         Summary.Add(new("Output", $"{o.Output.DisplayName()} · {o.Framework.DisplayName()}"));
@@ -452,7 +489,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         Summary.Add(new("Destination", MobileBuildService.OutputRootFor(s)));
     }
 
-    private bool CanStartBuild() => TrustAcknowledged && !IsBuilding && SelectedOutput?.IsEnabled == true;
+    private bool CanStartBuild() => TrustAcknowledged && !IsBuilding && SelectedOutput?.IsEnabled == true && ReadinessCanBuild;
 
     [RelayCommand(CanExecute = nameof(CanStartBuild))]
     private async Task StartBuildAsync()

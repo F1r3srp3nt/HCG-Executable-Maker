@@ -131,6 +131,28 @@ public static class Format
         _ => "Development (debugging)",
     };
 
+    public static string Label(ReadinessState s) => s switch
+    {
+        ReadinessState.Ready => "Ready",
+        ReadinessState.NotFound => "Not found",
+        ReadinessState.InvalidPath => "Invalid path",
+        ReadinessState.IncompatibleVersion => "Incompatible version",
+        ReadinessState.SetupRequired => "Setup required",
+        ReadinessState.NotVerifiable => "Not verifiable",
+        ReadinessState.NotNeeded => "Not needed for this build",
+        _ => "Other host",
+    };
+
+    public static string Tone(ReadinessState s, bool required) => s switch
+    {
+        ReadinessState.Ready => "success",
+        ReadinessState.NotNeeded or ReadinessState.OtherHost when !required => "neutral",
+        ReadinessState.NotVerifiable => "info",
+        _ when !required => "neutral",
+        ReadinessState.InvalidPath or ReadinessState.IncompatibleVersion => "error",
+        _ => "warning",
+    };
+
     public static string Label(PackagingAvailability a) => a switch
     {
         PackagingAvailability.Available => "Ready",
