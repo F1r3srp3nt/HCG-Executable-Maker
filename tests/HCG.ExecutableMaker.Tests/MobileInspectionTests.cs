@@ -192,7 +192,8 @@ public class MobileInspectionTests : IDisposable
         var options = MobileCapabilities.Evaluate(a.Mobile!, Report(TargetPlatform.MacOS, ToolchainIds.Xcode, ToolchainIds.IosSdk));
         Assert.True(options.Single(o => o.Output == MobileOutput.IosSimulatorApp).IsAvailable);
         Assert.True(options.Single(o => o.Output == MobileOutput.IosArchive).IsAvailable);
-        Assert.Contains("code-signing identities", options.Single(o => o.Output == MobileOutput.IosIpa).Reason);
+        // CI's "IPA is refused without code-signing identities" step expects this exact text (.github/workflows/build.yml).
+        Assert.Contains("no code-signing identities were found for this destination", options.Single(o => o.Output == MobileOutput.IosIpa).Reason);
         var signed = MobileCapabilities.Evaluate(a.Mobile!, Report(TargetPlatform.MacOS, ToolchainIds.Xcode, ToolchainIds.IosSdk, ToolchainIds.AppleSigningIdentities));
         Assert.True(signed.Single(o => o.Output == MobileOutput.IosIpa).IsAvailable);
     }
