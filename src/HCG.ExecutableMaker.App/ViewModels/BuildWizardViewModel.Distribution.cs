@@ -211,7 +211,8 @@ public sealed partial class BuildWizardViewModel
     /// <summary>Re-evaluates every capability state after a distribution choice changed (selection is kept where still possible).</summary>
     private void DistributionChanged()
     {
-        if (_suspendDistribution || Step != WizardStep.Package) return;
+        // Also runs while moving from Configure to Package (PreparePackaging), so the states are right on first display.
+        if (_suspendDistribution || !ShowDistribution || Step is WizardStep.Build or WizardStep.Results) return;
         var ctx = DistributionContext(BasePackagingContext());
         var (devState, devReason) = MacDistributionCatalog.DeveloperId(ctx);
         DeveloperIdAvailable = devState == PackagingAvailability.Available;
@@ -272,10 +273,16 @@ public sealed partial class BuildWizardViewModel
     public ObservableCollection<DistributionStepItem> DistributionResults { get; } = [];
     [ObservableProperty] private bool _hasDistributionResults;
 
+    private bool _keepDistributionResults;
+
     private async Task PrepareDistributionActionsAsync(BuildRecord build)
     {
-        DistributionResults.Clear();
-        HasDistributionResults = false;
+        if (!_keepDistributionResults)
+        {
+            DistributionResults.Clear();
+            HasDistributionResults = false;
+        }
+        _keepDistributionResults = false;
         var s = await _settings.LoadAsync();
         var mac = build.Settings.Platform == TargetPlatform.MacOS && build.Status == BuildStatus.Succeeded;
         var blocker = NotarizationService.Blocker(build, s.NotaryKeychainProfile);
@@ -297,6 +304,8 @@ public sealed partial class BuildWizardViewModel
                 "Notarize")) return;
         await RunDistributionActionAsync(async ct =>
             await _notarization.NotarizeAsync(build, NotarizationService.Eligible(build).Select(a => a.Id).ToList(), s.NotaryKeychainProfile!, l => Append(BuildLogKind.Info, l), ct));
+        // Refresh the artifacts (new checksums and checks) but keep the step-by-step notarization report on screen.
+        _keepDistributionResults = true;
         ShowResult(build);
     }
 
