@@ -288,6 +288,8 @@ internal static class Program
         public Task<string?> PickFileAsync(string title, string typeName, params string[] patterns) => Task.FromResult<string?>(null);
         public Task CopyAsync(string text) => Task.CompletedTask;
         public Task<bool> OpenFolderAsync(string path) => Task.FromResult(Directory.Exists(path));
+        public Task<string?> PickApplicationAsync(string title) => Task.FromResult(Arg("--select-xcode"));
+        public Task<bool> OpenApplicationAsync(string appPath) => Task.FromResult(false);
     }
 
     private sealed class LoggingDialogs : IDialogService

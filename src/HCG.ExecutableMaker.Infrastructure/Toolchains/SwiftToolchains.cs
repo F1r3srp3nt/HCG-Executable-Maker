@@ -97,19 +97,20 @@ public sealed partial class ToolchainDetector
     private async Task<ToolchainInfo> DetectXcTestAsync(CancellationToken ct)
     {
         const string name = "XCTest (tests only — not needed to build)";
-        const string hint = "Only needed to run the package's tests: install Xcode and select it (sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer), or run tests with DEVELOPER_DIR pointing at Xcode. Building and packaging do not need XCTest.";
+        const string hint = "Only needed to run the package's tests: select an installed Xcode for HCG (Toolchains › Xcode › Select Xcode) — the system setting is not changed. Building and packaging do not need XCTest.";
         try
         {
-            var (rd, devOut, _) = await runner.CaptureAsync(new ProcessSpec { Executable = "/usr/bin/xcode-select", Arguments = ["-p"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
+            var devDir = await ActiveDeveloperDirectoryAsync(ct).ConfigureAwait(false);
+            var (rd, devOut) = (devDir is not null, devDir ?? "");
             var (rp, platformOut, _) = await runner.CaptureAsync(new ProcessSpec { Executable = "/usr/bin/xcrun", Arguments = ["--sdk", "macosx", "--show-sdk-platform-path"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
             var candidates = new List<string>();
             if (rp.Succeeded && platformOut.Trim().Length > 0) candidates.Add(Path.Combine(platformOut.Trim(), "Developer", "Library", "Frameworks", "XCTest.framework"));
-            if (rd.Succeeded && devOut.Trim().Length > 0) candidates.Add(Path.Combine(devOut.Trim(), "Library", "Developer", "Frameworks", "XCTest.framework"));
+            if (rd && devOut.Length > 0) candidates.Add(Path.Combine(devOut.Trim(), "Library", "Developer", "Frameworks", "XCTest.framework"));
             var found = candidates.FirstOrDefault(Directory.Exists);
             return found is not null
                 ? new ToolchainInfo { Id = ToolchainIds.XcTest, DisplayName = name, Category = SwiftCategory, Status = ToolchainStatus.Installed, ExecutablePath = found, Detail = found }
                 : new ToolchainInfo { Id = ToolchainIds.XcTest, DisplayName = name, Category = SwiftCategory, Status = ToolchainStatus.Missing,
-                    Detail = $"Not found in {(rd.Succeeded ? devOut.Trim() : "the selected developer directory")}", InstallHint = hint };
+                    Detail = $"Not found in {(rd ? devOut : "the selected developer directory")}", InstallHint = hint };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

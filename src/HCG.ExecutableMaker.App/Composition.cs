@@ -36,6 +36,7 @@ public static class Composition
         // Environment & toolchains
         services.AddSingleton<IProcessRunner, ProcessRunner>();
         services.AddSingleton<IExecutableLocator, ExecutableLocator>();
+        services.AddSingleton<DeveloperDirectorySelection>();
         services.AddSingleton<IToolchainDetector, ToolchainDetector>();
         services.AddSingleton<IToolchainService, ToolchainService>();
 

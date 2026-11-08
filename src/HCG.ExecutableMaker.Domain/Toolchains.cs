@@ -33,6 +33,8 @@ public sealed record ToolchainReport(
 {
     public ToolchainInfo? Find(string id) => Toolchains.FirstOrDefault(t => t.Id == id);
     public bool IsAvailable(string id) => Find(id)?.IsAvailable == true;
+    /// <summary>Xcode discovery and diagnosis (macOS only).</summary>
+    public XcodeStatus? Xcode { get; init; }
 }
 
 public static class ToolchainIds

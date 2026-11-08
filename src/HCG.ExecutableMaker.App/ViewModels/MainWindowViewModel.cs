@@ -49,6 +49,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public async Task InitializeAsync()
     {
+        // HCG's own Xcode choice (DEVELOPER_DIR for HCG's processes) must be in place before anything probes tools.
+        try { await _services.GetRequiredService<HCG.ExecutableMaker.Infrastructure.Toolchains.DeveloperDirectorySelection>().InitializeAsync(); }
+        catch (Exception ex) { EngineStatus = "Could not load the Xcode selection: " + ex.Message; EngineTone = "warning"; }
         await NavigateAsync("dashboard", null);
         try { await _toolchains.GetAsync(); }
         catch (Exception ex) { EngineStatus = "Toolchain detection failed: " + ex.Message; EngineTone = "error"; }

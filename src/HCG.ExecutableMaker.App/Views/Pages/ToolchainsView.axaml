@@ -29,6 +29,63 @@
       </Border>
       <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
 
+      <Border Classes="card" IsVisible="{Binding HasXcodePanel}">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="eyebrow" Text="XCODE" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="Command Line Tools are enough for macOS Swift package builds. iOS builds, the Simulator, installer and store validation need Xcode." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding XcodeState}" VerticalAlignment="Top" />
+          </Grid>
+          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" >
+            <TextBlock Classes="label" Text="ACTIVE DEVELOPER DIRECTORY" Margin="0,4" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding XcodeActivePath}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="1" Classes="label" Text="SOURCE" Margin="0,4" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding XcodeSource}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="2" Classes="label" Text="VERIFIED VERSION" Margin="0,4" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="{Binding XcodeVersion}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="3" Classes="label" Text="SDKS" Margin="0,4" />
+            <SelectableTextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding XcodeSdks}" TextWrapping="Wrap" Margin="0,4" />
+          </Grid>
+          <TextBlock Text="{Binding XcodeDiagnosis}" TextWrapping="Wrap" />
+          <Border Classes="callout warning" Padding="12" IsVisible="{Binding HasXcodeAction}">
+            <SelectableTextBlock Text="{Binding XcodeAction}" TextWrapping="Wrap" />
+          </Border>
+          <SelectableTextBlock Classes="mono muted" FontSize="12" Text="{Binding XcodeRawError}" IsVisible="{Binding HasXcodeRawError}" TextWrapping="Wrap" />
+
+          <TextBlock Classes="label" Text="INSTALLED XCODE APPLICATIONS" Margin="0,6,0,0" />
+          <TextBlock Classes="muted" Text="None found in /Applications, ~/Applications or by Spotlight. Use Browse… if Xcode is elsewhere."
+                     IsVisible="{Binding !XcodeInstallations.Count}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding XcodeInstallations}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:XcodeInstallItem">
+                <Grid ColumnDefinitions="200,*,Auto" Margin="0,4">
+                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                  <SelectableTextBlock Grid.Column="1" Classes="mono muted" Text="{Binding Path}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                  <Panel Grid.Column="2" Margin="12,0,0,0">
+                    <TextBlock Classes="muted" Text="Active" IsVisible="{Binding IsActive}" VerticalAlignment="Center" />
+                    <Button Content="Select Xcode" IsVisible="{Binding CanSelect}"
+                            Command="{Binding $parent[ItemsControl].((vm:ToolchainsViewModel)DataContext).SelectXcodeCommand}"
+                            CommandParameter="{Binding}" />
+                  </Panel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <WrapPanel Orientation="Horizontal">
+            <Button Content="Browse…" Command="{Binding BrowseXcodeCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,8,8" />
+            <Button Content="Open Xcode" Command="{Binding OpenXcodeCommand}" Margin="0,0,8,8" />
+            <Button Classes="primary" Content="Recheck" Command="{Binding RefreshCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,8,8" />
+            <Button Content="Use system setting" Command="{Binding UseSystemSettingCommand}" IsVisible="{Binding HcgSelectionActive}" Margin="0,0,8,8" />
+          </WrapPanel>
+          <TextBlock Classes="muted" Text="{Binding XcodeMessage}" IsVisible="{Binding HasXcodeMessage}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="Selecting an Xcode here sets DEVELOPER_DIR for HCG's own processes (inspection, SDK discovery, builds, signing and tests). HCG never runs xcode-select --switch." />
+        </StackPanel>
+      </Border>
+
       <ItemsControl ItemsSource="{Binding Groups}">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ToolchainGroup">

@@ -32,6 +32,10 @@ public sealed record AppSettings
     public int BuildTimeoutMinutes { get; init; } = 30;
     public string? DefaultOutputDirectory { get; init; }
     public string? LastPublisher { get; init; }
+    /// <summary>HCG's own developer directory (…/Xcode.app/Contents/Developer), passed to HCG's processes as DEVELOPER_DIR. Null = system setting.</summary>
+    public string? DeveloperDirectory { get; init; }
+    /// <summary>Name of a notarytool keychain profile (created with xcrun notarytool store-credentials). Only the name is stored; the secret stays in the login keychain.</summary>
+    public string? NotaryKeychainProfile { get; init; }
 }
 
 public interface ISettingsStore
