@@ -2,6 +2,48 @@
 
 0.2.0 contains M0.1, M0.2 (Windows installer) and M0.5 (Mobile Build Studio), merged into `main` with founder approval.
 
+# Swift macOS apps (unreleased, branch `feature/swift-macos`, not merged)
+
+Evidence: CI run #20 (<https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/runs/42428955743>), all jobs green.
+Host: macOS 26.7.2, Xcode 26.6 (`/Applications/Xcode_26.6.app/Contents/Developer`), Swift 6.3.3, macOS SDK 26.5.
+Reference repository: Oslo-Sprint @ `45431255`.
+
+## Verified on a real Mac (through the real New Build wizard, `tools/ui-driver`, headless)
+
+| What | Result |
+|---|---|
+| Folder import, both packages listed, none pre-selected; `distil/` evaluated after trust. Products: TokenLab (app); libraries: TokenLabCore; tests: TokenLabCoreTests | Passed |
+| **Distil.app** (TokenLab, display name Distil, `dev.tokenlab.prototype` 0.4.0 (4), developer-tools, arm64) + app ZIP + DMG | Built and verified. `codesign --verify --strict` valid. Launched with `open`, still running, window screenshot. DMG mounted: app verifies, Applications link present |
+| ZIP import with a wrapping folder; `relay/` evaluated. Products Relay (app) and relay-runner (CLI), neither pre-selected. The wizard asks for `NSMicrophoneUsageDescription` and blocks the build while it is empty | Passed |
+| **Relay.app** universal (x86_64 + arm64, minos 14.0) + app ZIP | Built and verified. Launched from the build output and again after `ditto -x -k` of the ZIP; window screenshot |
+| **relay-runner** CLI (folder + ZIP) | Built; `relay-runner help` and `export-procedure` ran, also from the unzipped ZIP |
+| Builds refused before trust; evaluation refused before trust | Passed |
+
+Screenshots: `docs/screenshots/11`–`15-swift-*.jpg`.
+
+## Verified locally (Linux)
+
+- Wizard on Linux: evaluation and Continue disabled, *Needs another host*, the reason shown (ui-driver
+  `--expect-blocked-host`).
+- 313 tests passed, 1 skipped (Windows-only).
+
+## Not verified
+
+- Clicking through the wizard by hand on a Mac desktop. CI drives the same view models and views headlessly; only the
+  file picker and dialogs are scripted.
+- Packages with SwiftPM resource bundles: the reference projects have none, and older `Bundle.module` accessors may
+  not find `Contents/Resources`.
+- Packages with remote dependencies: implemented (`swift package resolve`), not exercised.
+- The Command Line Tools-only developer directory (CI uses full Xcode). Running the apps on other Macs (Gatekeeper
+  warns: ad-hoc signature).
+
+## Not implemented
+
+Xcode macOS projects/workspaces (recognized, explained in the UI); Developer ID signing, notarization, `.pkg`, Mac App
+Store; Swift builds on Windows/Linux.
+
+---
+
 # Milestone 0.2 (Windows installer)
 
 Evidence: CI run #13

@@ -607,10 +607,11 @@
                       <TextBlock Classes="label" Text="ERRORS" />
                       <TextBlock Text="{Binding Result.ErrorCount, FallbackValue=0}" FontWeight="SemiBold" Classes="error" />
                     </StackPanel>
-                    <StackPanel Spacing="2">
-                      <TextBlock Classes="label" Text="OUTPUT" />
-                      <SelectableTextBlock Text="{Binding ResultOutput}" Classes="mono" />
-                    </StackPanel>
+                  </StackPanel>
+                  <!-- Own row: long output paths wrap instead of running under the action buttons. -->
+                  <StackPanel Spacing="2" Margin="0,0,16,0">
+                    <TextBlock Classes="label" Text="OUTPUT" />
+                    <SelectableTextBlock Text="{Binding ResultOutput}" Classes="mono" TextWrapping="Wrap" />
                   </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Spacing="8" Margin="20,0,0,0" MinWidth="200">

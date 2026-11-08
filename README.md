@@ -9,7 +9,8 @@
 HCG Executable Maker imports a project (ZIP archive or folder), inspects it **without executing any of its code**,
 builds it with the real toolchain, packages it for distribution, and verifies every artifact with SHA-256 checksums.
 
-**Status: 0.2.0 pre-release — M0.1 Functional Foundation, M0.2 Windows installer, M0.5 Mobile Build Studio.**
+**Status: 0.2.0 pre-release — M0.1 Functional Foundation, M0.2 Windows installer, M0.5 Mobile Build Studio.
+Unreleased on `feature/swift-macos`: native Swift/macOS apps (SwiftPM → `.app`).**
 .NET projects (including Avalonia desktop apps) can be built and packaged for **Windows** (portable or **Setup.exe
 installer**), **macOS** and **Linux (portable preview)**; Android and iOS projects are built in **Mobile Build Studio**
 (see below). See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is and isn't implemented
@@ -38,6 +39,27 @@ A standard **Setup.exe** built with Inno Setup 6: Start-menu shortcut, optional 
 all-users install, uninstaller in Settings → Apps, in-place upgrades. Requires a Windows build host with Inno Setup 6
 and a self-contained build; from macOS/Linux use the Windows CI runner. Verified by really installing, launching and
 uninstalling on Windows. Details: [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md).
+
+## Swift macOS apps (unreleased, `feature/swift-macos`)
+
+Swift Package Manager packages are built into macOS apps on a Mac, through the normal New Build wizard:
+
+1. Import a folder or ZIP.
+2. Choose the package (e.g. `distil/` or `relay/`; never auto-selected).
+3. Evaluate `Package.swift` on this Mac. This happens only after you confirm trust, through the build worker.
+4. Pick the executable product (libraries and tests are listed separately).
+5. Configure: display name, bundle id, build number, minimum macOS, privacy texts, arm64/x86_64/universal.
+6. Build.
+
+Outputs:
+- **SwiftUI/AppKit** products become an ad-hoc-signed `.app`, optionally also as ZIP and DMG.
+- **Command-line** products become a folder or ZIP.
+
+Not offered on Windows/Linux. macOS Xcode projects are recognized but not built yet. Verified in CI by building and
+launching Distil.app and Relay.app from the pinned Oslo-Sprint repository. Details:
+[`docs/SWIFT-MACOS.md`](docs/SWIFT-MACOS.md).
+
+![Swift package in the wizard](docs/screenshots/11-swift-inspect-relay.jpg)
 
 ## Mobile Build Studio (M0.5)
 
