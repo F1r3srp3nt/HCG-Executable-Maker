@@ -274,12 +274,13 @@ jobs:
       - name: Unsigned device archive (.xcarchive, inspection only)
         run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT" --output ios-archive --signing unsigned --trust
 
-      # CI has no Apple certificates, so HCG refuses the IPA before archiving (capability gate). The later refusal —
-      # inspecting an unsigned archive and declining to export it — is covered by MobileBuildServiceTests.
+      # CI has no Apple certificates, so HCG refuses the IPA before archiving (readiness gate: the destination's
+      # certificate is missing). The later refusal — inspecting an unsigned archive and declining to export it — is
+      # covered by MobileBuildServiceTests.
       - name: IPA is refused without code-signing identities
         run: >
           dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-ipa
-          --trust --expect-failure "No code-signing identities were found"
+          --trust --expect-failure "no code-signing identities were found for this destination"
 
       - name: Signed archive without a development team fails honestly (no certificates in CI)
         run: >
