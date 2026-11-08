@@ -144,6 +144,11 @@ public sealed class XcodeDiscoveryTests
         Assert.Equal(XcodeState.Ready, ready.State);
         Assert.Equal(("27.2", "27B52"), (ready.VerifiedVersion, ready.VerifiedBuild));
         Assert.Equal("", ready.CorrectiveAction);
+        // Regression (CI run 42516970067): the iOS SDK row's ExecutablePath is what XcodePlanner runs — it must be
+        // xcodebuild of the selected Xcode, never the developer directory itself.
+        var iosRow = ToolchainDetector.IosSdkRow(ready);
+        Assert.Equal(ToolchainStatus.Installed, iosRow.Status);
+        Assert.Equal(Path.Combine(dev, "usr", "bin", "xcodebuild"), iosRow.ExecutablePath);
 
         var broken = XcodeDiscovery.Diagnose(Probe(dev, [Installed()], exit: 1, output: "", error: "xcodebuild: error: unable to load plug-in"));
         Assert.Equal(XcodeState.ValidationFailed, broken.State);
