@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/HCG.ExecutableMaker.Account/HCG.ExecutableMaker.Account.csproj" />
     <Project Path="src/HCG.ExecutableMaker.App/HCG.ExecutableMaker.App.csproj" />
     <Project Path="src/HCG.ExecutableMaker.BuildEngine/HCG.ExecutableMaker.BuildEngine.csproj" />
     <Project Path="src/HCG.ExecutableMaker.Core/HCG.ExecutableMaker.Core.csproj" />

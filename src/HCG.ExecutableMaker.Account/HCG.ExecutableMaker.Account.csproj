@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- HCG account features: sign-in (HCG identity, OAuth 2.1 + PKCE), ERP App Access, support requests, HCG AI. -->
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.ExecutableMaker.Core\HCG.ExecutableMaker.Core.csproj" />
+    <ProjectReference Include="..\HCG.ExecutableMaker.Security\HCG.ExecutableMaker.Security.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />
+  </ItemGroup>
+</Project>
