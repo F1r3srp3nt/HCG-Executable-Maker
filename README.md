@@ -1,5 +1,7 @@
 # HCG Executable Maker
 
+![HCG Executable Maker — One project in. A distributable application out.](docs/branding/hcg-executable-maker-banner.webp)
+
 [![Build & Release](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml/badge.svg)](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml)
 
 **Hakmi Capital Group · Software Engineering & Distribution Infrastructure**
