@@ -173,6 +173,13 @@ public sealed class HcgAccountService : IDisposable
 
     public void CancelSignIn() => _signInCts?.Cancel();
 
+    /// <summary>Tests only: adopt a session as if sign-in had just completed (not stored).</summary>
+    internal void AdoptForTesting(HcgSession session)
+    {
+        lock (_gate) _session = session;
+        Set(HcgAccountStatus.SignedIn, "Signed in (test session).", session.Identity);
+    }
+
     /// <summary>A valid access token for an HCG call (refreshed first when it is about to expire), or null when signed out.</summary>
     public async Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {

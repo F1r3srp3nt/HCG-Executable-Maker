@@ -123,7 +123,8 @@ public sealed class SupportService(HcgApiClient api, HttpClient uploadHttp)
     internal async Task UploadAsync(UploadSlot slot, UploadFile file, IProgress<long> progress, CancellationToken ct)
     {
         var allowed = new[] { api.Account.Configuration.Issuer.Host, api.Account.Configuration.ApiBaseUrl.Host };
-        if (slot.UploadUrl.Scheme != Uri.UriSchemeHttps || !allowed.Contains(slot.UploadUrl.Host, StringComparer.OrdinalIgnoreCase))
+        var schemeOk = slot.UploadUrl.Scheme == Uri.UriSchemeHttps || (slot.UploadUrl.Scheme == Uri.UriSchemeHttp && slot.UploadUrl.IsLoopback); // loopback: local test servers only
+        if (!schemeOk || !allowed.Contains(slot.UploadUrl.Host, StringComparer.OrdinalIgnoreCase))
             throw new HcgApiException(HcgApiFailure.Invalid, $"HCG returned an upload address outside HCG ({slot.UploadUrl.Host}); nothing was uploaded.");
         var length = new FileInfo(file.Path).Length;
         if (length > slot.MaxBytes)
