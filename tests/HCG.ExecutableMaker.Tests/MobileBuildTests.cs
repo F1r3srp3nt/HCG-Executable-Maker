@@ -118,7 +118,8 @@ public class MobilePlannerTests : IDisposable
         var plan = GradlePlanner.Plan(Input(analysis, Android(MobileOutput.AndroidDebugApk), dir, report));
 
         var step = Assert.Single(plan.Steps);
-        Assert.Equal(_k.Java, step.Process.Executable);
+        // The inspected JDK is passed by its real path (macOS temp folders live under the /var → /private/var link).
+        Assert.Equal(HCG.ExecutableMaker.Core.PathGuard.GetRealPath(_k.Java), HCG.ExecutableMaker.Core.PathGuard.GetRealPath(step.Process.Executable));
         var args = step.Process.Arguments;
         Assert.Equal(Path.Combine(dir, "gradle", "wrapper", "gradle-wrapper.jar"), args[args.ToList().IndexOf("-classpath") + 1]);
         Assert.Contains("org.gradle.wrapper.GradleWrapperMain", args);
