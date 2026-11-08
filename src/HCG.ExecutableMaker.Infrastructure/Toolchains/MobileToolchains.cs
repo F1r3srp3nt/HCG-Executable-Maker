@@ -194,6 +194,13 @@ public sealed partial class ToolchainDetector
         return (result, identities, profiles);
     }
 
+    /// <summary>
+    /// xcodebuild of the selected developer directory. The iOS SDK row's ExecutablePath is what the Xcode planner runs,
+    /// so it must be the tool, never the directory.
+    /// </summary>
+    public static string XcodebuildFor(string? developerDirectory) =>
+        developerDirectory is { Length: > 0 } dev ? Path.Combine(dev, "usr", "bin", "xcodebuild") : "/usr/bin/xcodebuild";
+
     /// <summary>The iOS SDK row follows the Xcode diagnosis: with the Command Line Tools selected it is "Setup required: select Xcode", not "Missing".</summary>
     public static ToolchainInfo IosSdkRow(XcodeStatus? xcode)
     {
@@ -218,7 +225,7 @@ public sealed partial class ToolchainDetector
             ? new ToolchainInfo
             {
                 Id = ToolchainIds.IosSdk, DisplayName = name, Category = AppleCat, Status = ToolchainStatus.Installed,
-                Version = (device.FirstOrDefault() ?? sim[0]).Split(' ')[1], ExecutablePath = xcode.ActiveDeveloperDirectory, AdditionalVersions = [.. device, .. sim],
+                Version = (device.FirstOrDefault() ?? sim[0]).Split(' ')[1], ExecutablePath = XcodebuildFor(xcode.ActiveDeveloperDirectory), AdditionalVersions = [.. device, .. sim],
                 Detail = device.Count > 0 && sim.Count > 0 ? "Device and Simulator SDKs" : device.Count > 0 ? "Device SDK only (no Simulator SDK: install it in Xcode › Settings › Components)" : "Simulator SDK only",
                 Source = "Selected Xcode",
             }
