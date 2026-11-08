@@ -212,6 +212,16 @@ jobs:
       - name: Debug APK
         run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT" --output android-debug-apk --trust
 
+      - name: Finder-style launch — no JAVA_HOME, ANDROID_HOME or shell PATH; HCG finds the JDK and SDK itself
+        run: |
+          set -o pipefail
+          dotnet build src/HCG.ExecutableMaker.App -c Release -v q
+          bare() { env -i HOME="$HOME" PATH=/usr/bin:/bin DOTNET_ROOT="$DOTNET_ROOT" BUNDLETOOL_JAR="$BUNDLETOOL_JAR" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/hcg-bare" "$(command -v dotnet)" "$@"; }
+          bare src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --toolchain-report | tee "$OUT/toolchains-bare-env.txt"
+          grep -q "^JDK selected: /" "$OUT/toolchains-bare-env.txt"
+          grep -q "^Android SDK: /" "$OUT/toolchains-bare-env.txt"
+          bare run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT/bare-env" --output android-debug-apk --trust
+
       - name: Release APK (unsigned — no signing configured in the project)
         run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloAndroid "$OUT" --output android-release-apk --signing unsigned --trust
 
@@ -264,12 +274,13 @@ jobs:
       - name: Unsigned device archive (.xcarchive, inspection only)
         run: dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT" --output ios-archive --signing unsigned --trust
 
-      # CI has no Apple certificates, so HCG refuses the IPA before archiving (capability gate). The later refusal —
-      # inspecting an unsigned archive and declining to export it — is covered by MobileBuildServiceTests.
+      # CI has no Apple certificates, so HCG refuses the IPA before archiving (readiness gate: the destination's
+      # certificate is missing). The later refusal — inspecting an unsigned archive and declining to export it — is
+      # covered by MobileBuildServiceTests.
       - name: IPA is refused without code-signing identities
         run: >
           dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-ipa
-          --trust --expect-failure "No code-signing identities were found"
+          --trust --expect-failure "no code-signing identities were found for this destination"
 
       - name: Signed archive without a development team fails honestly (no certificates in CI)
         run: >
@@ -330,6 +341,30 @@ jobs:
         run: |
           dotnet build tools/ui-driver -c Release
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --version
+
+      - name: Toolchain report — Terminal launch vs Finder-style launch (no shell environment)
+        run: |
+          set -o pipefail
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          dotnet "$app" --toolchain-report | tee "$OUT/toolchains-terminal.txt"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/hcg-finder" \
+            "$(command -v dotnet)" "$app" --toolchain-report | tee "$OUT/toolchains-finder.txt"
+          grep -q "^JDK selected: /" "$OUT/toolchains-finder.txt"
+          grep -q "^Android SDK: /" "$OUT/toolchains-finder.txt"
+          grep -q "^Xcode: Ready" "$OUT/toolchains-finder.txt"
+
+      - name: Command Line Tools selected while Xcode is installed (disposable runner only) — diagnosed, then restored
+        run: |
+          set -o pipefail
+          if [ ! -d /Library/Developer/CommandLineTools ]; then echo "No Command Line Tools on this runner image; scenario not reproducible here"; exit 0; fi
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          sudo xcode-select --switch /Library/Developer/CommandLineTools
+          env -u DEVELOPER_DIR HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/hcg-clt" dotnet "$app" --toolchain-report | tee "$OUT/toolchains-clt.txt" || true
+          sudo xcode-select --switch "$SYSTEM_DEVDIR"
+          xcode-select -p
+          grep -q "^Xcode: InstalledNotSelected" "$OUT/toolchains-clt.txt"
+          grep -q "\[Apple mobile\] iOS SDK: SetupRequired" "$OUT/toolchains-clt.txt"
+          grep -q "Select Xcode .* for HCG" "$OUT/toolchains-clt.txt"
 
       - name: Distil — import distil/ alone; identity comes from its own script (not passed in)
         run: >

@@ -400,7 +400,7 @@ public sealed class MobileBuildService(
         var dir = Path.Combine(paths.Root, "signing");
         var path = Path.Combine(dir, "hcg-debug.keystore");
         if (File.Exists(path)) return new DebugKeystore(path);
-        var java = report.Find(ToolchainIds.Jdk)?.ExecutablePath ?? throw new BuildValidationException("A JDK is required to create the debug keystore.");
+        var java = MobileArgs.InspectedJdk(report)?.JavaExecutable ?? throw new BuildValidationException("A JDK is required to create the debug keystore. Choose one in Toolchains › Java.");
         var keytool = Path.Combine(Path.GetDirectoryName(PathGuard.GetRealPath(java))!, OperatingSystem.IsWindows() ? "keytool.exe" : "keytool");
         if (!File.Exists(keytool)) throw new BuildValidationException("keytool was not found next to java; a full JDK is required.");
         Directory.CreateDirectory(dir);

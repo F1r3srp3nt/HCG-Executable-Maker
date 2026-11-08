@@ -84,6 +84,45 @@ public static partial class MobileArgs
         return d;
     }
 
+    /// <summary>
+    /// The JDK the inspection selected and validated (its JAVA_HOME and java), or null. Builds use exactly this one, never
+    /// a different java found later on PATH.
+    /// </summary>
+    public static JdkCandidate? InspectedJdk(ToolchainReport report)
+    {
+        if (report.Java is { } java) return java.Selected is { IsUsable: true } jdk ? jdk : null;
+        // Reports without discovery details (older records, tests): the validated JDK row is the toolchain.
+        return report.Find(ToolchainIds.Jdk) is { IsAvailable: true, ExecutablePath: { } exe } row && JavaHome(exe) is { } home
+            ? new JdkCandidate(home, "Toolchain report", row.Version, int.TryParse((row.Version ?? "").Split('.', '_', '-')[0], out var major) ? major : 0, true, null)
+            : null;
+    }
+
+    /// <summary>
+    /// The environment every mobile build process gets: JAVA_HOME, ANDROID_HOME / ANDROID_SDK_ROOT and PATH entries for
+    /// the toolchain that passed inspection. This does not depend on the login shell, so builds started by an HCG that
+    /// was opened from Finder (no JAVA_HOME, minimal PATH) use the same tools as builds started from Terminal.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ToolchainEnvironment(IReadOnlyDictionary<string, string> env, ToolchainReport report, params (string Key, string? Value)[] extra)
+    {
+        var jdk = InspectedJdk(report);
+        var sdk = report.AndroidSdk is { Problem: null, Root: { } root } ? root : report.Find(ToolchainIds.AndroidSdk) is { IsAvailable: true, ExecutablePath: { } p } ? p : null;
+        var pathDirs = new List<string>();
+        if (jdk is not null) pathDirs.Add(Path.Combine(jdk.Home, "bin"));
+        if (sdk is not null)
+        {
+            pathDirs.Add(Path.Combine(sdk, "platform-tools"));
+            if (report.AndroidSdk?.SelectedBuildTools is { } bt) pathDirs.Add(bt.Directory);
+        }
+        if (report.Find(ToolchainIds.Flutter) is { IsAvailable: true, ExecutablePath: { } flutter }) pathDirs.Add(Path.GetDirectoryName(flutter)!);
+        var sep = OperatingSystem.IsWindows() ? ';' : ':';
+        var pathKey = env.Keys.FirstOrDefault(k => string.Equals(k, "PATH", StringComparison.OrdinalIgnoreCase)) ?? "PATH";
+        var existing = env.TryGetValue(pathKey, out var cur) ? cur : "";
+        var path = string.Join(sep, pathDirs.Where(Directory.Exists).Concat(existing.Split(sep, StringSplitOptions.RemoveEmptyEntries)).Distinct());
+        return With(env, [
+            ("JAVA_HOME", jdk?.Home), ("ANDROID_HOME", sdk), ("ANDROID_SDK_ROOT", sdk), (pathKey, path.Length == 0 ? null : path),
+            .. extra]);
+    }
+
     /// <summary>JAVA_HOME for a java executable (…/bin/java → …), following symlinks such as /usr/bin/java.</summary>
     public static string? JavaHome(string? java)
     {

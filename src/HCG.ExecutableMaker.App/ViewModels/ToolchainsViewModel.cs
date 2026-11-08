@@ -8,7 +8,7 @@ using HCG.ExecutableMaker.Infrastructure.Toolchains;
 
 namespace HCG.ExecutableMaker.App.ViewModels;
 
-public sealed partial class ToolchainsViewModel(IToolchainService toolchains, DeveloperDirectorySelection developerDirectory, IPlatformShell shell) : PageViewModel
+public sealed partial class ToolchainsViewModel(IToolchainService toolchains, DeveloperDirectorySelection developerDirectory, IPlatformShell shell, ToolPathSelection toolPaths) : PageViewModel
 {
     public override string Title => "Toolchains";
     public override string Subtitle => "Development tools detected on this computer. HCG never installs tools automatically.";
@@ -105,9 +105,10 @@ public sealed partial class ToolchainsViewModel(IToolchainService toolchains, De
         DiskFree = report.AvailableDiskBytes is { } free ? $"{Format.Bytes(free)} free ({report.DiskPath})" : "Unavailable";
         DetectedAt = "Detected " + Format.When(report.DetectedAt);
         Groups.Clear();
-        foreach (var g in report.Toolchains.GroupBy(t => t.Category))
-            Groups.Add(new ToolchainGroup(g.Key, g.Select(t => new ToolchainItem(t)).ToList()));
+        foreach (var g in ToolchainGrouping.Group(report)) Groups.Add(g);
         ApplyXcode(report.Xcode);
+        ApplyJava(report);
+        ApplyAndroid(report);
     }
 
     private void ApplyXcode(XcodeStatus? x)

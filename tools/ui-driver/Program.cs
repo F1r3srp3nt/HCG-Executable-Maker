@@ -159,6 +159,12 @@ internal static class Program
             Check(Environment.GetEnvironmentVariable("DEVELOPER_DIR")?.StartsWith(xcodePath.TrimEnd('/'), StringComparison.Ordinal) == true,
                 $"DEVELOPER_DIR for HCG's processes is {Environment.GetEnvironmentVariable("DEVELOPER_DIR")}");
         }
+        Log($"Java: [{toolchainsPage.JavaState.Text}] {toolchainsPage.JavaPath} · {toolchainsPage.JavaVersion} · {toolchainsPage.JavaSource} · {toolchainsPage.JavaDetail}");
+        foreach (var jc in toolchainsPage.JavaCandidates) Log("Java candidate: " + jc);
+        Log($"Android SDK: [{toolchainsPage.SdkState.Text}] {toolchainsPage.SdkPath} · platforms {toolchainsPage.SdkPlatforms} · build-tools {toolchainsPage.SdkBuildTools} · {toolchainsPage.SdkDetail}");
+        foreach (var grp in toolchainsPage.Groups) foreach (var row in grp.Items) Log($"Tool [{grp.Category}] {row.Name}: {row.Status.Text} · {row.Version} · {row.Location}");
+        Shot("toolchains");
+        ShotScrolledToEnd("toolchains-groups");
         if (toolchainsPage.HasXcodePanel)
         {
             Log($"Xcode: [{toolchainsPage.XcodeState.Text}] {toolchainsPage.XcodeDiagnosis}");
@@ -357,6 +363,7 @@ internal static class Program
         public Task<bool> OpenFolderAsync(string path) => Task.FromResult(Directory.Exists(path));
         public Task<string?> PickApplicationAsync(string title) => Task.FromResult(Arg("select-xcode"));
         public Task<bool> OpenApplicationAsync(string appPath) => Task.FromResult(false);
+        public Task<bool> OpenUrlAsync(string url) => Task.FromResult(false);
     }
 
     private sealed class LoggingDialogs : IDialogService

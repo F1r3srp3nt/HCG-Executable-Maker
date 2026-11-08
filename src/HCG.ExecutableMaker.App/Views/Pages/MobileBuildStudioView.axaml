@@ -234,6 +234,50 @@
               <c:StatusChip Status="{Binding ResultTag}" />
             </StackPanel>
           </Grid>
+          <Border Classes="inset" Padding="16,14" IsVisible="{Binding HasReadiness}">
+            <StackPanel Spacing="8">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Classes="h3" Text="Readiness for this build" />
+                  <TextBlock Classes="muted" FontSize="12" Text="{Binding ReadinessSummary}" TextWrapping="Wrap" />
+                </StackPanel>
+                <c:StatusChip Grid.Column="1" Status="{Binding ReadinessTag}" VerticalAlignment="Top" />
+              </Grid>
+              <TextBlock Classes="formlabel" Text="REQUIRED" />
+              <ItemsControl ItemsSource="{Binding ReadinessRequired}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ReadinessRow">
+                    <Grid ColumnDefinitions="180,*,Auto" Margin="0,4">
+                      <TextBlock Text="{Binding Tool}" FontWeight="SemiBold" FontSize="12.5" />
+                      <StackPanel Grid.Column="1" Spacing="2" Margin="8,0">
+                        <TextBlock Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                        <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding Location}" IsVisible="{Binding HasLocation}" TextWrapping="Wrap" />
+                        <TextBlock Classes="warning" FontSize="12" Text="{Binding Fix}" IsVisible="{Binding HasFix}" TextWrapping="Wrap" />
+                        <Button Classes="small ghost" Content="Official setup guide" IsVisible="{Binding HasSetupUrl}" HorizontalAlignment="Left"
+                                Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).OpenSetupUrlCommand}" CommandParameter="{Binding}" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Classes="formlabel" Text="OPTIONAL OR NOT NEEDED FOR THIS BUILD" Margin="0,6,0,0" />
+              <ItemsControl ItemsSource="{Binding ReadinessOptional}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ReadinessRow">
+                    <Grid ColumnDefinitions="180,*,Auto" Margin="0,3">
+                      <TextBlock Text="{Binding Tool}" FontSize="12.5" Classes="secondary" />
+                      <StackPanel Grid.Column="1" Spacing="2" Margin="8,0">
+                        <TextBlock Classes="muted" Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Classes="muted" FontSize="12" Text="{Binding Fix}" IsVisible="{Binding HasFix}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
           <ItemsControl ItemsSource="{Binding Summary}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:SummaryRow">

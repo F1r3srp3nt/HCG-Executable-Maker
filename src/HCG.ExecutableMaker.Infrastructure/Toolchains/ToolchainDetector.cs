@@ -15,7 +15,8 @@ public sealed partial class ToolchainDetector(
     IExecutableLocator locator,
     IAppPaths paths,
     TimeProvider time,
-    ILogger<ToolchainDetector>? logger = null) : IToolchainDetector
+    ILogger<ToolchainDetector>? logger = null,
+    ISettingsStore? settings = null) : IToolchainDetector
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(20);
     private readonly ILogger _logger = logger ?? NullLogger<ToolchainDetector>.Instance;
@@ -33,9 +34,11 @@ public sealed partial class ToolchainDetector(
         tasks.AddRange(MacTools(cancellationToken));
         tasks.AddRange(SwiftTools(cancellationToken));
         tasks.AddRange(WindowsTools(cancellationToken));
+        var saved = settings is null ? new AppSettings() : await settings.LoadAsync(cancellationToken).ConfigureAwait(false);
         var xcodeTask = Host.Platform == TargetPlatform.MacOS ? DetectXcodeAsync(cancellationToken) : null;
-        var mobileTask = DetectMobileAsync(cancellationToken);
-        var results = (await Task.WhenAll(tasks).ConfigureAwait(false)).Concat(await mobileTask.ConfigureAwait(false)).ToList();
+        var mobileTask = DetectMobileAsync(saved, xcodeTask, cancellationToken);
+        var mobile = await mobileTask.ConfigureAwait(false);
+        var results = (await Task.WhenAll(tasks).ConfigureAwait(false)).Concat(mobile.Rows).ToList();
         XcodeStatus? xcode = null;
         if (xcodeTask is not null)
         {
@@ -43,7 +46,10 @@ public sealed partial class ToolchainDetector(
             results.Add(XcodeToolchainInfo(xcode));
         }
         var (free, diskPath) = GetDiskSpace();
-        return new ToolchainReport(Host, results, free, diskPath, time.GetUtcNow()) { Xcode = xcode };
+        return new ToolchainReport(Host, results, free, diskPath, time.GetUtcNow())
+        {
+            Xcode = xcode, Java = mobile.Java, AndroidSdk = mobile.Android, AppleIdentities = mobile.Identities, IosProfiles = mobile.Profiles,
+        };
     }
 
     // ---------- Cross-platform ----------

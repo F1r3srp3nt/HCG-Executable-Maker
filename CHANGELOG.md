@@ -2,6 +2,42 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/toolchain-setup` (local, not pushed)
+
+### Fixed — toolchain discovery and setup ([docs/TOOLCHAINS.md](docs/TOOLCHAINS.md))
+- **Java:**
+  - JDKs are found without the login shell (saved path, JAVA_HOME, Android Studio's bundled JDK, `java_home -V`,
+    JavaVirtualMachines, Homebrew, SDKMAN, system folders, then PATH);
+  - each one is run, with stdout and stderr both read;
+  - the macOS `/usr/bin/java` stub without a JDK, broken shims and JREs without `javac` are rejected with the reason;
+  - Browse… / Verify / Use automatic detection.
+- **Android SDK:**
+  - saved path, environment or the default location;
+  - platforms (with `android.jar`) and build-tools reported separately;
+  - apksigner, zipalign and aapt2 from one complete build-tools;
+  - licence state reported (never accepted by HCG);
+  - Browse… / Verify.
+- **Xcode:**
+  - with the Command Line Tools selected, Xcode and the iOS SDK show **Setup required** with the HCG-only fix, not
+    "Missing";
+  - installed Xcode versions are shown, and aliases are listed once.
+- **New states:** Invalid path, Incompatible version, Setup required. Only validated tools are Ready.
+- **Project readiness** in Mobile Build Studio:
+  - required vs optional per project, output and signing mode;
+  - the JDK is checked against the project's Gradle and AGP;
+  - bundletool is required only for APK sets;
+  - profiles are not needed for Simulator builds;
+  - development certificates never count as distribution readiness;
+  - other hosts are explained;
+  - Start is blocked only by required items.
+- **Builds use the inspected toolchain:** JAVA_HOME, ANDROID_HOME and PATH come from the report, so Finder launches
+  work.
+- **Toolchains page and dashboard:**
+  - groups say what they are for;
+  - optional SDKs and other-host tools are shown neutrally;
+  - links to the official setup guides.
+- `HCGExecutableMaker --toolchain-report` prints the detection result without the UI.
+
 ## [0.3.0] — 2026-11-08 (pre-release)
 
 Native Swift/macOS apps and macOS distribution. HCG itself is still unsigned.

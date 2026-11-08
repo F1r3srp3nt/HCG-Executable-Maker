@@ -58,6 +58,8 @@ public interface IPlatformShell
     Task<string?> PickFileAsync(string title, string typeName, params string[] patterns);
     Task CopyAsync(string text);
     Task<bool> OpenFolderAsync(string path);
+    /// <summary>Opens an https link (official setup pages) in the default browser. Other schemes are refused.</summary>
+    Task<bool> OpenUrlAsync(string url);
     /// <summary>Picks a macOS application bundle (*.app). Returns its path or null.</summary>
     Task<string?> PickApplicationAsync(string title);
     /// <summary>Opens a macOS application (open -a semantics, via /usr/bin/open with an argument list). False when it could not be started.</summary>
@@ -121,6 +123,12 @@ public sealed class PlatformShell(MainWindowProvider owner) : IPlatformShell
             FileTypeFilter = [new FilePickerFileType("Applications") { Patterns = ["*.app"], AppleUniformTypeIdentifiers = ["com.apple.application-bundle"] }],
         });
         return files.Count > 0 ? files[0].TryGetLocalPath()?.TrimEnd('/') : null;
+    }
+
+    public async Task<bool> OpenUrlAsync(string url)
+    {
+        if (Top is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
+        return await Top.Launcher.LaunchUriAsync(uri);
     }
 
     public Task<bool> OpenApplicationAsync(string appPath)

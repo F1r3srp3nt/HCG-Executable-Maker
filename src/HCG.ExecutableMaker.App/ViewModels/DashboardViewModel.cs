@@ -46,10 +46,25 @@ public sealed partial class DashboardViewModel(
             HostName = report.Host.DisplayName;
             HostDetail = report.Host.OsDescription;
             DiskFree = report.AvailableDiskBytes is { } free ? $"{Format.Bytes(free)} free on {report.DiskPath}" : "Disk space unavailable";
-            Replace(KeyToolchains, report.Toolchains.Where(t => t.Status != ToolchainStatus.UnsupportedOnHost).Select(t => new ToolchainItem(t)));
-            var installed = report.Toolchains.Count(t => t.IsAvailable);
-            var relevant = report.Toolchains.Count(t => t.Status != ToolchainStatus.UnsupportedOnHost);
-            ToolchainSummary = $"{installed} of {relevant} host tools available";
+            // Core and desktop tools always; optional ecosystems (Android, iOS, Flutter, MAUI) only once something is set up.
+            static bool Core(ToolchainInfo t) => t.Category is "Build" or "Source control" or "macOS" or "Swift";
+            Replace(KeyToolchains, report.Toolchains.Where(t => t.Status != ToolchainStatus.UnsupportedOnHost && (Core(t) || t.IsAvailable)).Select(t => new ToolchainItem(t)));
+            string Area(string name, params string[] ids)
+            {
+                var rows = ids.Select(report.Find).OfType<ToolchainInfo>().Where(t => t.Status != ToolchainStatus.UnsupportedOnHost).ToList();
+                if (rows.Count == 0) return "";
+                return rows.All(t => t.IsAvailable) ? $"{name}: ready"
+                    : rows.Any(t => t.Status is ToolchainStatus.SetupRequired or ToolchainStatus.InvalidPath or ToolchainStatus.IncompatibleVersion or ToolchainStatus.ValidationFailed) ? $"{name}: setup required"
+                    : rows.Any(t => t.IsAvailable) ? $"{name}: partly set up" : $"{name}: not set up (optional)";
+            }
+            ToolchainSummary = string.Join(" · ", new[]
+            {
+                Area("Desktop", ToolchainIds.DotNetSdk),
+                report.Host.Platform == TargetPlatform.MacOS ? Area("Swift/macOS", ToolchainIds.Swift, ToolchainIds.MacOSSdk) : "",
+                Area("Android", ToolchainIds.Jdk, ToolchainIds.AndroidSdk),
+                report.Host.Platform == TargetPlatform.MacOS ? Area("iOS", ToolchainIds.Xcode, ToolchainIds.IosSdk) : "",
+                Area("Flutter", ToolchainIds.Flutter), Area(".NET MAUI", ToolchainIds.MauiWorkloads),
+            }.Where(x => x.Length > 0));
         }
         finally { IsBusy = false; }
     }

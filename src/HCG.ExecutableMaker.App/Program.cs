@@ -15,6 +15,10 @@ internal static class Program
             if (Core.HostInfo.AppBundlePath is { } app) Console.WriteLine("App bundle: " + app);
             return 0;
         }
+        // `HCGExecutableMaker --toolchain-report`: print what HCG detects (the same detection the Toolchains page uses),
+        // e.g. to compare a Finder launch with a Terminal launch. Read-only; applies HCG's saved Xcode choice like the app.
+        if (args.Contains("--toolchain-report"))
+            return ToolchainReportCommand.Run();
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
