@@ -20,9 +20,16 @@ public static class SwiftCapabilities
             return new Assessment(SupportLevel.MissingToolchain, "Toolchains have not been detected yet.", ["Open the Toolchains page and press Refresh."], requirements);
 
         if (report.Host.Platform != TargetPlatform.MacOS)
+        {
+            var swiftHere = report.Find(ToolchainIds.Swift);
+            requirements.Add(new ToolchainRequirement("macos-host", "macOS build host", package.MinimumMacOSHint, false, $"This computer runs {report.Host.Platform.DisplayName()}"));
+            requirements.Add(new ToolchainRequirement(ToolchainIds.XcodeCommandLineTools, "Xcode or Command Line Tools", null, false, "Only available on macOS"));
+            requirements.Add(new ToolchainRequirement(ToolchainIds.Swift, "Swift compiler", package.ToolsVersion, false,
+                swiftHere?.IsAvailable == true ? $"Swift {swiftHere.Version} is installed here, but it cannot build macOS SwiftUI/AppKit apps" : "Provided by Xcode on the Mac"));
             return new Assessment(SupportLevel.RequiresDifferentHost,
                 $"Swift macOS apps are built on a Mac. This computer runs {report.Host.Platform.DisplayName()}; HCG does not build macOS SwiftUI/AppKit apps on {report.Host.Platform.DisplayName()}.",
                 ["Import this project in HCG Executable Maker on a Mac with Xcode or the Command Line Tools, or use a macOS CI runner (docs/SWIFT-MACOS.md)."], requirements);
+        }
 
         var devDir = report.Find(ToolchainIds.XcodeCommandLineTools);
         requirements.Add(new ToolchainRequirement(ToolchainIds.XcodeCommandLineTools, "Apple developer directory", null, devDir?.IsAvailable == true, devDir?.ExecutablePath ?? devDir?.Detail));

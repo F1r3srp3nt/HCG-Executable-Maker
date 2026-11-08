@@ -19,7 +19,8 @@ namespace HCG.ExecutableMaker.App;
 
 public static class Composition
 {
-    public static ServiceProvider Build(IAppPaths paths)
+    /// <param name="overrides">Optional replacements applied last (used by the headless UI driver to script file pickers and dialogs).</param>
+    public static ServiceProvider Build(IAppPaths paths, Action<IServiceCollection>? overrides = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(paths);
@@ -83,6 +84,7 @@ public static class Composition
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<SigningViewModel>();
         services.AddSingleton<SettingsViewModel>();
+        overrides?.Invoke(services);
         return services.BuildServiceProvider();
     }
 }

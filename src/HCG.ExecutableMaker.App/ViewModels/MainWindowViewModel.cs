@@ -74,9 +74,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private void UpdateFooter(ToolchainReport report)
     {
         var sdk = report.Find(ToolchainIds.DotNetSdk);
-        (EngineStatus, EngineTone) = sdk?.IsAvailable == true
-            ? ($".NET SDK {sdk.Version} ready", "success")
-            : ("No .NET SDK — builds unavailable", "warning");
+        var swift = report.Host.Platform == TargetPlatform.MacOS ? report.Find(ToolchainIds.Swift) : null;
+        (EngineStatus, EngineTone) = (sdk?.IsAvailable == true, swift?.IsAvailable == true) switch
+        {
+            (true, true) => ($".NET SDK {sdk!.Version} · Swift {swift!.Version} ready", "success"),
+            (true, false) => ($".NET SDK {sdk!.Version} ready", "success"),
+            (false, true) => ($"Swift {swift!.Version} ready · no .NET SDK (.NET builds unavailable)", "warning"),
+            _ => ("No .NET SDK — builds unavailable", "warning"),
+        };
         EnvironmentStatus = $"{report.Host.DisplayName} · {Format.Bytes(report.AvailableDiskBytes)} free";
     }
 }

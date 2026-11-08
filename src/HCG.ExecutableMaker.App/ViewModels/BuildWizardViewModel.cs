@@ -34,6 +34,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private readonly IPlatformShell _shell;
     private readonly ArtifactExporter _exporter;
     private readonly NavigationService _navigation;
+    private readonly HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator _swiftEvaluator;
     private readonly ConcurrentQueue<BuildLogLine> _pendingLog = new();
     private readonly DispatcherTimer _uiTimer;
     private readonly Stopwatch _buildClock = new();
@@ -42,8 +43,10 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private string? _identityPrefilledFor;
 
     public BuildWizardViewModel(ProjectService projectService, IProjectRepository projects, BuildService buildService, IToolchainService toolchains,
-        ISettingsStore settings, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, ArtifactExporter exporter, NavigationService navigation)
+        ISettingsStore settings, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, ArtifactExporter exporter, NavigationService navigation,
+        HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator swiftEvaluator)
     {
+        _swiftEvaluator = swiftEvaluator;
         _navigation = navigation;
         _projectService = projectService;
         _projects = projects;
@@ -134,7 +137,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         UpdateSteps();
     }
 
-    private bool CanGoBack() => ShowBack && !IsBuilding && !IsImporting;
+    private bool CanGoBack() => ShowBack && !IsBuilding && !IsImporting && !IsEvaluatingSwift;
 
     [RelayCommand(CanExecute = nameof(CanGoBack))]
     private void Back()
@@ -162,6 +165,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         ImportWarnings.Clear();
         Result = null;
         _identityPrefilledFor = null;
+        SwiftEvaluationTrusted = false;
+        SwiftEvaluationLog.Clear();
+        HasSwiftEvaluationLog = false;
         IconPath = null;
         Step = WizardStep.Import;
         UpdateSteps();
@@ -309,9 +315,15 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [ObservableProperty] private bool _hasDiagnostics;
     [ObservableProperty] private bool _hasMissing;
 
-    public bool CanConfigure => Analysis?.Support == SupportLevel.Supported && SelectedProject?.Project.CompatiblePlatforms.Count > 0;
+    public bool CanConfigure => IsSwiftProject
+        ? SwiftReadyToConfigure
+        : Analysis?.Support == SupportLevel.Supported && SelectedProject?.Project.CompatiblePlatforms.Count > 0;
 
-    partial void OnSelectedProjectChanged(ProjectChoice? value) => OnPropertyChanged(nameof(CanConfigure));
+    partial void OnSelectedProjectChanged(ProjectChoice? value)
+    {
+        RefreshSwiftPackage();
+        OnPropertyChanged(nameof(CanConfigure));
+    }
 
     [RelayCommand]
     private async Task ReinspectAsync()
@@ -332,20 +344,30 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         Analysis = a;
         SupportTag = new StatusTag(Format.Label(a.Support), Format.Tone(a.Support));
         AnalysisRows.Clear();
-        AnalysisRows.Add(new("Project name", a.ProjectName));
+        AnalysisRows.Add(new("Project name", string.IsNullOrWhiteSpace(a.ProjectName) ? Project?.Name ?? "—" : a.ProjectName));
         AnalysisRows.Add(new("Language", a.Language));
         AnalysisRows.Add(new("Framework", a.Framework));
         AnalysisRows.Add(new("Runtime", a.Runtime ?? "—"));
         AnalysisRows.Add(new("Application type", a.ApplicationType));
-        AnalysisRows.Add(new("Solution", a.SolutionFiles.Count > 0 ? string.Join(", ", a.SolutionFiles) : "None (project files only)"));
-        AnalysisRows.Add(new("Projects found", a.Projects.Count.ToString()));
+        if (a.Swift is { } sa)
+        {
+            AnalysisRows.Add(new("Swift packages", sa.Packages.Count > 0 ? string.Join(", ", sa.Packages.Select(p => p.DisplayDirectory)) : "None"));
+            if (sa.MacXcodeProjects.Count > 0) AnalysisRows.Add(new("macOS Xcode projects", string.Join(", ", sa.MacXcodeProjects) + " (not built in this version)"));
+        }
+        else
+        {
+            AnalysisRows.Add(new("Solution", a.SolutionFiles.Count > 0 ? string.Join(", ", a.SolutionFiles) : "None (project files only)"));
+            AnalysisRows.Add(new("Projects found", a.Projects.Count.ToString()));
+        }
         if (a.GlobalJsonSdkVersion is { } gj) AnalysisRows.Add(new("global.json SDK", $"{gj} (rollForward: {a.GlobalJsonRollForward ?? "patch"})"));
         AnalysisRows.Add(new("Recommended outputs", a.RecommendedFormats.Count > 0 ? string.Join(", ", a.RecommendedFormats.Select(f => f.DisplayName())) : "—"));
         AnalysisRows.Add(new("Icons found", a.DetectedIcons.Count > 0 ? string.Join(", ", a.DetectedIcons.Take(3)) : "None"));
 
         ProjectOptions.Clear();
         foreach (var p in a.Projects.Where(p => p.IsRunnableApplication)) ProjectOptions.Add(new ProjectChoice(p));
-        SelectedProject = ProjectOptions.FirstOrDefault(p => p.Path == a.PrimaryProjectPath) ?? ProjectOptions.FirstOrDefault();
+        // Several Swift packages: the user chooses (never silently the first). Otherwise keep the existing behaviour.
+        SelectedProject = ProjectOptions.FirstOrDefault(p => p.Path == a.PrimaryProjectPath)
+                          ?? (a.Swift is { Packages.Count: > 0 } ? null : ProjectOptions.FirstOrDefault());
 
         Diagnostics.Clear();
         foreach (var d in a.Diagnostics.OrderByDescending(d => d.Severity)) Diagnostics.Add(new DiagnosticItem(d));
@@ -355,6 +377,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         MissingDependencies.Clear();
         foreach (var m in a.MissingDependencies) MissingDependencies.Add(m);
         HasMissing = MissingDependencies.Count > 0;
+        RefreshSwiftPackage();
         OnPropertyChanged(nameof(CanConfigure));
         NextCommand.NotifyCanExecuteChanged();
     }
@@ -375,7 +398,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     public ObservableCollection<Choice<TargetPlatform>> PlatformOptions { get; } = [];
     [ObservableProperty] private Choice<TargetPlatform>? _selectedPlatform;
-    public IReadOnlyList<Choice<TargetArchitecture>> ArchitectureOptions { get; } =
+    public ObservableCollection<Choice<TargetArchitecture>> ArchitectureOptions { get; } =
         [new(TargetArchitecture.X64, "x64 (Intel / AMD)"), new(TargetArchitecture.Arm64, "ARM64 (Apple Silicon / Windows on ARM)")];
     [ObservableProperty] private Choice<TargetArchitecture>? _selectedArchitecture;
     public IReadOnlyList<Choice<BuildConfigurationKind>> ConfigurationOptions { get; } =
@@ -394,8 +417,24 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var detected = SelectedProject?.Project;
         if (detected is null) return;
         var settings = await _settings.LoadAsync();
-        var key = Project?.Id + "|" + detected.RelativePath;
-        if (_identityPrefilledFor != key)
+        var swift = IsSwiftBuild;
+        SetArchitectureOptions(swift);
+        OnPropertyChanged(nameof(IsSwiftBuild));
+        OnPropertyChanged(nameof(IsDotNetBuild));
+        OnPropertyChanged(nameof(IsSwiftGui));
+        var key = Project?.Id + "|" + detected.RelativePath + (swift ? "|" + SelectedSwiftProduct?.Name : "");
+        if (_identityPrefilledFor != key && swift)
+        {
+            _identityPrefilledFor = key;
+            Publisher = settings.LastPublisher ?? "";
+            OutputDirectory = settings.DefaultOutputDirectory ?? _paths.DefaultOutputDirectory;
+            TimeoutMinutes = settings.BuildTimeoutMinutes;
+            SelectedConfiguration = ConfigurationOptions[0];
+            SelectedArchitecture = ArchitectureOptions.First(a => a.Value == HostInfo.CurrentArchitecture);
+            IconPath = null;
+            PrefillSwift(SelectedSwiftPackage!, SelectedSwiftProduct!);
+        }
+        else if (_identityPrefilledFor != key)
         {
             _identityPrefilledFor = key;
             AppName = detected.Product ?? detected.AssemblyName ?? detected.Name;
@@ -443,7 +482,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         AppId = s.Identity.ApplicationId;
         IconPath = s.Identity.IconSourcePath is { } i && File.Exists(i) ? i : null;
         SelectedPlatform = PlatformOptions.FirstOrDefault(p => p.Value == s.Platform && p.IsEnabled) ?? SelectedPlatform;
-        SelectedArchitecture = ArchitectureOptions.First(a => a.Value == s.Architecture);
+        if (s.Swift is { } swiftOptions) ApplySwiftSettings(swiftOptions);
+        SelectedArchitecture = ArchitectureOptions.FirstOrDefault(a => a.Value == s.Architecture) ?? SelectedArchitecture;
         SelectedConfiguration = ConfigurationOptions.First(c => c.Value == s.Configuration);
         SelfContained = s.SelfContained;
         SingleFile = s.SingleFile;
@@ -496,7 +536,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (SelectedArchitecture is null) ConfigErrors.Add("Choose a target architecture.");
         if (TimeoutMinutes is not (>= 1 and <= 720)) ConfigErrors.Add("Timeout must be between 1 and 720 minutes.");
         if (IconNotes.Any(n => n.IsError)) ConfigErrors.Add("The selected icon is invalid.");
-        if (ConfigErrors.Count == 0 && SelectedProject is not null)
+        if (ConfigErrors.Count == 0 && SelectedProject is not null && IsSwiftBuild)
+        {
+            ValidateSwift(CreateSettings([PackagingFormat.MacAppBundle]));
+        }
+        else if (ConfigErrors.Count == 0 && SelectedProject is not null)
         {
             try { DotNetBuildPlanner.Validate(CreateSettings([PackagingFormat.PortableFolder])); }
             catch (BuildValidationException ex) { ConfigErrors.Add(ex.Message); }
@@ -554,6 +598,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         Timeout = TimeSpan.FromMinutes((double)(TimeoutMinutes ?? 30)),
         PackagingFormats = formats,
         WindowsInstaller = CreateInstallerOptions(),
+        Swift = CreateSwiftOptions(),
         Identity = new AppIdentity
         {
             ApplicationName = AppName.Trim(),
@@ -573,7 +618,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         var detected = SelectedProject?.Project;
         var isGui = detected is not null && (detected.IsAvalonia || string.Equals(detected.OutputType, "WinExe", StringComparison.OrdinalIgnoreCase));
-        var ctx = new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained);
+        var swiftKind = IsSwiftBuild ? SelectedSwiftKind?.Value ?? SwiftAppKind.GuiApp : (SwiftAppKind?)null;
+        if (swiftKind is { } k) isGui = k == SwiftAppKind.GuiApp;
+        var ctx = new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained, swiftKind);
+        if (swiftKind is not null)
+            preselect ??= swiftKind == SwiftAppKind.GuiApp ? [PackagingFormat.MacAppBundle] : [PackagingFormat.PortableZip];
         foreach (var old in PackagingOptions) old.PropertyChanged -= OnPackagingOptionChanged;
         PackagingOptions.Clear();
         var recommended = preselect ?? Analysis?.RecommendedFormats ?? [];
@@ -651,9 +700,19 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         Summary.Add(new("Project", $"{Project?.Name} · {s.ProjectRelativePath}"));
         Summary.Add(new("Application", $"{s.Identity.ApplicationName} {s.Identity.Version}"));
         Summary.Add(new("Identifier", s.Identity.ApplicationId));
-        Summary.Add(new("Target", $"{s.Platform.DisplayName()} {s.Architecture.DisplayName()} ({s.RuntimeIdentifier})"));
-        Summary.Add(new("Configuration", $"{s.Configuration} · {(s.SelfContained ? "self-contained" : "framework-dependent")}{(s.SingleFile ? " · single file" : "")}"));
-        Summary.Add(new("Packaging", string.Join(", ", PackagingCatalog.WithDependencies(s.PackagingFormats).Select(f => f.DisplayName()))));
+        Summary.Add(new("Target", TargetLabel(s)));
+        if (s.Swift is { } sw)
+        {
+            Summary.Add(new("Swift package", $"{(sw.PackageDirectory.Length == 0 ? "(workspace root)" : sw.PackageDirectory + "/")} · product {sw.Product} · {(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")}"));
+            Summary.Add(new("Configuration", $"{s.Configuration} · build number {sw.BuildNumber} · minimum macOS {sw.MinimumMacOS ?? "from the executable"}{(sw.Category is { } c ? " · " + c : "")}"));
+            if (sw.UsageDescriptions.Count > 0) Summary.Add(new("Privacy keys", string.Join(", ", sw.UsageDescriptions.Keys)));
+            Summary.Add(new("Signing", "Ad-hoc (codesign --sign -). Not Developer ID signed, not notarized."));
+        }
+        else
+        {
+            Summary.Add(new("Configuration", $"{s.Configuration} · {(s.SelfContained ? "self-contained" : "framework-dependent")}{(s.SingleFile ? " · single file" : "")}"));
+        }
+        Summary.Add(new("Packaging", string.Join(", ", PackagingCatalog.WithDependencies(s.PackagingFormats, s).Select(f => f.DisplayName()))));
         if (s.PackagingFormats.Contains(PackagingFormat.WindowsInstallerExe))
         {
             var w = s.WindowsInstaller;
@@ -672,7 +731,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         if (Project is null || SelectedProject is null) return;
         var settings = CreateSettings(SelectedFormats());
-        try { DotNetBuildPlanner.Validate(settings); }
+        try
+        {
+            if (settings.Swift is not null) HCG.ExecutableMaker.BuildEngine.Swift.SwiftBuildPlanner.Validate(settings, HostInfo.CurrentPlatform);
+            else DotNetBuildPlanner.Validate(settings);
+        }
         catch (BuildValidationException ex)
         {
             await _dialogs.AlertAsync("Configuration problem", ex.Message);
@@ -690,7 +753,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                 return;
             }
             allowOverwrite = await _dialogs.ConfirmAsync("Replace previous output?",
-                $"A previous HCG build of {settings.Identity.ApplicationName} {settings.Identity.Version} for {settings.RuntimeIdentifier} exists:\n\n{outputRoot}\n\nReplace it with this build?",
+                $"A previous HCG build of {settings.Identity.ApplicationName} {settings.Identity.Version} for {TargetLabel(settings)} exists:\n\n{outputRoot}\n\nReplace it with this build?",
                 "Replace and build", destructive: true);
             if (!allowOverwrite) return;
         }
@@ -816,7 +879,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             _ => "Build failed",
         };
         ResultDetail = build.Status == BuildStatus.Succeeded
-            ? $"{build.Artifacts.Count} artifact(s) generated and verified · {build.WarningCount} warning(s). Artifacts are unsigned."
+            ? $"{build.Artifacts.Count} artifact(s) generated and verified · {build.WarningCount} warning(s). " +
+              (build.Settings.Swift is not null ? "Ad-hoc signed only: not Developer ID signed or notarized." : "Artifacts are unsigned.")
             : build.FailureReason ?? "The build did not complete.";
         ResultDuration = Format.Duration(build.Duration);
         ResultOutput = build.Artifacts.Count > 0 ? BuildService.OutputRootFor(build.Settings) : "No output produced";

@@ -66,7 +66,7 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
         foreach (var p in packages)
         {
             diagnostics.Add(new(DiagnosticSeverity.Info,
-                "Package.swift is Swift code and was NOT executed. Its products are confirmed by evaluating it on this Mac after you trust the project (Configure step)." +
+                "Package.swift is Swift code and was NOT executed. Its products are confirmed by evaluating it on this Mac after you trust the project (Inspect step → Evaluate package)." +
                 (p.HasConditionalDeclarations ? " It declares some products conditionally (#if os(…)), so the product list depends on the build host." : ""),
                 p.ManifestPath));
             if (p.HasPackageDependencies)
@@ -84,7 +84,8 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
 
         // Overall: the best support level among packages (each package is assessed on its own in the wizard).
         var best = assessments.OrderBy(a => Rank(a.Assessment.Support)).First();
-        var name = packages.Count == 1 ? packages[0].NameHint ?? LastSegment(packages[0].Directory, index.Root) : new DirectoryInfo(index.Root).Name;
+        // Several packages: no single name; ProjectService keeps the import's name (e.g. the repository folder).
+        var name = packages.Count == 1 ? packages[0].NameHint ?? LastSegment(packages[0].Directory, index.Root) : "";
         var summary = best.Assessment.Summary + (best.Assessment.Remediation.Count > 0 ? " " + string.Join(" ", best.Assessment.Remediation) : "");
 
         return new ProjectAnalysis
@@ -117,7 +118,7 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
         if (p.SourceFacts.Any(f => f.SuggestedKind == SwiftAppKind.CommandLine)) kinds.Add("command-line tool");
         return new DetectedProject
         {
-            Name = p.NameHint ?? LastSegment(p.Directory, root),
+            Name = p.NameHint ?? (LastSegment(p.Directory, root) is { Length: > 0 } n ? n : "Swift package"),
             RelativePath = p.ManifestPath,
             Language = "Swift",
             Sdk = p.ToolsVersion is null ? null : "swift-tools-version " + p.ToolsVersion,
@@ -130,8 +131,9 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
         };
     }
 
+    /// <summary>Last folder name of a package directory; empty for the workspace root (the import's own name is used then).</summary>
     private static string LastSegment(string dir, string root) =>
-        dir.Length == 0 ? new DirectoryInfo(root).Name : dir[(dir.LastIndexOf('/') + 1)..];
+        dir.Length == 0 ? "" : dir[(dir.LastIndexOf('/') + 1)..];
 
     private static int Rank(SupportLevel s) => s switch
     {

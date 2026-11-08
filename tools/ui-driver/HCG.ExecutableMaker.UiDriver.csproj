@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Headless driver for the REAL desktop UI: boots the app's own App/MainWindow/views/view models on Avalonia's headless
+    platform (Skia rendering), drives the New Build wizard through the same commands its buttons invoke, and saves
+    rendered screenshots. Only the OS file picker and modal dialogs are scripted. Used by CI on macOS (Swift → .app).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>hcg-ui-driver</AssemblyName>
+    <RootNamespace>HCG.ExecutableMaker.UiDriver</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Headless" />
+    <PackageReference Include="Avalonia.Skia" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HCG.ExecutableMaker.App\HCG.ExecutableMaker.App.csproj" />
+  </ItemGroup>
+</Project>
