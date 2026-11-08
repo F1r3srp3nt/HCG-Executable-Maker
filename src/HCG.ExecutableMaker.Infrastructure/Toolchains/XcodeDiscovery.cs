@@ -39,8 +39,10 @@ public static class XcodeDiscovery
     /// <summary>Reads an Xcode.app (or null when the path is not a usable Xcode application).</summary>
     public static XcodeInstallation? Read(string appPath)
     {
-        appPath = appPath.TrimEnd('/');
-        if (appPath.EndsWith("/Contents/Developer", StringComparison.Ordinal)) appPath = appPath[..^"/Contents/Developer".Length];
+        appPath = appPath.TrimEnd('/', Path.DirectorySeparatorChar);
+        // …/Xcode.app/Contents/Developer → …/Xcode.app (by path components, so any separator works).
+        if (Path.GetFileName(appPath) == "Developer" && Path.GetFileName(Path.GetDirectoryName(appPath)) == "Contents")
+            appPath = Path.GetDirectoryName(Path.GetDirectoryName(appPath)!)!;
         var info = Path.Combine(appPath, "Contents", "Info.plist");
         var dev = Path.Combine(appPath, "Contents", "Developer");
         if (!File.Exists(info) || !File.Exists(Path.Combine(dev, "usr", "bin", "xcodebuild"))) return null;
@@ -143,7 +145,8 @@ public static class XcodeDiscovery
         return (version, build);
     }
 
-    private static bool SamePath(string a, string b) => string.Equals(a.TrimEnd('/'), b.TrimEnd('/'), StringComparison.Ordinal);
+    private static bool SamePath(string a, string b) =>
+        string.Equals(a.TrimEnd('/', Path.DirectorySeparatorChar), b.TrimEnd('/', Path.DirectorySeparatorChar), StringComparison.Ordinal);
 
     private static string FirstLine(string s) => s.Trim().Split('\n').FirstOrDefault()?.Trim() ?? "";
 }
