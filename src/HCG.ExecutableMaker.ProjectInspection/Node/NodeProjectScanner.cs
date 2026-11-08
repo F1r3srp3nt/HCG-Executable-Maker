@@ -239,7 +239,7 @@ public static class NodeProjectScanner
         if (scripts.TryGetValue("dev", out var dev) && (dev.Contains("vite", StringComparison.Ordinal) || dev.Contains("next dev", StringComparison.Ordinal) || dev.Contains("webpack serve", StringComparison.Ordinal)))
             yield return $"The app currently runs from a development server (\"dev\": \"{dev}\"). A packaged app cannot depend on it: build the renderer (e.g. vite build) and load the output from disk.";
         if (servers.Count > 0)
-            yield return $"The project includes a {string.Join("/", servers)} backend. A desktop app must start it inside the Electron main process (or bundle it) because HCG does not run separate servers.";
+            yield return $"The project includes a backend server ({string.Join(", ", servers)}). A desktop app must start it inside the Electron main process (or bundle it) because HCG does not run separate servers.";
     }
 
     private static (NodePackageManager Manager, string? LockFile) DetectPackageManager(Func<string, bool> exists, string? field)

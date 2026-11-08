@@ -71,7 +71,7 @@ public static class NodeCapabilities
                 _ => "a Node.js library",
             };
             return new Assessment(SupportLevel.RequiresConfiguration,
-                $"{project.DisplayDirectory} is {what}, not an Electron desktop app, so HCG cannot package it as one yet.", fixes, requirements);
+                $"{project.DisplayName} ({project.DisplayDirectory}) is {what}, not an Electron desktop app, so HCG cannot package it as one yet.", fixes, requirements);
         }
         if (report is null)
             return new Assessment(SupportLevel.MissingToolchain, "Toolchains have not been detected yet.", ["Open the Toolchains page and press Refresh."], requirements);

@@ -11,6 +11,10 @@
 //       [--expect-products TokenLab] [--expect-libraries TokenLabCore] [--expect-tests TokenLabCoreTests]
 //       --output <dir> --screenshots <dir> [--prefix distil]
 //   --expect-blocked-host: on Windows/Linux, prove the wizard refuses to evaluate/build the package and explains why.
+// Usage (Electron app, built with the project's own electron-builder workflow):
+//   dotnet run --project tools/ui-driver -- --electron --source <folder|zip> [--project <dir>] [--arch arm64|x64]
+//       [--formats app,zip,dmg | folder] [--expect-name N] [--expect-bundle-id ID] [--expect-version V] --output <dir> --screenshots <dir>
+//   --expect-not-desktop: prove a web-only / service project is explained (what is missing) and cannot be configured.
 //   Distribution (macOS): --formats …,pkg,mas  --select-xcode <Xcode.app> (HCG-only selection via Toolchains › Browse…)
 //       --expect-xcode-state Ready  --signing adhoc|devid  --confirm-entitlements  --test-install [launch]
 using System.Diagnostics;
@@ -28,7 +32,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace HCG.ExecutableMaker.UiDriver;
 
-internal static class Program
+internal static partial class Program
 {
     private static Dictionary<string, string> _args = new();
     private static readonly List<string> Report = [];
@@ -43,7 +47,7 @@ internal static class Program
         for (var i = 0; i < argv.Length; i++)
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
-        if (!_args.ContainsKey("source") || !_args.ContainsKey("package"))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -185,6 +189,7 @@ internal static class Program
         await WaitUntil(() => !wizard.IsImporting && (wizard.IsInspectStep || wizard.ImportError is not null), TimeSpan.FromMinutes(5), "import");
         Check(wizard.ImportError is null, $"Imported {(isZip ? "ZIP" : "folder")} {Path.GetFileName(source)}" + (wizard.ImportError is { } e ? ": " + e : ""));
         if (wizard.ImportError is not null) return 1;
+        if (_args.ContainsKey("electron")) return await RunElectronAsync(wizard, host, output);
 
         // 2. Inspect: packages listed, none auto-selected when there are several.
         Check(wizard.IsSwiftProject, $"Recognized as Swift project ({wizard.Analysis?.Framework}; support {wizard.Analysis?.Support})");

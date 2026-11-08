@@ -479,6 +479,125 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  electron-macos:
+    name: Electron — Presentation Studio through the New Build wizard (arm64 .app, zip, dmg; launch; packaged-app e2e)
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/electron-out
+      OSLO_REPO: https://github.com/F1r3srp3nt/Oslo-Sprint.git
+      # Presentation Studio after its desktop conversion (electron-builder.yml, desktop:* scripts).
+      OSLO_COMMIT: 49b401699e66b7b5b66db13d19eeb6b554988b58
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Presentation Studio at a pinned commit — a clean copy (no node_modules, no release/)
+        run: |
+          mkdir -p "$OUT/screens" "$OUT/src"
+          git clone --quiet "$OSLO_REPO" "$OUT/Oslo-Sprint"
+          git -C "$OUT/Oslo-Sprint" checkout --quiet "$OSLO_COMMIT"
+          git -C "$OUT/Oslo-Sprint" archive HEAD presentation-studio | tar -x -C "$OUT/src"
+          ls "$OUT/src/presentation-studio"
+          sw_vers; uname -m; node --version; npm --version
+          python -m pip install --quiet python-pptx==1.0.2
+
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Toolchain report — Node.js from a Terminal launch and from a Finder-style launch (no shell environment)
+        run: |
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          dotnet "$app" --toolchain-report | grep -F "[Node.js / Electron]" -A1 | tee "$OUT/node-terminal.txt"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/hcg-finder" \
+            "$(command -v dotnet)" "$app" --toolchain-report | grep -F "[Node.js / Electron]" -A1 | tee "$OUT/node-finder.txt"
+          grep -q "Node.js: Installed" "$OUT/node-terminal.txt"
+
+      - name: Import, inspect, configure and build through the wizard (npm ci → desktop:build → electron-builder --mac zip dmg --arm64)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --electron --source "$OUT/src/presentation-studio"
+          --arch arm64 --formats app,zip,dmg
+          --expect-name "Presentation Studio" --expect-bundle-id com.oslosprint.presentationstudio --expect-version 0.1.0
+          --output "$OUT/studio" --screenshots "$OUT/screens" --prefix electron
+
+      - name: The .app exists; Apple's tools agree with HCG's verification (signature, arm64, Info.plist, zip, dmg)
+        run: |
+          APP="$(sed -n 1p "$OUT/studio/electron-app.txt")"
+          echo "App: $APP"
+          [ -d "$APP" ] && [[ "$APP" == *"/Presentation Studio.app" ]]
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Identifier|Signature|Format"
+          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle(Name|Identifier|Executable|ShortVersionString)|LSMinimumSystemVersion|NSMicrophoneUsageDescription'
+          [ "$(lipo -archs "$APP/Contents/MacOS/Presentation Studio")" = "arm64" ]
+          dir="$(dirname "$APP")"
+          hdiutil verify "$dir"/*.dmg
+          unzip -tq "$dir"/*.zip
+          # electron-builder wrote into HCG's build folder, not into the imported project.
+          ls -d "$OUT/studio/hcg-data/workspaces"/*/source
+          if ls -d "$OUT/studio/hcg-data/workspaces"/*/source/release 2>/dev/null; then echo "release/ was created in the imported source"; exit 1; fi
+
+      - name: Launch through LaunchServices (as Finder does) — stays up, no crash report, no development server
+        run: |
+          for port in 5173 8787; do if nc -z 127.0.0.1 $port; then echo "port $port in use"; exit 1; fi; done
+          bash "$OUT/Oslo-Sprint/.github/scripts/launch-check.sh" "$(sed -n 1p "$OUT/studio/electron-app.txt")" 10
+          sleep 2
+          if pgrep -fl "Presentation Studio.app"; then echo "processes left behind"; exit 1; fi
+
+      - name: The project's own packaged-app end-to-end test, against the app HCG built
+        working-directory: ${{ github.workspace }}/electron-out/Oslo-Sprint/presentation-studio
+        env:
+          STUDIO_SKIP_LIBREOFFICE: "1"
+        run: |
+          npm ci --no-audit --no-fund
+          STUDIO_APP="$(sed -n 2p "$OUT/studio/electron-app.txt")" npm run test:desktop
+          ls test-output/desktop
+
+      - name: Window screenshot of the app HCG built
+        continue-on-error: true
+        env:
+          WINDOW_ID: ${{ runner.temp }}/window-id
+        run: |
+          swiftc -O "$OUT/Oslo-Sprint/.github/scripts/window-id.swift" -o "$WINDOW_ID"
+          bash "$OUT/Oslo-Sprint/.github/scripts/app-screenshot.sh" "$(sed -n 1p "$OUT/studio/electron-app.txt")" "$OUT/screens/electron-99-launched-app.png"
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload Electron outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: electron-macos-outputs
+          path: |
+            ${{ github.workspace }}/electron-out/screens
+            ${{ github.workspace }}/electron-out/studio/*.txt
+            ${{ github.workspace }}/electron-out/studio/*.json
+            ${{ github.workspace }}/electron-out/*.txt
+            ${{ github.workspace }}/electron-out/Oslo-Sprint/presentation-studio/test-output/desktop
+          if-no-files-found: warn
+          retention-days: 7
+
   release:
     name: Publish pre-release
     if: startsWith(github.ref, 'refs/tags/v')

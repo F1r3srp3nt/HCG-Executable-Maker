@@ -82,6 +82,21 @@ checked against developer.android.com.
   only after you accept them with `sdkmanager --licenses`.
 - **bundletool** is required only to turn an App Bundle into APKs.
 
+## Node.js (Toolchains › Node.js / Electron)
+
+- **Discovery** works without the login shell, so a Finder launch finds the same Node as Terminal. HCG looks in:
+  - PATH;
+  - Homebrew (`/opt/homebrew`, `/usr/local`, `node@NN`);
+  - nvm (`$NVM_DIR` or `~/.nvm`);
+  - Volta's installed images (not its shim);
+  - fnm, asdf and `/opt/node*`;
+  - on Windows, Program Files and nvm-windows.
+- **Validation:** every candidate is run (`node --version`). A file that merely exists is never Ready.
+- **npm** is the `npm-cli.js` that ships with that Node. Its version is read from npm's own `package.json`, and builds
+  run it with that Node.
+- **Per project:** HCG uses the newest installation that satisfies the project's `engines.node`. It also checks
+  `engines.npm` and a `packageManager: npm@…` pin. An unreadable range is reported, never assumed to match.
+
 ## Project readiness (Mobile Build Studio)
 
 For the selected project, output and signing mode, HCG lists:

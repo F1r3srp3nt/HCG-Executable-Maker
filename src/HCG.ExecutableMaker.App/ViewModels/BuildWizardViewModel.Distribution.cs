@@ -21,7 +21,8 @@ public sealed partial class BuildWizardViewModel
     private bool _suspendDistribution;
 
     /// <summary>The Distribution section applies to macOS targets.</summary>
-    public bool ShowDistribution => (SelectedPlatform?.Value ?? TargetPlatform.Windows) == TargetPlatform.MacOS;
+    // Electron apps are signed by electron-builder as their configuration says (mac.identity); HCG does not re-sign them.
+    public bool ShowDistribution => !IsElectronBuild && (SelectedPlatform?.Value ?? TargetPlatform.Windows) == TargetPlatform.MacOS;
 
     // ---------- Signing mode ----------
     public IReadOnlyList<Choice<MacSigningMode>> SigningModeOptions { get; } =

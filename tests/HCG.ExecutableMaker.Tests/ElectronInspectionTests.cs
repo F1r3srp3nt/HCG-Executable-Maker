@@ -101,7 +101,7 @@ public class ElectronInspectionTests : IDisposable
         Assert.Contains(p.MissingForDesktop, m => m.Contains("main-process entry"));
         Assert.Contains(p.MissingForDesktop, m => m.Contains("electron-builder"));
         Assert.Contains(p.MissingForDesktop, m => m.Contains("development server"));
-        Assert.Contains(p.MissingForDesktop, m => m.Contains("Express backend"));
+        Assert.Contains(p.MissingForDesktop, m => m.Contains("backend server (Express)"));
         Assert.False(Assert.Single(a.Projects).IsRunnableApplication);
         Assert.DoesNotContain("planned for a later milestone", a.SupportSummary);
     }
