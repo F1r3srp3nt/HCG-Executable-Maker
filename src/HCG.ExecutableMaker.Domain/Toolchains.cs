@@ -62,6 +62,9 @@ public static class ToolchainIds
     public const string Aapt2 = "aapt2";
     public const string Bundletool = "bundletool";
     public const string IosSdk = "ios-sdk";
+    public const string AndroidNdk = "android-ndk";
+    public const string AndroidCmake = "android-cmake";
+    public const string Adb = "adb";
     public const string AppleSigningIdentities = "apple-signing-identities";
     public const string ProvisioningProfiles = "provisioning-profiles";
     public const string Flutter = "flutter";

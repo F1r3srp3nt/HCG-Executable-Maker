@@ -4,5 +4,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />
+    <InternalsVisibleTo Include="HCG.ExecutableMaker.Porting" />
   </ItemGroup>
 </Project>

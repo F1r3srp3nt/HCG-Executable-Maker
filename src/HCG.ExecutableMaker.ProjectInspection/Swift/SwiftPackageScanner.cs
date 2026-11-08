@@ -75,7 +75,8 @@ public static partial class SwiftPackageScanner
     public static SwiftTargetSourceFacts FactsFor(SourceIndex index, string packageDir, string target, string? customPath)
     {
         var relTarget = customPath ?? $"Sources/{target}";
-        var root = Join(packageDir, relTarget) + "/";
+        var rootDir = Join(packageDir, relTarget);
+        var root = rootDir.Length == 0 || rootDir == "." ? "" : rootDir + "/";
         var files = index.Files.Where(f => f.StartsWith(root, StringComparison.Ordinal)).ToList();
         var swift = files.Where(f => f.EndsWith(".swift", StringComparison.Ordinal)).Take(MaxSourceFilesPerTarget).ToList();
         bool swiftUI = false, appKit = false, entry = false;

@@ -98,6 +98,7 @@ public sealed partial class ToolchainDetector
             yield return Missing(ToolchainIds.AndroidSdk, "Android SDK", AndroidCat, hint);
             foreach (var (id, name) in new[] { (ToolchainIds.AndroidBuildTools, "Android build-tools"), (ToolchainIds.AndroidPlatforms, "Android platforms"), (ToolchainIds.Apksigner, "apksigner"), (ToolchainIds.Zipalign, "zipalign"), (ToolchainIds.Aapt2, "aapt2") })
                 yield return Missing(id, name, AndroidCat, "Part of the Android SDK build-tools.");
+            foreach (var t in DetectNativeAndroidTools(null)) yield return t;
             yield break;
         }
         var platforms = SortedVersionDirs(Path.Combine(sdk, "platforms"), "android-");
@@ -123,6 +124,53 @@ public sealed partial class ToolchainDetector
                 ? new ToolchainInfo { Id = id, DisplayName = name, Category = AndroidCat, Status = ToolchainStatus.Installed, ExecutablePath = path, Version = buildTools[0] }
                 : Missing(id, name, AndroidCat, "Part of the Android SDK build-tools.");
         }
+        foreach (var t in DetectNativeAndroidTools(sdk)) yield return t;
+    }
+
+    /// <summary>NDK, SDK CMake and adb: needed for native (C/C++) Android builds and for launching on emulators/devices.</summary>
+    private static IEnumerable<ToolchainInfo> DetectNativeAndroidTools(string? sdk)
+    {
+        const string ndkHint = "Install the NDK (Side by side) and CMake from Android Studio → SDK Manager → SDK Tools, or: sdkmanager \"ndk;27.2.12479018\" \"cmake;3.22.1\". HCG does not install them.";
+        var ndks = new List<(string Version, string Path)>();
+        if (sdk is not null)
+            foreach (var v in SortedVersionDirs(Path.Combine(sdk, "ndk"), ""))
+                ndks.Add((v, Path.Combine(sdk, "ndk", v)));
+        foreach (var env in new[] { "ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "ANDROID_NDK_LATEST_HOME" })
+            if (Environment.GetEnvironmentVariable(env) is { Length: > 0 } dir && NdkRevision(dir) is { } rev && ndks.All(n => n.Version != rev))
+                ndks.Add((rev, dir));
+        ndks = ndks.Where(n => File.Exists(Path.Combine(n.Path, "source.properties"))).Select(n => (NdkRevision(n.Path) ?? n.Version, n.Path)).ToList();
+        yield return ndks.Count > 0
+            ? new ToolchainInfo
+            {
+                Id = ToolchainIds.AndroidNdk, DisplayName = "Android NDK", Category = AndroidCat, Status = ToolchainStatus.Installed,
+                Version = ndks[0].Version, ExecutablePath = ndks[0].Path, AdditionalVersions = ndks.Select(n => n.Version).ToList(),
+                Detail = $"{ndks.Count} NDK version(s)",
+            }
+            : Missing(ToolchainIds.AndroidNdk, "Android NDK", AndroidCat, ndkHint);
+        var cmakes = sdk is null ? [] : SortedVersionDirs(Path.Combine(sdk, "cmake"), "")
+            .Where(v => File.Exists(Path.Combine(sdk, "cmake", v, "bin", OperatingSystem.IsWindows() ? "cmake.exe" : "cmake"))).ToList();
+        yield return cmakes.Count > 0
+            ? new ToolchainInfo
+            {
+                Id = ToolchainIds.AndroidCmake, DisplayName = "CMake (Android SDK)", Category = AndroidCat, Status = ToolchainStatus.Installed,
+                Version = cmakes[0], ExecutablePath = Path.Combine(sdk!, "cmake", cmakes[0], "bin"), AdditionalVersions = cmakes,
+            }
+            : Missing(ToolchainIds.AndroidCmake, "CMake (Android SDK)", AndroidCat, ndkHint);
+        var adb = sdk is null ? null : Path.Combine(sdk, "platform-tools", OperatingSystem.IsWindows() ? "adb.exe" : "adb");
+        yield return adb is not null && File.Exists(adb)
+            ? new ToolchainInfo { Id = ToolchainIds.Adb, DisplayName = "adb (platform-tools)", Category = AndroidCat, Status = ToolchainStatus.Installed, ExecutablePath = adb }
+            : Missing(ToolchainIds.Adb, "adb (platform-tools)", AndroidCat, "Install Android SDK Platform-Tools with the SDK Manager.");
+    }
+
+    /// <summary>Pkg.Revision from an NDK's source.properties, e.g. "27.2.12479018".</summary>
+    internal static string? NdkRevision(string ndkDir)
+    {
+        var props = Path.Combine(ndkDir, "source.properties");
+        if (!File.Exists(props)) return null;
+        foreach (var line in File.ReadLines(props))
+            if (line.StartsWith("Pkg.Revision", StringComparison.Ordinal) && line.IndexOf('=') is var eq and > 0)
+                return line[(eq + 1)..].Trim();
+        return null;
     }
 
     private static List<string> SortedVersionDirs(string dir, string prefix)
