@@ -11,6 +11,7 @@ namespace HCG.ExecutableMaker.Packaging.Packagers;
 public sealed class MacAppBundlePackager : IPackager
 {
     public PackagingFormat Format => PackagingFormat.MacAppBundle;
+    public bool Handles(BuildSettings settings) => settings.Swift is null; // Swift apps use SwiftAppBundlePackager
 
     public Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken) => Task.Run(() =>
     {

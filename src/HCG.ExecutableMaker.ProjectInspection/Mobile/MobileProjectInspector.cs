@@ -22,7 +22,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
         markers.AddRange(FlutterAnalyzer.FindPubspecs(index).Select(p => (p, 110)));
         markers.AddRange(mauiProjects.Select(m => (m.ProjectPath, 110)));
         markers.AddRange(AndroidGradleAnalyzer.FindRoots(index).Select(r => (AndroidGradleAnalyzer.Join(r, "build.gradle"), 105)));
-        markers.AddRange(XcodeProjectAnalyzer.FindProjects(index).Select(p => (p, 105)));
+        markers.AddRange(XcodeProjectAnalyzer.FindMobileProjects(index).Select(p => (p, 105)));
         markers.AddRange(XcodeProjectAnalyzer.FindAppPackages(index).Select(p => (p, 105)));
         if (markers.Count == 0) return 0;
         var mobileDepth = markers.Min(m => SourceIndex.Depth(m.Path));
@@ -154,7 +154,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             diagnostics.AddRange(d);
         }
         IosProjectInfo? ios = null;
-        var xcodeProjects = XcodeProjectAnalyzer.FindProjects(index);
+        var xcodeProjects = XcodeProjectAnalyzer.FindMobileProjects(index);
         if (xcodeProjects.Count > 0)
         {
             // Prefer the project with an app target.

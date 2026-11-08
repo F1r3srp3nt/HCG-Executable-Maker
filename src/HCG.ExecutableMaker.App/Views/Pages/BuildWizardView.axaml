@@ -211,8 +211,8 @@
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
                   <Border Classes="divider" />
-                  <TextBlock Classes="formlabel" Text="PROJECT TO BUILD" Margin="0" />
-                  <ComboBox ItemsSource="{Binding ProjectOptions}" SelectedItem="{Binding SelectedProject}" PlaceholderText="No runnable application project found">
+                  <TextBlock Classes="formlabel" Text="{Binding ProjectPickerLabel}" Margin="0" />
+                  <ComboBox ItemsSource="{Binding ProjectOptions}" SelectedItem="{Binding SelectedProject}" PlaceholderText="{Binding ProjectPickerPlaceholder}" HorizontalAlignment="Stretch">
                     <ComboBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:ProjectChoice">
                         <StackPanel Spacing="1">
@@ -222,6 +222,78 @@
                       </DataTemplate>
                     </ComboBox.ItemTemplate>
                   </ComboBox>
+                  <!-- Swift package: trusted evaluation and executable product choice -->
+                  <StackPanel Spacing="12" IsVisible="{Binding HasSelectedSwiftPackage}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="Swift package" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding SwiftPackageTag}" />
+                    </Grid>
+                    <TextBlock Classes="body secondary" Text="{Binding SwiftPackageStatus}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding SwiftPackageFacts}" TextWrapping="Wrap" />
+                    <Border Classes="callout warning" IsVisible="{Binding HasSwiftRemediation}">
+                      <ItemsControl ItemsSource="{Binding SwiftRemediation}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="x:String">
+                            <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Border>
+                    <Border Classes="inset" Padding="16,14" IsVisible="{Binding SwiftHostCanEvaluate}">
+                      <StackPanel Spacing="10">
+                        <TextBlock Text="Evaluate Package.swift on this Mac" FontWeight="SemiBold" />
+                        <TextBlock Classes="muted" TextWrapping="Wrap"
+                                   Text="Package.swift is Swift code. HCG has only read it as text so far. To list the products this Mac really builds (products declared under #if os(macOS) included), HCG runs 'swift package dump-package' through the same isolated build worker as a build: scrubbed environment, scratch space outside the project, cancellable, 5-minute limit." />
+                        <CheckBox IsChecked="{Binding SwiftEvaluationTrusted}" IsEnabled="{Binding !IsEvaluatingSwift}">
+                          <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
+                        </CheckBox>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button Classes="primary" Content="Evaluate package" Command="{Binding EvaluateSwiftPackageCommand}" />
+                          <Button Classes="ghost" Content="Cancel" Command="{Binding CancelSwiftEvaluationCommand}" IsVisible="{Binding IsEvaluatingSwift}" />
+                          <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsEvaluatingSwift}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="callout error" IsVisible="{Binding SwiftEvaluationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <SelectableTextBlock FontSize="12.5" Text="{Binding SwiftEvaluationError}" TextWrapping="Wrap" />
+                    </Border>
+                    <Expander Header="Evaluation output" IsVisible="{Binding HasSwiftEvaluationLog}" HorizontalAlignment="Stretch">
+                      <ScrollViewer MaxHeight="180">
+                        <ItemsControl ItemsSource="{Binding SwiftEvaluationLog}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Expander>
+                    <StackPanel Spacing="8" IsVisible="{Binding HasSwiftProducts}">
+                      <TextBlock Classes="formlabel" Text="EXECUTABLE PRODUCT TO BUILD" Margin="0" />
+                      <ComboBox ItemsSource="{Binding SwiftExecutableProducts}" SelectedItem="{Binding SelectedSwiftProduct}" PlaceholderText="Choose an executable product…" HorizontalAlignment="Stretch">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:SwiftProductChoice">
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="{Binding Display}" />
+                              <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
+                      <Grid ColumnDefinitions="170,*" Margin="0,4,0,0">
+                        <TextBlock Classes="label" Text="Library products" />
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding SwiftLibrariesText}" FontSize="13" TextWrapping="Wrap" />
+                      </Grid>
+                      <Grid ColumnDefinitions="170,*">
+                        <TextBlock Classes="label" Text="Test targets" />
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding SwiftTestsText}" FontSize="13" TextWrapping="Wrap" />
+                      </Grid>
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Libraries and tests are not built into an app; only executable products are offered." />
+                    </StackPanel>
+                  </StackPanel>
+                  <Border Classes="callout warning" IsVisible="{Binding HasMacXcodeProjects}">
+                    <SelectableTextBlock FontSize="12.5" Text="{Binding MacXcodeProjectsText}" TextWrapping="Wrap" />
+                  </Border>
                 </StackPanel>
               </Border>
             </StackPanel>
@@ -255,7 +327,7 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-                  <TextBlock Classes="muted" Text="Install the missing tools (see the Toolchains page), then press Re-inspect." TextWrapping="Wrap" />
+                  <TextBlock Classes="muted" Text="{Binding MissingHint}" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
               <Border Classes="card" IsVisible="{Binding HasDiagnostics}">
@@ -377,18 +449,60 @@
                       <NumericUpDown Value="{Binding TimeoutMinutes}" Minimum="1" Maximum="720" Increment="5" FormatString="0" />
                     </StackPanel>
                   </UniformGrid>
-                  <CheckBox IsChecked="{Binding SelfContained}">
+                  <CheckBox IsChecked="{Binding SelfContained}" IsVisible="{Binding IsDotNetBuild}">
                     <StackPanel Spacing="1">
                       <TextBlock Text="Self-contained" FontWeight="Medium" />
                       <TextBlock Classes="muted" Text="Bundle the .NET runtime — no installation required on the target machine." TextWrapping="Wrap" />
                     </StackPanel>
                   </CheckBox>
-                  <CheckBox IsChecked="{Binding SingleFile}">
+                  <CheckBox IsChecked="{Binding SingleFile}" IsVisible="{Binding IsDotNetBuild}">
                     <StackPanel Spacing="1">
                       <TextBlock Text="Single-file executable" FontWeight="Medium" />
                       <TextBlock Classes="muted" Text="Package the app and its dependencies into one executable file." TextWrapping="Wrap" />
                     </StackPanel>
                   </CheckBox>
+                </StackPanel>
+              </Border>
+              <Border Classes="card" IsVisible="{Binding IsSwiftBuild}">
+                <StackPanel Spacing="12">
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h2" Text="macOS app (Swift package)" />
+                    <TextBlock Classes="muted" TextWrapping="Wrap" Text="Written to the .app's Info.plist. The application name above is the display name (e.g. Distil); the executable keeps the product name." />
+                  </StackPanel>
+                  <StackPanel>
+                    <TextBlock Classes="formlabel" Text="DELIVER AS" />
+                    <ComboBox ItemsSource="{Binding SwiftKindOptions}" SelectedItem="{Binding SelectedSwiftKind}" HorizontalAlignment="Stretch" />
+                    <TextBlock Classes="muted" FontSize="12" Margin="0,4,0,0" Text="{Binding SwiftKindNote}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <UniformGrid Columns="2">
+                    <StackPanel Margin="0,0,6,0">
+                      <TextBlock Classes="formlabel" Text="BUILD NUMBER (CFBUNDLEVERSION)" />
+                      <TextBox Text="{Binding SwiftBuildNumber}" PlaceholderText="1" />
+                    </StackPanel>
+                    <StackPanel Margin="6,0,0,0">
+                      <TextBlock Classes="formlabel" Text="MINIMUM MACOS" />
+                      <TextBox Text="{Binding SwiftMinimumMacOS}" PlaceholderText="from the executable" />
+                    </StackPanel>
+                  </UniformGrid>
+                  <StackPanel IsVisible="{Binding IsSwiftGui}">
+                    <TextBlock Classes="formlabel" Text="APP CATEGORY (LSAPPLICATIONCATEGORYTYPE)" />
+                    <ComboBox ItemsSource="{Binding SwiftCategoryOptions}" SelectedItem="{Binding SelectedSwiftCategory}" HorizontalAlignment="Stretch" />
+                  </StackPanel>
+                  <StackPanel Spacing="10" IsVisible="{Binding HasSwiftUsageDescriptions}">
+                    <TextBlock Classes="formlabel" Text="PRIVACY USAGE DESCRIPTIONS (REQUIRED)" Margin="0" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="macOS shows this text when the app asks for permission, and terminates the app if the key is missing." />
+                    <ItemsControl ItemsSource="{Binding SwiftUsageDescriptions}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SwiftUsageItem">
+                          <StackPanel Spacing="4" Margin="0,0,0,10">
+                            <TextBlock Text="{Binding Heading}" FontWeight="Medium" FontSize="12.5" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Evidence, StringFormat='Detected: {0}'}" TextWrapping="Wrap" />
+                            <TextBox Text="{Binding Text}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" PlaceholderText="Explain why the app needs this access." />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
                 </StackPanel>
               </Border>
               <Border Classes="card">
@@ -493,10 +607,11 @@
                       <TextBlock Classes="label" Text="ERRORS" />
                       <TextBlock Text="{Binding Result.ErrorCount, FallbackValue=0}" FontWeight="SemiBold" Classes="error" />
                     </StackPanel>
-                    <StackPanel Spacing="2">
-                      <TextBlock Classes="label" Text="OUTPUT" />
-                      <SelectableTextBlock Text="{Binding ResultOutput}" Classes="mono" />
-                    </StackPanel>
+                  </StackPanel>
+                  <!-- Own row: long output paths wrap instead of running under the action buttons. -->
+                  <StackPanel Spacing="2" Margin="0,0,16,0">
+                    <TextBlock Classes="label" Text="OUTPUT" />
+                    <SelectableTextBlock Text="{Binding ResultOutput}" Classes="mono" TextWrapping="Wrap" />
                   </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Spacing="8" Margin="20,0,0,0" MinWidth="200">

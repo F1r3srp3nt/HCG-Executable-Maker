@@ -6,6 +6,7 @@ namespace HCG.ExecutableMaker.Packaging.Packagers;
 public sealed class PortableFolderPackager : IPackager
 {
     public PackagingFormat Format => PackagingFormat.PortableFolder;
+    public bool Handles(BuildSettings settings) => settings.Swift is not { Kind: SwiftAppKind.GuiApp };
 
     public Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken) => Task.Run(() =>
     {

@@ -9,6 +9,9 @@
     <Project Path="src/HCG.ExecutableMaker.ProjectInspection/HCG.ExecutableMaker.ProjectInspection.csproj" />
     <Project Path="src/HCG.ExecutableMaker.Security/HCG.ExecutableMaker.Security.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/ui-driver/HCG.ExecutableMaker.UiDriver.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HCG.ExecutableMaker.Tests/HCG.ExecutableMaker.Tests.csproj" />
   </Folder>

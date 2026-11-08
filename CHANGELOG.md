@@ -2,6 +2,42 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/swift-macos` (not merged)
+
+### Added — native Swift/macOS apps
+- **Swift package discovery** (passive, `Package.swift` read as text, never run):
+  - packages at the root, inside a ZIP's wrapping folder, and several per repository;
+  - build/cache folders ignored;
+  - no package pre-selected when there are several;
+  - tools version, macOS platform, conditional declarations, GUI entry points and privacy-sensitive APIs.
+- **Trusted evaluation**: `swift package dump-package` through the build worker after explicit trust. Its JSON is the
+  authoritative product list: executables separate from libraries and test targets; products declared under
+  `#if os(macOS)` are included.
+- **Toolchain checks**: macOS version, selected developer directory, Swift compiler (vs the package tools version),
+  macOS SDK (vs the minimum macOS), codesign and hdiutil. Each gap names its exact fix. The states *Missing toolchain*,
+  *Needs another host* and *Unsupported* are kept distinct.
+- **Build**: `swift package resolve`, then `swift build --product … --arch …` (arm64, x86_64 or universal), with
+  scratch space outside the project, cancellation, timeouts, diagnostics parsing and history.
+- **`SwiftAppBundlePackager`**: Swift-specific `.app` layout and Info.plist. The deployment target comes from the
+  package / Mach-O, never the .NET defaults. Adds privacy usage keys, resource bundles in `Contents/Resources` and an
+  ad-hoc signature.
+- **Swift verifier**: Mach-O slices, deployment target, privacy keys, `codesign --verify --strict`.
+- **App ZIP** via `ditto`, with an extract-and-re-verify round trip. DMG via the existing packager. CLI products use
+  the existing portable folder/ZIP packagers.
+- **New Build wizard**:
+  - package/product choice, trusted evaluation panel, macOS app options;
+  - .NET-only options hidden;
+  - macOS Xcode projects explained as not built;
+  - Windows/Linux hosts blocked, with the reason.
+- `tools/ui-driver`: drives the real wizard headlessly (Avalonia headless + Skia) and saves screenshots.
+- CI `swift-macos`: builds Distil.app (+ZIP, DMG), universal Relay.app (+ZIP) and the relay-runner CLI from the
+  pinned Oslo-Sprint repo (folder and ZIP imports), then verifies and launches them.
+- 37 unit tests; docs `docs/SWIFT-MACOS.md`.
+
+### Fixed
+- macOS-only Xcode projects were claimed by the iOS (Mobile) inspector.
+- Results page: long output paths no longer run under the action buttons.
+
 ## [0.2.0] — 2026-11-01 (pre-release)
 
 Unsigned pre-release. Adds the Windows Setup.exe installer (M0.2) and Mobile Build Studio (M0.5). Verified in CI: real

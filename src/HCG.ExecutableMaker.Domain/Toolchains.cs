@@ -66,4 +66,9 @@ public static class ToolchainIds
     public const string ProvisioningProfiles = "provisioning-profiles";
     public const string Flutter = "flutter";
     public const string MauiWorkloads = "maui-workloads";
+
+    // Swift / macOS desktop
+    public const string Swift = "swift";
+    public const string MacOSSdk = "macos-sdk";
+    public const string MacOSVersion = "macos-version";
 }
