@@ -38,7 +38,14 @@ public sealed class PortingService(IToolchainService toolchains, ProjectService 
     /// <summary>The output folder for a new port: a fresh, timestamped folder in <paramref name="parent"/>.</summary>
     public string OutputFolderFor(ProjectRecord project, PortingAssessment assessment, string parent) =>
         Path.Combine(Path.GetFullPath(parent),
-            $"{PathGuard.SanitizeFileName(project.Name, "project")}-{(assessment.Path == PortingPath.MacOSToIOS ? "ios" : "android")}-port-{time.GetLocalNow():yyyyMMdd-HHmmss}");
+            $"{PathGuard.SanitizeFileName(SourceName(project), "project")}-{(assessment.Path == PortingPath.MacOSToIOS ? "ios" : "android")}-port-{time.GetLocalNow():yyyyMMdd-HHmmss}");
+
+    /// <summary>The user's folder/ZIP name (the analysed project name can be a generic workspace folder).</summary>
+    private static string SourceName(ProjectRecord project)
+    {
+        var name = Path.GetFileNameWithoutExtension(project.SourceLocation.TrimEnd('/', '\\'));
+        return string.IsNullOrWhiteSpace(name) ? project.Name : name;
+    }
 
     public async Task<PortReport> GenerateAsync(ProjectRecord project, PortingAssessment assessment, PortOptions options, string outputParent, CancellationToken cancellationToken)
     {
@@ -69,7 +76,7 @@ public sealed class PortingService(IToolchainService toolchains, ProjectService 
                 var plan = new MigrationPlan { Steps = steps, Changes = output.Changes, IsDraft = options.Draft };
                 var port = new PortReport
                 {
-                    Id = Guid.NewGuid(), SourceProject = project.Name, SourceDirectory = project.SourceLocation, OutputDirectory = outputRoot,
+                    Id = Guid.NewGuid(), SourceProject = SourceName(project), SourceDirectory = project.SourceLocation, OutputDirectory = outputRoot,
                     BuildRoot = buildRoot, Assessment = fresh, Plan = plan, Options = options, CreatedAt = time.GetUtcNow(),
                     Verification =
                     [
@@ -115,7 +122,7 @@ public sealed class PortingService(IToolchainService toolchains, ProjectService 
             foreach (var (id, name) in new[] { (ToolchainIds.AndroidNdk, "Android NDK"), (ToolchainIds.AndroidCmake, "CMake (Android SDK)"), (ToolchainIds.AndroidSdk, "Android SDK"), (ToolchainIds.Jdk, "JDK") })
                 if (!report.IsAvailable(id))
                     return new(Record(port, new VerificationEntry(VerificationLevel.Compiled, LevelStatus.NotPossibleHere,
-                        $"{name} is not installed, so the native build cannot run here. {report.Find(id)?.InstallHint} (HCG does not install SDK components, and the generated project pins versions so Gradle does not download them either.)", time.GetUtcNow())), null, null);
+                        $"{name} is not installed, so the native build cannot run here. {report.Find(id)?.InstallHint} The generated project pins the NDK/CMake versions found when it was generated, so Gradle does not download them either.", time.GetUtcNow())), null, null);
 
         // The port is imported like any project, then built by Mobile Build Studio's engine (logging, history, verification).
         var import = await projects.ImportDirectoryAsync(port.OutputDirectory, null, cancellationToken).ConfigureAwait(false);

@@ -23,5 +23,6 @@
     <ProjectReference Include="..\HCG.ExecutableMaker.Infrastructure\HCG.ExecutableMaker.Infrastructure.csproj" />
     <ProjectReference Include="..\HCG.ExecutableMaker.ProjectInspection\HCG.ExecutableMaker.ProjectInspection.csproj" />
     <ProjectReference Include="..\HCG.ExecutableMaker.BuildEngine\HCG.ExecutableMaker.BuildEngine.csproj" />
+    <ProjectReference Include="..\HCG.ExecutableMaker.Porting\HCG.ExecutableMaker.Porting.csproj" />
   </ItemGroup>
 </Project>
