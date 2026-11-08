@@ -15,6 +15,10 @@
 #   ios         — on macOS with Xcode: Simulator build, unsigned archive, and the expected refusals (IPA without
 #                 code-signing identities; signed archive without a development team). No certificates are configured
 #                 in CI and nothing is uploaded anywhere. Mobile outputs are workflow artifacts (7 days).
+#   swift-macos — on macOS with Xcode: the REAL New Build wizard (tools/ui-driver, Avalonia headless) imports the pinned
+#                 Oslo-Sprint repository as a folder and as a ZIP, evaluates Package.swift after trust, and builds
+#                 Distil.app (+ ZIP, DMG), Relay.app (universal, + ZIP) and the relay-runner CLI; the apps are then
+#                 verified independently (codesign, plutil, lipo), launched and screenshotted.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -278,6 +282,115 @@ jobs:
         with:
           name: mobile-ios-fixture-outputs
           path: ${{ github.workspace }}/mobile-out
+          if-no-files-found: warn
+          retention-days: 7
+
+  swift-macos:
+    name: Swift — macOS apps through the New Build wizard (Distil, Relay)
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/swift-out
+      # Pinned public reference repository (two SwiftPM packages; GUI products are declared under #if os(macOS)).
+      OSLO_REPO: https://github.com/F1r3srp3nt/Oslo-Sprint.git
+      OSLO_COMMIT: 45431255bcc50c0e48c553c1f522ed67adf7e954
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Toolchain (Swift, SDK, developer directory)
+        run: |
+          sw_vers
+          xcode-select -p
+          swift --version
+          xcrun --sdk macosx --show-sdk-version
+
+      - name: Reference projects (folder + ZIP with a wrapping folder)
+        run: |
+          mkdir -p "$OUT/screens"
+          git clone --quiet "$OSLO_REPO" "$OUT/Oslo-Sprint"
+          git -C "$OUT/Oslo-Sprint" checkout --quiet "$OSLO_COMMIT"
+          git -C "$OUT/Oslo-Sprint" archive --format=zip --prefix=Oslo-Sprint-main/ -o "$OUT/Oslo-Sprint-main.zip" HEAD
+          unzip -l "$OUT/Oslo-Sprint-main.zip" | grep Package.swift
+
+      - name: Build the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Distil.app — folder import, package distil/, product TokenLab (app + ZIP + DMG)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --package distil
+          --product TokenLab --name Distil --bundle-id dev.tokenlab.prototype --version 0.4.0 --build-number 4
+          --category public.app-category.developer-tools --arch arm64 --formats app,zip,dmg
+          --expect-products TokenLab --expect-libraries TokenLabCore --expect-tests TokenLabCoreTests
+          --output "$OUT/distil" --screenshots "$OUT/screens" --prefix distil
+
+      - name: Relay.app — ZIP import (wrapper folder), package relay/, product Relay, universal (app + ZIP)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint-main.zip" --package Oslo-Sprint-main/relay
+          --product Relay --name Relay --bundle-id com.oslosprint.relay --version 0.1.0 --build-number 1 --arch universal --formats app,zip
+          "--usage" "NSMicrophoneUsageDescription=Relay records only while you hold the push-to-talk button, and sends that recording to ElevenLabs for transcription."
+          --expect-products "Relay,relay-runner" --expect-libraries "RelayCore,RelayAdapters" --expect-tests "RelayAdaptersTests,RelayCoreTests"
+          --output "$OUT/relay" --screenshots "$OUT/screens" --prefix relay
+
+      - name: relay-runner — command-line product (folder + ZIP)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint-main.zip" --package Oslo-Sprint-main/relay
+          --product relay-runner --name relay-runner --bundle-id com.oslosprint.relay-runner --version 0.1.0 --arch arm64 --formats folder,zip
+          --output "$OUT/runner" --screenshots "$OUT/screens" --prefix runner
+
+      - name: Launch and inspect the built apps
+        run: |
+          distil="$(find "$OUT/distil/artifacts" -maxdepth 2 -name Distil.app -type d | head -1)"
+          relay="$(find "$OUT/relay/artifacts" -maxdepth 2 -name Relay.app -type d | head -1)"
+          tools/ui-driver/verify-macos-app.sh "$distil" "$OUT/screens/launch-distil.png" arm64
+          tools/ui-driver/verify-macos-app.sh "$relay" "$OUT/screens/launch-relay.png" "arm64 x86_64"
+          # The app ZIP as a recipient gets it.
+          mkdir -p "$OUT/unzipped" && ditto -x -k "$(find "$OUT/relay/artifacts" -name '*.app.zip' | head -1)" "$OUT/unzipped"
+          tools/ui-driver/verify-macos-app.sh "$OUT/unzipped/Relay.app" "$OUT/screens/launch-relay-from-zip.png" "arm64 x86_64"
+          # The DMG: mount read-only, verify the app inside and the Applications link.
+          dmg="$(find "$OUT/distil/artifacts" -name '*.dmg' | head -1)"
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          ls -la "$mnt"
+          codesign --verify --strict --deep --verbose=2 "$mnt/Distil.app"
+          test -L "$mnt/Applications"
+          hdiutil detach "$mnt"
+
+      - name: Run the command-line product
+        run: |
+          runner="$(find "$OUT/runner/artifacts" -maxdepth 3 -type f -name relay-runner -perm -u+x | head -1)"
+          lipo -archs "$runner"
+          "$runner" help
+          "$runner" export-procedure | head -c 400; echo
+          mkdir -p "$OUT/runner-unzipped" && unzip -q "$(find "$OUT/runner/artifacts" -name '*.zip' | head -1)" -d "$OUT/runner-unzipped"
+          "$(find "$OUT/runner-unzipped" -type f -name relay-runner | head -1)" help | head -3
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload Swift outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: swift-macos-outputs
+          path: |
+            ${{ github.workspace }}/swift-out/screens
+            ${{ github.workspace }}/swift-out/*/artifacts
+            ${{ github.workspace }}/swift-out/*/*.txt
+            ${{ github.workspace }}/swift-out/*/*.json
           if-no-files-found: warn
           retention-days: 7
 
