@@ -21,8 +21,12 @@ public static class XcodeDiscovery
         if (home.Length > 0) yield return Path.Combine(home, "Applications");
     }
 
-    /// <summary>Xcode apps in the given folders (depth 1) and extra candidate paths, de-duplicated, newest version first.</summary>
-    public static IReadOnlyList<XcodeInstallation> FindInstallations(IEnumerable<string> folders, IEnumerable<string>? extraCandidates = null)
+    /// <summary>
+    /// Xcode apps in the given folders (depth 1) and extra candidate paths, newest version first. Several names for the
+    /// same Xcode (symbolic links such as Xcode.app → Xcode_26.6.app) are listed once; the name that is active
+    /// (<paramref name="activeDeveloperDirectory"/>) is kept, otherwise the real (non-link) path.
+    /// </summary>
+    public static IReadOnlyList<XcodeInstallation> FindInstallations(IEnumerable<string> folders, IEnumerable<string>? extraCandidates = null, string? activeDeveloperDirectory = null)
     {
         var candidates = new List<string>();
         foreach (var folder in folders.Where(Directory.Exists))
@@ -31,9 +35,21 @@ public static class XcodeDiscovery
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
         candidates.AddRange(extraCandidates ?? []);
-        return candidates.Select(Path.GetFullPath).Distinct(StringComparer.Ordinal)
+        return candidates.Select(c => Path.GetFullPath(c).TrimEnd('/', Path.DirectorySeparatorChar)).Distinct(StringComparer.Ordinal)
             .Select(Read).OfType<XcodeInstallation>()
-            .OrderByDescending(x => System.Version.TryParse(x.Version, out var v) ? v : new System.Version(0, 0)).ToList();
+            .GroupBy(x => RealPath(x.AppPath), StringComparer.Ordinal)
+            .Select(g => g.FirstOrDefault(x => activeDeveloperDirectory is not null && SamePath(x.DeveloperDirectory, activeDeveloperDirectory))
+                         ?? g.FirstOrDefault(x => x.AppPath == g.Key)
+                         ?? g.OrderBy(x => x.AppPath, StringComparer.Ordinal).First())
+            .OrderByDescending(x => System.Version.TryParse(x.Version, out var v) ? v : new System.Version(0, 0))
+            .ThenBy(x => x.AppPath, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>The app's path with a symbolic link (the .app itself) resolved.</summary>
+    internal static string RealPath(string appPath)
+    {
+        try { return new DirectoryInfo(appPath).ResolveLinkTarget(returnFinalTarget: true)?.FullName.TrimEnd('/', Path.DirectorySeparatorChar) ?? appPath; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return appPath; }
     }
 
     /// <summary>Reads an Xcode.app (or null when the path is not a usable Xcode application).</summary>
@@ -49,7 +65,10 @@ public static class XcodeDiscovery
         var plist = ReadPlist(info);
         if (plist.GetValueOrDefault("CFBundleIdentifier") is { } id && id != "com.apple.dt.Xcode") return null;
         var version = ReadPlist(Path.Combine(appPath, "Contents", "version.plist"));
-        return new XcodeInstallation(appPath, dev, plist.GetValueOrDefault("CFBundleShortVersionString"), version.GetValueOrDefault("ProductBuildVersion"));
+        // Xcode's Info.plist is a binary plist (not read here); version.plist is XML and carries the same version.
+        return new XcodeInstallation(appPath, dev,
+            plist.GetValueOrDefault("CFBundleShortVersionString") ?? version.GetValueOrDefault("CFBundleShortVersionString"),
+            version.GetValueOrDefault("ProductBuildVersion"));
     }
 
     private static Dictionary<string, string> ReadPlist(string path)
