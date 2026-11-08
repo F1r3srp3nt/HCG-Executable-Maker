@@ -4,6 +4,11 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 
 ## [Unreleased] — `feature/macos-distribution` (local, not pushed)
 
+### Changed
+- CI `swift-macos` pins Oslo-Sprint `503faad` (its `main` after PR #14; product `Distil`, 0.5.0 (5)). The repository now
+  also contains a Node.js project (`presentation-studio/`), which parent-repository imports report alongside the Swift packages. The ui-driver
+  usage text and `docs/SWIFT-MACOS.md` no longer name the old `TokenLab` product or 0.4.0.
+
 ### Added — macOS distribution ([docs/MACOS-DISTRIBUTION.md](docs/MACOS-DISTRIBUTION.md))
 - **Xcode discovery** (Toolchains › Xcode):
   - installed Xcode apps from /Applications, ~/Applications, Spotlight and Browse…;
