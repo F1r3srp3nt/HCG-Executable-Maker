@@ -164,7 +164,9 @@ test('upload flow: signed URL, upload, intake check, submit; drafts are invisibl
   assert.equal(sub.body.request.summary.status, 'submitted');
   // A retry of the same draft after submission does not create a second request or new uploads.
   const retry = await call(t, '/support/requests', { method: 'POST', body: { ...(await call(t, `/support/requests/${r.body.request.id}`)).body.request, clientRequestId: undefined } });
-  assert.notEqual(retry.status, 500);
+  // A request without a clientRequestId is the caller's mistake (400), never reported as an outage (5xx).
+  assert.equal(retry.status, 400);
+  assert.equal(retry.body.error, 'invalid');
 });
 
 test("attachments: other users cannot get upload targets, download links or the stored object", async () => {

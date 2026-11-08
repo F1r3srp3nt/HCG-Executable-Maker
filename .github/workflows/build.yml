@@ -632,7 +632,9 @@ jobs:
           for i in $(seq 1 60); do [ -f "$RUNNER_TEMP/exm-contract.json" ] && break; sleep 0.5; done
           HCG_EXM_CONTRACT_SERVER_INFO="$RUNNER_TEMP/exm-contract.json" dotnet test tests/HCG.ExecutableMaker.Tests -c Release --no-build \
             --filter "FullyQualifiedName~HcgContractTests" --logger "console;verbosity=normal" | tee "$RUNNER_TEMP/contract.txt"
-          grep -q "Passed:     3" "$RUNNER_TEMP/contract.txt"
+          # Normal verbosity prints "Total tests: 3" and "     Passed: 3"; require exactly 3 run and 3 passed.
+          grep -Eq "^[[:space:]]*Total tests:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
+          grep -Eq "^[[:space:]]*Passed:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
 
   release:
     name: Publish pre-release

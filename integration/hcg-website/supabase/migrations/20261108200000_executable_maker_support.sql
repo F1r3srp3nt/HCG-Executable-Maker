@@ -148,7 +148,7 @@ begin
 end $$;
 
 create or replace function exm.is_uuid(p_text text) returns boolean
-language sql immutable as $$ select p_text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' $$;
+language sql immutable as $$ select coalesce(p_text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', false) $$; -- NULL is not a UUID
 
 create or replace function exm.caller(out subject uuid, out client_id uuid, out channel text)
 language plpgsql stable security definer set search_path = '' as $$
