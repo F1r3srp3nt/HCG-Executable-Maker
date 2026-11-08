@@ -36,6 +36,7 @@ public static class Composition
         // Environment & toolchains
         services.AddSingleton<IProcessRunner, ProcessRunner>();
         services.AddSingleton<IExecutableLocator, ExecutableLocator>();
+        services.AddSingleton<DeveloperDirectorySelection>();
         services.AddSingleton<IToolchainDetector, ToolchainDetector>();
         services.AddSingleton<IToolchainService, ToolchainService>();
 
@@ -58,6 +59,13 @@ public static class Composition
         services.AddSingleton<IPackager, DmgPackager>();
         services.AddSingleton<IPackager, SwiftAppBundlePackager>();
         services.AddSingleton<IPackager, SwiftAppZipPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacPkgPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacAppStorePackager>();
+        services.AddSingleton<HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningInventoryReader>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppleCredentialsService>();
         services.AddSingleton<IPackager, InnoSetupPackager>();
         services.AddSingleton<PackagingRegistry>();
         services.AddSingleton<BuildService>();

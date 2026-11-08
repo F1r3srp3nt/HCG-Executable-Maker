@@ -22,6 +22,14 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
     public static readonly IReadOnlySet<string> ExcludedDirectoryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "bin", "obj", ".git", ".hg", ".svn", ".vs", ".idea", "node_modules", "TestResults",
+        // SwiftPM / Xcode generated state: build products, dependency checkouts, Xcode's package workspace.
+        ".build", ".swiftpm", "DerivedData",
+    };
+
+    /// <summary>Generated folders also skipped inside ZIP archives (a zipped working copy may contain them).</summary>
+    public static readonly IReadOnlySet<string> ExcludedArchiveDirectoryNames = new HashSet<string>(StringComparer.Ordinal)
+    {
+        ".build", ".swiftpm", "DerivedData", "node_modules", ".git",
     };
 
     private readonly ILogger _logger = logger ?? NullLogger<ProjectImporter>.Instance;
@@ -124,6 +132,7 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
         long declaredTotal = 0;
         var fileCount = 0;
         var skippedMetadata = 0;
+        var skippedGenerated = new SortedSet<string>(StringComparer.Ordinal);
 
         IReadOnlyCollection<ZipArchiveEntry> all;
         try { all = archive.Entries; }
@@ -141,6 +150,11 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
             if (!PathGuard.TryNormalizeArchiveEntry(name, out var segments, out var reason))
             {
                 problems.Add($"'{name}': {reason}");
+                continue;
+            }
+            if (segments.SkipLast(isDirectory ? 0 : 1).FirstOrDefault(ExcludedArchiveDirectoryNames.Contains) is { } generated)
+            {
+                skippedGenerated.Add(generated);
                 continue;
             }
             var unixType = (entry.ExternalAttributes >> 16) & UnixFileTypeMask;
@@ -191,6 +205,8 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
             throw new ImportRejectedException("The archive contains no files.");
         if (skippedMetadata > 0)
             warnings.Add($"Skipped {skippedMetadata} macOS metadata entr{(skippedMetadata == 1 ? "y" : "ies")} (__MACOSX, .DS_Store).");
+        if (skippedGenerated.Count > 0)
+            warnings.Add($"Skipped generated folders in the archive: {string.Join(", ", skippedGenerated)}.");
         return new ArchivePlan(entries, fileCount);
     }
 

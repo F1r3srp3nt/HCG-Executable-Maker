@@ -33,6 +33,8 @@ public sealed record ToolchainReport(
 {
     public ToolchainInfo? Find(string id) => Toolchains.FirstOrDefault(t => t.Id == id);
     public bool IsAvailable(string id) => Find(id)?.IsAvailable == true;
+    /// <summary>Xcode discovery and diagnosis (macOS only).</summary>
+    public XcodeStatus? Xcode { get; init; }
 }
 
 public static class ToolchainIds
@@ -71,4 +73,6 @@ public static class ToolchainIds
     public const string Swift = "swift";
     public const string MacOSSdk = "macos-sdk";
     public const string MacOSVersion = "macos-version";
+    /// <summary>XCTest for the selected developer directory: needed to RUN Swift tests, not to build or package apps.</summary>
+    public const string XcTest = "xctest";
 }

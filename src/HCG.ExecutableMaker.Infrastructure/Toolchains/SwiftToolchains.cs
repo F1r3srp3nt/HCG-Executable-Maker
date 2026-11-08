@@ -16,10 +16,12 @@ public sealed partial class ToolchainDetector
         {
             yield return Task.FromResult(Unsupported(ToolchainIds.MacOSSdk, "macOS SDK", SwiftCategory, "Only available on macOS hosts (it ships with Xcode / the Command Line Tools)."));
             yield return Task.FromResult(Unsupported(ToolchainIds.MacOSVersion, "macOS", SwiftCategory, $"This computer runs {Host.Platform.DisplayName()}."));
+            yield return Task.FromResult(Unsupported(ToolchainIds.XcTest, "XCTest (tests only)", SwiftCategory, "Only relevant on macOS."));
             yield break;
         }
         yield return DetectMacOSVersionAsync(ct);
         yield return DetectMacOSSdkAsync(ct);
+        yield return DetectXcTestAsync(ct);
     }
 
     private async Task<ToolchainInfo> DetectSwiftAsync(CancellationToken ct)
@@ -85,6 +87,34 @@ public sealed partial class ToolchainDetector
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return Failed(ToolchainIds.MacOSSdk, "macOS SDK", SwiftCategory, xcrun, ex.Message, hint);
+        }
+    }
+
+    /// <summary>
+    /// XCTest in the selected developer directory. Full Xcode ships it; the Command Line Tools alone often do not, in
+    /// which case `swift test` fails with "no such module 'XCTest'". Building and packaging an app never need it.
+    /// </summary>
+    private async Task<ToolchainInfo> DetectXcTestAsync(CancellationToken ct)
+    {
+        const string name = "XCTest (tests only — not needed to build)";
+        const string hint = "Only needed to run the package's tests: select an installed Xcode for HCG (Toolchains › Xcode › Select Xcode) — the system setting is not changed. Building and packaging do not need XCTest.";
+        try
+        {
+            var devDir = await ActiveDeveloperDirectoryAsync(ct).ConfigureAwait(false);
+            var (rd, devOut) = (devDir is not null, devDir ?? "");
+            var (rp, platformOut, _) = await runner.CaptureAsync(new ProcessSpec { Executable = "/usr/bin/xcrun", Arguments = ["--sdk", "macosx", "--show-sdk-platform-path"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
+            var candidates = new List<string>();
+            if (rp.Succeeded && platformOut.Trim().Length > 0) candidates.Add(Path.Combine(platformOut.Trim(), "Developer", "Library", "Frameworks", "XCTest.framework"));
+            if (rd && devOut.Length > 0) candidates.Add(Path.Combine(devOut.Trim(), "Library", "Developer", "Frameworks", "XCTest.framework"));
+            var found = candidates.FirstOrDefault(Directory.Exists);
+            return found is not null
+                ? new ToolchainInfo { Id = ToolchainIds.XcTest, DisplayName = name, Category = SwiftCategory, Status = ToolchainStatus.Installed, ExecutablePath = found, Detail = found }
+                : new ToolchainInfo { Id = ToolchainIds.XcTest, DisplayName = name, Category = SwiftCategory, Status = ToolchainStatus.Missing,
+                    Detail = $"Not found in {(rd ? devOut : "the selected developer directory")}", InstallHint = hint };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Failed(ToolchainIds.XcTest, name, SwiftCategory, "/usr/bin/xcode-select", ex.Message, hint);
         }
     }
 

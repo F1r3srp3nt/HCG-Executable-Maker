@@ -33,10 +33,17 @@ public sealed partial class ToolchainDetector(
         tasks.AddRange(MacTools(cancellationToken));
         tasks.AddRange(SwiftTools(cancellationToken));
         tasks.AddRange(WindowsTools(cancellationToken));
+        var xcodeTask = Host.Platform == TargetPlatform.MacOS ? DetectXcodeAsync(cancellationToken) : null;
         var mobileTask = DetectMobileAsync(cancellationToken);
         var results = (await Task.WhenAll(tasks).ConfigureAwait(false)).Concat(await mobileTask.ConfigureAwait(false)).ToList();
+        XcodeStatus? xcode = null;
+        if (xcodeTask is not null)
+        {
+            xcode = await xcodeTask.ConfigureAwait(false);
+            results.Add(XcodeToolchainInfo(xcode));
+        }
         var (free, diskPath) = GetDiskSpace();
-        return new ToolchainReport(Host, results, free, diskPath, time.GetUtcNow());
+        return new ToolchainReport(Host, results, free, diskPath, time.GetUtcNow()) { Xcode = xcode };
     }
 
     // ---------- Cross-platform ----------
@@ -134,16 +141,12 @@ public sealed partial class ToolchainDetector(
         }
 
         yield return DetectXcodeSelectAsync(ct);
-        yield return ProbeVersionOrPresenceAsync(ToolchainIds.Xcode, "Xcode", cat, "/usr/bin/xcodebuild", ["-version"], XcodeVersionRegex(),
-            "Install Xcode from the Mac App Store.", ct);
+        // Xcode itself: DetectXcodeAsync (discovery + diagnosis), added in DetectAsync.
         yield return Task.FromResult(Presence(ToolchainIds.Codesign, "codesign", cat, "/usr/bin/codesign", "Install Xcode command-line tools: xcode-select --install"));
         yield return Task.FromResult(Presence(ToolchainIds.Hdiutil, "hdiutil (DMG)", cat, "/usr/bin/hdiutil", "hdiutil ships with macOS."));
         yield return DetectNotarytoolAsync(ct);
         yield return Task.FromResult(Presence(ToolchainIds.Productbuild, "productbuild (PKG)", cat, "/usr/bin/productbuild", "Install Xcode command-line tools: xcode-select --install"));
     }
-
-    [GeneratedRegex(@"Xcode (\S+)")]
-    private static partial Regex XcodeVersionRegex();
 
     private async Task<ToolchainInfo> DetectXcodeSelectAsync(CancellationToken ct)
     {
@@ -152,9 +155,8 @@ public sealed partial class ToolchainDetector(
         if (!File.Exists(exe)) return Missing(ToolchainIds.XcodeCommandLineTools, "Xcode Command Line Tools", "macOS", hint);
         try
         {
-            var (r, stdout, _) = await runner.CaptureAsync(new ProcessSpec { Executable = exe, Arguments = ["-p"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
-            var dir = stdout.Trim();
-            return r.Succeeded && Directory.Exists(dir)
+            var dir = await ActiveDeveloperDirectoryAsync(ct).ConfigureAwait(false) ?? "";
+            return Directory.Exists(dir)
                 ? new ToolchainInfo { Id = ToolchainIds.XcodeCommandLineTools, DisplayName = "Xcode Command Line Tools", Category = "macOS", Status = ToolchainStatus.Installed, ExecutablePath = dir, Version = DescribeDeveloperDirectory(dir).Split(' ')[0], Detail = "Selected developer directory: " + DescribeDeveloperDirectory(dir) }
                 : Missing(ToolchainIds.XcodeCommandLineTools, "Xcode Command Line Tools", "macOS", hint);
         }

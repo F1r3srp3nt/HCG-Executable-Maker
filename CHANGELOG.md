@@ -2,6 +2,48 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/macos-distribution` (local, not pushed)
+
+### Added — macOS distribution ([docs/MACOS-DISTRIBUTION.md](docs/MACOS-DISTRIBUTION.md))
+- **Xcode discovery** (Toolchains › Xcode):
+  - installed Xcode apps from /Applications, ~/Applications, Spotlight and Browse…;
+  - diagnosis: not installed, installed but not selected, license, first launch, SDKs, validation failure;
+  - Select Xcode / Open Xcode / Recheck / Use system setting;
+  - an HCG-only developer directory (`DEVELOPER_DIR` for HCG's processes; `xcode-select` untouched);
+  - the build log records the directory used.
+- **Signing inventory**:
+  - identities from `security find-identity -v`, including installer certificates, classified by type;
+  - macOS provisioning profiles (type, App ID, team, expiry, certificates).
+- **Evidence-based entitlements**:
+  - hardened-runtime and App Sandbox entitlements proposed from the sources;
+  - sandbox review items and blockers;
+  - the user confirms them; deselected ones are listed as disabled features.
+- **Developer ID signing** of Swift apps and DMGs:
+  - hardened runtime, secure timestamp, confirmed entitlements;
+  - independent checks: signature, certificate/team, runtime, timestamp, entitlements, Gatekeeper.
+- **Installer package (.pkg)**:
+  - pkgbuild/productbuild, not relocatable, no scripts, OS and architecture checks;
+  - unsigned for local testing or signed with Developer ID Installer;
+  - inspection by expanding and comparing the payload byte for byte.
+- **Mac App Store package**:
+  - store-signed copy with embedded profile and sandbox entitlements;
+  - Mac Installer Distribution signature;
+  - blockers with exact fixes.
+- **Explicit steps after a build**:
+  - Notarize (notarytool + stapler + Gatekeeper, per container);
+  - Test install into ~/Applications (optional launch, then removal);
+  - Validate with App Store Connect (altool; no upload).
+- **Settings › Apple credentials**: notarytool keychain profile name (with the store-credentials command and a check)
+  and App Store Connect API key IDs. Secrets stay in the keychain or key file.
+
+### Changed
+- Packaging states are now Ready / Setup required / Incompatible with this project / Failed / Needs another host. The
+  "planned for M0.3/M0.4" placeholders for macOS are gone.
+- DMGs are mounted and compared with the built app after creation.
+- A build whose artifacts fail verification no longer presents them: the output folder is removed, and the failing
+  checks are recorded as build errors.
+- Signing & Security reports Developer ID, notarization and the Mac App Store as implemented.
+
 ## [Unreleased] — `feature/swift-macos` (not merged)
 
 ### Added — native Swift/macOS apps
@@ -37,6 +79,32 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ### Fixed
 - macOS-only Xcode projects were claimed by the iOS (Mobile) inspector.
 - Results page: long output paths no longer run under the action buttons.
+
+## [Unreleased] — `fix/swift-macos-native` (local, not pushed)
+
+### Fixed
+- **SwiftPM resources:** resource bundles are now placed where SwiftPM's `Bundle.module` actually looks, the `.app`
+  root. Before, they went in `Contents/Resources`, where `Bundle.module` fails at launch. `Contents` is signed and
+  verified separately, and the unsealed root bundles are reported.
+- Folder and ZIP imports skip SwiftPM/Xcode generated folders (`.build`, `.swiftpm`, `DerivedData`). Built working
+  copies previously copied the whole build tree into the workspace and could exceed the import limits.
+
+### Added
+- Build identity: the version, git commit, build time, executable and `.app` path are shown in Settings › About this
+  build and in the footer, and printed by `HCGExecutableMaker --version`. `self-package` passes the commit through
+  `HCG_SOURCE_REVISION`.
+- The Configure step preserves a package's configured identity by reading its own packaging script (never running
+  it). For Distil, Relay and similar packages that means the bundle id, display name, version, build number, minimum
+  macOS, category and privacy texts.
+- An XCTest probe, reported only as a test prerequisite. Build logs state that tests were not run.
+- `tools/build-local-mac.sh` builds this checkout as an app on your Mac and prints the exact path. `--verify` runs the
+  Distil/Relay/parent-repo/resource checks.
+- CI `swift-macos` for current Oslo-Sprint (`b5d8697`, product `Distil`):
+  - first builds both packages with their own scripts, then imports `distil/` and `relay/` separately, the parent
+    repository as a folder and as a ZIP, and a resource fixture;
+  - checks that the identity was preserved, launches every app, verifies resource loading, and compares Info.plist
+    keys with the scripts' apps.
+- Fixture `ResourceProbe`: a library and an app target, both with resources.
 
 ## [0.2.0] — 2026-11-01 (pre-release)
 

@@ -45,6 +45,8 @@ public sealed record SwiftTargetSourceFacts
     /// <summary>A SwiftUI <c>@main struct …: App</c> or an AppKit <c>NSApplication</c> entry point.</summary>
     public bool HasGuiEntryPoint { get; init; }
     public IReadOnlyList<SwiftPrivacyUsage> PrivacyUsages { get; init; } = [];
+    /// <summary>Sandbox / hardened-runtime evidence (entitlements a feature needs, sandbox blockers).</summary>
+    public IReadOnlyList<EntitlementEvidence> EntitlementEvidence { get; init; } = [];
     public bool HasResourceDirectory { get; init; }
     public SwiftAppKind SuggestedKind => HasGuiEntryPoint || ImportsSwiftUI || ImportsAppKit ? SwiftAppKind.GuiApp : SwiftAppKind.CommandLine;
 }

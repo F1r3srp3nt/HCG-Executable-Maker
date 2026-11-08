@@ -34,7 +34,12 @@ public enum PackagingAvailability
     MissingTool,
     RequiresDifferentHost,
     NotImplemented,
+    /// <summary>Incompatible with this project (the reason says why).</summary>
     NotApplicable,
+    /// <summary>The pipeline exists, but this Mac lacks a certificate, profile or credential; the reason is the guided setup.</summary>
+    SetupRequired,
+    /// <summary>Evaluating the format failed (e.g. the keychain could not be read); the reason is the actual error.</summary>
+    Failed,
 }
 
 public sealed record PackagingOption(

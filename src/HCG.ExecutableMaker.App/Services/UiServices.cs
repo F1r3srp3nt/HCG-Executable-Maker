@@ -58,6 +58,10 @@ public interface IPlatformShell
     Task<string?> PickFileAsync(string title, string typeName, params string[] patterns);
     Task CopyAsync(string text);
     Task<bool> OpenFolderAsync(string path);
+    /// <summary>Picks a macOS application bundle (*.app). Returns its path or null.</summary>
+    Task<string?> PickApplicationAsync(string title);
+    /// <summary>Opens a macOS application (open -a semantics, via /usr/bin/open with an argument list). False when it could not be started.</summary>
+    Task<bool> OpenApplicationAsync(string appPath);
 }
 
 public sealed class PlatformShell(MainWindowProvider owner) : IPlatformShell
@@ -105,6 +109,31 @@ public sealed class PlatformShell(MainWindowProvider owner) : IPlatformShell
             FileTypeFilter = [new FilePickerFileType(typeName) { Patterns = patterns }],
         });
         return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+    }
+
+    public async Task<string?> PickApplicationAsync(string title)
+    {
+        if (Top is null) return null;
+        var files = await Top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("Applications") { Patterns = ["*.app"], AppleUniformTypeIdentifiers = ["com.apple.application-bundle"] }],
+        });
+        return files.Count > 0 ? files[0].TryGetLocalPath()?.TrimEnd('/') : null;
+    }
+
+    public Task<bool> OpenApplicationAsync(string appPath)
+    {
+        if (!OperatingSystem.IsMacOS() || !Directory.Exists(appPath)) return Task.FromResult(false);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("/usr/bin/open") { UseShellExecute = false };
+            psi.ArgumentList.Add(appPath);
+            using var p = System.Diagnostics.Process.Start(psi);
+            return Task.FromResult(p is not null);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException) { return Task.FromResult(false); }
     }
 
     public async Task CopyAsync(string text)

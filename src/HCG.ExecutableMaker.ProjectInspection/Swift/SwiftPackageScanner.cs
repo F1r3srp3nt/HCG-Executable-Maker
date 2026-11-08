@@ -80,6 +80,7 @@ public static partial class SwiftPackageScanner
         var swift = files.Where(f => f.EndsWith(".swift", StringComparison.Ordinal)).Take(MaxSourceFilesPerTarget).ToList();
         bool swiftUI = false, appKit = false, entry = false;
         var usages = new Dictionary<string, SwiftPrivacyUsage>(StringComparer.Ordinal);
+        var evidence = new Dictionary<string, EntitlementEvidence>(StringComparer.Ordinal);
         foreach (var file in swift)
         {
             var src = StripComments(Read(index, file, MaxSourceBytes));
@@ -90,6 +91,10 @@ public static partial class SwiftPackageScanner
             foreach (var rule in PrivacyRules)
                 if (!usages.ContainsKey(rule.Key) && rule.Pattern.Match(src) is { Success: true } m)
                     usages[rule.Key] = new SwiftPrivacyUsage(rule.Key, rule.Purpose, $"{file[(Join(packageDir, "").Length)..].TrimStart('/')}: {m.Value.Trim()}");
+            foreach (var rule in EntitlementRules)
+                if (!evidence.ContainsKey(rule.Capability) && rule.Pattern.Match(src) is { Success: true } em)
+                    evidence[rule.Capability] = new EntitlementEvidence(rule.Capability, rule.Kind, rule.Sandbox, rule.HardenedRuntime,
+                        $"{file[(Join(packageDir, "").Length)..].TrimStart('/')}: {em.Value.Trim()}", rule.Explanation);
         }
         return new SwiftTargetSourceFacts
         {
@@ -100,6 +105,7 @@ public static partial class SwiftPackageScanner
             ImportsAppKit = appKit,
             HasGuiEntryPoint = entry,
             PrivacyUsages = usages.Values.OrderBy(u => u.InfoPlistKey, StringComparer.Ordinal).ToList(),
+            EntitlementEvidence = evidence.Values.OrderBy(e => e.Kind).ThenBy(e => e.Capability, StringComparer.Ordinal).ToList(),
             HasResourceDirectory = files.Any(f => f.StartsWith(root + "Resources/", StringComparison.Ordinal)),
         };
     }

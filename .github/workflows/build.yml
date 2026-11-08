@@ -286,15 +286,14 @@ jobs:
           retention-days: 7
 
   swift-macos:
-    name: Swift — macOS apps through the New Build wizard (Distil, Relay)
+    name: Swift — macOS apps through the New Build wizard (Distil, Relay, parent repo, resources)
     needs: test
     runs-on: macos-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       OUT: ${{ github.workspace }}/swift-out
-      # Pinned public reference repository (two SwiftPM packages; GUI products are declared under #if os(macOS)).
       OSLO_REPO: https://github.com/F1r3srp3nt/Oslo-Sprint.git
-      OSLO_COMMIT: 45431255bcc50c0e48c553c1f522ed67adf7e954
+      OSLO_COMMIT: b5d86974e7c789523b46df8a8184f768c06b212c
     steps:
       - uses: actions/checkout@v7
 
@@ -302,72 +301,124 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Toolchain (Swift, SDK, developer directory)
+      - name: Toolchain (Swift, SDK, developer directory, XCTest); pick an Xcode for HCG that is NOT the system one
         run: |
           sw_vers
           xcode-select -p
+          sys="$(cd "$(xcode-select -p)" && pwd -P)"
+          echo "SYSTEM_DEVDIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          ls -d /Applications/Xcode*.app
+          alt=""
+          for a in /Applications/Xcode_*.app; do [ "$(cd "$a/Contents/Developer" && pwd -P)" != "$sys" ] && alt="$a"; done
+          echo "HCG_XCODE=${alt:-$(dirname "$(dirname "$sys")")}" >> "$GITHUB_ENV"
+          echo "System developer directory: $sys · Xcode selected for HCG only: ${alt:-same as system (no other Xcode installed)}"
           swift --version
           xcrun --sdk macosx --show-sdk-version
+          ls "$(xcrun --sdk macosx --show-sdk-platform-path)/Developer/Library/Frameworks" | grep -i xctest || echo "XCTest not found (only affects tests)"
 
-      - name: Reference projects (folder + ZIP with a wrapping folder)
+      - name: Reference projects, built first with their own scripts (realistic working copies)
         run: |
           mkdir -p "$OUT/screens"
           git clone --quiet "$OSLO_REPO" "$OUT/Oslo-Sprint"
           git -C "$OUT/Oslo-Sprint" checkout --quiet "$OSLO_COMMIT"
           git -C "$OUT/Oslo-Sprint" archive --format=zip --prefix=Oslo-Sprint-main/ -o "$OUT/Oslo-Sprint-main.zip" HEAD
-          unzip -l "$OUT/Oslo-Sprint-main.zip" | grep Package.swift
+          bash "$OUT/Oslo-Sprint/distil/scripts/build-macos.sh"
+          bash "$OUT/Oslo-Sprint/relay/scripts/build-app.sh"
+          ls -d "$OUT/Oslo-Sprint/distil/.build" "$OUT/Oslo-Sprint/distil/dist/Distil.app" "$OUT/Oslo-Sprint/relay/build/Relay.app"
 
-      - name: Build the UI driver (real app views, headless)
-        run: dotnet build tools/ui-driver -c Release
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: |
+          dotnet build tools/ui-driver -c Release
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --version
 
-      - name: Distil.app — folder import, package distil/, product TokenLab (app + ZIP + DMG)
+      - name: Distil — import distil/ alone; identity comes from its own script (not passed in)
         run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --package distil
-          --product TokenLab --name Distil --bundle-id dev.tokenlab.prototype --version 0.4.0 --build-number 4
-          --category public.app-category.developer-tools --arch arm64 --formats app,zip,dmg
-          --expect-products TokenLab --expect-libraries TokenLabCore --expect-tests TokenLabCoreTests
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint/distil" --package ""
+          --product Distil --expect-name Distil --expect-bundle-id dev.tokenlab.prototype --expect-version "0.5.0 (5)"
+          --arch arm64 --formats app,zip,dmg,pkg --expect-products Distil --expect-libraries TokenLabCore --expect-tests TokenLabCoreTests
+          --select-xcode "$HCG_XCODE" --expect-xcode-state Ready --test-install launch
           --output "$OUT/distil" --screenshots "$OUT/screens" --prefix distil
 
-      - name: Relay.app — ZIP import (wrapper folder), package relay/, product Relay, universal (app + ZIP)
+      - name: Xcode selection applied to HCG only; the build used it; the system setting is unchanged
+        run: |
+          echo "xcode-select -p now: $(xcode-select -p) (before: $SYSTEM_DEVDIR)"
+          [ "$(xcode-select -p)" = "$SYSTEM_DEVDIR" ]
+          used="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ToolchainVersions"]["developer-dir"])' "$OUT/distil/distil-build.json")"
+          echo "Developer directory recorded by the build: $used"
+          [ "$used" = "$HCG_XCODE/Contents/Developer" ]
+          exe="$(find "$OUT/distil/artifacts" -path '*Distil.app/Contents/MacOS/Distil' -type f | head -1)"
+          echo "SDK recorded in the executable:"; vtool -show-build "$exe" | grep -i sdk
+          echo "SDK of the selected Xcode: $(DEVELOPER_DIR="$HCG_XCODE/Contents/Developer" xcrun --sdk macosx --show-sdk-version)"
+          vtool -show-build "$exe" | grep -qi "sdk $(DEVELOPER_DIR="$HCG_XCODE/Contents/Developer" xcrun --sdk macosx --show-sdk-version)"
+
+      - name: Installer package — inspect, install on this disposable runner, launch, remove
+        run: |
+          pkg="$(find "$OUT/distil/artifacts" -maxdepth 3 -name '*.pkg' | head -1)"
+          app="$(find "$OUT/distil/artifacts" -maxdepth 3 -name Distil.app -type d | head -1)"
+          pkgutil --check-signature "$pkg" || true
+          pkgutil --payload-files "$pkg" | head -20
+          sudo installer -pkg "$pkg" -target /
+          diff -r "$app" /Applications/Distil.app && echo "Installed app is identical to the built app"
+          codesign --verify --strict --deep --verbose=2 /Applications/Distil.app
+          tools/ui-driver/verify-macos-app.sh /Applications/Distil.app "$OUT/screens/launch-installed-distil.png" arm64
+          sudo rm -rf /Applications/Distil.app
+          sudo pkgutil --forget dev.tokenlab.prototype
+
+      - name: Relay — import relay/ alone; microphone text comes from its own script
         run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint-main.zip" --package Oslo-Sprint-main/relay
-          --product Relay --name Relay --bundle-id com.oslosprint.relay --version 0.1.0 --build-number 1 --arch universal --formats app,zip
-          "--usage" "NSMicrophoneUsageDescription=Relay records only while you hold the push-to-talk button, and sends that recording to ElevenLabs for transcription."
-          --expect-products "Relay,relay-runner" --expect-libraries "RelayCore,RelayAdapters" --expect-tests "RelayAdaptersTests,RelayCoreTests"
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint/relay" --package ""
+          --product Relay --expect-bundle-id com.oslosprint.relay --expect-version "0.2.0 (2)" --arch universal --formats app,zip
+          --expect-products "Relay,relay-runner" --expect-libraries "RelayAdapters,RelayCore" --expect-tests "RelayAdaptersTests,RelayCoreTests"
           --output "$OUT/relay" --screenshots "$OUT/screens" --prefix relay
 
-      - name: relay-runner — command-line product (folder + ZIP)
+      - name: Parent repository — folder import, choose distil/ then relay/ (CLI product)
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --package distil \
+            --product Distil --expect-bundle-id dev.tokenlab.prototype --arch arm64 --formats app \
+            --output "$OUT/parent-distil" --screenshots "$OUT/screens" --prefix parent-distil
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --package relay \
+            --product relay-runner --name relay-runner --bundle-id com.oslosprint.relay-runner --arch arm64 --formats folder,zip \
+            --output "$OUT/runner" --screenshots "$OUT/screens" --prefix runner
+
+      - name: Parent repository — GitHub-style ZIP (wrapper folder), relay/
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint-main.zip" --package Oslo-Sprint-main/relay
-          --product relay-runner --name relay-runner --bundle-id com.oslosprint.relay-runner --version 0.1.0 --arch arm64 --formats folder,zip
-          --output "$OUT/runner" --screenshots "$OUT/screens" --prefix runner
+          --product Relay --expect-bundle-id com.oslosprint.relay --arch arm64 --formats app
+          --output "$OUT/zip-relay" --screenshots "$OUT/screens" --prefix zip-relay
 
-      - name: Launch and inspect the built apps
+      - name: SwiftPM resources (library + app target) through Bundle.module
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/ResourceProbe --package ""
+          --product ResourceProbe --name "Resource Probe" --bundle-id com.hakmicapital.resourceprobe --arch arm64 --formats app,zip
+          --output "$OUT/probe" --screenshots "$OUT/screens" --prefix probe
+
+      - name: Launch and inspect the built apps; Info.plist parity with the projects' own scripts
         run: |
-          distil="$(find "$OUT/distil/artifacts" -maxdepth 2 -name Distil.app -type d | head -1)"
-          relay="$(find "$OUT/relay/artifacts" -maxdepth 2 -name Relay.app -type d | head -1)"
+          app() { find "$1" -maxdepth 3 -name "$2" -type d | head -1; }
+          distil="$(app "$OUT/distil/artifacts" Distil.app)"
+          relay="$(app "$OUT/relay/artifacts" Relay.app)"
+          probe="$(app "$OUT/probe/artifacts" 'Resource Probe.app')"
           tools/ui-driver/verify-macos-app.sh "$distil" "$OUT/screens/launch-distil.png" arm64
           tools/ui-driver/verify-macos-app.sh "$relay" "$OUT/screens/launch-relay.png" "arm64 x86_64"
-          # The app ZIP as a recipient gets it.
-          mkdir -p "$OUT/unzipped" && ditto -x -k "$(find "$OUT/relay/artifacts" -name '*.app.zip' | head -1)" "$OUT/unzipped"
-          tools/ui-driver/verify-macos-app.sh "$OUT/unzipped/Relay.app" "$OUT/screens/launch-relay-from-zip.png" "arm64 x86_64"
-          # The DMG: mount read-only, verify the app inside and the Applications link.
-          dmg="$(find "$OUT/distil/artifacts" -name '*.dmg' | head -1)"
-          mnt="$(mktemp -d)"
-          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
-          ls -la "$mnt"
-          codesign --verify --strict --deep --verbose=2 "$mnt/Distil.app"
-          test -L "$mnt/Applications"
-          hdiutil detach "$mnt"
+          tools/ui-driver/verify-macos-app.sh "$(app "$OUT/parent-distil/artifacts" Distil.app)" "$OUT/screens/launch-parent-distil.png" arm64
+          tools/ui-driver/verify-macos-app.sh "$(app "$OUT/zip-relay/artifacts" Relay.app)" "$OUT/screens/launch-zip-relay.png" arm64
+          rm -f "$TMPDIR/hcg-resource-probe.txt"
+          tools/ui-driver/verify-macos-app.sh "$probe" "$OUT/screens/launch-resource-probe.png" arm64
+          echo "--- resource probe report:"; cat "$TMPDIR/hcg-resource-probe.txt"
+          grep -q "^app=Banner from the app target$" "$TMPDIR/hcg-resource-probe.txt"
+          grep -q "^library=Hello from ProbeKit resources$" "$TMPDIR/hcg-resource-probe.txt"
+          for k in CFBundleExecutable CFBundleIdentifier CFBundleDisplayName CFBundleShortVersionString CFBundleVersion LSMinimumSystemVersion LSApplicationCategoryType NSMicrophoneUsageDescription; do
+            for pair in "$distil|$OUT/Oslo-Sprint/distil/dist/Distil.app" "$relay|$OUT/Oslo-Sprint/relay/build/Relay.app"; do
+              a="$(/usr/libexec/PlistBuddy -c "Print :$k" "${pair%%|*}/Contents/Info.plist" 2>/dev/null || echo '<absent>')"
+              b="$(/usr/libexec/PlistBuddy -c "Print :$k" "${pair##*|}/Contents/Info.plist" 2>/dev/null || echo '<absent>')"
+              [ "$a" = "$b" ] && echo "same  $k: $a" || { echo "DIFF  $k: HCG=$a script=$b"; exit 1; }
+            done
+          done
 
       - name: Run the command-line product
         run: |
           runner="$(find "$OUT/runner/artifacts" -maxdepth 3 -type f -name relay-runner -perm -u+x | head -1)"
-          lipo -archs "$runner"
-          "$runner" help
-          "$runner" export-procedure | head -c 400; echo
-          mkdir -p "$OUT/runner-unzipped" && unzip -q "$(find "$OUT/runner/artifacts" -name '*.zip' | head -1)" -d "$OUT/runner-unzipped"
-          "$(find "$OUT/runner-unzipped" -type f -name relay-runner | head -1)" help | head -3
+          "$runner" help | head -3
 
       - name: Screenshots (JPEG, base64 in the log)
         if: always()
@@ -429,7 +480,7 @@ jobs:
           | Windows x64 / ARM64 (portable) | \`*-win-x64.zip\` / \`*-win-arm64.zip\` |
           | Linux (preview) | \`*-linux-x64.zip\` / \`*-linux-arm64.zip\` |
 
-          **Unsigned pre-release** — not code-signed or notarized (planned for M0.4).
+          **Unsigned pre-release** — HCG itself is not code-signed or notarized.
           - macOS first launch: \`xattr -cr "/Applications/HCG Executable Maker.app"\`, then right-click → Open.
           - Windows: SmartScreen → More info → Run anyway.
 

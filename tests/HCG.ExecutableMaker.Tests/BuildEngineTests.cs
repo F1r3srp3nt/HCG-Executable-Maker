@@ -176,12 +176,14 @@ public class SecurityTests
     }
 
     [Fact]
-    public void Signing_capabilities_are_never_reported_as_implemented()
+    public void Signing_capabilities_report_exactly_what_is_implemented()
     {
         var caps = SigningCapabilityCatalog.Evaluate(Fixtures.Toolchains("10.0.114"));
-        Assert.NotEmpty(caps);
-        Assert.All(caps, c => Assert.Equal(SigningImplementationStatus.NotImplemented, c.Implementation));
-        Assert.All(caps, c => Assert.StartsWith("Not implemented", c.StatusText));
+        // macOS Developer ID, notarization and Mac App Store pipelines exist; Windows signing does not.
+        Assert.Equal(["developer-id", "mac-app-store", "notarization"],
+            caps.Where(c => c.Implementation == SigningImplementationStatus.Implemented).Select(c => c.Id).Order());
+        Assert.All(caps.Where(c => c.Platform == TargetPlatform.Windows), c => Assert.StartsWith("Not implemented", c.StatusText));
+        Assert.All(caps.Where(c => c.Implementation == SigningImplementationStatus.Implemented), c => Assert.DoesNotContain("Not implemented", c.StatusText));
     }
 
     [Fact]
@@ -444,8 +446,11 @@ public class BuildServiceTests : IDisposable
         var settings = BuildPlannerTests.Settings(_t.Combine("out"), arch: TargetArchitecture.X64, formats: [PackagingFormat.PortableFolder]);
         var build = await Service(worker).RunAsync(Request(settings), new Observer(), CancellationToken.None);
         Assert.Equal(BuildStatus.Failed, build.Status);
-        Assert.Contains("verification", build.FailureReason);
-        Assert.Contains(build.Artifacts.Single().Checks, c => c.Status == VerificationStatus.Failed && c.Detail.Contains("ARM64"));
+        Assert.Contains("Verification failed", build.FailureReason);
+        // The failing check is reported, but no unverified artifact is presented or left on disk.
+        Assert.Contains(build.Messages, m => m.Severity == DiagnosticSeverity.Error && m.Text.Contains("ARM64"));
+        Assert.Empty(build.Artifacts);
+        Assert.False(Directory.Exists(BuildService.OutputRootFor(settings)));
     }
 
     [Fact]

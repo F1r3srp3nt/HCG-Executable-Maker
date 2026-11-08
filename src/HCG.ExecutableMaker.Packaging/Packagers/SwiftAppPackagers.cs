@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging.MacDistribution;
 using HCG.ExecutableMaker.Packaging.Verification;
 
 namespace HCG.ExecutableMaker.Packaging.Packagers;
@@ -28,6 +29,18 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
         var codesign = request.Toolchains.Find(ToolchainIds.Codesign)?.ExecutablePath
                        ?? throw new InvalidOperationException("codesign was not detected. Install the Command Line Tools: xcode-select --install");
 
+        var distribution = settings.MacDistribution;
+        if (distribution.SigningMode == MacSigningMode.DeveloperId)
+        {
+            if (string.IsNullOrEmpty(distribution.DeveloperIdApplicationSha1))
+                throw new InvalidOperationException("Developer ID signing is selected but no Developer ID Application certificate was chosen.");
+            if (!distribution.EntitlementsConfirmed)
+                throw new InvalidOperationException("Developer ID signing needs the entitlements to be reviewed and confirmed first (Configure › Distribution).");
+            if (Directory.EnumerateDirectories(request.PublishDirectory, "*.bundle").Any())
+                throw new InvalidOperationException("Developer ID signing is incompatible with this project: SwiftPM resource bundles must sit at the .app root " +
+                    "(where Bundle.module looks), outside the signed Contents folder, and Gatekeeper rejects such an app. Load resources from Bundle.main or build with Xcode.");
+        }
+
         var identity = settings.Identity;
         var bundleName = BundleName(settings);
         var bundle = Path.Combine(request.OutputRoot, bundleName);
@@ -45,16 +58,9 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
         File.Copy(sourceExe, exe);
         FileOps.MarkExecutable(exe);
 
-        // SwiftPM resource bundles: Contents/Resources is the only location codesign accepts for nested bundles.
-        var resourceBundles = new List<string>();
-        foreach (var dir in Directory.EnumerateDirectories(request.PublishDirectory, "*.bundle"))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var name = Path.GetFileName(dir);
-            FileOps.CopyDirectory(dir, Path.Combine(resources, name), cancellationToken);
-            resourceBundles.Add(name);
-            log.Info($"Resource bundle {name} → Contents/Resources");
-        }
+        // SwiftPM resource bundles are placed after signing (below): SwiftPM's generated Bundle.module accessor looks for
+        // them at Bundle.main.bundleURL/<name>.bundle — the .app's root — and nowhere inside Contents.
+        var resourceBundles = Directory.EnumerateDirectories(request.PublishDirectory, "*.bundle").Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal).ToList();
 
         string? iconFile = null;
         if (request.Icons?.IcnsPath is { } icns)
@@ -97,6 +103,23 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
         File.WriteAllText(Path.Combine(contents, "Info.plist"), InfoPlist.Create(entries));
         File.WriteAllText(Path.Combine(contents, "PkgInfo"), "APPL????");
 
+        if (distribution.SigningMode == MacSigningMode.DeveloperId)
+        {
+            // Developer ID: hardened runtime + secure timestamp + the confirmed entitlements (no resource bundles; checked above).
+            var signer = new MacCodeSigner(runner, codesign);
+            log.Info($"Signing for direct distribution with Developer ID ({distribution.DeveloperIdApplicationSha1}), hardened runtime, secure timestamp, " +
+                     $"entitlements: {(distribution.DeveloperIdEntitlements.Count == 0 ? "none" : string.Join(", ", distribution.DeveloperIdEntitlements))}");
+            await signer.SignDeveloperIdAsync(bundle, distribution.DeveloperIdApplicationSha1!, distribution.DeveloperIdEntitlements, log, cancellationToken).ConfigureAwait(false);
+            var devChecks = new List<VerificationCheck>(SwiftBundleVerifier.VerifyStructure(bundle, settings, []));
+            devChecks.AddRange(await signer.VerifyDeveloperIdAsync(bundle,
+                new SigningIdentity(distribution.DeveloperIdApplicationSha1!, "", AppleCertificateKind.DeveloperIdApplication, null),
+                distribution.DeveloperIdEntitlements, cancellationToken).ConfigureAwait(false));
+            devChecks.Add(await signer.GatekeeperAsync(bundle, "execute", cancellationToken).ConfigureAwait(false));
+            devChecks.Add(new VerificationCheck("Notarization", VerificationStatus.NotVerifiable, "Not notarized yet. Notarization is a separate, explicit step (Build results › Notarize)."));
+            devChecks.Add(Checks.LaunchNotPerformed());
+            return [new PackagedOutput(Format, ArtifactKind.Directory, bundle, devChecks)];
+        }
+
         // Ad-hoc signature over the whole bundle (seals Info.plist and resources). Not a Developer ID; not notarized.
         log.Info("Signing ad hoc: codesign --force --sign - " + bundleName);
         var sign = await runner.RunAsync(new ProcessSpec
@@ -105,6 +128,14 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
         }, (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (!sign.Succeeded) throw new InvalidOperationException($"codesign failed with exit code {sign.ExitCode}.");
+
+        foreach (var name in resourceBundles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            FileOps.CopyDirectory(Path.Combine(request.PublishDirectory, name), Path.Combine(bundle, name), cancellationToken);
+            log.Info($"Resource bundle {name} → {bundleName}/{name} (where SwiftPM's Bundle.module looks: Bundle.main.bundleURL). " +
+                     "It is outside the signed Contents folder: macOS code signing seals only Contents, and SwiftPM looks nowhere inside it.");
+        }
 
         var checks = await SwiftBundleVerifier.VerifyAsync(runner, codesign, bundle, settings, resourceBundles, cancellationToken).ConfigureAwait(false);
         return [new PackagedOutput(Format, ArtifactKind.Directory, bundle, checks)];
@@ -135,17 +166,40 @@ public static class SwiftBundleVerifier
         IReadOnlyList<string> expectedResourceBundles, CancellationToken cancellationToken)
     {
         var checks = new List<VerificationCheck>(VerifyStructure(bundle, settings, expectedResourceBundles));
-        var output = new List<string>();
-        var verify = await runner.RunAsync(new ProcessSpec
+        // With root-level resource bundles the whole-bundle check necessarily reports "unsealed contents present in the
+        // bundle root"; the signature itself is verified on a copy without them so a real signing problem still fails.
+        var target = bundle;
+        string? temp = null;
+        if (expectedResourceBundles.Count > 0)
         {
-            Executable = codesign, Arguments = ["--verify", "--strict", "--deep", "--verbose=2", bundle], Timeout = TimeSpan.FromMinutes(5),
-        }, (_, l) => { lock (output) output.Add(l); }, cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        checks.Add(verify.Succeeded
-            ? new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings,
-                "codesign --verify --strict passed. Ad-hoc signature only: NOT signed with a Developer ID and NOT notarized, so other Macs show a Gatekeeper warning (right-click → Open).")
-            : new VerificationCheck("Code signature", VerificationStatus.Failed,
-                $"codesign --verify --strict failed (exit code {verify.ExitCode}): {string.Join(" ", output.TakeLast(3))}"));
+            temp = Path.Combine(Path.GetTempPath(), "hcg-sigcheck-" + Guid.NewGuid().ToString("N")[..10]);
+            target = Path.Combine(temp, Path.GetFileName(bundle));
+            var copy = await runner.RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = [bundle, target], Timeout = TimeSpan.FromMinutes(5) },
+                (_, _) => { }, cancellationToken).ConfigureAwait(false);
+            if (copy.Succeeded) foreach (var name in expectedResourceBundles) { var d = Path.Combine(target, name); if (Directory.Exists(d)) Directory.Delete(d, true); }
+            else target = bundle;
+        }
+        try
+        {
+            var output = new List<string>();
+            var verify = await runner.RunAsync(new ProcessSpec
+            {
+                Executable = codesign, Arguments = ["--verify", "--strict", "--deep", "--verbose=2", target], Timeout = TimeSpan.FromMinutes(5),
+            }, (_, l) => { lock (output) output.Add(l); }, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var adHoc = "Ad-hoc signature only: NOT signed with a Developer ID and NOT notarized, so other Macs show a Gatekeeper warning (right-click → Open).";
+            checks.Add(verify.Succeeded
+                ? new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings,
+                    expectedResourceBundles.Count == 0
+                        ? "codesign --verify --strict passed. " + adHoc
+                        : $"codesign --verify --strict passed for the signed Contents folder. The SwiftPM resource bundle(s) at the app root ({string.Join(", ", expectedResourceBundles)}) are outside the seal, so a whole-bundle check reports \"unsealed contents present in the bundle root\" and Gatekeeper will reject a downloaded copy. Local use works; for distribution, load resources from Bundle.main (Contents/Resources) or build with Xcode. " + adHoc)
+                : new VerificationCheck("Code signature", VerificationStatus.Failed,
+                    $"codesign --verify --strict failed (exit code {verify.ExitCode}): {string.Join(" ", output.TakeLast(3))}"));
+        }
+        finally
+        {
+            if (temp is not null) try { Directory.Delete(temp, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
         checks.Add(Checks.LaunchNotPerformed());
         return checks;
     }
@@ -213,11 +267,11 @@ public static class SwiftBundleVerifier
                 : new VerificationCheck("Icon", VerificationStatus.Failed, $"Referenced icon {icon} is missing."));
         if (expectedResourceBundles.Count > 0)
         {
-            var absent = expectedResourceBundles.Where(b => !Directory.Exists(Path.Combine(contents, "Resources", b))).ToList();
+            var absent = expectedResourceBundles.Where(b => !Directory.Exists(Path.Combine(bundle, b)) || !Directory.EnumerateFileSystemEntries(Path.Combine(bundle, b)).Any()).ToList();
             checks.Add(absent.Count == 0
-                ? new VerificationCheck("Resource bundles", VerificationStatus.PassedWithWarnings,
-                    $"{string.Join(", ", expectedResourceBundles)} in Contents/Resources. Code that loads them through Bundle.module depends on the toolchain's generated accessor finding Contents/Resources; confirm by launching the app.")
-                : new VerificationCheck("Resource bundles", VerificationStatus.Failed, "Missing: " + string.Join(", ", absent)));
+                ? new VerificationCheck("Resource bundles", VerificationStatus.Passed,
+                    $"{string.Join(", ", expectedResourceBundles)} at the app root, where SwiftPM's generated Bundle.module accessor looks (Bundle.main.bundleURL).")
+                : new VerificationCheck("Resource bundles", VerificationStatus.Failed, "Missing or empty: " + string.Join(", ", absent)));
         }
         return checks;
     }
@@ -287,12 +341,18 @@ public sealed class SwiftAppZipPackager(IProcessRunner runner) : IPackager
                 checks.Add(new VerificationCheck("Extract round trip", VerificationStatus.NotVerifiable, "Extracted, but codesign is unavailable to re-verify the signature."));
             else
             {
+                // Root-level SwiftPM resource bundles are outside the seal (see the .app's signature check): verify Contents.
+                var extracted = Path.Combine(temp, bundleName);
+                var rootBundles = Directory.EnumerateDirectories(extracted, "*.bundle").ToList();
+                var bundlesIntact = rootBundles.All(b => Directory.EnumerateFileSystemEntries(b, "*", SearchOption.AllDirectories).Any());
+                foreach (var b in rootBundles) Directory.Delete(b, true);
                 var verify = await runner.RunAsync(new ProcessSpec
                 {
-                    Executable = codesign, Arguments = ["--verify", "--strict", "--deep", Path.Combine(temp, bundleName)], Timeout = TimeSpan.FromMinutes(5),
+                    Executable = codesign, Arguments = ["--verify", "--strict", "--deep", extracted], Timeout = TimeSpan.FromMinutes(5),
                 }, (_, _) => { }, cancellationToken).ConfigureAwait(false);
-                checks.Add(verify.Succeeded
-                    ? new VerificationCheck("Extract round trip", VerificationStatus.Passed, "Extracted with ditto -x -k; the .app's signature still verifies (codesign --verify --strict).")
+                checks.Add(verify.Succeeded && bundlesIntact
+                    ? new VerificationCheck("Extract round trip", VerificationStatus.Passed, "Extracted with ditto -x -k; the .app's signature still verifies (codesign --verify --strict)" +
+                        (rootBundles.Count > 0 ? $" and its {rootBundles.Count} resource bundle(s) extracted intact." : "."))
                     : new VerificationCheck("Extract round trip", VerificationStatus.Failed, $"After extraction, codesign --verify failed (exit code {verify.ExitCode})."));
             }
         }

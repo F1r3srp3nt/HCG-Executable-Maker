@@ -1,4 +1,5 @@
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging.MacDistribution;
 
 namespace HCG.ExecutableMaker.Packaging;
 
@@ -56,8 +57,12 @@ public static class PackagingCatalog
                     Add(PackagingFormat.MacDmg, "Compressed disk image.", PackagingAvailability.MissingTool, "hdiutil was not detected on this Mac.");
                 else
                     Add(PackagingFormat.MacDmg, "Compressed disk image containing the .app and an Applications shortcut.", PackagingAvailability.Available);
-                Add(PackagingFormat.MacPkg, "macOS installer package.", PackagingAvailability.NotImplemented, "PKG packaging is planned for M0.3.", "M0.3");
-                Add(PackagingFormat.MacAppStore, "Sandboxed, signed package for App Store Connect.", PackagingAvailability.NotImplemented, "Mac App Store packaging requires signing (M0.4).", "M0.4");
+                {
+                    var (pa, pr) = MacDistributionCatalog.Pkg(ctx, dotNet: true);
+                    Add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, pa, pr);
+                    Add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, PackagingAvailability.NotApplicable,
+                        ".NET apps are incompatible with Mac App Store preparation in this version: they need JIT/unsigned-memory exceptions and a sandbox review that HCG does not perform. Use the .pkg or DMG for direct distribution.");
+                }
                 break;
 
             case TargetPlatform.Linux:
@@ -112,9 +117,20 @@ public static class PackagingCatalog
                 "This product is a command-line tool (no SwiftUI/AppKit entry point). Command-line tools are distributed as an executable, not an .app.", null);
             add(PackagingFormat.MacDmg, "Disk image.", PackagingAvailability.NotApplicable, "DMG packaging requires an .app bundle.", null);
         }
-        add(PackagingFormat.MacPkg, "macOS installer package.", PackagingAvailability.NotImplemented, "PKG packaging is planned for M0.3.", "M0.3");
-        add(PackagingFormat.MacAppStore, "Sandboxed, signed package for App Store Connect.", PackagingAvailability.NotImplemented,
-            "App Store distribution needs Developer ID signing, sandbox entitlements and notarization, which HCG does not perform.", "M0.4");
+        if (kind == SwiftAppKind.GuiApp)
+        {
+            var (pa, pr) = MacDistributionCatalog.Pkg(ctx, dotNet: false);
+            add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, pa, pr, null);
+            var (sa, sr) = MacDistributionCatalog.AppStore(ctx);
+            add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, sa, sr, null);
+        }
+        else
+        {
+            add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, PackagingAvailability.NotApplicable,
+                "This product is a command-line tool; the installer package in this version installs .app bundles into Applications.", null);
+            add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, PackagingAvailability.NotApplicable,
+                "The Mac App Store accepts applications, not command-line tools.", null);
+        }
     }
 
     /// <summary>Formats that must also be produced because a selected format depends on them.</summary>
@@ -128,10 +144,18 @@ public static class PackagingCatalog
     {
         var set = selected.ToList();
         var swiftGui = settings?.Swift?.Kind == SwiftAppKind.GuiApp;
-        var needsBundle = set.Contains(PackagingFormat.MacDmg) || (swiftGui && set.Contains(PackagingFormat.PortableZip));
+        var needsBundle = set.Contains(PackagingFormat.MacDmg) || set.Contains(PackagingFormat.MacPkg) || set.Contains(PackagingFormat.MacAppStore)
+                          || (swiftGui && set.Contains(PackagingFormat.PortableZip));
         if (needsBundle && !set.Contains(PackagingFormat.MacAppBundle))
             set.Insert(0, PackagingFormat.MacAppBundle);
         // Bundles must exist before the DMG / ZIP that wraps them.
-        return [.. set.Distinct().OrderBy(f => f == PackagingFormat.MacAppBundle ? 0 : f == PackagingFormat.MacDmg ? 2 : 1)];
+        return [.. set.Distinct().OrderBy(f => f switch
+        {
+            PackagingFormat.MacAppBundle => 0,
+            PackagingFormat.MacDmg => 2,
+            PackagingFormat.MacPkg => 3,
+            PackagingFormat.MacAppStore => 4,
+            _ => 1,
+        })];
     }
 }

@@ -77,7 +77,7 @@ Details: [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md).
 ![Mobile Build Studio](docs/screenshots/10-mobile-build-studio.png)
 
 **Not yet implemented** (shown in the UI as *Planned*, never as working): Windows MSI (WiX — M0.2b) and MSIX,
-macOS `.pkg`/App Store packaging (M0.3/M0.4), desktop code signing and notarization (M0.4), Linux AppImage/DEB/RPM,
+Windows code signing (Authenticode), Linux AppImage/DEB/RPM,
 store uploads of any kind, sandboxed build workers.
 
 ## Requirements

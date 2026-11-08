@@ -469,6 +469,9 @@
                     <TextBlock Classes="h2" Text="macOS app (Swift package)" />
                     <TextBlock Classes="muted" TextWrapping="Wrap" Text="Written to the .app's Info.plist. The application name above is the display name (e.g. Distil); the executable keeps the product name." />
                   </StackPanel>
+                  <Border Classes="callout" Padding="10">
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SwiftPrefillNote}" />
+                  </Border>
                   <StackPanel>
                     <TextBlock Classes="formlabel" Text="DELIVER AS" />
                     <ComboBox ItemsSource="{Binding SwiftKindOptions}" SelectedItem="{Binding SelectedSwiftKind}" HorizontalAlignment="Stretch" />
@@ -581,6 +584,124 @@
                   </CheckBox>
                 </StackPanel>
               </Border>
+
+              <!-- macOS distribution: signing, entitlements, installer and Mac App Store -->
+              <Border Classes="inset" Padding="18,16" IsVisible="{Binding ShowDistribution}">
+                <StackPanel Spacing="12">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="h3" Text="macOS distribution" />
+                      <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding SigningInventoryNote}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="small" Content="Refresh certificates" Command="{Binding RefreshSigningCommand}" VerticalAlignment="Top" />
+                  </Grid>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding IsSwiftGui}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="formlabel" Text="SIGNING" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding DeveloperIdState}" />
+                    </Grid>
+                    <ComboBox ItemsSource="{Binding SigningModeOptions}" SelectedItem="{Binding SelectedSigningMode}" HorizontalAlignment="Stretch" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding DeveloperIdReason}" />
+                    <StackPanel Spacing="6" IsVisible="{Binding IsDeveloperId}">
+                      <TextBlock Classes="formlabel" Text="DEVELOPER ID APPLICATION CERTIFICATE" />
+                      <ComboBox ItemsSource="{Binding DeveloperIdIdentities}" SelectedItem="{Binding SelectedDeveloperIdIdentity}" HorizontalAlignment="Stretch" />
+                      <TextBlock Classes="formlabel" Text="HARDENED-RUNTIME ENTITLEMENTS (FROM THE SOURCES)" />
+                      <TextBlock Classes="muted" FontSize="12" Text="None needed: the sources use no protected resource." IsVisible="{Binding !HasDeveloperIdEntitlements}" TextWrapping="Wrap" />
+                      <ItemsControl ItemsSource="{Binding DeveloperIdEntitlements}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:EntitlementChoice">
+                            <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+                              <StackPanel Spacing="1">
+                                <TextBlock Text="{Binding Heading}" FontWeight="Medium" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Evidence}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                              </StackPanel>
+                            </CheckBox>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </StackPanel>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding ShowPkgOptions}">
+                    <TextBlock Classes="formlabel" Text="INSTALLER PACKAGE SIGNATURE" />
+                    <ComboBox ItemsSource="{Binding InstallerIdentities}" SelectedItem="{Binding SelectedInstallerIdentity}" HorizontalAlignment="Stretch" IsEnabled="{Binding IsSwiftGui}" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                               Text="Unsigned packages are for testing on this Mac. Distribution needs a Developer ID Installer certificate and a Developer ID signed app, then notarization." />
+                  </StackPanel>
+
+                  <Expander IsVisible="{Binding IsSwiftGui}" HorizontalAlignment="Stretch">
+                    <Expander.Header>
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="Mac App Store preparation" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <c:StatusChip Grid.Column="1" Status="{Binding AppStoreState}" Margin="12,0,0,0" />
+                      </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding AppStoreReason}" />
+                      <TextBlock Classes="formlabel" Text="APPLE DISTRIBUTION CERTIFICATE" />
+                      <ComboBox ItemsSource="{Binding AppStoreIdentities}" SelectedItem="{Binding SelectedAppStoreIdentity}" HorizontalAlignment="Stretch" />
+                      <TextBlock Classes="formlabel" Text="MAC INSTALLER DISTRIBUTION CERTIFICATE" />
+                      <ComboBox ItemsSource="{Binding AppStoreInstallerIdentities}" SelectedItem="{Binding SelectedAppStoreInstaller}" HorizontalAlignment="Stretch" />
+                      <TextBlock Classes="formlabel" Text="MAC APP STORE PROVISIONING PROFILE" />
+                      <Grid ColumnDefinitions="*,Auto">
+                        <ComboBox ItemsSource="{Binding AppStoreProfiles}" SelectedItem="{Binding SelectedAppStoreProfile}" HorizontalAlignment="Stretch" />
+                        <Button Grid.Column="1" Classes="small" Content="Browse…" Command="{Binding BrowseProvisioningProfileCommand}" Margin="8,0,0,0" />
+                      </Grid>
+                      <TextBlock Classes="formlabel" Text="APP SANDBOX ENTITLEMENTS (FROM THE SOURCES; APP SANDBOX ITSELF IS ALWAYS ON)" />
+                      <ItemsControl ItemsSource="{Binding AppStoreEntitlements}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:EntitlementChoice">
+                            <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+                              <StackPanel Spacing="1">
+                                <TextBlock Text="{Binding Heading}" FontWeight="Medium" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Evidence}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                              </StackPanel>
+                            </CheckBox>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <StackPanel Spacing="4" IsVisible="{Binding HasAppStoreReviews}">
+                        <TextBlock Classes="formlabel" Text="REVIEW BEFORE SUBMITTING" />
+                        <ItemsControl ItemsSource="{Binding AppStoreReviews}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <TextBlock Classes="warning" FontSize="12" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                      <StackPanel Spacing="4" IsVisible="{Binding HasAppStoreBlockers}">
+                        <TextBlock Classes="formlabel" Text="BLOCKERS (NOT POSSIBLE IN THE APP SANDBOX)" />
+                        <ItemsControl ItemsSource="{Binding AppStoreBlockers}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <TextBlock Classes="error" FontSize="12" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </StackPanel>
+                  </Expander>
+
+                  <CheckBox IsChecked="{Binding EntitlementsConfirmed}" IsVisible="{Binding IsSwiftGui}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="I reviewed these entitlements" FontWeight="Medium" />
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="HCG proposes only what the sources need and never adds others. An unchecked entitlement disables that feature in the signed app; the summary lists it." />
+                    </StackPanel>
+                  </CheckBox>
+                  <ItemsControl ItemsSource="{Binding DistributionErrors}" IsVisible="{Binding HasDistributionErrors}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="x:String">
+                        <TextBlock Classes="error" FontSize="12.5" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </Border>
 
@@ -642,6 +763,34 @@
                   </Button>
                 </StackPanel>
               </Grid>
+            </Border>
+
+            <Border Classes="card" IsVisible="{Binding ResultSucceeded}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="h2" Text="Distribution steps" />
+                <TextBlock Classes="muted" TextWrapping="Wrap"
+                           Text="Each step is explicit and reported on its own. Upload to App Store Connect and submission for review stay manual." />
+                <WrapPanel>
+                  <Button Content="Notarize with Apple…" Command="{Binding NotarizeCommand}" IsEnabled="{Binding CanNotarize}" Margin="0,0,8,8" />
+                  <Button Content="Test install…" Command="{Binding TestInstallCommand}" IsEnabled="{Binding CanTestInstall}" Margin="0,0,8,8" />
+                  <CheckBox Content="Launch after test install" IsChecked="{Binding LaunchAfterTestInstall}" IsEnabled="{Binding CanTestInstall}" Margin="0,0,16,8" />
+                  <Button Content="Validate with App Store Connect…" Command="{Binding ValidateAppStoreCommand}" IsEnabled="{Binding CanValidateAppStore}" Margin="0,0,8,8" />
+                </WrapPanel>
+                <TextBlock Classes="muted" FontSize="12" Text="{Binding NotarizeNote}" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunningDistributionAction}" />
+                <ItemsControl ItemsSource="{Binding DistributionResults}" IsVisible="{Binding HasDistributionResults}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DistributionStepItem">
+                      <Grid ColumnDefinitions="200,170,Auto,*" Margin="0,3">
+                        <TextBlock Text="{Binding Artifact}" FontSize="12" Classes="secondary" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" FontWeight="Medium" />
+                        <c:StatusChip Grid.Column="2" Status="{Binding Status}" Margin="0,0,10,0" />
+                        <SelectableTextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
             </Border>
 
             <ItemsControl ItemsSource="{Binding ResultArtifacts}">

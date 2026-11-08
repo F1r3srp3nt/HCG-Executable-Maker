@@ -118,6 +118,17 @@ public sealed class BuildService(
             var report = await toolchains.GetAsync(cancellationToken: overall.Token).ConfigureAwait(false);
             var host = report.Host;
             build.ToolchainVersions["host"] = $"{host.DisplayName} ({host.OsDescription})";
+            if (host.Platform == TargetPlatform.MacOS)
+            {
+                // Every tool this build starts inherits HCG's environment, so this is the Xcode/CLT the whole build uses.
+                var developerDir = Environment.GetEnvironmentVariable("DEVELOPER_DIR");
+                build.ToolchainVersions["developer-dir"] = developerDir ?? "xcode-select";
+                Log(BuildLogKind.Info, developerDir is { Length: > 0 }
+                    ? $"Developer directory: {developerDir} (DEVELOPER_DIR, applies to every tool this build runs; the system setting is unchanged)"
+                    : "Developer directory: the system setting (xcode-select -p)");
+                if (report.Xcode is { } x)
+                    Log(BuildLogKind.Info, $"Xcode: {x.Diagnosis}");
+            }
             var isSwift = settings.Swift is not null;
             ToolchainInfo? sdk = null, swiftTool = null;
             if (isSwift)
@@ -249,6 +260,7 @@ public sealed class BuildService(
                 var (stagedExe, bundles) = SwiftBuildPlanner.Stage(binPath, settings.Swift!.Product, publishDir);
                 exeName = stagedExe;
                 if (bundles.Count > 0) Log(BuildLogKind.Info, $"SwiftPM resource bundles: {string.Join(", ", bundles)}");
+                Log(BuildLogKind.Info, "Tests were not run: HCG builds the selected product only (test targets are neither compiled nor run).");
                 try { Directory.Delete(swiftScratch, recursive: true); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove SwiftPM scratch space {swiftScratch}: {ex.Message}"); }
             }
@@ -339,13 +351,19 @@ public sealed class BuildService(
                 runtimeIdentifier = settings.RuntimeIdentifier,
                 createdAt = time.GetUtcNow(),
                 complete = true,
-                signed = false,
+                signing = settings.Platform == TargetPlatform.MacOS ? settings.MacDistribution.SigningMode.ToString() : "none",
                 notarized = false,
             }), overall.Token).ConfigureAwait(false);
 
             if (build.Artifacts.Any(a => a.Verification == VerificationStatus.Failed))
             {
-                Fail(BuildStatus.Failed, "One or more artifacts failed verification.");
+                // Never present output that failed verification: the reasons are in the log above; the files are removed.
+                var failed = build.Artifacts.Where(a => a.Verification == VerificationStatus.Failed).Select(a => Path.GetFileName(a.Path)).ToList();
+                foreach (var a in build.Artifacts.Where(a => a.Verification == VerificationStatus.Failed))
+                    foreach (var c in a.Checks.Where(c => c.Status == VerificationStatus.Failed))
+                        AddMessage(new BuildMessage(DiagnosticSeverity.Error, $"{Path.GetFileName(a.Path)} — {c.Name}: {c.Detail}", "HCG-VERIFY"));
+                build.Artifacts.Clear();
+                Fail(BuildStatus.Failed, $"Verification failed for {string.Join(", ", failed)} (see the checks in the log). The output was removed so no unverified artifact is offered.");
                 return build;
             }
             build.Status = BuildStatus.Succeeded;
