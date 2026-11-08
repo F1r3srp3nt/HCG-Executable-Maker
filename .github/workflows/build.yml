@@ -167,14 +167,14 @@ jobs:
         shell: bash
         run: >
           dotnet run --no-cache tools/self-package/self-package.cs --
-          . "${{ runner.temp }}/selfpack" --targets win-x64 --version 0.2.0 --dist "${{ runner.temp }}/dist" --installer
+          . "${{ runner.temp }}/selfpack" --targets win-x64 --version 0.3.0 --dist "${{ runner.temp }}/dist" --installer
 
       - name: Install, verify, launch, uninstall, confirm cleanup
         shell: pwsh
         run: >
           ./tools/installer-test/Test-Installer.ps1
-          -Setup "${{ runner.temp }}/dist/HCG-Executable-Maker-0.2.0-win-x64-Setup.exe"
-          -AppName "HCG Executable Maker" -ExeName HCGExecutableMaker.exe -Version 0.2.0
+          -Setup "${{ runner.temp }}/dist/HCG-Executable-Maker-0.3.0-win-x64-Setup.exe"
+          -AppName "HCG Executable Maker" -ExeName HCGExecutableMaker.exe -Version 0.3.0
 
       - name: Upload installer
         if: always()

@@ -2,7 +2,9 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — `feature/macos-distribution` (local, not pushed)
+## [0.3.0] — 2026-11-08 (pre-release)
+
+Native Swift/macOS apps and macOS distribution. HCG itself is still unsigned.
 
 ### Added — macOS distribution ([docs/MACOS-DISTRIBUTION.md](docs/MACOS-DISTRIBUTION.md))
 - **Xcode discovery** (Toolchains › Xcode):
@@ -44,8 +46,6 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   checks are recorded as build errors.
 - Signing & Security reports Developer ID, notarization and the Mac App Store as implemented.
 
-## [Unreleased] — `feature/swift-macos` (not merged)
-
 ### Added — native Swift/macOS apps
 - **Swift package discovery** (passive, `Package.swift` read as text, never run):
   - packages at the root, inside a ZIP's wrapping folder, and several per repository;
@@ -80,9 +80,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - macOS-only Xcode projects were claimed by the iOS (Mobile) inspector.
 - Results page: long output paths no longer run under the action buttons.
 
-## [Unreleased] — `fix/swift-macos-native` (local, not pushed)
-
-### Fixed
+### Fixed — Swift/macOS
 - **SwiftPM resources:** resource bundles are now placed where SwiftPM's `Bundle.module` actually looks, the `.app`
   root. Before, they went in `Contents/Resources`, where `Bundle.module` fails at launch. `Contents` is signed and
   verified separately, and the unsealed root bundles are reported.
