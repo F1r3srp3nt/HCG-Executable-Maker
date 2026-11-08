@@ -135,7 +135,7 @@ public sealed class ToolchainSetupTests : IDisposable
 
     // ───────────── 3. Paths with spaces; Finder launch (no shell variables) ─────────────
 
-    [Fact]
+    [UnixFact]
     public async Task Finder_launch_without_JAVA_HOME_or_PATH_finds_Android_Studios_JDK_in_a_path_with_spaces()
     {
         var root = _t.Combine("root");
@@ -172,7 +172,7 @@ public sealed class ToolchainSetupTests : IDisposable
         Assert.Equal(ToolchainStatus.Installed, ToolchainDetector.JdkRow(ok).Status);
     }
 
-    [Fact]
+    [UnixFact]
     public void Picked_folders_are_normalized_to_a_JDK_home()
     {
         var home = FakeJdk(_t.Combine("Applications", "Android Studio.app", "Contents", "jbr", "Contents", "Home"));
@@ -196,6 +196,10 @@ public sealed class ToolchainSetupTests : IDisposable
 
     // ───────────── 4. Android SDK components ─────────────
 
+    /// <summary>Inspects as on a Mac regardless of the test host (tool file names differ on Windows).</summary>
+    private static AndroidSdkDiscoveryResult InspectSdk(string root, string source) =>
+        AndroidSdkDiscovery.Inspect(root, source, new AndroidSdkDiscovery.Context { Platform = TargetPlatform.MacOS });
+
     private string FakeSdk(string root, bool platformJar = true, bool completeBuildTools = true, bool licences = false)
     {
         Directory.CreateDirectory(Path.Combine(root, "platforms", "android-35"));
@@ -213,11 +217,11 @@ public sealed class ToolchainSetupTests : IDisposable
     [Fact]
     public void Platforms_and_build_tools_are_separate_and_tools_come_from_one_complete_build_tools()
     {
-        var sdk = AndroidSdkDiscovery.Inspect(FakeSdk(_t.Combine("Android SDK")), "test");
+        var sdk = InspectSdk(FakeSdk(_t.Combine("Android SDK")), "test");
         Assert.Equal(["35"], sdk.Platforms);                       // android-34 has no android.jar
         Assert.Equal(Path.Combine(sdk.Root!, "build-tools", "35.0.0", "aapt2"), sdk.SelectedBuildTools!.Aapt2);
 
-        var incomplete = AndroidSdkDiscovery.Inspect(FakeSdk(_t.Combine("partial sdk"), platformJar: false, completeBuildTools: false), "test");
+        var incomplete = InspectSdk(FakeSdk(_t.Combine("partial sdk"), platformJar: false, completeBuildTools: false), "test");
         Assert.Empty(incomplete.Platforms);
         Assert.Null(incomplete.SelectedBuildTools);
         var rows = AndroidSdkDiscovery.Rows(incomplete).ToDictionary(r => r.Id);
@@ -245,12 +249,12 @@ public sealed class ToolchainSetupTests : IDisposable
     [Fact]
     public void Missing_platform_blocks_only_when_Gradle_cannot_download_it()
     {
-        var noLicences = AndroidReport(AndroidSdkDiscovery.Inspect(FakeSdk(_t.Combine("a"), platformJar: false), "test"), Jdk(21));
+        var noLicences = AndroidReport(InspectSdk(FakeSdk(_t.Combine("a"), platformJar: false), "test"), Jdk(21));
         var r = MobileReadiness.Evaluate(HelloAndroid(compileSdk: 35), MobileOutput.AndroidDebugApk, null, noLicences);
         Assert.Equal(ReadinessState.SetupRequired, r.Items.Single(i => i.Tool == "SDK Platform 35").State);
         Assert.False(r.CanBuild);
 
-        var withLicences = AndroidReport(AndroidSdkDiscovery.Inspect(FakeSdk(_t.Combine("b"), platformJar: false, licences: true), "test"), Jdk(21));
+        var withLicences = AndroidReport(InspectSdk(FakeSdk(_t.Combine("b"), platformJar: false, licences: true), "test"), Jdk(21));
         var r2 = MobileReadiness.Evaluate(HelloAndroid(compileSdk: 35), MobileOutput.AndroidDebugApk, null, withLicences);
         Assert.Equal(ReadinessState.NotVerifiable, r2.Items.Single(i => i.Tool == "SDK Platform 35").State);
         Assert.True(r2.CanBuild, r2.Summary);
@@ -302,7 +306,7 @@ public sealed class ToolchainSetupTests : IDisposable
     [Fact]
     public void Flutter_MAUI_and_iOS_tools_never_block_a_native_Android_build_and_bundletool_only_matters_for_APK_sets()
     {
-        var report = AndroidReport(AndroidSdkDiscovery.Inspect(FakeSdk(_t.Combine("sdk"), licences: true), "test"), Jdk(21),
+        var report = AndroidReport(InspectSdk(FakeSdk(_t.Combine("sdk"), licences: true), "test"), Jdk(21),
             new ToolchainInfo { Id = ToolchainIds.Flutter, DisplayName = "Flutter", Category = "Flutter", Status = ToolchainStatus.Missing },
             new ToolchainInfo { Id = ToolchainIds.Bundletool, DisplayName = "bundletool", Category = "Android", Status = ToolchainStatus.Missing });
         var apk = MobileReadiness.Evaluate(HelloAndroid(), MobileOutput.AndroidDebugApk, null, report);
@@ -391,11 +395,11 @@ public sealed class ToolchainSetupTests : IDisposable
 
     // ───────────── 6. Builds use the toolchain that passed inspection ─────────────
 
-    [Fact]
+    [UnixFact]
     public void Gradle_runs_the_inspected_JDK_with_its_JAVA_HOME_SDK_and_PATH_even_from_a_Finder_environment()
     {
         var jdkHome = FakeJdk(_t.Combine("Android Studio.app", "Contents", "jbr", "Contents", "Home"));
-        var sdk = AndroidSdkDiscovery.Inspect(FakeSdk(_t.Combine("Android SDK"), licences: true), "Android Studio default location");
+        var sdk = InspectSdk(FakeSdk(_t.Combine("Android SDK"), licences: true), "Android Studio default location");
         var java = new JavaDiscoveryResult(new JdkCandidate(jdkHome, "Android Studio (bundled JDK)", "21.0.6", 21, true, null), [], null);
         var report = AndroidReport(sdk, java);
         var dir = MobileTestKit.Fixture("HelloAndroid");
@@ -424,7 +428,7 @@ public sealed class ToolchainSetupTests : IDisposable
     public void Without_a_working_JDK_the_build_is_refused_with_where_to_fix_it()
     {
         var broken = new JavaDiscoveryResult(new JdkCandidate("/usr", "java on PATH", null, 0, false, "macOS java stub"), [], null);
-        var report = AndroidReport(AndroidSdkDiscovery.Inspect(FakeSdk(_t.Combine("sdk")), "t"), broken);
+        var report = AndroidReport(InspectSdk(FakeSdk(_t.Combine("sdk")), "t"), broken);
         var ex = Assert.Throws<BuildValidationException>(() => GradlePlanner.Plan(new MobilePlanInput
         {
             Options = new MobileBuildOptions { Framework = MobileFramework.NativeAndroid, Output = MobileOutput.AndroidDebugApk },
