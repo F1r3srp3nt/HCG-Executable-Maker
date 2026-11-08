@@ -150,8 +150,20 @@ The Toolchains page and the Inspect step report:
 - the macOS SDK version, compared with the package's minimum macOS;
 - `codesign` and `hdiutil`.
 
-Every missing item comes with the exact fix, e.g. `xcode-select --install` or
-`sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer`.
+Every missing item comes with the exact fix, e.g. `xcode-select --install`.
+
+**Xcode** (Toolchains › Xcode) lists installed Xcode apps from `/Applications`, `~/Applications`, Spotlight and
+*Browse…*. *Select Xcode* applies one to HCG only: `DEVELOPER_DIR` is set for HCG's own process, so inspection, SDK
+discovery, builds, signing and tests all use it. `xcode-select` is never changed. The page distinguishes:
+- not installed;
+- installed but not selected;
+- license not accepted;
+- first-launch setup needed;
+- no SDKs;
+- validation failed.
+
+It also has *Open Xcode*, *Recheck* and *Use system setting*. The Command Line Tools remain enough for Swift package
+builds. See [MACOS-DISTRIBUTION.md](MACOS-DISTRIBUTION.md#xcode-selection).
 
 The statuses are distinct:
 - *Supported* — buildable now.
@@ -167,8 +179,8 @@ HCG never installs tools.
   and the wizard says they are not built (schemes, signing settings and asset catalogs are a separate capability). If
   the repository also has a `Package.swift`, choose that. iOS Xcode projects belong to Mobile Build Studio, which does
   not produce macOS apps.
-- Developer ID signing, hardened runtime, entitlements, notarization, `.pkg` and the Mac App Store. Apps are
-  **ad-hoc signed**: other Macs show a Gatekeeper warning (right-click → Open).
+- Developer ID signing, hardened runtime, entitlements, notarization, `.pkg` and Mac App Store preparation are now
+  implemented: see [MACOS-DISTRIBUTION.md](MACOS-DISTRIBUTION.md). Ad hoc remains the default.
 - Building Swift macOS apps on Windows/Linux, and Swift on Linux/Windows targets.
 - Fully sealed apps that also use SwiftPM resources through `Bundle.module` (see "SwiftPM resources" above).
 

@@ -2,6 +2,48 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/macos-distribution` (local, not pushed)
+
+### Added — macOS distribution ([docs/MACOS-DISTRIBUTION.md](docs/MACOS-DISTRIBUTION.md))
+- **Xcode discovery** (Toolchains › Xcode):
+  - installed Xcode apps from /Applications, ~/Applications, Spotlight and Browse…;
+  - diagnosis: not installed, installed but not selected, license, first launch, SDKs, validation failure;
+  - Select Xcode / Open Xcode / Recheck / Use system setting;
+  - an HCG-only developer directory (`DEVELOPER_DIR` for HCG's processes; `xcode-select` untouched);
+  - the build log records the directory used.
+- **Signing inventory**:
+  - identities from `security find-identity -v`, including installer certificates, classified by type;
+  - macOS provisioning profiles (type, App ID, team, expiry, certificates).
+- **Evidence-based entitlements**:
+  - hardened-runtime and App Sandbox entitlements proposed from the sources;
+  - sandbox review items and blockers;
+  - the user confirms them; deselected ones are listed as disabled features.
+- **Developer ID signing** of Swift apps and DMGs:
+  - hardened runtime, secure timestamp, confirmed entitlements;
+  - independent checks: signature, certificate/team, runtime, timestamp, entitlements, Gatekeeper.
+- **Installer package (.pkg)**:
+  - pkgbuild/productbuild, not relocatable, no scripts, OS and architecture checks;
+  - unsigned for local testing or signed with Developer ID Installer;
+  - inspection by expanding and comparing the payload byte for byte.
+- **Mac App Store package**:
+  - store-signed copy with embedded profile and sandbox entitlements;
+  - Mac Installer Distribution signature;
+  - blockers with exact fixes.
+- **Explicit steps after a build**:
+  - Notarize (notarytool + stapler + Gatekeeper, per container);
+  - Test install into ~/Applications (optional launch, then removal);
+  - Validate with App Store Connect (altool; no upload).
+- **Settings › Apple credentials**: notarytool keychain profile name (with the store-credentials command and a check)
+  and App Store Connect API key IDs. Secrets stay in the keychain or key file.
+
+### Changed
+- Packaging states are now Ready / Setup required / Incompatible with this project / Failed / Needs another host. The
+  "planned for M0.3/M0.4" placeholders for macOS are gone.
+- DMGs are mounted and compared with the built app after creation.
+- A build whose artifacts fail verification no longer presents them: the output folder is removed, and the failing
+  checks are recorded as build errors.
+- Signing & Security reports Developer ID, notarization and the Mac App Store as implemented.
+
 ## [Unreleased] — `feature/swift-macos` (not merged)
 
 ### Added — native Swift/macOS apps

@@ -160,8 +160,8 @@ Verification was done in a Linux x64 development container (see `ENVIRONMENT-REP
 ## Not implemented (by design labelled *Planned* / *Not implemented* in the UI)
 
 - Windows installer `.exe`, `.msi`, `.msix` (M0.2) · Windows `.exe` icon embedding when cross-building (needs Windows host)
-- macOS `.pkg`, Mac App Store packaging (M0.3/M0.4)
-- Authenticode, Developer ID signing, notarization, Store signing (M0.4)
+- Authenticode and Microsoft Store signing (M0.4)
+- macOS `.pkg`, Developer ID, notarization and Mac App Store preparation are implemented for Swift apps (docs/MACOS-DISTRIBUTION.md)
 - Linux AppImage/DEB/RPM, Android, non-.NET build pipelines (M0.5+)
 - Isolated/sandboxed build workers (the `IBuildWorker` abstraction exists; only local execution is implemented)
 - **Final** HCG logo: the founder-provided *temporary* official logo is installed (sidebar, About, window/app icon); replace it when the final artwork is approved
@@ -193,7 +193,7 @@ Suggested next steps, in order:
 3. **M0.2 Windows packaging:** add `InnoSetupPackager` (`IPackager`, uses detected `ISCC.exe`) and a WiX MSI packager;
    flip their `PackagingCatalog` entries to `Available` when the tool is detected; add installer metadata
    (publisher, version, shortcuts, uninstall) from `AppIdentity`; add Windows-host CI.
-4. **M0.3 macOS:** universal (arm64+x64) bundles via `lipo`, `.pkg` via `productbuild`, Mac-host CI for `DmgPackager`.
+4. **M0.3 macOS:** `.pkg` via pkgbuild/productbuild — done for Swift and .NET apps (unsigned) and Swift apps (Developer ID Installer); see docs/MACOS-DISTRIBUTION.md.
 5. **M0.4 signing:** credentials from OS keychain/certificate store only, per-operation founder approval, never inside
    untrusted builds; notarization with `notarytool` + stapling; release manifests.
 6. Generalize `BuildService` into `IBuildPipeline` per ecosystem before adding non-.NET toolchains (M0.5).
