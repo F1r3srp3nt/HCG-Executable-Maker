@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging.MacDistribution;
 using HCG.ExecutableMaker.Packaging.Verification;
 
 namespace HCG.ExecutableMaker.Packaging.Packagers;
@@ -27,6 +28,18 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
             throw new InvalidOperationException("Swift .app bundles are produced on a Mac for macOS.");
         var codesign = request.Toolchains.Find(ToolchainIds.Codesign)?.ExecutablePath
                        ?? throw new InvalidOperationException("codesign was not detected. Install the Command Line Tools: xcode-select --install");
+
+        var distribution = settings.MacDistribution;
+        if (distribution.SigningMode == MacSigningMode.DeveloperId)
+        {
+            if (string.IsNullOrEmpty(distribution.DeveloperIdApplicationSha1))
+                throw new InvalidOperationException("Developer ID signing is selected but no Developer ID Application certificate was chosen.");
+            if (!distribution.EntitlementsConfirmed)
+                throw new InvalidOperationException("Developer ID signing needs the entitlements to be reviewed and confirmed first (Configure › Distribution).");
+            if (Directory.EnumerateDirectories(request.PublishDirectory, "*.bundle").Any())
+                throw new InvalidOperationException("Developer ID signing is incompatible with this project: SwiftPM resource bundles must sit at the .app root " +
+                    "(where Bundle.module looks), outside the signed Contents folder, and Gatekeeper rejects such an app. Load resources from Bundle.main or build with Xcode.");
+        }
 
         var identity = settings.Identity;
         var bundleName = BundleName(settings);
@@ -89,6 +102,23 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
             entries.Add((key, text));
         File.WriteAllText(Path.Combine(contents, "Info.plist"), InfoPlist.Create(entries));
         File.WriteAllText(Path.Combine(contents, "PkgInfo"), "APPL????");
+
+        if (distribution.SigningMode == MacSigningMode.DeveloperId)
+        {
+            // Developer ID: hardened runtime + secure timestamp + the confirmed entitlements (no resource bundles; checked above).
+            var signer = new MacCodeSigner(runner, codesign);
+            log.Info($"Signing for direct distribution with Developer ID ({distribution.DeveloperIdApplicationSha1}), hardened runtime, secure timestamp, " +
+                     $"entitlements: {(distribution.DeveloperIdEntitlements.Count == 0 ? "none" : string.Join(", ", distribution.DeveloperIdEntitlements))}");
+            await signer.SignDeveloperIdAsync(bundle, distribution.DeveloperIdApplicationSha1!, distribution.DeveloperIdEntitlements, log, cancellationToken).ConfigureAwait(false);
+            var devChecks = new List<VerificationCheck>(SwiftBundleVerifier.VerifyStructure(bundle, settings, []));
+            devChecks.AddRange(await signer.VerifyDeveloperIdAsync(bundle,
+                new SigningIdentity(distribution.DeveloperIdApplicationSha1!, "", AppleCertificateKind.DeveloperIdApplication, null),
+                distribution.DeveloperIdEntitlements, cancellationToken).ConfigureAwait(false));
+            devChecks.Add(await signer.GatekeeperAsync(bundle, "execute", cancellationToken).ConfigureAwait(false));
+            devChecks.Add(new VerificationCheck("Notarization", VerificationStatus.NotVerifiable, "Not notarized yet. Notarization is a separate, explicit step (Build results › Notarize)."));
+            devChecks.Add(Checks.LaunchNotPerformed());
+            return [new PackagedOutput(Format, ArtifactKind.Directory, bundle, devChecks)];
+        }
 
         // Ad-hoc signature over the whole bundle (seals Info.plist and resources). Not a Developer ID; not notarized.
         log.Info("Signing ad hoc: codesign --force --sign - " + bundleName);

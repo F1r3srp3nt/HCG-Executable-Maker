@@ -59,6 +59,9 @@ public static class Composition
         services.AddSingleton<IPackager, DmgPackager>();
         services.AddSingleton<IPackager, SwiftAppBundlePackager>();
         services.AddSingleton<IPackager, SwiftAppZipPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacPkgPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacAppStorePackager>();
+        services.AddSingleton<HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningInventoryReader>();
         services.AddSingleton<IPackager, InnoSetupPackager>();
         services.AddSingleton<PackagingRegistry>();
         services.AddSingleton<BuildService>();

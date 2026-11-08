@@ -444,8 +444,11 @@ public class BuildServiceTests : IDisposable
         var settings = BuildPlannerTests.Settings(_t.Combine("out"), arch: TargetArchitecture.X64, formats: [PackagingFormat.PortableFolder]);
         var build = await Service(worker).RunAsync(Request(settings), new Observer(), CancellationToken.None);
         Assert.Equal(BuildStatus.Failed, build.Status);
-        Assert.Contains("verification", build.FailureReason);
-        Assert.Contains(build.Artifacts.Single().Checks, c => c.Status == VerificationStatus.Failed && c.Detail.Contains("ARM64"));
+        Assert.Contains("Verification failed", build.FailureReason);
+        // The failing check is reported, but no unverified artifact is presented or left on disk.
+        Assert.Contains(build.Messages, m => m.Severity == DiagnosticSeverity.Error && m.Text.Contains("ARM64"));
+        Assert.Empty(build.Artifacts);
+        Assert.False(Directory.Exists(BuildService.OutputRootFor(settings)));
     }
 
     [Fact]

@@ -128,11 +128,13 @@ public static class Format
 
     public static string Label(PackagingAvailability a) => a switch
     {
-        PackagingAvailability.Available => "Available",
-        PackagingAvailability.MissingTool => "Tool missing",
+        PackagingAvailability.Available => "Ready",
+        PackagingAvailability.MissingTool => "Setup required",
+        PackagingAvailability.SetupRequired => "Setup required",
         PackagingAvailability.RequiresDifferentHost => "Needs another host",
         PackagingAvailability.NotImplemented => "Planned",
-        _ => "Not applicable",
+        PackagingAvailability.Failed => "Failed",
+        _ => "Incompatible with this project",
     };
 }
 

@@ -43,4 +43,17 @@ public interface IPackager
 
 /// <summary>Context used to decide which packaging formats are offered for a build.</summary>
 /// <param name="SwiftKind">Set for Swift packages: GUI apps become .app bundles, command-line tools portable folders/ZIPs.</param>
-public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Host, ToolchainReport? Toolchains, bool IsGuiApplication, bool SelfContained = true, SwiftAppKind? SwiftKind = null);
+/// <param name="Signing">Signing material on this Mac (null when not read yet / not a Mac).</param>
+/// <param name="Distribution">The current distribution choices (signing mode, identities, profile).</param>
+/// <param name="BundleId">CFBundleIdentifier, to match provisioning profiles.</param>
+/// <param name="HasRootResourceBundles">SwiftPM resource bundles end up at the .app root (outside the signature seal).</param>
+/// <param name="Evidence">Sandbox / hardened-runtime evidence from the product's sources.</param>
+public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Host, ToolchainReport? Toolchains, bool IsGuiApplication, bool SelfContained = true, SwiftAppKind? SwiftKind = null)
+{
+    public MacSigningInventory? Signing { get; init; }
+    public MacDistributionOptions? Distribution { get; init; }
+    public string? BundleId { get; init; }
+    public bool HasRootResourceBundles { get; init; }
+    public IReadOnlyList<EntitlementEvidence> Evidence { get; init; } = [];
+    public DateTimeOffset Now { get; init; } = DateTimeOffset.UtcNow;
+}
