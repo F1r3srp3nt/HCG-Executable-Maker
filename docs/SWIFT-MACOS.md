@@ -7,8 +7,8 @@ HCG Executable Maker builds **Swift Package Manager** packages into macOS apps o
 | SwiftUI / AppKit executable | `Name.app` (Info.plist, PkgInfo, executable, icon, SwiftPM resource bundles, ad-hoc signature); optionally the `.app` as ZIP (`ditto`) and DMG |
 | Command-line executable | Folder with the executable (+ resource bundles) and/or ZIP with the executable bit recorded |
 
-Reference projects: [Oslo-Sprint](https://github.com/F1r3srp3nt/Oslo-Sprint): `distil/` (product `TokenLab`, shipped as
-**Distil.app**) and `relay/` (products `Relay`, a SwiftUI app, and `relay-runner`, a command-line tool).
+Reference projects: [Oslo-Sprint](https://github.com/F1r3srp3nt/Oslo-Sprint): `distil/` (product `Distil`, target `TokenLabApp` in the
+package named `TokenLab`, shipped as **Distil.app**) and `relay/` (products `Relay`, a SwiftUI app, and `relay-runner`, a command-line tool).
 
 ## Which build am I running?
 
@@ -47,7 +47,8 @@ open. Add `--verify <Oslo-Sprint path>` to also run the Distil/Relay checks belo
    targets. When a package has several executable products (Relay: `Relay` and `relay-runner`), none is pre-selected.
    The evaluation result is stored with the project. **Re-inspect** discards it.
 4. **Configure**:
-   - Display name, e.g. *Distil*. The executable keeps the product name, *TokenLab*.
+   - Display name, e.g. *Distil*. The executable keeps the product name (Distil's product is `Distil`; its package is
+     still named `TokenLab`, so never derive the product from the package name).
    - Bundle identifier, version (`CFBundleShortVersionString`) and build number (`CFBundleVersion`).
    - Minimum macOS: defaults to the package's `platforms:` value; a lower value is refused.
    - App category.
@@ -189,10 +190,10 @@ HCG never installs tools.
 [`tools/ui-driver`](../tools/ui-driver) runs the **real** app on Avalonia's headless platform with Skia rendering:
 `App`, `MainWindow`, `BuildWizardView` and `BuildWizardViewModel`. It presses the same commands the buttons are bound
 to and saves rendered screenshots of every step. Only the OS file picker and modal dialogs are scripted. CI
-(macOS, Xcode) clones Oslo-Sprint at a pinned commit and:
+(macOS, Xcode) clones Oslo-Sprint at the commit pinned in `OSLO_COMMIT` (`.github/workflows/build.yml`) and:
 
-1. **Distil.app**: folder import, package `distil/`, product `TokenLab`, display name *Distil*,
-   `dev.tokenlab.prototype` 0.4.0 (4), developer-tools category, arm64. Produces app + ZIP + DMG.
+1. **Distil.app**: package `distil/`, product `Distil`, display name *Distil*, `dev.tokenlab.prototype` 0.5.0 (5),
+   developer-tools category, arm64. Produces app + ZIP + DMG + pkg.
 2. **Relay.app**: import from a ZIP with a wrapping folder, package `relay/`, product `Relay`, universal binary, the
    required microphone text. Produces app + ZIP.
 3. **relay-runner**: the command-line product, as folder + ZIP.

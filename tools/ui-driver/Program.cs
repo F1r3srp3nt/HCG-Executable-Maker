@@ -5,10 +5,10 @@
 // picker (it returns --source) and modal dialogs (logged; confirmations answered "yes") are scripted.
 //
 // Usage (Swift package → macOS app):
-//   dotnet run --project tools/ui-driver -- --source <folder|zip> --package distil --product TokenLab --name Distil
-//       --bundle-id dev.tokenlab.prototype --version 0.4.0 --build-number 4 [--category public.app-category.developer-tools]
+//   dotnet run --project tools/ui-driver -- --source <folder|zip> --package distil --product Distil --name Distil
+//       --bundle-id dev.tokenlab.prototype --version 0.5.0 --build-number 5 [--category public.app-category.developer-tools]
 //       [--usage NSMicrophoneUsageDescription=text] [--kind gui|cli] [--arch arm64|x64|universal] [--formats app,zip,dmg]
-//       [--expect-products TokenLab] [--expect-libraries TokenLabCore] [--expect-tests TokenLabCoreTests]
+//       [--expect-products Distil] [--expect-libraries TokenLabCore] [--expect-tests TokenLabCoreTests]
 //       --output <dir> --screenshots <dir> [--prefix distil]
 //   --expect-blocked-host: on Windows/Linux, prove the wizard refuses to evaluate/build the package and explains why.
 //   Distribution (macOS): --formats …,pkg,mas  --select-xcode <Xcode.app> (HCG-only selection via Toolchains › Browse…)

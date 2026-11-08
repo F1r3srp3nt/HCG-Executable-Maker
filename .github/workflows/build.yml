@@ -293,7 +293,7 @@ jobs:
     env:
       OUT: ${{ github.workspace }}/swift-out
       OSLO_REPO: https://github.com/F1r3srp3nt/Oslo-Sprint.git
-      OSLO_COMMIT: b5d86974e7c789523b46df8a8184f768c06b212c
+      OSLO_COMMIT: 503faad9632736f83d921f6be5fd2549cf143d5d
     steps:
       - uses: actions/checkout@v7
 
