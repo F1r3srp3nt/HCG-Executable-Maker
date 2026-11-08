@@ -2,10 +2,32 @@ namespace HCG.ExecutableMaker.Domain;
 
 public enum ToolchainStatus
 {
+    /// <summary>Ready: found AND validated (a version probe or structure check passed), not merely present.</summary>
     Installed,
+    /// <summary>Not found anywhere HCG looks.</summary>
     Missing,
+    /// <summary>Belongs to another host OS (e.g. Windows SDK on a Mac). Not a fault of this machine.</summary>
     UnsupportedOnHost,
+    /// <summary>Found, but the probe failed for another reason (see Detail for the tool's own output).</summary>
     ValidationFailed,
+    /// <summary>A saved or configured path does not contain the expected tool (e.g. a folder that is not a JDK).</summary>
+    InvalidPath,
+    /// <summary>Found and working, but the version is too old (or too new) for what HCG needs.</summary>
+    IncompatibleVersion,
+    /// <summary>Installed but needs a user step first (select Xcode, first launch, licence, SDK component).</summary>
+    SetupRequired,
+}
+
+/// <summary>Which kind of work a tool serves; drives grouping and whether a missing tool is a problem.</summary>
+public enum ToolchainRole
+{
+    Core,
+    MacDesktop,
+    Android,
+    AppleMobile,
+    Flutter,
+    Maui,
+    Windows,
 }
 
 public sealed record ToolchainInfo
@@ -20,6 +42,10 @@ public sealed record ToolchainInfo
     /// <summary>How to obtain the tool when missing. HCG never installs tools automatically.</summary>
     public string? InstallHint { get; init; }
     public IReadOnlyList<string> AdditionalVersions { get; init; } = [];
+    /// <summary>Where the tool was found: "Saved in HCG", "JAVA_HOME", "Android Studio", "PATH", …</summary>
+    public string? Source { get; init; }
+    /// <summary>Official setup page for this tool.</summary>
+    public string? SetupUrl { get; init; }
 
     public bool IsAvailable => Status == ToolchainStatus.Installed;
 }
@@ -35,6 +61,14 @@ public sealed record ToolchainReport(
     public bool IsAvailable(string id) => Find(id)?.IsAvailable == true;
     /// <summary>Xcode discovery and diagnosis (macOS only).</summary>
     public XcodeStatus? Xcode { get; init; }
+    /// <summary>JDK discovery: the selected JDK and every candidate examined (with why it was rejected).</summary>
+    public JavaDiscoveryResult? Java { get; init; }
+    /// <summary>Android SDK discovery: platforms and build-tools listed separately.</summary>
+    public AndroidSdkDiscoveryResult? AndroidSdk { get; init; }
+    /// <summary>Valid code-signing identities in the keychain (macOS), classified by certificate type.</summary>
+    public IReadOnlyList<SigningIdentity> AppleIdentities { get; init; } = [];
+    /// <summary>iOS provisioning profiles (*.mobileprovision) on this Mac.</summary>
+    public IReadOnlyList<IosProvisioningProfile> IosProfiles { get; init; } = [];
 }
 
 public static class ToolchainIds

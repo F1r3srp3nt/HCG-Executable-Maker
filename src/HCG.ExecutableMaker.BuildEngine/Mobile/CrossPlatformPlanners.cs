@@ -13,7 +13,7 @@ public static class BundletoolPlanner
 
     public static MobileStep BuildApks(MobilePlanInput input, string aabPath, string apksPath)
     {
-        var java = input.Toolchains.Find(ToolchainIds.Jdk)?.ExecutablePath ?? throw new BuildValidationException("A JDK is required to run bundletool.");
+        var java = MobileArgs.InspectedJdk(input.Toolchains)?.JavaExecutable ?? throw new BuildValidationException("A JDK is required to run bundletool. Choose one in Toolchains › Java.");
         var jar = input.Toolchains.Find(ToolchainIds.Bundletool) is { IsAvailable: true, ExecutablePath: { } j } ? j
             : throw new BuildValidationException("bundletool was not found. Set BUNDLETOOL_JAR to a bundletool-all-*.jar downloaded from github.com/google/bundletool/releases.");
         var ks = input.Keystore ?? throw new BuildValidationException("The HCG debug keystore was not prepared.");
@@ -36,7 +36,7 @@ public static class BundletoolPlanner
         return new MobileStep(BuildStage.Packaging, "bundletool build-apks", new ProcessSpec
         {
             Executable = java, Arguments = args, WorkingDirectory = input.WorkDirectory,
-            Environment = MobileArgs.With(input.Environment, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
+            Environment = MobileArgs.ToolchainEnvironment(input.Environment, input.Toolchains, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
         });
     }
 }
@@ -98,10 +98,7 @@ public static class FlutterPlanner
                 throw new BuildValidationException($"{o.Output.DisplayName()} is not supported for Flutter.");
         }
         args.Add("--suppress-analytics");
-        var java = input.Toolchains.Find(ToolchainIds.Jdk)?.ExecutablePath;
-        var sdk = input.Toolchains.Find(ToolchainIds.AndroidSdk)?.ExecutablePath;
-        var env = MobileArgs.With(input.Environment,
-            ("JAVA_HOME", MobileArgs.JavaHome(java)), ("ANDROID_HOME", sdk), ("ANDROID_SDK_ROOT", sdk),
+        var env = MobileArgs.ToolchainEnvironment(input.Environment, input.Toolchains,
             ("GRADLE_USER_HOME", Path.Combine(input.ToolHomeDirectory, "gradle")), ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android")),
             ("FLUTTER_SUPPRESS_ANALYTICS", "true"), ("CI", "true"));
         Directory.CreateDirectory(Path.Combine(input.ToolHomeDirectory, "gradle"));
@@ -166,13 +163,13 @@ public static class MauiPlanner
         if (android)
         {
             if (input.Toolchains.Find(ToolchainIds.AndroidSdk)?.ExecutablePath is { } sdk) args.Add("-p:AndroidSdkDirectory=" + sdk);
-            if (MobileArgs.JavaHome(input.Toolchains.Find(ToolchainIds.Jdk)?.ExecutablePath) is { } jh) args.Add("-p:JavaSdkDirectory=" + jh);
+            if (MobileArgs.InspectedJdk(input.Toolchains)?.Home is { } jh) args.Add("-p:JavaSdkDirectory=" + jh);
         }
         args.AddRange(["-p:UseSharedCompilation=false", "-nodeReuse:false"]);
         return new MobilePlan([new MobileStep(BuildStage.Compiling, $"dotnet {args[0]} -f {tfm}", new ProcessSpec
         {
             Executable = dotnet, Arguments = args, WorkingDirectory = projectDir,
-            Environment = MobileArgs.With(input.Environment, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
+            Environment = MobileArgs.ToolchainEnvironment(input.Environment, input.Toolchains, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
         })], outputs) { Notes = notes };
     }
 }

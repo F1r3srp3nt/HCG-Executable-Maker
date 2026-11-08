@@ -65,8 +65,8 @@ public static class Format
     public static string Tone(ToolchainStatus s) => s switch
     {
         ToolchainStatus.Installed => "success",
-        ToolchainStatus.Missing => "warning",
-        ToolchainStatus.ValidationFailed => "error",
+        ToolchainStatus.Missing or ToolchainStatus.SetupRequired or ToolchainStatus.IncompatibleVersion => "warning",
+        ToolchainStatus.ValidationFailed or ToolchainStatus.InvalidPath => "error",
         _ => "neutral",
     };
 
@@ -89,8 +89,13 @@ public static class Format
 
     public static string Label(ToolchainStatus s) => s switch
     {
-        ToolchainStatus.UnsupportedOnHost => "Not on this host",
+        ToolchainStatus.Installed => "Ready",
+        ToolchainStatus.Missing => "Not found",
+        ToolchainStatus.UnsupportedOnHost => "Other host",
         ToolchainStatus.ValidationFailed => "Validation failed",
+        ToolchainStatus.InvalidPath => "Invalid path",
+        ToolchainStatus.IncompatibleVersion => "Incompatible version",
+        ToolchainStatus.SetupRequired => "Setup required",
         _ => s.ToString(),
     };
 

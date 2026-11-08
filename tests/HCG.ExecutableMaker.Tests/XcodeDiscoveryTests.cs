@@ -163,7 +163,7 @@ public sealed class XcodeDiscoveryTests
     {
         var s = XcodeDiscovery.Diagnose(Probe("/Library/Developer/CommandLineTools", [Installed()], exit: 1, output: ""));
         var row = ToolchainDetector.XcodeToolchainInfo(s);
-        Assert.Equal(ToolchainStatus.Missing, row.Status);
+        Assert.Equal(ToolchainStatus.SetupRequired, row.Status);   // installed but not selected: a setup step, not "missing"
         Assert.Equal(s.CorrectiveAction, row.InstallHint);
         Assert.Contains("/Applications/Xcode.app", row.AdditionalVersions[0]);
     }

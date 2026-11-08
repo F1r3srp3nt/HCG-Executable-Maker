@@ -93,7 +93,7 @@ public sealed class ToolchainItem(ToolchainInfo info)
     public string Location => Info.ExecutablePath ?? "—";
     public string? Detail => Info.Detail;
     public bool HasDetail => !string.IsNullOrEmpty(Info.Detail);
-    public string? Hint => Info.Status is ToolchainStatus.Missing or ToolchainStatus.ValidationFailed ? Info.InstallHint : null;
+    public string? Hint => Info.Status is not (ToolchainStatus.Installed or ToolchainStatus.UnsupportedOnHost) ? Info.InstallHint : null;
     public bool HasHint => !string.IsNullOrEmpty(Hint);
     public string Others => Info.AdditionalVersions.Count > 1 ? "All installed: " + string.Join(", ", Info.AdditionalVersions) : "";
     public bool HasOthers => Info.AdditionalVersions.Count > 1;

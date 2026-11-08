@@ -139,19 +139,7 @@ public sealed partial class MacSigningInventoryReader(IProcessRunner runner, Tim
         return list;
     }
 
-    public static AppleCertificateKind Classify(string commonName) => commonName switch
-    {
-        _ when commonName.StartsWith("Developer ID Application:", StringComparison.Ordinal) => AppleCertificateKind.DeveloperIdApplication,
-        _ when commonName.StartsWith("Developer ID Installer:", StringComparison.Ordinal) => AppleCertificateKind.DeveloperIdInstaller,
-        _ when commonName.StartsWith("Apple Distribution:", StringComparison.Ordinal) => AppleCertificateKind.AppleDistribution,
-        _ when commonName.StartsWith("3rd Party Mac Developer Application:", StringComparison.Ordinal)
-               || commonName.StartsWith("Mac App Distribution:", StringComparison.Ordinal) => AppleCertificateKind.MacAppDistribution,
-        _ when commonName.StartsWith("3rd Party Mac Developer Installer:", StringComparison.Ordinal)
-               || commonName.StartsWith("Mac Installer Distribution:", StringComparison.Ordinal) => AppleCertificateKind.MacInstallerDistribution,
-        _ when commonName.StartsWith("Apple Development:", StringComparison.Ordinal)
-               || commonName.StartsWith("Mac Developer:", StringComparison.Ordinal) => AppleCertificateKind.Development,
-        _ => AppleCertificateKind.Other,
-    };
+    public static AppleCertificateKind Classify(string commonName) => AppleCertificateNames.Classify(commonName);
 
     [GeneratedRegex(@"^\s*\d+\)\s+(?<sha>[0-9A-F]{40})\s+""(?<name>[^""]+)""", RegexOptions.Multiline)]
     private static partial Regex IdentityRegex();

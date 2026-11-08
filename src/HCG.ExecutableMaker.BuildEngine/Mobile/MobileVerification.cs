@@ -57,7 +57,7 @@ public sealed partial class MobileArtifactVerifier(IProcessRunner runner)
         if (report.Checks.All(c => c.Name != "Structure")) checks.Insert(0, Metadata(report));
         if (toolchains is null || report.Status == VerificationStatus.Failed) return (report, checks);
 
-        var java = toolchains.Find(ToolchainIds.Jdk) is { IsAvailable: true, ExecutablePath: { } j } ? j : null;
+        var java = MobileArgs.InspectedJdk(toolchains)?.JavaExecutable;
         switch (report.Kind)
         {
             case MobileArtifactKind.Apk when report.Signing != MobileSigningState.Unsigned && java is not null

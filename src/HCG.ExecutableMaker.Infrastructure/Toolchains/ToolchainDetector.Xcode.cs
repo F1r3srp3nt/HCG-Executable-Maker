@@ -102,7 +102,8 @@ public sealed partial class ToolchainDetector
         Status = x.State switch
         {
             XcodeState.Ready => ToolchainStatus.Installed,
-            XcodeState.NotInstalled or XcodeState.InstalledNotSelected => ToolchainStatus.Missing,
+            XcodeState.NotInstalled => ToolchainStatus.Missing,
+            XcodeState.InstalledNotSelected or XcodeState.LicenseNotAccepted or XcodeState.FirstLaunchRequired or XcodeState.SdkMissing => ToolchainStatus.SetupRequired,
             XcodeState.NotApplicable => ToolchainStatus.UnsupportedOnHost,
             _ => ToolchainStatus.ValidationFailed,
         },
