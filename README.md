@@ -13,7 +13,9 @@ builds it with the real toolchain, packages it for distribution, and verifies ev
 
 **Status: 0.3.0 pre-release — M0.1 Functional Foundation, M0.2 Windows installer, M0.5 Mobile Build Studio, native
 Swift/macOS apps (SwiftPM → `.app`), and macOS distribution (Xcode selection, `.pkg`, Developer ID, notarization, Mac
-App Store preparation; see docs/MACOS-DISTRIBUTION.md).**
+App Store preparation; see docs/MACOS-DISTRIBUTION.md), Electron desktop apps (docs/ELECTRON.md), guided toolchain setup
+(docs/TOOLCHAINS.md), and HCG account features that stay switched off until HCG's external setup is done
+(docs/HCG-ACCOUNT.md).**
 .NET projects (including Avalonia desktop apps) can be built and packaged for **Windows** (portable or **Setup.exe
 installer**), **macOS** and **Linux (portable preview)**; Android and iOS projects are built in **Mobile Build Studio**
 (see below). See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is and isn't implemented

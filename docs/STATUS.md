@@ -1,6 +1,8 @@
 # Status — 0.3.0 pre-release
 
-0.3.0 adds native Swift/macOS apps and macOS distribution (docs/SWIFT-MACOS.md, docs/MACOS-DISTRIBUTION.md) to 0.2.0.
+0.3.0 adds native Swift/macOS apps and macOS distribution (docs/SWIFT-MACOS.md, docs/MACOS-DISTRIBUTION.md), Electron
+desktop apps (docs/ELECTRON.md), guided toolchain setup (docs/TOOLCHAINS.md) and the HCG account features
+(docs/HCG-ACCOUNT.md — not live until HCG's external setup is done) to 0.2.0.
 0.2.0 contained M0.1, M0.2 (Windows installer) and M0.5 (Mobile Build Studio), merged into `main` with founder approval.
 
 # Swift macOS apps (unreleased, branch `feature/swift-macos`, not merged)

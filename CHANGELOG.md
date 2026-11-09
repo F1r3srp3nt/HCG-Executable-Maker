@@ -2,9 +2,15 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — `feature/hcg-account` (local, not pushed)
+## [0.3.0] — 2026-11-09 (pre-release)
 
-### Added — HCG account features ([docs/HCG-ACCOUNT.md](docs/HCG-ACCOUNT.md))
+Native Swift/macOS apps and macOS distribution, Electron desktop apps, guided toolchain setup, and the HCG account
+features. HCG itself is still unsigned. HCG sign-in, support requests and AI assistance stay switched off ("Not
+available yet" / "Not connected") until the external HCG setup in [docs/HCG-ACCOUNT.md](docs/HCG-ACCOUNT.md) is done.
+
+### HCG account (sign-in, App Access, support requests, AI foundation)
+
+#### Added — HCG account features ([docs/HCG-ACCOUNT.md](docs/HCG-ACCOUNT.md))
 - **Sign in with HCG:**
   - the existing HCG identity, through HCG's OAuth 2.1 server (Supabase Auth), with authorization code + PKCE in the system browser and an RFC 8252 loopback callback;
   - state, nonce and ID-token checks (ES256 signature, issuer, audience, expiry), plus a userinfo cross-check;
@@ -28,12 +34,12 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - **HCG AI foundation:** adapter interface, payload review and redaction, permission, quota and outage handling. It shows **Not connected**, because no gateway contract is published.
 - **New pages:** Account, Help & Support, My requests, AI assistance. Unsupported-project and failed-build actions added.
 
-### Security
+#### Security
 - Secrets are redacted from the file log, diagnostics and AI payloads (`SecretRedactor`).
 
-## [Unreleased] — `feature/electron` (pushed)
+### Electron desktop apps
 
-### Added — Electron desktop apps ([docs/ELECTRON.md](docs/ELECTRON.md))
+#### Added — Electron desktop apps ([docs/ELECTRON.md](docs/ELECTRON.md))
 - **Capability-based Node.js inspection** replaces the "planned for a later milestone" placeholder for every
   `package.json`:
   - each project is classified as an Electron desktop app, a browser app, a Node service/CLI or a library;
@@ -65,12 +71,12 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - Presentation Studio was built through the wizard on Linux and passed its own packaged-app test (15/15);
   - the `electron-macos` CI job builds the arm64 `.app`/zip/dmg, launches it and runs the same test.
 
-### Security
+#### Security
 - `CSC_*` / `WIN_CSC_*` (electron-builder signing certificates and passwords) are removed from every build environment.
 
-## [Unreleased] — `feature/toolchain-setup` (pushed)
+### Toolchain discovery and guided setup
 
-### Fixed — toolchain discovery and setup ([docs/TOOLCHAINS.md](docs/TOOLCHAINS.md))
+#### Fixed — toolchain discovery and setup ([docs/TOOLCHAINS.md](docs/TOOLCHAINS.md))
 - **Java:**
   - JDKs are found without the login shell (saved path, JAVA_HOME, Android Studio's bundled JDK, `java_home -V`,
     JavaVirtualMachines, Homebrew, SDKMAN, system folders, then PATH);
@@ -104,11 +110,9 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - links to the official setup guides.
 - `HCGExecutableMaker --toolchain-report` prints the detection result without the UI.
 
-## [0.3.0] — 2026-11-08 (pre-release)
+### Native Swift/macOS apps and macOS distribution
 
-Native Swift/macOS apps and macOS distribution. HCG itself is still unsigned.
-
-### Added — macOS distribution ([docs/MACOS-DISTRIBUTION.md](docs/MACOS-DISTRIBUTION.md))
+#### Added — macOS distribution ([docs/MACOS-DISTRIBUTION.md](docs/MACOS-DISTRIBUTION.md))
 - **Xcode discovery** (Toolchains › Xcode):
   - installed Xcode apps from /Applications, ~/Applications, Spotlight and Browse…;
   - diagnosis: not installed, installed but not selected, license, first launch, SDKs, validation failure;
@@ -140,7 +144,7 @@ Native Swift/macOS apps and macOS distribution. HCG itself is still unsigned.
 - **Settings › Apple credentials**: notarytool keychain profile name (with the store-credentials command and a check)
   and App Store Connect API key IDs. Secrets stay in the keychain or key file.
 
-### Changed
+#### Changed
 - Packaging states are now Ready / Setup required / Incompatible with this project / Failed / Needs another host. The
   "planned for M0.3/M0.4" placeholders for macOS are gone.
 - DMGs are mounted and compared with the built app after creation.
@@ -148,7 +152,7 @@ Native Swift/macOS apps and macOS distribution. HCG itself is still unsigned.
   checks are recorded as build errors.
 - Signing & Security reports Developer ID, notarization and the Mac App Store as implemented.
 
-### Added — native Swift/macOS apps
+#### Added — native Swift/macOS apps
 - **Swift package discovery** (passive, `Package.swift` read as text, never run):
   - packages at the root, inside a ZIP's wrapping folder, and several per repository;
   - build/cache folders ignored;
@@ -178,18 +182,18 @@ Native Swift/macOS apps and macOS distribution. HCG itself is still unsigned.
   pinned Oslo-Sprint repo (folder and ZIP imports), then verifies and launches them.
 - 37 unit tests; docs `docs/SWIFT-MACOS.md`.
 
-### Fixed
+#### Fixed
 - macOS-only Xcode projects were claimed by the iOS (Mobile) inspector.
 - Results page: long output paths no longer run under the action buttons.
 
-### Fixed — Swift/macOS
+#### Fixed — Swift/macOS
 - **SwiftPM resources:** resource bundles are now placed where SwiftPM's `Bundle.module` actually looks, the `.app`
   root. Before, they went in `Contents/Resources`, where `Bundle.module` fails at launch. `Contents` is signed and
   verified separately, and the unsealed root bundles are reported.
 - Folder and ZIP imports skip SwiftPM/Xcode generated folders (`.build`, `.swiftpm`, `DerivedData`). Built working
   copies previously copied the whole build tree into the workspace and could exceed the import limits.
 
-### Added
+#### Added
 - Build identity: the version, git commit, build time, executable and `.app` path are shown in Settings › About this
   build and in the footer, and printed by `HCGExecutableMaker --version`. `self-package` passes the commit through
   `HCG_SOURCE_REVISION`.
