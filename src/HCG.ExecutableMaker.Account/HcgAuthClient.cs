@@ -121,6 +121,7 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
         {
             throw new HcgAuthException(HcgAuthFailure.Invalid, ex.Message + " Nothing was stored.");
         }
+        CheckAccessTokenClient(tokens.AccessToken);
         var info = await UserInfoAsync(tokens.AccessToken!, ct).ConfigureAwait(false);
         if (info.Subject != claims.Subject)
             throw new HcgAuthException(HcgAuthFailure.Invalid, "The account HCG reported does not match the signed ID token. Nothing was stored.");
@@ -135,11 +136,23 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
             ["refresh_token"] = session.RefreshToken,
             ["client_id"] = session.ClientId,
         }, refreshing: true, ct).ConfigureAwait(false);
-        // The refreshed token must still be for the same account.
+        // The refreshed token must still be for the same account and this app. A refresh may return no new ID token
+        // (not required) and, if the provider does not rotate it, no new refresh token: the current one stays valid.
         var sub = tokens.AccessToken is { } at && IdTokenValidator.PeekClaims(at) is { } c ? IdTokenValidator.Str(c, "sub") : null;
         if (sub is not null && sub != session.Identity.Subject)
             throw new HcgAuthException(HcgAuthFailure.Invalid, "The refreshed session belongs to a different account. Sign in again.");
-        return Session(tokens, session.Identity, session.OrganisationId);
+        CheckAccessTokenClient(tokens.AccessToken);
+        return Session(tokens, session.Identity, session.OrganisationId, previousRefreshToken: session.RefreshToken);
+    }
+
+    /// <summary>
+    /// HCG access tokens carry the issued client ID as a signed <c>client_id</c> claim (audience <c>authenticated</c>).
+    /// The app does not validate access tokens (HCG's APIs do), but one issued to another client is never used.
+    /// </summary>
+    private void CheckAccessTokenClient(string? accessToken)
+    {
+        if (accessToken is { } at && IdTokenValidator.PeekClaims(at) is { } c && IdTokenValidator.Str(c, "client_id") is { } issuedTo && issuedTo != config.ClientId)
+            throw new HcgAuthException(HcgAuthFailure.Invalid, "HCG returned an access token issued to another app. Nothing was stored; sign in again.");
     }
 
     public async Task<HcgIdentity> UserInfoAsync(string accessToken, CancellationToken ct)
@@ -171,10 +184,11 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
         return body;
     }
 
-    private HcgSession Session(TokenResponse tokens, HcgIdentity identity, string? organisation) => new()
+    private HcgSession Session(TokenResponse tokens, HcgIdentity identity, string? organisation, string? previousRefreshToken = null) => new()
     {
         AccessToken = tokens.AccessToken ?? throw new HcgAuthException(HcgAuthFailure.Invalid, "HCG returned no access token."),
-        RefreshToken = tokens.RefreshToken ?? throw new HcgAuthException(HcgAuthFailure.Invalid, "HCG returned no refresh token (offline_access)."),
+        // Empty = HCG issued no refresh token: the session lasts until the access token expires and is not stored.
+        RefreshToken = tokens.RefreshToken ?? previousRefreshToken ?? "",
         ExpiresAt = time.GetUtcNow().AddSeconds(Math.Clamp(tokens.ExpiresIn ?? 3600, 60, 86_400)),
         Identity = identity,
         ClientId = config.ClientId!,

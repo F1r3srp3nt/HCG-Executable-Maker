@@ -25,6 +25,11 @@ public sealed class MockIdentityServer : HttpMessageHandler
     public Func<HttpRequestMessage, HttpResponseMessage?>? Override { get; set; }
     public List<(string Path, string? Form)> Calls { get; } = [];
     public int RefreshCount { get; private set; }
+    /// <summary>Token responses carry no refresh_token (code exchange and/or refresh).</summary>
+    public bool OmitRefreshTokenOnExchange { get; set; }
+    public bool OmitRefreshTokenOnRefresh { get; set; }
+    /// <summary>client_id claim of issued access tokens (default: the app's client ID).</summary>
+    public string AccessTokenClientId { get; set; } = ClientId;
 
     public static HcgConnectConfiguration Config => HcgConnectConfiguration.Default with { ClientId = ClientId };
 
@@ -48,8 +53,8 @@ public sealed class MockIdentityServer : HttpMessageHandler
         return header + "." + payload + "." + Base64Url.Encode(sig);
     }
 
-    public static string AccessToken(string sub) =>
-        "eyJhbGciOiJFUzI1NiJ9." + Base64Url.Encode(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { sub, role = "authenticated", client_id = ClientId }))) + ".c2ln";
+    public static string AccessToken(string sub, string clientId = ClientId) =>
+        "eyJhbGciOiJFUzI1NiJ9." + Base64Url.Encode(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { sub, aud = "authenticated", role = "authenticated", client_id = clientId }))) + ".c2ln";
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
@@ -67,7 +72,9 @@ public sealed class MockIdentityServer : HttpMessageHandler
             Assert.DoesNotContain("client_secret", form);
             return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new Dictionary<string, object?>
             {
-                ["access_token"] = AccessToken(Subject), ["refresh_token"] = "rt-" + Guid.NewGuid().ToString("N"), ["expires_in"] = 3600, ["token_type"] = "bearer",
+                ["access_token"] = AccessToken(Subject, AccessTokenClientId),
+                ["refresh_token"] = (refreshing ? OmitRefreshTokenOnRefresh : OmitRefreshTokenOnExchange) ? null : "rt-" + Guid.NewGuid().ToString("N"),
+                ["expires_in"] = 3600, ["token_type"] = "bearer",
                 ["id_token"] = refreshing ? null : IdToken(NextNonce ?? ""),
             }));
         }
@@ -110,7 +117,7 @@ public class HcgAuthTests
         Assert.Equal(PkcePair.ChallengeFor(attempt.Pkce.Verifier), q["code_challenge"]);
         Assert.Equal(attempt.State, q["state"]);
         Assert.Equal(attempt.Nonce, q["nonce"]);
-        Assert.Contains("offline_access", q["scope"]);
+        Assert.Equal("openid email profile", q["scope"]);
         Assert.DoesNotContain("secret", attempt.AuthorizationUrl.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
@@ -311,6 +318,48 @@ public class HcgSessionTests
         Assert.Equal(HcgAccountStatus.SignedIn, restarted.Status);
         Assert.Equal(1, server.RefreshCount);
         Assert.NotNull(await restarted.GetAccessTokenAsync());
+    }
+
+    [Fact]
+    public async Task A_refresh_without_a_new_refresh_token_keeps_the_current_one_and_needs_no_new_id_token()
+    {
+        var server = new MockIdentityServer { OmitRefreshTokenOnRefresh = true };
+        var store = new SessionOnlyCredentialStore();
+        var config = WithFreePorts(MockIdentityServer.Config);
+        var account = AccountWith(config, server, store);
+        await account.SignInAsync(ApprovingBrowser(server));
+        var issued = JsonDocument.Parse((await store.ReadAsync("session"))!).RootElement.GetProperty("RefreshToken").GetString();
+        var restarted = AccountWith(config, server, store);
+        await restarted.InitializeAsync(); // refresh: no id_token, no refresh_token in the response
+        Assert.Equal(HcgAccountStatus.SignedIn, restarted.Status);
+        Assert.Equal(issued, JsonDocument.Parse((await store.ReadAsync("session"))!).RootElement.GetProperty("RefreshToken").GetString());
+    }
+
+    [Fact]
+    public async Task Without_a_refresh_token_the_session_lasts_this_run_only_and_is_not_stored()
+    {
+        var server = new MockIdentityServer { OmitRefreshTokenOnExchange = true };
+        var store = new SessionOnlyCredentialStore();
+        var account = AccountWith(WithFreePorts(MockIdentityServer.Config), server, store);
+        await account.SignInAsync(ApprovingBrowser(server));
+        Assert.Equal(HcgAccountStatus.SignedIn, account.Status);
+        Assert.Contains("for this run only", account.Message);
+        Assert.Null(await store.ReadAsync("session"));
+        Assert.True(await account.RecoverFromUnauthorizedAsync((await account.GetAccessTokenAsync())!) is false);
+        Assert.Equal(HcgAccountStatus.Expired, account.Status);
+        Assert.Equal(0, server.RefreshCount); // nothing to refresh with: no call is made
+    }
+
+    [Fact]
+    public async Task An_access_token_issued_to_another_client_is_refused_and_nothing_is_stored()
+    {
+        var server = new MockIdentityServer { AccessTokenClientId = "99999999-0000-4000-8000-000000000000" };
+        var store = new SessionOnlyCredentialStore();
+        var account = AccountWith(WithFreePorts(MockIdentityServer.Config), server, store);
+        await account.SignInAsync(ApprovingBrowser(server));
+        Assert.Equal(HcgAccountStatus.SignedOut, account.Status);
+        Assert.Contains("issued to another app", account.Message);
+        Assert.Null(await store.ReadAsync("session"));
     }
 
     [Fact]

@@ -248,6 +248,14 @@ public sealed class HcgAccountService : IDisposable
     private async Task AcceptAsync(HcgSession session, CancellationToken ct)
     {
         lock (_gate) _session = session;
+        if (session.RefreshToken.Length == 0)
+        {
+            // No refresh token was issued: usable until the access token expires, never stored.
+            await SafeDeleteAsync().ConfigureAwait(false);
+            Set(HcgAccountStatus.SignedIn, $"Signed in as {session.Identity.Email ?? session.Identity.DisplayName ?? "your HCG account"} for this run only: HCG issued no refresh token, so you will sign in again next time.", session.Identity);
+            ScheduleRefresh(session);
+            return;
+        }
         try
         {
             await _store.WriteAsync(StoreAccount, JsonSerializer.Serialize(new StoredSession
@@ -271,6 +279,12 @@ public sealed class HcgAccountService : IDisposable
         {
             var latest = _session ?? current;
             if (latest.AccessToken.Length > 0 && !latest.ExpiresSoon(_time.GetUtcNow()) && latest.AccessToken != current.AccessToken) return; // refreshed meanwhile
+            if (latest.RefreshToken.Length == 0)
+            {
+                await ForgetAsync().ConfigureAwait(false);
+                Set(HcgAccountStatus.Expired, "Your HCG session ended (HCG issued no refresh token for it). Sign in again.", null);
+                return;
+            }
             try
             {
                 var refreshed = await _auth.RefreshAsync(latest, ct).ConfigureAwait(false);
