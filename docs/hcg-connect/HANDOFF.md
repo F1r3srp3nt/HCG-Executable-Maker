@@ -273,9 +273,9 @@ All calls send `Authorization: Bearer <access token>` to `https://beta.hakmicapi
 
 | Part | Implemented | Configured for live HCG | End-to-end tested |
 |---|---|---|---|
-| Sign-in: system browser, PKCE S256, loopback callback, state, nonce, ES256 ID token, userinfo | Yes | **No**: needs the issued client ID | Unit tests with a mock identity server. Real app build against the MOCK HCG (`--hcg-session sign-in`). Packaged macOS `.app` on CI (`hcg-connect-macos`). |
-| OS credential storage | Yes | n/a | macOS login Keychain: packaged app on CI. Windows Credential Manager: unit test on the Windows runner. Linux Secret Service: only the "not reachable → this run only" path (no working keyring here). |
-| Restore after restart, renewal (rotated refresh tokens), sign-out | Yes | **No** | Packaged macOS app on CI: two command-line restarts and one GUI start, then sign-out and a restart. Unit tests cover expiry, outages and revocation. |
+| Sign-in: system browser, PKCE S256, loopback callback, state, nonce, ES256 ID token, userinfo | Yes | **No**: needs the issued client ID | Unit tests with a mock identity server. Real app build (Linux) against the MOCK HCG (`--hcg-session sign-in`). **Packaged macOS `.app`: CI job `hcg-connect-macos` written, not yet run** (the branch is not on GitHub yet). |
+| OS credential storage | Yes | n/a | Windows Credential Manager and the macOS Keychain: unit test on the Windows and macOS runners (earlier runs). Packaged-app Keychain persistence: in `hcg-connect-macos`, **not yet run**. Linux Secret Service: only the "not reachable → this run only" path (no working keyring here). |
+| Restore after restart, renewal (rotated refresh tokens), sign-out | Yes | **No** | Unit tests: restore, expiry, outages, revocation. **Packaged macOS app across restarts: `hcg-connect-macos`, not yet run.** |
 | Organisations, features, plan, licence from the Ecosystem API | Yes, reading the shape in §6 | Routes live (401 without token); **response bodies unconfirmed** | MOCK HCG only: unit tests, real Account page (UI driver), packaged app |
 | Plan-management and checkout links; recheck after return | Yes | **No**: HCG sends no links and has no billing yet | MOCK HCG only: unit tests and real Account page (return without HCG confirmation changes nothing) |
 | Live HCG with a real account | n/a | n/a | **Not done.** Needs the issued client and your consent in a browser (§9). |

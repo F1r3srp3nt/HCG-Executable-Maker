@@ -25,7 +25,7 @@ It creates no account system and no role system, holds no secret, and never deci
 | Support requests, uploads, My requests, ERP support desk | **Implemented and tested** (16 package tests and 3 cross-language contract tests). **Not deployed.** |
 | HCG AI ("Explain this build error" and three prepared capabilities) | **Not connected.** No gateway contract exists anywhere in HCG's sources. Executable Maker shows "Not connected" and never simulates an answer. |
 | Plan, licence, organisation, features (central Ecosystem API) | **Implemented and tested against the MOCK HCG.** Routes are live on HCG and need a token; their response bodies await HCG's confirmation (handoff §6). |
-| Packaged macOS app: sign-in, restart, sign-out | **CI job `hcg-connect-macos`**: the self-packaged `.app` against the MOCK HCG, with the real login Keychain. |
+| Packaged macOS app: sign-in, restart, sign-out | **Prepared, not yet run.** CI job `hcg-connect-macos` runs the self-packaged `.app` against the MOCK HCG with the real login Keychain. It runs once `feature/hcg-connect` is pushed. |
 | Live verification against HCG | **None with an account.** Read-only checks on 9 Nov 2026: OIDC discovery, JWKS, and `ecosystem/v1/*` answering 401. Signing in needs the issued client ID and a person to consent. |
 
 ## 1. Identity (what was verified, and where)
