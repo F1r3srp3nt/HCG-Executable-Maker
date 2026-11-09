@@ -72,8 +72,14 @@ jobs:
       - name: Build
         run: dotnet build HCG.ExecutableMaker.slnx -c Release
 
+      # --blame-hang-timeout: a test that does not finish within 5 minutes (the slowest takes ~40 s) is aborted and named
+      # in the log and in TestResults (Sequence_*.xml), so a hang fails fast with evidence instead of running into the
+      # job timeout with no log (main, run 42540213014: macOS test step stuck for 40 minutes, log never uploaded).
       - name: Test (unit + end-to-end)
-        run: dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" --logger "console;verbosity=normal" --results-directory TestResults
+        run: >
+          dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx"
+          --logger "console;verbosity=normal" --results-directory TestResults
+          --blame-hang-timeout 5m --blame-hang-dump-type none
 
       - name: Upload test results
         if: always()
