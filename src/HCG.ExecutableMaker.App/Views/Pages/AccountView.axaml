@@ -1,0 +1,99 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:a="using:HCG.ExecutableMaker.Account"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.AccountView"
+             x:DataType="vm:AccountViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
+      <!-- HCG sign-in -->
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Border Width="64" Height="64" CornerRadius="32" Classes="inset" VerticalAlignment="Top">
+            <PathIcon Data="{StaticResource Icon.Account}" Width="28" Height="28" Foreground="{DynamicResource Hcg.Brush.Accent}" />
+          </Border>
+          <StackPanel Grid.Column="1" Margin="18,0,18,0" Spacing="6">
+            <TextBlock Classes="label" Text="HAKMI CAPITAL GROUP · HCG ACCOUNT" />
+            <TextBlock Classes="h2" Text="{Binding AccountHeadline}" />
+            <TextBlock Classes="body secondary" Text="{Binding AccountMessage}" TextWrapping="Wrap" />
+            <StackPanel Spacing="2" IsVisible="{Binding IsSignedIn}" Margin="0,6,0,0">
+              <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+              <TextBlock Classes="secondary" Text="{Binding Email}" />
+              <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding AccountId, StringFormat='Account ID (from HCG): {0}'}" />
+              <TextBlock Classes="muted" FontSize="12" Text="{Binding SessionDetail}" TextWrapping="Wrap" />
+            </StackPanel>
+            <TextBlock Classes="muted" FontSize="12" Text="{Binding SessionDetail}" TextWrapping="Wrap" IsVisible="{Binding !IsSignedIn}" />
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+              <Button Classes="primary" Command="{Binding SignInCommand}" IsVisible="{Binding CanSignIn}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Account}" /><TextBlock Text="Sign in with HCG" /></StackPanel>
+              </Button>
+              <Button Classes="ghost" Content="Cancel sign-in" Command="{Binding CancelSignInCommand}" IsVisible="{Binding IsSigningIn}" />
+              <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsSigningIn}" />
+              <Button Classes="ghost" Content="Try again" Command="{Binding RetryCommand}" IsVisible="{Binding CanRetry}" />
+              <Button Classes="ghost" Content="Sign out" Command="{Binding SignOutCommand}" IsVisible="{Binding IsSignedIn}" />
+            </StackPanel>
+          </StackPanel>
+          <c:StatusChip Grid.Column="2" Status="{Binding AccountTag}" VerticalAlignment="Top" />
+        </Grid>
+      </Border>
+
+      <Border Classes="callout" IsVisible="{Binding IsNotConfigured}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="{Binding ConfigurationHelp}" FontSize="12.5" TextWrapping="Wrap" />
+          <Button Classes="small" Content="Open data folder" Command="{Binding OpenDataFolderCommand}" HorizontalAlignment="Left" />
+        </StackPanel>
+      </Border>
+
+      <!-- Organisation -->
+      <Border Classes="card" IsVisible="{Binding HasOrganisations}">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Organisation" />
+          <TextBlock Classes="muted" TextWrapping="Wrap" Text="Your HCG account belongs to several organisations. Requests are filed under the one you choose, and HCG checks your membership and permissions for it on every request." />
+          <ComboBox ItemsSource="{Binding Organisations}" SelectedItem="{Binding SelectedOrganisation}" MinWidth="320">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="a:AccessOrganisation">
+                <TextBlock Text="{Binding Name}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+      </Border>
+
+      <!-- Access granted by HCG -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="h2" Text="Access to HCG Executable Maker" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Decided by HCG (ERP ▸ App Access) and checked again by HCG on every request. HCG Executable Maker cannot grant itself anything." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding AccessTag}" VerticalAlignment="Top" />
+          </Grid>
+          <TextBlock Classes="body secondary" Text="{Binding AccessMessage}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Permissions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AccountPermissionRow">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,6">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Title}" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <c:StatusChip Grid.Column="1" Status="{Binding State}" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button Classes="small" Content="Check access again" Command="{Binding RefreshAccessCommand}" IsVisible="{Binding IsSignedIn}" HorizontalAlignment="Left" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="callout">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{Binding LocalBuildsNote}" FontSize="12.5" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{Binding PrivacyNote}" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

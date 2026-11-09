@@ -32,6 +32,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             new("artifacts", "Artifacts", "Icon.Artifacts", typeof(ArtifactsViewModel)),
             new("toolchains", "Toolchains", "Icon.Toolchains", typeof(ToolchainsViewModel)),
             new("security", "Signing & Security", "Icon.Security", typeof(SigningViewModel)),
+            new("ai", "AI assistance", "Icon.Ai", typeof(AiAssistantViewModel)),
+            new("support", "Help & Support", "Icon.Support", typeof(SupportViewModel)),
+            new("requests", "My requests", "Icon.Requests", typeof(MyRequestsViewModel)),
+            new("account", "Account", "Icon.Account", typeof(AccountViewModel)),
             new("settings", "Settings", "Icon.Settings", typeof(SettingsViewModel)),
         ];
     }
@@ -53,6 +57,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         try { await _services.GetRequiredService<HCG.ExecutableMaker.Infrastructure.Toolchains.DeveloperDirectorySelection>().InitializeAsync(); }
         catch (Exception ex) { EngineStatus = "Could not load the Xcode selection: " + ex.Message; EngineTone = "warning"; }
         await NavigateAsync("dashboard", null);
+        // Restore a saved HCG session (account features only; local builds never wait for it).
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var account = _services.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>();
+                await account.InitializeAsync();
+                if (account.IsSignedIn) await _services.GetRequiredService<HCG.ExecutableMaker.Account.AppAccessService>().RefreshAsync();
+            }
+            catch (Exception) { /* reported on the Account page */ }
+        });
         try { await _toolchains.GetAsync(); }
         catch (Exception ex) { EngineStatus = "Toolchain detection failed: " + ex.Message; EngineTone = "error"; }
     }

@@ -80,6 +80,16 @@ Electron apps packaged with **electron-builder** are built through the New Build
 
 Offered on macOS (arm64/x64 `.app`, zip, dmg) and Linux (unpacked app). Details: [`docs/ELECTRON.md`](docs/ELECTRON.md).
 
+## HCG account (unreleased, `feature/hcg-account`)
+
+Optional. Local builds never need it.
+- **Sign in with HCG** uses your existing HCG account. It runs in the system browser with PKCE, and access is governed by HCG ERP App Access.
+- **Request project support** for anything Executable Maker cannot build yet. You choose and review exactly what is sent, and credentials are never sent.
+- **My requests** shows HCG's responses.
+- **AI assistance** is prepared for HCG AI and shows **Not connected** until HCG publishes its gateway contract.
+
+The website/ERP side is a reviewable drop-in package (`integration/hcg-website`). Nothing is deployed or registered yet. Details and the exact remaining configuration: [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md).
+
 ## Mobile Build Studio (M0.5)
 
 | Area | Implemented |
@@ -147,6 +157,7 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 - [`docs/ANDROID-BUILDING.md`](docs/ANDROID-BUILDING.md) · [`docs/IOS-BUILDING.md`](docs/IOS-BUILDING.md) ·
   [`docs/MOBILE-ARTIFACT-VERIFICATION.md`](docs/MOBILE-ARTIFACT-VERIFICATION.md)
 - [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md) — Windows Setup.exe: features, requirements, CI route, tests
+- [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md) — HCG sign-in, ERP App Access, support requests, HCG AI: contract, configuration, verification
 - [`docs/ELECTRON.md`](docs/ELECTRON.md) — Electron apps: inspection, electron-builder stages, verification, offered targets
 - [`docs/TOOLCHAINS.md`](docs/TOOLCHAINS.md) — toolchain discovery (Xcode, Java, Android SDK, Node.js) and readiness
 - [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows

@@ -2,7 +2,36 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — `feature/electron` (local, not pushed)
+## [Unreleased] — `feature/hcg-account` (local, not pushed)
+
+### Added — HCG account features ([docs/HCG-ACCOUNT.md](docs/HCG-ACCOUNT.md))
+- **Sign in with HCG:**
+  - the existing HCG identity, through HCG's OAuth 2.1 server (Supabase Auth), with authorization code + PKCE in the system browser and an RFC 8252 loopback callback;
+  - state, nonce and ID-token checks (ES256 signature, issuer, audience, expiry), plus a userinfo cross-check;
+  - public client, no secret anywhere.
+  - It stays switched off ("Not available yet") until the client is registered.
+- **Session handling:**
+  - stored in Windows Credential Manager, the macOS Keychain or Secret Service; only the refresh token is stored;
+  - restore, proactive refresh, expiry, outage-tolerant retry, sign-out and revocation;
+  - Account page with organisation selection.
+- **ERP App Access:** read from the ERP and enforced on the server. Outages are distinguished from denials.
+- **Project-support requests:**
+  - diagnostics only, or diagnostics plus files the user selects;
+  - default exclusion of credentials, signing material, dependencies and outputs; secret scan with explanations;
+  - review before Submit; upload progress, cancellation, resume and duplicate protection;
+  - My requests, with HCG staff responses.
+- **Website/ERP drop-in package** (`integration/hcg-website`, not deployed):
+  - migration with SECURITY DEFINER authorization and a private bucket with RLS;
+  - API route and ERP support desk;
+  - audit trail and proposed retention;
+  - 16 tests on PostgreSQL.
+- **HCG AI foundation:** adapter interface, payload review and redaction, permission, quota and outage handling. It shows **Not connected**, because no gateway contract is published.
+- **New pages:** Account, Help & Support, My requests, AI assistance. Unsupported-project and failed-build actions added.
+
+### Security
+- Secrets are redacted from the file log, diagnostics and AI payloads (`SecretRedactor`).
+
+## [Unreleased] — `feature/electron` (pushed)
 
 ### Added — Electron desktop apps ([docs/ELECTRON.md](docs/ELECTRON.md))
 - **Capability-based Node.js inspection** replaces the "planned for a later milestone" placeholder for every

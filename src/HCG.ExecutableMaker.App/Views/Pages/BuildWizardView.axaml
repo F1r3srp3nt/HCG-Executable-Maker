@@ -365,6 +365,25 @@
                   <TextBlock Classes="muted" Text="{Binding MissingHint}" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
+              <!-- Not buildable as it is: explain, and offer HCG support (nothing is sent from here) -->
+              <Border Classes="card" IsVisible="{Binding ShowSupportActions}">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="h2" Text="What you can do" />
+                  <TextBlock Classes="muted" TextWrapping="Wrap" Text="HCG Executable Maker cannot build this project as it is. Review the diagnostics, or ask HCG to support it: you choose what is sent and nothing leaves this computer until you submit." />
+                  <WrapPanel>
+                    <Button Classes="small ghost" Margin="0,0,8,6" Command="{Binding ViewDiagnosticsCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Log}" Width="14" /><TextBlock Text="View diagnostics" /></StackPanel>
+                    </Button>
+                    <Button Classes="small" Margin="0,0,8,6" Command="{Binding RequestProjectSupportCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Support}" Width="14" /><TextBlock Text="Request project support" /></StackPanel>
+                    </Button>
+                    <Button Classes="small" Margin="0,0,8,6" Command="{Binding AnalyseWithAiCommand}" IsVisible="{Binding AiAnalysisAvailable}">
+                      <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Ai}" Width="14" /><TextBlock Text="AI analysis" /></StackPanel>
+                    </Button>
+                  </WrapPanel>
+                  <TextBlock Classes="muted" FontSize="12" Text="{Binding AiAnalysisNote}" IsVisible="{Binding !AiAnalysisAvailable}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
               <Border Classes="card" IsVisible="{Binding HasDiagnostics}">
                 <StackPanel Spacing="10">
                   <TextBlock Classes="h2" Text="Findings" />
@@ -767,6 +786,18 @@
                       <TextBlock Classes="label" Text="ERRORS" />
                       <TextBlock Text="{Binding Result.ErrorCount, FallbackValue=0}" FontWeight="SemiBold" Classes="error" />
                     </StackPanel>
+                  </StackPanel>
+                  <StackPanel Spacing="6" IsVisible="{Binding ShowBuildFailureActions}" Margin="0,4,0,0">
+                    <WrapPanel>
+                      <Button Classes="small" Margin="0,0,8,0" Command="{Binding ExplainBuildErrorCommand}" IsVisible="{Binding AiExplainAvailable}">
+                        <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Ai}" Width="14" /><TextBlock Text="Explain this build error" /></StackPanel>
+                      </Button>
+                      <Button Classes="small ghost" Margin="0,0,8,0" Command="{Binding RequestBuildSupportCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Support}" Width="14" /><TextBlock Text="Request support for this build" /></StackPanel>
+                      </Button>
+                    </WrapPanel>
+                    <TextBlock Classes="muted" FontSize="12" IsVisible="{Binding !AiExplainAvailable}" TextWrapping="Wrap"
+                               Text="{Binding AiExplainNote}" />
                   </StackPanel>
                   <!-- Own row: long output paths wrap instead of running under the action buttons. -->
                   <StackPanel Spacing="2" Margin="0,0,16,0">

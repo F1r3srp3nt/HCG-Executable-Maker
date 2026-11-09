@@ -1,0 +1,93 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:s="using:HCG.ExecutableMaker.Account.Support"
+             xmlns:ai="using:HCG.ExecutableMaker.Account.Ai"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.AiAssistantView"
+             x:DataType="vm:AiAssistantViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18" MaxWidth="1100" HorizontalAlignment="Left">
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Border Width="56" Height="56" CornerRadius="28" Classes="inset" VerticalAlignment="Top">
+            <PathIcon Data="{StaticResource Icon.Ai}" Width="24" Height="24" Foreground="{DynamicResource Hcg.Brush.Accent}" />
+          </Border>
+          <StackPanel Grid.Column="1" Margin="16,0" Spacing="6">
+            <TextBlock Classes="label" Text="HCG AI" />
+            <TextBlock Classes="h2" Text="AI assistance" />
+            <TextBlock Classes="body secondary" Text="{Binding ConnectionMessage}" TextWrapping="Wrap" />
+            <TextBlock Classes="muted" FontSize="12" Text="{Binding Architecture}" TextWrapping="Wrap" />
+          </StackPanel>
+          <c:StatusChip Grid.Column="2" Status="{Binding Connection}" VerticalAlignment="Top" />
+        </Grid>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="Capabilities" />
+          <ItemsControl ItemsSource="{Binding Capabilities}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:CapabilityRow">
+                <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,4">
+                  <TextBlock Text="{Binding Title}" FontWeight="Medium" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Classes="muted" Text="{Binding Quota}" Margin="0,0,10,0" VerticalAlignment="Center" />
+                  <c:StatusChip Grid.Column="2" Status="{Binding State}" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="“Explain this build error” comes first. Suggesting a build configuration, explaining missing toolchains and analysing an unsupported project are prepared and appear when HCG enables them." />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="What would be sent" />
+          <TextBlock Classes="secondary" Text="{Binding PayloadSummary}" TextWrapping="Wrap" FontSize="12.5" />
+          <Border Classes="inset" Padding="10" MaxHeight="260" IsVisible="{Binding HasPayload}">
+            <ScrollViewer>
+              <ItemsControl ItemsSource="{Binding Payload}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="s:DiagnosticEntry">
+                    <SelectableTextBlock Classes="mono" FontSize="11" TextWrapping="Wrap" Margin="0,1"><Run Text="{Binding Section}" Foreground="{DynamicResource Hcg.Brush.Accent}" /><Run Text=" · " /><Run Text="{Binding Label}" FontWeight="SemiBold" /><Run Text=": " /><Run Text="{Binding Value}" /></SelectableTextBlock>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Border>
+          <StackPanel Spacing="8" IsVisible="{Binding CanRun}">
+            <TextBox Text="{Binding Question}" PlaceholderText="Optional: your question" MaxLength="1000" />
+            <CheckBox IsChecked="{Binding Approved}"><TextBlock TextWrapping="Wrap" Text="I have reviewed what will be sent and approve sending it to HCG AI." /></CheckBox>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="primary" Content="Explain this build error" Command="{Binding RunCommand}" />
+              <Button Classes="ghost" Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding IsRunning}" />
+            </StackPanel>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding !CanRun}">
+            <Button Classes="small" Content="Request support from HCG instead" Command="{Binding RequestSupportCommand}" IsVisible="{Binding HasPayload}" />
+            <Button Classes="small ghost" Content="Account" Command="{Binding OpenAccountCommand}" />
+          </StackPanel>
+          <Border Classes="callout error" IsVisible="{Binding Failure, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding Failure}" TextWrapping="Wrap" />
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card" IsVisible="{Binding Answer, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="HCG AI's explanation (for your review)" />
+          <SelectableTextBlock Text="{Binding Answer}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Suggestions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="ai:AiSuggestion">
+                <StackPanel Margin="0,4"><TextBlock Text="{Binding Title}" FontWeight="Medium" /><SelectableTextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" /></StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Suggestions only: HCG Executable Maker never runs commands, changes your project, installs tools, changes security settings or publishes anything from an AI answer." />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

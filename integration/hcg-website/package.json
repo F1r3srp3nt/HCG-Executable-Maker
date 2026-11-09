@@ -1,0 +1,12 @@
+{
+  "name": "hcg-website-executable-maker-integration",
+  "private": true,
+  "type": "module",
+  "description": "Drop-in HCG Executable Maker API (App Access, support requests, attachments, staff desk) for the HCG website, with local tests.",
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "pg": "8.13.1"
+  }
+}

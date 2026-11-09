@@ -57,12 +57,13 @@ public sealed class FileLoggerProvider : ILoggerProvider
                 ["ts"] = DateTimeOffset.UtcNow.ToString("O"),
                 ["level"] = logLevel.ToString(),
                 ["category"] = category,
-                ["message"] = formatter(state, exception),
+                // Credentials never reach the log file (tokens, keys, passwords in messages or exceptions).
+                ["message"] = HCG.ExecutableMaker.Security.SecretRedactor.Redact(formatter(state, exception)),
             };
             if (state is IReadOnlyList<KeyValuePair<string, object?>> props)
                 foreach (var (k, v) in props)
-                    if (k != "{OriginalFormat}") payload["prop." + k] = v?.ToString();
-            if (exception is not null) payload["exception"] = exception.ToString();
+                    if (k != "{OriginalFormat}") payload["prop." + k] = HCG.ExecutableMaker.Security.SecretRedactor.Redact(v?.ToString());
+            if (exception is not null) payload["exception"] = HCG.ExecutableMaker.Security.SecretRedactor.Redact(exception.ToString());
             owner.Enqueue(JsonSerializer.Serialize(payload));
         }
     }

@@ -19,6 +19,10 @@ public sealed class ViewLocator : IDataTemplate
         [typeof(ToolchainsViewModel)] = () => new ToolchainsView(),
         [typeof(SigningViewModel)] = () => new SigningView(),
         [typeof(SettingsViewModel)] = () => new SettingsView(),
+        [typeof(AccountViewModel)] = () => new AccountView(),
+        [typeof(SupportViewModel)] = () => new SupportView(),
+        [typeof(MyRequestsViewModel)] = () => new MyRequestsView(),
+        [typeof(AiAssistantViewModel)] = () => new AiAssistantView(),
     };
 
     public Control? Build(object? param)
