@@ -15,6 +15,8 @@ It creates no account system and no role system, holds no secret, and never deci
 
 ## Status at a glance
 
+> **HCG Connect handoff for the main HCG site:** [docs/hcg-connect/HANDOFF.md](hcg-connect/HANDOFF.md). It covers the client to issue, the callback URIs, scopes, issuer and audience, and the `hcg-connect.json` schema with a placeholder client ID. It also covers the central Ecosystem API used for organisation, licence and feature access, and the implemented / configured / end-to-end-tested status of each part.
+
 | Part | State |
 |---|---|
 | Sign in with HCG (browser, PKCE, loopback) | **Implemented and tested against a mock identity server.** It stays switched off ("Not available yet") until Executable Maker's OAuth client is registered (step 1 below). |
@@ -22,7 +24,9 @@ It creates no account system and no role system, holds no secret, and never deci
 | ERP App Access, permissions, organisations | **Implemented** in the app and in the website package. Tested on PostgreSQL with an ERP stand-in. **Not deployed.** Organisation membership has no ERP contract yet (see below). |
 | Support requests, uploads, My requests, ERP support desk | **Implemented and tested** (16 package tests and 3 cross-language contract tests). **Not deployed.** |
 | HCG AI ("Explain this build error" and three prepared capabilities) | **Not connected.** No gateway contract exists anywhere in HCG's sources. Executable Maker shows "Not connected" and never simulates an answer. |
-| Live verification against HCG | **None.** Nothing in this phase was run against the live identity server, website or ERP, because no client is registered and the routes are not deployed. |
+| Plan, licence, organisation, features (central Ecosystem API) | **Implemented and tested against the MOCK HCG.** Routes are live on HCG and need a token; their response bodies await HCG's confirmation (handoff §6). |
+| Packaged macOS app: sign-in, restart, sign-out | **CI job `hcg-connect-macos`**: the self-packaged `.app` against the MOCK HCG, with the real login Keychain. |
+| Live verification against HCG | **None with an account.** Read-only checks on 9 Nov 2026: OIDC discovery, JWKS, and `ecosystem/v1/*` answering 401. Signing in needs the issued client ID and a person to consent. |
 
 ## 1. Identity (what was verified, and where)
 

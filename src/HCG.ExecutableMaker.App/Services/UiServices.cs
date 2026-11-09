@@ -127,7 +127,9 @@ public sealed class PlatformShell(MainWindowProvider owner) : IPlatformShell
 
     public async Task<bool> OpenUrlAsync(string url)
     {
-        if (Top is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps) return false;
+        // HTTPS only; plain http only to this computer (a local test identity server configured in hcg-connect.json).
+        if (Top is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme != Uri.UriSchemeHttps && !(uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)) return false;
         return await Top.Launcher.LaunchUriAsync(uri);
     }
 

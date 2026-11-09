@@ -74,6 +74,8 @@ public sealed class HcgAccountService : IDisposable
     public string? OrganisationId => _session?.OrganisationId;
     public DateTimeOffset? SessionExpiresAt => _session?.ExpiresAt;
     public bool IsSignedIn => Status == HcgAccountStatus.SignedIn && _session is not null;
+    /// <summary>True when the current session is saved in the OS credential store and survives a restart.</summary>
+    public bool SessionPersisted { get; private set; }
     public event EventHandler? Changed;
 
     private void Set(HcgAccountStatus status, string message, HcgIdentity? identity)
@@ -101,7 +103,8 @@ public sealed class HcgAccountService : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _log.LogWarning("The stored HCG session could not be read: {Error}", ex.GetType().Name);
-            Set(HcgAccountStatus.SignedOut, $"The saved HCG session could not be read from the {_store.Description}. Sign in again.", null);
+            Set(HcgAccountStatus.SignedOut, $"The {_store.Description} could not be reached ({Security.SecretRedactor.Redact(ex.Message)}). " +
+                "You can still sign in; the session then lasts for this run only unless the keyring becomes available.", null);
             return;
         }
         if (stored is null || stored.Version != 1 || stored.ClientId != Configuration.ClientId)
@@ -236,6 +239,7 @@ public sealed class HcgAccountService : IDisposable
     {
         _refreshTimer?.Cancel();
         lock (_gate) _session = null;
+        SessionPersisted = false;
         await SafeDeleteAsync().ConfigureAwait(false);
     }
 
@@ -248,6 +252,7 @@ public sealed class HcgAccountService : IDisposable
     private async Task AcceptAsync(HcgSession session, CancellationToken ct)
     {
         lock (_gate) _session = session;
+        SessionPersisted = false;
         if (session.RefreshToken.Length == 0)
         {
             // No refresh token was issued: usable until the access token expires, never stored.
@@ -266,8 +271,14 @@ public sealed class HcgAccountService : IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Never claim the session will survive a restart when it was not saved.
             _log.LogWarning("The HCG session could not be stored: {Error}", ex.GetType().Name);
+            Set(HcgAccountStatus.SignedIn, $"Signed in as {session.Identity.Email ?? session.Identity.DisplayName ?? "your HCG account"} for this run only: " +
+                $"the session could not be saved in the {_store.Description} ({Security.SecretRedactor.Redact(ex.Message)}). You will sign in again next time.", session.Identity);
+            ScheduleRefresh(session);
+            return;
         }
+        SessionPersisted = _store.IsPersistent;
         Set(HcgAccountStatus.SignedIn, $"Signed in as {session.Identity.Email ?? session.Identity.DisplayName ?? "your HCG account"}.", session.Identity);
         ScheduleRefresh(session);
     }

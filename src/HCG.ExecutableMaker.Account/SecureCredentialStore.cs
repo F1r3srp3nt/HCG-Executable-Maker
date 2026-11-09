@@ -230,19 +230,26 @@ public sealed class LinuxSecretToolStore(string service, string tool) : ISecureC
         var (code, stdout, stderr) = await RunAsync(["lookup", "service", service, "account", account], null, ct).ConfigureAwait(false);
         if (code == 0) return stdout.Length == 0 ? null : stdout;
         if (code == 1 && stderr.Trim().Length == 0) return null; // not found
-        throw new InvalidOperationException($"The keyring could not read the HCG session: {stderr.Trim()}");
+        throw new InvalidOperationException($"The keyring could not read the HCG session: {Clean(stderr)}");
     }
 
     public async Task WriteAsync(string account, string secret, CancellationToken ct = default)
     {
-        var (code, _, stderr) = await RunAsync(["store", "--label=HCG Executable Maker — HCG sign-in", "service", service, "account", account], secret, ct).ConfigureAwait(false);
-        if (code != 0) throw new InvalidOperationException($"The keyring could not store the HCG session: {stderr.Trim()}");
+        var (code, _, stderr) = await RunAsync(["store", "--label=HCG Executable Maker - HCG sign-in", "service", service, "account", account], secret, ct).ConfigureAwait(false);
+        if (code != 0) throw new InvalidOperationException($"The keyring could not store the HCG session: {Clean(stderr)}");
     }
 
     public async Task DeleteAsync(string account, CancellationToken ct = default)
     {
         var (code, _, stderr) = await RunAsync(["clear", "service", service, "account", account], null, ct).ConfigureAwait(false);
-        if (code is not (0 or 1)) throw new InvalidOperationException($"The keyring could not delete the HCG session: {stderr.Trim()}");
+        if (code is not (0 or 1)) throw new InvalidOperationException($"The keyring could not delete the HCG session: {Clean(stderr)}");
+    }
+
+    /// <summary>secret-tool's own message without its "secret-tool:" prefix (which reads like a key/value secret to the redactor).</summary>
+    private static string Clean(string stderr)
+    {
+        var line = stderr.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "";
+        return (line.StartsWith("secret-tool:", StringComparison.Ordinal) ? line["secret-tool:".Length..] : line).Trim();
     }
 
     private async Task<(int Code, string StdOut, string StdErr)> RunAsync(string[] args, string? stdin, CancellationToken ct)

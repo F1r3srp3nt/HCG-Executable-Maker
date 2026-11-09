@@ -266,11 +266,16 @@ All calls send `Authorization: Bearer <access token>` to `https://beta.hakmicapi
 
 ## 10. Status (implemented / configured / end-to-end tested)
 
-| Part | Implemented | Configured | End-to-end tested |
+**Kinds of verification:**
+- **Implemented:** the code exists in this repository.
+- **Configured:** set up for live HCG. Nothing is configured until HCG issues the client ID.
+- **End-to-end tested:** run as a whole. Here that means against the **MOCK HCG** (`tools/hcg-mock/mock-hcg.mjs`), which is never HCG.
+
+| Part | Implemented | Configured for live HCG | End-to-end tested |
 |---|---|---|---|
-| Sign-in (system browser, PKCE S256, loopback callback, state/nonce, ID token) | Yes | **No**: needs the issued client ID | Mock identity server only. Packaged macOS app on CI, see `docs/HCG-ACCOUNT.md` |
-| Keychain / Credential Manager / Secret Service storage | Yes | n/a | Real store on the macOS and Windows CI runners |
-| Session restore after restart, renewal, sign-out | Yes | **No** | Mock identity server; packaged macOS app restart on CI |
-| Organisations / features / plan / licence from the Ecosystem API | Yes (response shape per §6) | Routes live; **response bodies unconfirmed** | Mock only |
-| Plan-management and checkout links; recheck after return | Yes | **No**: HCG sends no links and has no billing yet | Mock only |
-| Live HCG with a real account | n/a | n/a | **Not done**: needs the issued client and your consent |
+| Sign-in: system browser, PKCE S256, loopback callback, state, nonce, ES256 ID token, userinfo | Yes | **No**: needs the issued client ID | Unit tests with a mock identity server. Real app build against the MOCK HCG (`--hcg-session sign-in`). Packaged macOS `.app` on CI (`hcg-connect-macos`). |
+| OS credential storage | Yes | n/a | macOS login Keychain: packaged app on CI. Windows Credential Manager: unit test on the Windows runner. Linux Secret Service: only the "not reachable → this run only" path (no working keyring here). |
+| Restore after restart, renewal (rotated refresh tokens), sign-out | Yes | **No** | Packaged macOS app on CI: two command-line restarts and one GUI start, then sign-out and a restart. Unit tests cover expiry, outages and revocation. |
+| Organisations, features, plan, licence from the Ecosystem API | Yes, reading the shape in §6 | Routes live (401 without token); **response bodies unconfirmed** | MOCK HCG only: unit tests, real Account page (UI driver), packaged app |
+| Plan-management and checkout links; recheck after return | Yes | **No**: HCG sends no links and has no billing yet | MOCK HCG only: unit tests and real Account page (return without HCG confirmation changes nothing) |
+| Live HCG with a real account | n/a | n/a | **Not done.** Needs the issued client and your consent in a browser (§9). |

@@ -605,6 +605,73 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  hcg-connect-macos:
+    name: HCG Connect — packaged macOS app sign-in, restart persistence, sign-out (MOCK identity server) and Account page states
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}/hcg-connect-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package HCG Executable Maker for this Mac (self-package, osx-arm64 .app)
+        run: |
+          mkdir -p "$OUT/screens"
+          dotnet run --no-cache tools/self-package/self-package.cs -- . "$RUNNER_TEMP/selfpack" --targets osx-arm64
+          app=$(find "$RUNNER_TEMP/selfpack" -maxdepth 8 -type d -name "*.app" | head -1)
+          test -n "$app"
+          echo "APP=$app" >> "$GITHUB_ENV"
+          echo "Packaged app: $app"
+
+      # The packaged app's own --hcg-session command (same services and Keychain store as the Account page), each
+      # phase a new process: sign in → restart → restart → GUI start → sign out → restart. MOCK HCG, never HCG.
+      - name: Sign in, restart twice, GUI start, sign out — packaged app, real login Keychain, MOCK HCG
+        run: |
+          swiftc -O tools/mac/window-id.swift -o "$RUNNER_TEMP/window-id"
+          bash tools/mac/verify-hcg-session.sh "$APP" "$OUT/session" "$RUNNER_TEMP/window-id"
+
+      - name: Account page states (real app views, headless) against the MOCK HCG
+        run: |
+          dotnet build tools/ui-driver -c Release
+          node tools/hcg-mock/mock-hcg.mjs "$OUT/ui-mock.json" > "$OUT/ui-mock.log" 2>&1 &
+          for i in $(seq 1 40); do [ -f "$OUT/ui-mock.json" ] && break; sleep 0.25; done
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --account-signed-in --hcg-mock "$OUT/ui-mock.json" \
+            --output "$OUT/ui" --screenshots "$OUT/screens" --prefix account
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png "$OUT"/session/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload HCG Connect outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hcg-connect-macos-outputs
+          path: |
+            ${{ env.OUT }}/**/*.txt
+            ${{ env.OUT }}/**/*.out
+            ${{ env.OUT }}/**/*.log
+            ${{ env.OUT }}/**/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
   hcg-website-package:
     name: HCG account — website/ERP package on PostgreSQL + C# contract test (mock identity)
     needs: test

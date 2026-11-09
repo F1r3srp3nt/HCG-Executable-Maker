@@ -56,7 +56,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         // HCG's own Xcode choice (DEVELOPER_DIR for HCG's processes) must be in place before anything probes tools.
         try { await _services.GetRequiredService<HCG.ExecutableMaker.Infrastructure.Toolchains.DeveloperDirectorySelection>().InitializeAsync(); }
         catch (Exception ex) { EngineStatus = "Could not load the Xcode selection: " + ex.Message; EngineTone = "warning"; }
-        await NavigateAsync("dashboard", null);
+        await NavigateAsync(NavItems.Any(n => n.Key == Program.StartPage) ? Program.StartPage : "dashboard", null);
         // Restore a saved HCG session (account features only; local builds never wait for it).
         _ = Task.Run(async () =>
         {
@@ -64,7 +64,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             {
                 var account = _services.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>();
                 await account.InitializeAsync();
-                if (account.IsSignedIn) await _services.GetRequiredService<HCG.ExecutableMaker.Account.AppAccessService>().RefreshAsync();
+                if (account.IsSignedIn)
+                {
+                    await _services.GetRequiredService<HCG.ExecutableMaker.Account.AccountPlanService>().RefreshAsync();
+                    await _services.GetRequiredService<HCG.ExecutableMaker.Account.AppAccessService>().RefreshAsync();
+                }
             }
             catch (Exception) { /* reported on the Account page */ }
         });

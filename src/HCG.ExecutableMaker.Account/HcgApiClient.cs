@@ -58,19 +58,37 @@ public sealed class HcgApiClient(HttpClient http, HcgAccountService account)
     public Uri Url(string relative) =>
         new(account.Configuration.ApiBaseUrl, account.Configuration.ApiPath.TrimEnd('/') + "/" + relative.TrimStart('/'));
 
+    /// <summary>A URL on HCG's central Ecosystem API (<c>{api}/api/public/ecosystem/v1/…</c>).</summary>
+    public Uri EcosystemUrl(string relative) =>
+        new(account.Configuration.ApiBaseUrl, account.Configuration.EcosystemApiPath.TrimEnd('/') + "/" + relative.TrimStart('/'));
+
     public Task<T> GetAsync<T>(string path, CancellationToken ct) => SendAsync<T>(HttpMethod.Get, path, null, ct);
     public Task<T> PostAsync<T>(string path, object? body, CancellationToken ct) => SendAsync<T>(HttpMethod.Post, path, body, ct);
 
-    public async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct)
+    public Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct) =>
+        SendCoreAsync<T>(method, Url(path), body, executableMakerRoute: true, ct);
+
+    /// <summary>
+    /// Calls HCG's central Ecosystem API with the caller's token. Same refresh-once, revocation and outage handling as
+    /// Executable Maker's own routes; the organisation is passed as a parameter, not as a header.
+    /// </summary>
+    public Task<T> SendEcosystemAsync<T>(HttpMethod method, string relative, object? body, CancellationToken ct) =>
+        SendCoreAsync<T>(method, EcosystemUrl(relative), body, executableMakerRoute: false, ct);
+
+    private async Task<T> SendCoreAsync<T>(HttpMethod method, Uri url, object? body, bool executableMakerRoute, CancellationToken ct)
     {
+        var path = url.AbsolutePath;
         for (var attempt = 0; attempt < 2; attempt++)
         {
             var token = await account.GetAccessTokenAsync(ct).ConfigureAwait(false)
                         ?? throw new HcgApiException(HcgApiFailure.NotSignedIn, "Sign in with HCG to use this feature.");
-            using var request = new HttpRequestMessage(method, Url(path));
+            using var request = new HttpRequestMessage(method, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Headers.Add(ContractHeader, Contract);
-            if (account.OrganisationId is { } org) request.Headers.Add(OrganisationHeader, org);
+            if (executableMakerRoute)
+            {
+                request.Headers.Add(ContractHeader, Contract);
+                if (account.OrganisationId is { } org) request.Headers.Add(OrganisationHeader, org);
+            }
             if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
             HttpResponseMessage response;
             try { response = await http.SendAsync(request, ct).ConfigureAwait(false); }
@@ -100,9 +118,19 @@ public sealed class HcgApiClient(HttpClient http, HcgAccountService account)
         string? code = null, message = null;
         try
         {
+            // Two envelopes: Executable Maker's routes {"error":"code","message":"…"} and the central Ecosystem API
+            // {"error":{"code":"…","message":"…"},"api_version":"v1"} (live-verified).
             using var doc = JsonDocument.Parse(text);
-            code = IdTokenValidator.Str(doc.RootElement, "error");
-            message = IdTokenValidator.Str(doc.RootElement, "message");
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.Object)
+            {
+                code = IdTokenValidator.Str(e, "code");
+                message = IdTokenValidator.Str(e, "message");
+            }
+            else
+            {
+                code = IdTokenValidator.Str(doc.RootElement, "error");
+                message = IdTokenValidator.Str(doc.RootElement, "message");
+            }
         }
         catch (JsonException) { }
         message = message is null ? null : HCG.ExecutableMaker.Security.SecretRedactor.Redact(message.Length > 300 ? message[..300] : message);

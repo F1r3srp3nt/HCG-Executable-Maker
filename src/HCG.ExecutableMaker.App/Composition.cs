@@ -101,6 +101,9 @@ public static class Composition
             credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>()));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgApiClient(hcgHttp, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>()));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AppAccessService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), TimeProvider.System));
+        // Plan, licence, organisation and feature access from HCG's central Ecosystem API.
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgEcosystemClient(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>()));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AccountPlanService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgEcosystemClient>(), TimeProvider.System));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Support.SupportService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), uploadHttp));
         // HCG AI: no verified gateway contract exists yet, so the "Not connected" adapter is used (never simulated answers).
         services.AddSingleton<HCG.ExecutableMaker.Account.Ai.IHcgAiGateway, HCG.ExecutableMaker.Account.Ai.NotConnectedAiGateway>();

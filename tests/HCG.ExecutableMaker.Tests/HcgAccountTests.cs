@@ -350,6 +350,27 @@ public class HcgSessionTests
         Assert.Equal(0, server.RefreshCount); // nothing to refresh with: no call is made
     }
 
+    private sealed class UnwritableStore : ISecureCredentialStore
+    {
+        public string Description => "test keyring";
+        public bool IsPersistent => true;
+        public Task<string?> ReadAsync(string account, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task WriteAsync(string account, string secret, CancellationToken ct = default) =>
+            throw new InvalidOperationException("The keyring could not store the HCG session: Object does not exist at path /org/freedesktop/secrets/collection/login");
+        public Task DeleteAsync(string account, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task When_the_session_cannot_be_saved_the_app_says_it_lasts_this_run_only()
+    {
+        var server = new MockIdentityServer();
+        var account = AccountWith(WithFreePorts(MockIdentityServer.Config), server, new UnwritableStore());
+        await account.SignInAsync(ApprovingBrowser(server));
+        Assert.Equal(HcgAccountStatus.SignedIn, account.Status);
+        Assert.Contains("for this run only", account.Message);
+        Assert.Contains("could not be saved in the test keyring", account.Message);
+    }
+
     [Fact]
     public async Task An_access_token_issued_to_another_client_is_refused_and_nothing_is_stored()
     {

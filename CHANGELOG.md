@@ -2,6 +2,42 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/hcg-connect`
+
+### Added — HCG Connect ([docs/hcg-connect/HANDOFF.md](docs/hcg-connect/HANDOFF.md))
+- **Integration handoff for the main HCG site:**
+  - one public desktop client (no secret);
+  - the exact loopback callback URIs and how they are handled;
+  - scopes, issuer and audiences;
+  - the central Ecosystem API calls, and a ready-to-paste request.
+
+  Values are labelled by how they were verified (live discovery and API probes, 9 Nov 2026).
+- **`hcg-connect.json` schema** (`docs/hcg-connect/hcg-connect.schema.json`) and an example with a placeholder client ID. Tests keep both identical to what the app accepts:
+  - unknown keys and secret-like keys make the app ignore the file;
+  - sign-in stays off until the client ID is an issued UUID.
+- **Plan and access** on the Account page, from HCG's central Ecosystem API (`/api/public/ecosystem/v1`):
+  - plan, access status and valid-until;
+  - organisation choice and features;
+  - only the links HCG provides, and only HTTPS links on HCG hosts;
+  - "Open HCG account" and "Check again".
+- **Checkout and plan changes:** the app re-reads HCG after the user returns, every 15 s for 10 minutes, and on demand. **The plan changes only when HCG's API reports it**; returning from a checkout proves nothing.
+- **`HCGExecutableMaker --hcg-session status|sign-in|sign-out`:** the account services without the UI. It never prints tokens.
+- **`--page <name>`:** opens a page at start.
+- **Test tooling:**
+  - `tools/hcg-mock/mock-hcg.mjs`: a MOCK HCG (identity server and Ecosystem API) for verification only;
+  - UI driver `--account-signed-in`;
+  - CI job `hcg-connect-macos`: sign-in, restart persistence and sign-out in the self-packaged `.app` with the real Keychain.
+
+### Changed
+- **Scopes:** sign-in requests `openid email profile`, following HCG's central guidance that `offline_access` is not needed.
+- **Product key:** the central product key is `hcg.executable.maker`.
+- **Renewal:** it keeps the current refresh token when a refresh returns none. An access token issued to another client is refused.
+
+### Fixed
+- **Unsaved sessions:** if the OS credential store refuses the session, the app now says the sign-in lasts for this run only. It used to claim the session was stored.
+- **Linux:** the keyring item label is ASCII. `secret-tool` rejected the previous label (it contained an em dash) when no UTF-8 locale was set.
+- **Keyring errors:** they are shown without being masked by the redactor, and an unreachable keyring is no longer described as "could not read the saved session".
+
 ## [0.3.0] — 2026-11-09 (pre-release)
 
 Native Swift/macOS apps and macOS distribution, Electron desktop apps, guided toolchain setup, and the HCG account

@@ -18,23 +18,26 @@ public sealed partial class AccountViewModel : PageViewModel
 {
     private readonly HcgAccountService _account;
     private readonly AppAccessService _access;
+    private readonly AccountPlanService _plan;
     private readonly IPlatformShell _shell;
     private readonly IAppPaths _paths;
     private bool _applyingOrganisation;
 
-    public AccountViewModel(HcgAccountService account, AppAccessService access, IPlatformShell shell, IAppPaths paths)
+    public AccountViewModel(HcgAccountService account, AppAccessService access, AccountPlanService plan, IPlatformShell shell, IAppPaths paths)
     {
         _account = account;
         _access = access;
+        _plan = plan;
         _shell = shell;
         _paths = paths;
         _account.Changed += (_, _) => Dispatcher.UIThread.Post(Refresh);
         _access.Changed += (_, _) => Dispatcher.UIThread.Post(Refresh);
+        _plan.Changed += (_, _) => Dispatcher.UIThread.Post(Refresh);
         Refresh();
     }
 
     public override string Title => "Account";
-    public override string Subtitle => "Your HCG account: sign-in, organisation and the access HCG grants to HCG Executable Maker.";
+    public override string Subtitle => "Your HCG account: sign-in, plan, organisation and the access HCG grants to HCG Executable Maker.";
 
     [ObservableProperty] private StatusTag _accountTag = new("—", "neutral");
     [ObservableProperty] private string _accountHeadline = "";
@@ -52,16 +55,34 @@ public sealed partial class AccountViewModel : PageViewModel
     [ObservableProperty] private StatusTag _accessTag = new("—", "neutral");
     [ObservableProperty] private string _accessMessage = "";
     [ObservableProperty] private bool _hasOrganisations;
-    [ObservableProperty] private AccessOrganisation? _selectedOrganisation;
-    public ObservableCollection<AccessOrganisation> Organisations { get; } = [];
+    [ObservableProperty] private bool _needsOrganisation;
+    [ObservableProperty] private EcosystemOrganisation? _selectedOrganisation;
+    public ObservableCollection<EcosystemOrganisation> Organisations { get; } = [];
     public ObservableCollection<AccountPermissionRow> Permissions { get; } = [];
+
+    // Plan and access, as HCG's central API reports them (never decided or assumed by the app).
+    [ObservableProperty] private StatusTag _planTag = new("—", "neutral");
+    [ObservableProperty] private string _planName = "";
+    [ObservableProperty] private string _planMessage = "";
+    [ObservableProperty] private string _validUntil = "";
+    [ObservableProperty] private string _planChecked = "";
+    [ObservableProperty] private bool _hasManageLink;
+    [ObservableProperty] private bool _hasCheckoutLink;
+    [ObservableProperty] private string _noBillingNote = "";
+    [ObservableProperty] private bool _hasChange;
+    [ObservableProperty] private string _changeMessage = "";
+    [ObservableProperty] private string _changeTone = "info";
+    [ObservableProperty] private bool _usesLocalIdentityServer;
+    public ObservableCollection<AccountPermissionRow> Features { get; } = [];
     public string LocalBuildsNote => "Local builds, packaging and toolchains work without an HCG account. Sign-in is needed only for support requests and HCG AI assistance.";
     public string PrivacyNote => "Sign-in happens in your own browser on HCG's sign-in page. HCG Executable Maker never sees your password. It keeps a renewable session in the system credential store and never writes it to a file or a log.";
 
     public override async Task OnNavigatedToAsync(object? parameter)
     {
         Refresh();
-        if (_account.IsSignedIn) await _access.RefreshAsync(force: false);
+        if (!_account.IsSignedIn) return;
+        await _plan.RefreshAsync(force: false);
+        await _access.RefreshAsync(force: false);
     }
 
     private void Refresh()
@@ -90,7 +111,8 @@ public sealed partial class AccountViewModel : PageViewModel
         Email = _account.Identity?.Email ?? "";
         AccountId = _account.Identity?.Subject ?? "";
         SessionDetail = IsSignedIn
-            ? $"Session stored in: {_account.StoreDescription}{(_account.SessionExpiresAt is { } e ? $" · renews automatically (current token until {e.LocalDateTime:t})" : "")}"
+            ? (_account.SessionPersisted ? $"Session stored in: {_account.StoreDescription}" : "Session kept for this run only (not stored)") +
+              (_account.SessionExpiresAt is { } e ? $" · renews automatically (current token until {e.LocalDateTime:t})" : "")
             : _account.StoreNote ?? "";
         ConfigurationHelp = IsNotConfigured
             ? "HCG Executable Maker's sign-in client has not been registered with HCG yet, so account features are switched off and nothing is contacted. " +
@@ -106,6 +128,7 @@ public sealed partial class AccountViewModel : PageViewModel
             AppAccessState.Unavailable => (new StatusTag("Unknown (HCG unavailable)", "warning"), _access.Message),
             _ => (new StatusTag("Sign in required", "neutral"), _access.Message),
         };
+        RefreshPlan();
         Permissions.Clear();
         foreach (var (perm, title, detail) in new[]
                  {
@@ -120,30 +143,100 @@ public sealed partial class AccountViewModel : PageViewModel
         }
         _applyingOrganisation = true;
         Organisations.Clear();
-        foreach (var o in _access.Directory?.Organisations ?? []) Organisations.Add(o);
+        foreach (var o in _plan.Organisations) Organisations.Add(o);
         HasOrganisations = Organisations.Count > 1;
-        SelectedOrganisation = Organisations.FirstOrDefault(o => o.Id == _account.OrganisationId) ?? Organisations.FirstOrDefault();
+        NeedsOrganisation = _plan.NeedsOrganisationChoice;
+        SelectedOrganisation = Organisations.FirstOrDefault(o => o.Id == _plan.OrganisationId);
         _applyingOrganisation = false;
         SignInCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnSelectedOrganisationChanged(AccessOrganisation? value)
+    private static readonly Dictionary<string, (string Title, string Detail)> KnownFeatures = new(StringComparer.Ordinal)
     {
-        if (_applyingOrganisation || value is null || value.Id == _account.OrganisationId) return;
+        [HcgPermissions.SupportSubmit] = ("Project support requests", "Send diagnostics about a project HCG Executable Maker cannot build yet."),
+        [HcgPermissions.SupportAttach] = ("Attach project files", "Include selected files or a project archive with a request."),
+        [HcgPermissions.AiUse] = ("HCG AI assistance", "Explain build errors with HCG AI (when HCG AI is connected)."),
+    };
+
+    private void RefreshPlan()
+    {
+        UsesLocalIdentityServer = _account.Configuration.UsesLocalIdentityServer;
+        (PlanTag, PlanMessage) = _plan.State switch
+        {
+            PlanAccessState.Granted => (new StatusTag("Active", "success"), _plan.Message),
+            PlanAccessState.Checking => (new StatusTag("Checking", "info"), _plan.Message),
+            PlanAccessState.NotGranted => (new StatusTag(_plan.NeedsOrganisationChoice ? "Choose organisation" : "Not granted", "warning"), _plan.Message),
+            PlanAccessState.Expired => (new StatusTag("Expired", "warning"), _plan.Message),
+            PlanAccessState.Suspended => (new StatusTag("Suspended", "error"), _plan.Message),
+            PlanAccessState.Unavailable => (new StatusTag("Unknown (HCG unavailable)", "warning"), _plan.Message),
+            _ => (new StatusTag("Sign in required", "neutral"), _plan.Message),
+        };
+        PlanName = _plan.State == PlanAccessState.SignedOut ? "—" : _plan.PlanDisplay;
+        ValidUntil = _plan.ValidUntil is { } until ? until.LocalDateTime.ToString("D") : _plan.Access?.Licence is null ? "Not reported by HCG" : "No end date";
+        PlanChecked = _plan.CheckedAt is { } at ? $"Checked with HCG at {at.LocalDateTime:t}" : "";
+        HasManageLink = _plan.Access?.Links.Manage is not null;
+        HasCheckoutLink = _plan.Access?.Links.Checkout is not null;
+        NoBillingNote = _plan.State != PlanAccessState.SignedOut && !HasManageLink && !HasCheckoutLink
+            ? "HCG provides no plan-management or purchase link for HCG Executable Maker yet. Plans and licences are managed by HCG."
+            : "";
+        HasChange = _plan.ChangeState != PlanChangeState.None;
+        ChangeMessage = _plan.ChangeMessage;
+        ChangeTone = _plan.ChangeState switch { PlanChangeState.Confirmed => "success", PlanChangeState.NotConfirmed => "warning", _ => "info" };
+        Features.Clear();
+        foreach (var f in _plan.Access?.Features ?? [])
+        {
+            var (title, detail) = KnownFeatures.TryGetValue(f.Key, out var k) ? k : (f.DisplayName ?? f.Key, f.Key);
+            Features.Add(new AccountPermissionRow(title, detail, f.Allowed && _plan.State == PlanAccessState.Granted
+                ? new StatusTag("Allowed", "success") : new StatusTag("Not allowed", "neutral")));
+        }
+    }
+
+    partial void OnSelectedOrganisationChanged(EcosystemOrganisation? value)
+    {
+        if (_applyingOrganisation || value is null || value.Id == _plan.OrganisationId) return;
         _ = SwitchOrganisationAsync(value.Id);
     }
 
     private async Task SwitchOrganisationAsync(string id)
     {
-        await _account.SetOrganisationAsync(id);
-        await _access.RefreshAsync(); // permissions may differ per organisation; HCG decides
+        await _plan.SelectOrganisationAsync(id); // access may differ per organisation; HCG decides
+        await _access.RefreshAsync();
     }
+
+    [RelayCommand]
+    private async Task CheckPlanAsync()
+    {
+        IsBusy = true;
+        try { await _plan.RefreshAsync(); }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand]
+    private async Task OpenManageAsync()
+    {
+        if (_plan.Access?.Links.Manage is not { } url) return;
+        _plan.BeginPlanChange();
+        await _shell.OpenUrlAsync(url.ToString());
+    }
+
+    [RelayCommand]
+    private async Task OpenCheckoutAsync()
+    {
+        if (_plan.Access?.Links.Checkout is not { } url) return;
+        _plan.BeginPlanChange();
+        await _shell.OpenUrlAsync(url.ToString());
+    }
+
+    [RelayCommand]
+    private Task OpenHcgAccountAsync() => _shell.OpenUrlAsync(_plan.AccountLink.ToString());
 
     [RelayCommand(CanExecute = nameof(CanSignIn))]
     private async Task SignInAsync()
     {
         await _account.SignInAsync(new ShellBrowser(_shell));
-        if (_account.IsSignedIn) await _access.RefreshAsync();
+        if (!_account.IsSignedIn) return;
+        await _plan.RefreshAsync();
+        await _access.RefreshAsync();
     }
 
     [RelayCommand] private void CancelSignIn() => _account.CancelSignIn();
@@ -163,7 +256,9 @@ public sealed partial class AccountViewModel : PageViewModel
     private async Task RetryAsync()
     {
         await _account.RetryAsync();
-        if (_account.IsSignedIn) await _access.RefreshAsync();
+        if (!_account.IsSignedIn) return;
+        await _plan.RefreshAsync();
+        await _access.RefreshAsync();
     }
 
     [RelayCommand]

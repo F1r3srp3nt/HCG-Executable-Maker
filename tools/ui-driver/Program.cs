@@ -47,7 +47,8 @@ internal static partial class Program
         for (var i = 0; i < argv.Length; i++)
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("account-pages")))
+        if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -59,6 +60,7 @@ internal static partial class Program
         Directory.CreateDirectory(_shots);
         // Isolated data folder: imports, history and SwiftPM scratch space do not touch a real installation.
         Environment.SetEnvironmentVariable(AppPaths.RootOverrideVariable, Path.Combine(output, "hcg-data"));
+        if (_args.ContainsKey("account-signed-in")) PrepareMockHcg(Path.Combine(output, "hcg-data"));
 
         var source = Path.GetFullPath(_args["source"]);
         AppClass.ServiceOverrides = services =>
@@ -150,6 +152,7 @@ internal static partial class Program
         await main.InitializeAsync();
         var host = HostInfo.Detect();
         Log($"Host: {host.DisplayName} ({host.OsDescription}) · footer: {main.EngineStatus}");
+        if (_args.ContainsKey("account-signed-in")) return await RunAccountSignedInAsync(main);
 
         // Optional: select an Xcode for HCG only (Toolchains › Xcode › Browse…), as a user would, before building.
         await main.NavigateAsync("toolchains", null);
@@ -369,7 +372,7 @@ internal static partial class Program
         public Task<bool> OpenFolderAsync(string path) => Task.FromResult(Directory.Exists(path));
         public Task<string?> PickApplicationAsync(string title) => Task.FromResult(Arg("select-xcode"));
         public Task<bool> OpenApplicationAsync(string appPath) => Task.FromResult(false);
-        public Task<bool> OpenUrlAsync(string url) => Task.FromResult(false);
+        public Task<bool> OpenUrlAsync(string url) => Task.FromResult(OpenUrl(url));
     }
 
     private sealed class LoggingDialogs : IDialogService
