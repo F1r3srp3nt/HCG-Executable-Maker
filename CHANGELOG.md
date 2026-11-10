@@ -28,6 +28,26 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - UI driver `--account-signed-in`;
   - CI job `hcg-connect-macos`: sign-in, restart persistence and sign-out in the self-packaged `.app` with the real Keychain.
 
+### Added — web → desktop
+- **"Prepare desktop app"** in the New Build wizard for Vite + React browser apps:
+  - It shows precisely what is unsupported or risky (backend, sign-in, network), with file and line.
+  - It previews every generated file and the `package.json` diff.
+  - On request it writes a **separate** desktop workspace (the imported project is unchanged), resolves its lockfile with `--ignore-scripts`, and imports it for the existing Electron build.
+  - The generated shell serves the production build from `app://bundle` (SPA fallback, base path, traversal guard), with context isolation, sandbox and webSecurity on and Node integration off.
+- **Configuration vs. toolchains:** the wizard lists what the *project* lacks separately from what *this computer* lacks, for Electron apps and for browser apps.
+- `TextDiff` (readable line diffs); fixture `tests/Fixtures/WebViteDesktop`; `tools/electron-launch-check/launch-check.cjs`; UI driver `--prepare-desktop`; CI job `web-desktop-macos`.
+
+### Added — HCG Connect configuration
+- **Account page › HCG Connect:**
+  - the configuration in use;
+  - **Import configuration…**: validated, refused with the reason, and applied without a restart; a different client's session is removed;
+  - **Check connection**: discovery, keys, client registration and API deployment, with specific DNS, TLS, HTTP and identity-server errors;
+  - the client registration HCG needs, produced from code.
+- `--hcg-session import <file> | check | registration`. UI driver `--import-config`.
+
+### Verified
+- CI run 47 (b83fe9c): the packaged macOS `.app` signed in, was restored after two restarts and a GUI start from the login Keychain, and signed out. All against the MOCK HCG.
+
 ### Changed
 - **Scopes:** sign-in requests `openid email profile`, following HCG's central guidance that `offline_access` is not needed.
 - **Product key:** the central product key is `hcg.executable.maker`.

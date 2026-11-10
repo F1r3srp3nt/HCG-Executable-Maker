@@ -42,10 +42,51 @@
         <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="Local test identity server: hcg-connect.json points sign-in at a server on this computer, not at HCG. Use it only for testing." />
       </Border>
 
-      <Border Classes="callout" IsVisible="{Binding IsNotConfigured}">
-        <StackPanel Spacing="8">
-          <TextBlock Text="{Binding ConfigurationHelp}" FontSize="12.5" TextWrapping="Wrap" />
-          <Button Classes="small" Content="Open data folder" Command="{Binding OpenDataFolderCommand}" HorizontalAlignment="Left" />
+      <!-- HCG Connect: the configuration in use, importing the issued file, checking it against HCG -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="h2" Text="HCG Connect" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="How this app signs in with HCG: a public desktop client using your browser and PKCE. It holds no secret." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding ConnectTag}" VerticalAlignment="Top" />
+          </Grid>
+          <TextBlock Text="{Binding ConfigurationHelp}" FontSize="12.5" TextWrapping="Wrap" IsVisible="{Binding IsNotConfigured}" />
+          <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding ConnectSummary}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="primary small" Content="Import configuration…" Command="{Binding ImportConfigurationCommand}" />
+            <Button Classes="small" Content="Check connection" Command="{Binding CheckConnectionCommand}" />
+            <Button Classes="ghost small" Content="Open data folder" Command="{Binding OpenDataFolderCommand}" />
+            <ProgressBar IsIndeterminate="True" Width="100" VerticalAlignment="Center" IsVisible="{Binding IsCheckingConnection}" />
+          </StackPanel>
+          <Border Classes="callout error" IsVisible="{Binding ConnectImportError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock FontSize="12.5" Text="{Binding ConnectImportError}" TextWrapping="Wrap" />
+          </Border>
+          <Border Classes="callout success" IsVisible="{Binding ConnectImportMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock FontSize="12.5" Text="{Binding ConnectImportMessage}" TextWrapping="Wrap" />
+          </Border>
+          <ItemsControl ItemsSource="{Binding ConnectionSteps}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AccountPermissionRow">
+                <Grid ColumnDefinitions="170,*,Auto" Margin="0,4">
+                  <TextBlock Classes="label" Text="{Binding Title}" />
+                  <SelectableTextBlock Grid.Column="1" FontSize="12.5" Text="{Binding Detail}" TextWrapping="Wrap" Margin="0,0,12,0" />
+                  <c:StatusChip Grid.Column="2" Status="{Binding State}" VerticalAlignment="Top" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="{Binding ConnectionVerdict}" TextWrapping="Wrap"
+                     IsVisible="{Binding ConnectionVerdict, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <Expander Header="Registration HCG needs for this app" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Produced from this build's configuration (RFC 7591 client metadata). HCG registers it centrally (ERP › App integrations) and issues the configuration file with the client ID. Another app's client (for example HCG AI's web client) must not be reused." />
+              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding RegistrationJson}" TextWrapping="Wrap" />
+              <Button Classes="small" Content="Copy registration request" Command="{Binding CopyRegistrationCommand}" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Expander>
         </StackPanel>
       </Border>
 

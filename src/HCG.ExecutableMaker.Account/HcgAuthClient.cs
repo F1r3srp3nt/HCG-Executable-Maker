@@ -55,6 +55,9 @@ public sealed record HcgSignInAttempt(Uri AuthorizationUrl, string State, string
 /// </summary>
 public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration config, TimeProvider time)
 {
+    /// <summary>The HCG Connect configuration in use; replaced when a new configuration is imported (see HcgAccountService).</summary>
+    public HcgConnectConfiguration Configuration { get; internal set; } = config;
+
     /// <summary>Error codes the identity server returns for a refresh token that can never work again (verified live by the LifeOS integration).</summary>
     public static readonly IReadOnlySet<string> DeadRefreshCodes = new HashSet<string>
     {
@@ -66,7 +69,7 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
 
     public HcgSignInAttempt BeginSignIn(Uri redirectUri)
     {
-        if (config.MissingForSignIn() is { Count: > 0 } missing)
+        if (Configuration.MissingForSignIn() is { Count: > 0 } missing)
             throw new HcgAuthException(HcgAuthFailure.NotConfigured, "HCG sign-in is not configured: " + string.Join("; ", missing) + ".");
         var pkce = PkcePair.Create();
         var state = Base64Url.RandomToken();
@@ -74,15 +77,15 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
         var query = new Dictionary<string, string>
         {
             ["response_type"] = "code",
-            ["client_id"] = config.ClientId!,
+            ["client_id"] = Configuration.ClientId!,
             ["redirect_uri"] = redirectUri.ToString(),
-            ["scope"] = string.Join(' ', config.Scopes),
+            ["scope"] = string.Join(' ', Configuration.Scopes),
             ["state"] = state,
             ["nonce"] = nonce,
             ["code_challenge"] = pkce.Challenge,
             ["code_challenge_method"] = "S256",
         };
-        var url = new UriBuilder(config.AuthorizationEndpoint)
+        var url = new UriBuilder(Configuration.AuthorizationEndpoint)
         {
             Query = string.Join('&', query.Select(kv => Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value))),
         }.Uri;
@@ -107,7 +110,7 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
             ["grant_type"] = "authorization_code",
             ["code"] = code,
             ["redirect_uri"] = attempt.RedirectUri.ToString(),
-            ["client_id"] = config.ClientId!,
+            ["client_id"] = Configuration.ClientId!,
             ["code_verifier"] = attempt.Pkce.Verifier,
         }, refreshing: false, ct).ConfigureAwait(false);
         if (tokens.IdToken is null)
@@ -115,7 +118,7 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
         IdTokenValidator.Claims claims;
         try
         {
-            claims = IdTokenValidator.Validate(tokens.IdToken, await JwksAsync(ct).ConfigureAwait(false), config.Issuer.ToString(), config.ClientId!, attempt.Nonce, time.GetUtcNow());
+            claims = IdTokenValidator.Validate(tokens.IdToken, await JwksAsync(ct).ConfigureAwait(false), Configuration.Issuer.ToString(), Configuration.ClientId!, attempt.Nonce, time.GetUtcNow());
         }
         catch (IdTokenValidator.ValidationException ex)
         {
@@ -151,13 +154,13 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
     /// </summary>
     private void CheckAccessTokenClient(string? accessToken)
     {
-        if (accessToken is { } at && IdTokenValidator.PeekClaims(at) is { } c && IdTokenValidator.Str(c, "client_id") is { } issuedTo && issuedTo != config.ClientId)
+        if (accessToken is { } at && IdTokenValidator.PeekClaims(at) is { } c && IdTokenValidator.Str(c, "client_id") is { } issuedTo && issuedTo != Configuration.ClientId)
             throw new HcgAuthException(HcgAuthFailure.Invalid, "HCG returned an access token issued to another app. Nothing was stored; sign in again.");
     }
 
     public async Task<HcgIdentity> UserInfoAsync(string accessToken, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, config.UserinfoEndpoint);
+        using var request = new HttpRequestMessage(HttpMethod.Get, Configuration.UserinfoEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         var (status, body) = await SendAsync(request, ct).ConfigureAwait(false);
         if (status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
@@ -175,7 +178,7 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
     internal async Task<string> JwksAsync(CancellationToken ct)
     {
         if (_jwks is not null && time.GetUtcNow() - _jwksFetched < TimeSpan.FromHours(1)) return _jwks;
-        using var request = new HttpRequestMessage(HttpMethod.Get, config.JwksEndpoint);
+        using var request = new HttpRequestMessage(HttpMethod.Get, Configuration.JwksEndpoint);
         var (status, body) = await SendAsync(request, ct).ConfigureAwait(false);
         if (status != HttpStatusCode.OK)
             throw new HcgAuthException(HcgAuthFailure.Unavailable, "HCG's signing keys could not be read, so the sign-in cannot be verified. Try again later.");
@@ -191,13 +194,13 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
         RefreshToken = tokens.RefreshToken ?? previousRefreshToken ?? "",
         ExpiresAt = time.GetUtcNow().AddSeconds(Math.Clamp(tokens.ExpiresIn ?? 3600, 60, 86_400)),
         Identity = identity,
-        ClientId = config.ClientId!,
+        ClientId = Configuration.ClientId!,
         OrganisationId = organisation,
     };
 
     private async Task<TokenResponse> TokenRequestAsync(Dictionary<string, string> form, bool refreshing, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, config.TokenEndpoint) { Content = new FormUrlEncodedContent(form) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, Configuration.TokenEndpoint) { Content = new FormUrlEncodedContent(form) };
         var (status, body) = await SendAsync(request, ct).ConfigureAwait(false);
         if (status == HttpStatusCode.OK)
         {

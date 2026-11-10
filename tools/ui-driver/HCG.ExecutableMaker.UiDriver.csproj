@@ -18,6 +18,10 @@
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The published placeholder example: the Account flow proves importing it is refused. -->
+    <None Include="..\..\docs\hcg-connect\hcg-connect.example.json" Link="hcg-connect.example.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.App\HCG.ExecutableMaker.App.csproj" />
   </ItemGroup>
 </Project>

@@ -14,6 +14,9 @@ namespace HCG.ExecutableMaker.App;
 /// <item><c>sign-in</c> signs in through the system browser. Only when hcg-connect.json points at a local test identity
 /// server (http on 127.0.0.1/localhost, never HCG) does it follow the redirects itself, so CI can verify a packaged app.</item>
 /// <item><c>sign-out</c> removes the stored session from this computer.</item>
+/// <item><c>import &lt;file&gt;</c> validates an issued hcg-connect.json and installs it in the data folder (as the Account page does).</item>
+/// <item><c>check</c> checks the configuration against the identity server and HCG's APIs without signing in.</item>
+/// <item><c>registration</c> prints the client registration HCG needs, produced from this build's configuration.</item>
 /// </list>
 /// Never prints a token. Exit code 0 when the requested state was reached.
 /// </summary>
@@ -37,14 +40,46 @@ internal static class HcgSessionCommand
             "status" => Status(account, plan),
             "sign-in" => SignIn(account, plan),
             "sign-out" => SignOut(account),
+            "import" => Import(args.SkipWhile(a => a != "import").Skip(1).FirstOrDefault(), paths, account, services.GetRequiredService<HcgConnectionCheck>()),
+            "check" => Check(account.Configuration, services.GetRequiredService<HcgConnectionCheck>()),
+            "registration" => Registration(account.Configuration),
             _ => Usage(),
         };
     }
 
     private static int Usage()
     {
-        Console.Error.WriteLine("Usage: HCGExecutableMaker --hcg-session status|sign-in|sign-out");
+        Console.Error.WriteLine("Usage: HCGExecutableMaker --hcg-session status|sign-in|sign-out|check|registration|import <hcg-connect.json>");
         return 2;
+    }
+
+    private static int Import(string? file, IAppPaths paths, HcgAccountService account, HcgConnectionCheck check)
+    {
+        if (file is null) return Usage();
+        var result = HcgConnectImport.Import(Path.GetFullPath(file), paths.Root);
+        if (result.Error is not null) { Console.WriteLine("Import: " + result.Error); return 6; }
+        account.ApplyConfigurationAsync(result.Configuration!).GetAwaiter().GetResult();
+        Console.WriteLine($"Import: installed {HcgConnectConfiguration.FileName} in {paths.Root} (client {result.Configuration!.ClientId}, issuer {result.Configuration.Issuer}).");
+        return Check(result.Configuration, check);
+    }
+
+    /// <summary>Exit 0 when sign-in can be attempted (this does not prove sign-in works), 5 otherwise.</summary>
+    private static int Check(HcgConnectConfiguration config, HcgConnectionCheck check)
+    {
+        var result = check.RunAsync(config).GetAwaiter().GetResult();
+        foreach (var step in result.Steps) Console.WriteLine($"Check {step.Name}: {step.State} — {step.Detail}");
+        Console.WriteLine(result.ReadyToSignIn
+            ? "Connection check: sign-in can be attempted. Only a completed sign-in proves it works."
+            : "Connection check: sign-in cannot work with this configuration yet (see the failed checks above).");
+        return result.ReadyToSignIn ? 0 : 5;
+    }
+
+    private static int Registration(HcgConnectConfiguration config)
+    {
+        Console.WriteLine("Client registration HCG needs for HCG Executable Maker (RFC 7591 metadata, from this build's configuration).");
+        Console.WriteLine("Register it centrally (ERP > App integrations); never reuse another app's client. No secret is requested or accepted.");
+        Console.WriteLine(config.RegistrationRequestJson());
+        return 0;
     }
 
     private static int Status(HcgAccountService account, AccountPlanService plan)

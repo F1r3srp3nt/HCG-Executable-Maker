@@ -265,7 +265,7 @@ public class HcgAuthTests
     }
 }
 
-public class HcgSessionTests
+public partial class HcgSessionTests
 {
     private static (HcgAccountService Account, MockIdentityServer Server, SessionOnlyCredentialStore Store) Account(SessionOnlyCredentialStore? store = null)
     {

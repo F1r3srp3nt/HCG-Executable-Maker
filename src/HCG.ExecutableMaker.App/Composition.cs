@@ -100,6 +100,8 @@ public static class Composition
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAccountService(hcgConfig, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAuthClient>(),
             credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>()));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgApiClient(hcgHttp, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>()));
+        // Connection check: never follows redirects (the authorization request is probed, not opened), 15 s per step.
+        services.AddSingleton(_ => new HCG.ExecutableMaker.Account.HcgConnectionCheck(new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) }));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AppAccessService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), TimeProvider.System));
         // Plan, licence, organisation and feature access from HCG's central Ecosystem API.
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgEcosystemClient(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>()));

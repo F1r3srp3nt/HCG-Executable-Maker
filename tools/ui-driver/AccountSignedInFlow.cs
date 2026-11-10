@@ -12,7 +12,9 @@ namespace HCG.ExecutableMaker.UiDriver;
 /// The Account page signed in, against the MOCK HCG (tools/hcg-mock/mock-hcg.mjs, never HCG): sign-in through the
 /// browser flow, plan and access from the (mock) central API, organisation choice, an expired licence, and a checkout
 /// whose return proves nothing until HCG reports the new plan.
-/// Usage: hcg-ui-driver --account-signed-in --hcg-mock &lt;mock.json&gt; --output DIR --screenshots DIR --prefix account
+/// Usage: hcg-ui-driver --account-signed-in --hcg-mock &lt;mock.json&gt; [--import-config] --output DIR --screenshots DIR --prefix account
+/// --import-config: start unconfigured and import the issued configuration through the Account page (a placeholder file
+/// is refused first), then run the connection check, before signing in.
 /// </summary>
 internal static partial class Program
 {
@@ -27,7 +29,10 @@ internal static partial class Program
         _mockPort = r.GetProperty("port").GetInt32();
         var issuer = r.GetProperty("issuer").GetString()!;
         Directory.CreateDirectory(dataRoot);
-        File.WriteAllText(Path.Combine(dataRoot, HcgConnectConfiguration.FileName), JsonSerializer.Serialize(new Dictionary<string, object>
+        // With --import-config the file is "issued" next to the data folder and imported through the Account page.
+        var target = _args.ContainsKey("import-config") ? Path.Combine(Path.GetDirectoryName(dataRoot)!, "issued-hcg-connect.json") : Path.Combine(dataRoot, HcgConnectConfiguration.FileName);
+        if (_args.ContainsKey("import-config")) _args["pick-file"] = target;
+        File.WriteAllText(target, JsonSerializer.Serialize(new Dictionary<string, object>
         {
             ["contractVersion"] = HcgConnectConfiguration.ContractVersion, ["clientId"] = r.GetProperty("clientId").GetString()!, ["issuer"] = issuer,
             ["authorizationEndpoint"] = issuer + "/oauth/authorize", ["tokenEndpoint"] = issuer + "/oauth/token",
@@ -67,12 +72,45 @@ internal static partial class Program
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>Account page › HCG Connect: refuse the placeholder example, import the issued file, check the connection.</summary>
+    private static async Task ImportConfigurationAsync(AccountViewModel account)
+    {
+        Log($"Account: [{account.AccountTag.Text}] [{account.ConnectTag.Text}] {account.AccountMessage}");
+        Check(account.IsNotConfigured && !account.CanSignIn, "Unconfigured build: sign-in is not offered and the reason is shown");
+        account.CheckConnectionCommand.Execute(null);
+        await WaitUntil(() => !account.IsCheckingConnection && account.ConnectionSteps.Count > 0, TimeSpan.FromSeconds(30), "connection check (unconfigured)");
+        Check(account.ConnectionSteps[0].State.Text == "Failed" && account.ConnectionSteps.Skip(1).All(s => s.State.Text == "Not checked"),
+            "Unconfigured: the check names the missing client ID and contacts nothing");
+        Shot("connect-not-configured");
+
+        var issued = _args["pick-file"];
+        var example = Path.Combine(Path.GetDirectoryName(issued)!, "placeholder-hcg-connect.json");
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "hcg-connect.example.json"), example, overwrite: true);
+        _args["pick-file"] = example;
+        await account.ImportConfigurationCommand.ExecuteAsync(null);
+        Log("Import placeholder: " + account.ConnectImportError);
+        Check(account.ConnectImportError?.Contains("not an issued HCG client ID", StringComparison.Ordinal) == true && account.IsNotConfigured,
+            "The placeholder example is refused with the reason; nothing changes");
+        Shot("connect-placeholder-refused");
+
+        _args["pick-file"] = issued;
+        await account.ImportConfigurationCommand.ExecuteAsync(null);
+        Log("Import issued: " + (account.ConnectImportMessage ?? account.ConnectImportError));
+        Check(account.ConnectImportError is null && !account.IsNotConfigured && account.CanSignIn, "The issued configuration is imported and in use without a restart");
+        account.CheckConnectionCommand.Execute(null);
+        await WaitUntil(() => !account.IsCheckingConnection && account.ConnectionSteps.Count == 6, TimeSpan.FromSeconds(60), "connection check");
+        foreach (var step in account.ConnectionSteps) Log($"Check {step.Title}: [{step.State.Text}] {step.Detail}");
+        Check(account.ConnectionReady, "Connection check: identity server, keys and client registration pass (sign-in not yet proven)");
+        Shot("connect-checked");
+    }
+
     private static async Task<int> RunAccountSignedInAsync(MainWindowViewModel main)
     {
         var plan = AppClass.Services!.GetRequiredService<AccountPlanService>();
         await main.NavigateAsync("account", null);
         var account = (AccountViewModel)main.CurrentPage!;
         await Task.Delay(300);
+        if (_args.ContainsKey("import-config")) await ImportConfigurationAsync(account);
         Log($"Account: [{account.AccountTag.Text}] {account.AccountHeadline} — {account.AccountMessage}");
         Check(!account.IsNotConfigured && account.CanSignIn, "Sign in with HCG is offered (client ID configured)");
         Check(account.UsesLocalIdentityServer, "The page says sign-in points at a local test server, not HCG");

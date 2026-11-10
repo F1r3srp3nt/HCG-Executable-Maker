@@ -21,10 +21,12 @@ public sealed partial class AccountViewModel : PageViewModel
     private readonly AccountPlanService _plan;
     private readonly IPlatformShell _shell;
     private readonly IAppPaths _paths;
+    private readonly HcgConnectionCheck _check;
     private bool _applyingOrganisation;
 
-    public AccountViewModel(HcgAccountService account, AppAccessService access, AccountPlanService plan, IPlatformShell shell, IAppPaths paths)
+    public AccountViewModel(HcgAccountService account, AppAccessService access, AccountPlanService plan, IPlatformShell shell, IAppPaths paths, HcgConnectionCheck check)
     {
+        _check = check;
         _account = account;
         _access = access;
         _plan = plan;
@@ -74,6 +76,17 @@ public sealed partial class AccountViewModel : PageViewModel
     [ObservableProperty] private string _changeTone = "info";
     [ObservableProperty] private bool _usesLocalIdentityServer;
     public ObservableCollection<AccountPermissionRow> Features { get; } = [];
+
+    // HCG Connect configuration: what this build uses, importing the issued file, and checking it against HCG.
+    [ObservableProperty] private StatusTag _connectTag = new("—", "neutral");
+    [ObservableProperty] private string _connectSummary = "";
+    [ObservableProperty] private string _registrationJson = "";
+    [ObservableProperty] private string? _connectImportError;
+    [ObservableProperty] private string? _connectImportMessage;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CheckConnectionCommand))] private bool _isCheckingConnection;
+    [ObservableProperty] private string _connectionVerdict = "";
+    [ObservableProperty] private bool _connectionReady;
+    public ObservableCollection<AccountPermissionRow> ConnectionSteps { get; } = [];
     public string LocalBuildsNote => "Local builds, packaging and toolchains work without an HCG account. Sign-in is needed only for support requests and HCG AI assistance.";
     public string PrivacyNote => "Sign-in happens in your own browser on HCG's sign-in page. HCG Executable Maker never sees your password. It keeps a renewable session in the system credential store and never writes it to a file or a log.";
 
@@ -116,8 +129,9 @@ public sealed partial class AccountViewModel : PageViewModel
             : _account.StoreNote ?? "";
         ConfigurationHelp = IsNotConfigured
             ? "HCG Executable Maker's sign-in client has not been registered with HCG yet, so account features are switched off and nothing is contacted. " +
-              $"After registration, HCG provides a configuration file ({HcgConnectConfiguration.FileName}) for {_paths.Root}. It contains the public client ID only and never a secret."
+              $"After registration, HCG provides a configuration file ({HcgConnectConfiguration.FileName}). Import it here; it contains the public client ID only and never a secret."
             : "";
+        RefreshConnect();
 
         (AccessTag, AccessMessage) = _access.State switch
         {
@@ -263,6 +277,76 @@ public sealed partial class AccountViewModel : PageViewModel
 
     [RelayCommand]
     private Task OpenDataFolderAsync() => _shell.OpenFolderAsync(_paths.Root);
+
+    private void RefreshConnect()
+    {
+        var c = _account.Configuration;
+        var file = Path.Combine(_paths.Root, HcgConnectConfiguration.FileName);
+        var source = _account.ConfigurationProblem is not null ? $"built-in defaults ({HcgConnectConfiguration.FileName} was ignored)"
+            : File.Exists(file) ? file : "built-in defaults (no " + HcgConnectConfiguration.FileName + " imported)";
+        ConnectTag = c.MissingForSignIn().Count > 0 ? new StatusTag("Not configured", "neutral")
+            : c.UsesLocalIdentityServer ? new StatusTag("Local test server", "warning")
+            : new StatusTag("Configured, not verified", "info");
+        if (_account.IsSignedIn && !c.UsesLocalIdentityServer) ConnectTag = new StatusTag("Signed in with HCG", "success");
+        ConnectSummary = string.Join("\n", new[]
+        {
+            $"Client ID: {(string.IsNullOrWhiteSpace(c.ClientId) ? "(none: not registered yet)" : c.ClientId)} (public client, PKCE S256, no secret)",
+            $"Identity server: {c.Issuer}",
+            $"Redirect URIs: {string.Join(", ", c.RedirectUris)}",
+            $"Scopes: {string.Join(" ", c.Scopes)}",
+            $"HCG APIs: {c.ApiBaseUrl}  ({c.EcosystemApiPath}, {c.ApiPath})",
+            $"Source: {source}",
+        });
+        RegistrationJson = c.RegistrationRequestJson();
+    }
+
+    /// <summary>Imports the hcg-connect.json HCG issued: validated first; on any problem nothing changes.</summary>
+    [RelayCommand]
+    private async Task ImportConfigurationAsync()
+    {
+        ConnectImportError = ConnectImportMessage = null;
+        if (await _shell.PickFileAsync("Import the HCG Connect configuration", "HCG Connect configuration", "*.json") is not { } file) return;
+        var result = HcgConnectImport.Import(file, _paths.Root);
+        if (result.Error is not null) { ConnectImportError = result.Error; return; }
+        var previousClient = _account.Configuration.ClientId;
+        await _account.ApplyConfigurationAsync(result.Configuration!);
+        ConnectImportMessage = $"Imported: client {result.Configuration!.ClientId} on {result.Configuration.Issuer.Host}" +
+            (previousClient is not null && previousClient != result.Configuration.ClientId && previousClient.Length > 0 ? " (the previous client's session was removed from this computer)" : "") +
+            ". It is in use now. Check the connection, then sign in; only a completed sign-in proves it works.";
+        ConnectionSteps.Clear();
+        ConnectionVerdict = "";
+        Refresh();
+    }
+
+    private bool CanCheckConnection() => !IsCheckingConnection;
+
+    [RelayCommand(CanExecute = nameof(CanCheckConnection))]
+    private async Task CheckConnectionAsync()
+    {
+        IsCheckingConnection = true;
+        ConnectionSteps.Clear();
+        ConnectionVerdict = "Checking…";
+        try
+        {
+            var result = await _check.RunAsync(_account.Configuration);
+            foreach (var step in result.Steps)
+                ConnectionSteps.Add(new AccountPermissionRow(step.Name, step.Detail, step.State switch
+                {
+                    ConnectionCheckState.Passed => new StatusTag("Passed", "success"),
+                    ConnectionCheckState.Warning => new StatusTag("Not available", "warning"),
+                    ConnectionCheckState.Failed => new StatusTag("Failed", "error"),
+                    _ => new StatusTag("Not checked", "neutral"),
+                }));
+            ConnectionReady = result.ReadyToSignIn;
+            ConnectionVerdict = result.ReadyToSignIn
+                ? "Sign-in can be attempted with this configuration. The check does not sign in: only a completed sign-in proves it works."
+                : "Sign-in cannot work with this configuration yet. The failed check says what is missing.";
+        }
+        finally { IsCheckingConnection = false; }
+    }
+
+    [RelayCommand]
+    private Task CopyRegistrationAsync() => _shell.CopyAsync(RegistrationJson);
 }
 
 /// <summary>Opens HCG's sign-in page in the user's default browser (never an embedded view).</summary>

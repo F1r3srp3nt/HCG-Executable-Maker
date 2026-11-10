@@ -30,6 +30,33 @@ Nothing in this handoff was registered, issued, applied or published. No HCG set
 | Logout return URLs | None. There is no end-session endpoint, so the app signs out locally (§4). |
 | Required permissions | None for local use. Account features are decided by the central checks in §6. |
 
+**Reuse an existing registration?** There is none to reuse (LIVE-VERIFIED, 10 Nov):
+- The identity server answers `400 {"error_code":"oauth_client_not_found","msg":"invalid client_id"}` to an authorization request for an unregistered client. That is the result the app's connection check reports today.
+- LifeOS discovery (`/api/public/lifeos/v1/discovery`) lists only LifeOS clients. No Executable Maker client could be discovered.
+- **Do not reuse HCG AI's web client** or any other app's client. Its redirect URIs, client type and consent name belong to another product. Executable Maker needs its own public native client.
+
+**The registration body, produced from the app's code** (`HCGExecutableMaker --hcg-session registration`, also on the Account page under "Registration HCG needs for this app"):
+
+```json
+{
+  "client_name": "HCG Executable Maker",
+  "application_type": "native",
+  "client_type": "public",
+  "token_endpoint_auth_method": "none",
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "redirect_uris": [
+    "http://127.0.0.1:47820/oauth/callback",
+    "http://127.0.0.1:47821/oauth/callback",
+    "http://127.0.0.1:47822/oauth/callback"
+  ],
+  "scope": "openid email profile",
+  "code_challenge_method": "S256"
+}
+```
+
+The app never calls the registration endpoint itself; HCG registers the client centrally.
+
 **What HCG gives back:** the issued `client_id` (a UUID). It goes into `hcg-connect.json` (§5) or into the app's built-in default. Nothing else is needed. A registration access token, if the provider returns one, must not be passed to the app.
 
 ## 2. Callback URIs and how the app handles them
@@ -166,6 +193,21 @@ A `clientId` that is not an issued UUID keeps sign-in **off**. That covers the p
 
 The tests check all of this: `HcgConnectConfigurationTests`, which also require the schema's keys and defaults to match the app exactly.
 
+### Importing the issued file (IMPLEMENTED + TESTED, mock)
+
+- **Account page › HCG Connect › Import configuration…** or `HCGExecutableMaker --hcg-session import <file>`.
+- The file is validated with the startup rules: no secret-like keys, only known keys, this contract version, under 64 KB. It must also be ready for sign-in: an issued UUID client ID (the published placeholder is refused), loopback `127.0.0.1` redirect URIs, `openid`, and HTTPS identity endpoints.
+- On any problem the reason is shown and **nothing changes**.
+- A valid file is written to the data folder; the previous one is kept as `hcg-connect.previous.json`. It takes effect at once, with no restart. A session issued to a different client is removed from this computer.
+- **Check connection** (Account page, or `--hcg-session check`) runs without signing in and sends no credential. It names exactly what fails (DNS, TLS, timeout, HTTP status, or the identity server's own error):
+  1. the configuration itself;
+  2. the identity server's discovery document: issuer, endpoints, PKCE S256, public clients;
+  3. the signing keys;
+  4. the client registration: an authorization request that is not followed, so a redirect means the client and redirect URI were accepted;
+  5. whether the central Ecosystem API and the Executable Maker API are deployed.
+
+  A passing check means sign-in can be attempted. **Only a completed sign-in proves it works.**
+
 ## 6. Central APIs Executable Maker uses
 
 All calls send `Authorization: Bearer <access token>` to `https://beta.hakmicapitalgroup.com/api/public/ecosystem/v1`.
@@ -251,7 +293,8 @@ All calls send `Authorization: Bearer <access token>` to `https://beta.hakmicapi
 
 ## 9. Acceptance after issuance
 
-**On a Mac, with the issued client ID in `hcg-connect.json`, sign in with the packaged app:**
+**On a Mac, sign in with the packaged app:**
+- [ ] Account page › **Import configuration…** with the issued `hcg-connect.json`, then **Check connection**: *Configuration*, *Identity server*, *Signing keys* and *Client registration* all show **Passed**. Today *Client registration* fails with "does not know client ID" for any unissued ID.
 - [ ] The Account page shows "Sign in with HCG". The browser opens the HCG consent page "Connect your HCG account" for "HCG Executable Maker".
 - [ ] After consent, the browser tab says "You can close this tab". The app shows **Signed in as \<your e-mail\>**, and Keychain Access lists a generic password for the service `com.hakmicapitalgroup.executablemaker.hcg`, account `session`.
 - [ ] Quit and reopen the app: it shows **Signed in** without opening the browser.
@@ -273,9 +316,11 @@ All calls send `Authorization: Bearer <access token>` to `https://beta.hakmicapi
 
 | Part | Implemented | Configured for live HCG | End-to-end tested |
 |---|---|---|---|
-| Sign-in: system browser, PKCE S256, loopback callback, state, nonce, ES256 ID token, userinfo | Yes | **No**: needs the issued client ID | Unit tests with a mock identity server. Real app build (Linux) against the MOCK HCG (`--hcg-session sign-in`). **Packaged macOS `.app`: CI job `hcg-connect-macos` written, not yet run** (the branch is not on GitHub yet). |
-| OS credential storage | Yes | n/a | Windows Credential Manager and the macOS Keychain: unit test on the Windows and macOS runners (earlier runs). Packaged-app Keychain persistence: in `hcg-connect-macos`, **not yet run**. Linux Secret Service: only the "not reachable → this run only" path (no working keyring here). |
-| Restore after restart, renewal (rotated refresh tokens), sign-out | Yes | **No** | Unit tests: restore, expiry, outages, revocation. **Packaged macOS app across restarts: `hcg-connect-macos`, not yet run.** |
+| Sign-in: system browser, PKCE S256, loopback callback, state, nonce, ES256 ID token, userinfo | Yes | **No**: needs the issued client ID | Unit tests with a mock identity server. Real app build (Linux) against the MOCK HCG (`--hcg-session sign-in`). **Packaged macOS `.app`: passed in CI run 47 (`hcg-connect-macos`, 9 Nov) against the MOCK HCG.** |
+| Importing the issued configuration on the Account page; applying it without a restart | Yes | Waiting for the issued file | Unit tests (refusals, atomic install, client change removes the old session). Real Account page (UI driver `--import-config`, Linux, MOCK HCG): placeholder refused, issued file imported, check passed, sign-in. |
+| Connection check (discovery, keys, client registration, API deployment; specific DNS/TLS/HTTP errors) | Yes | n/a | Unit tests. **Run against live HCG (10 Nov) with an unissued UUID:** identity server, keys and Ecosystem API pass; *Client registration* fails with `oauth_client_not_found`; the Executable Maker API is not deployed (HTTP 406 from the site's catch-all). Against the MOCK HCG, every identity step passes. |
+| OS credential storage | Yes | n/a | Windows Credential Manager and the macOS Keychain: unit test on the Windows and macOS runners. **Packaged-app login Keychain: passed in CI run 47** (item present after sign-in, absent after sign-out). Linux Secret Service: only the "not reachable → this run only" path (no working keyring here). |
+| Restore after restart, renewal (rotated refresh tokens), sign-out | Yes | **No** | Unit tests: restore, expiry, outages, revocation. **Packaged macOS app: passed in CI run 47**: one sign-in, two CLI restarts and a GUI start each restored the session with one rotated refresh (mock counts: 1 authorization, 1 code exchange, 3 refreshes); after sign-out the next start was signed out. |
 | Organisations, features, plan, licence from the Ecosystem API | Yes, reading the shape in §6 | Routes live (401 without token); **response bodies unconfirmed** | MOCK HCG only: unit tests, real Account page (UI driver), packaged app |
 | Plan-management and checkout links; recheck after return | Yes | **No**: HCG sends no links and has no billing yet | MOCK HCG only: unit tests and real Account page (return without HCG confirmation changes nothing) |
 | Live HCG with a real account | n/a | n/a | **Not done.** Needs the issued client and your consent in a browser (§9). |

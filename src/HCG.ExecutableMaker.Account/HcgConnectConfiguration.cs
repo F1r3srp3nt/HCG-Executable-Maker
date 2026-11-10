@@ -127,9 +127,24 @@ public sealed record HcgConnectConfiguration
     {
         var path = Path.Combine(appDataRoot, FileName);
         if (!File.Exists(path)) return new LoadResult(Default, null);
+        string text;
+        try { text = File.ReadAllText(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new LoadResult(Default, $"{FileName} could not be read ({ex.Message}). The file was ignored.");
+        }
+        return Parse(text);
+    }
+
+    /// <summary>Largest configuration file accepted (the real one is about 1 KB).</summary>
+    public const int MaxFileBytes = 64 * 1024;
+
+    /// <summary>Validates configuration text with the same rules as <see cref="Load"/> (nothing is written).</summary>
+    public static LoadResult Parse(string text)
+    {
+        if (text.Length > MaxFileBytes) return new LoadResult(Default, $"{FileName} is larger than {MaxFileBytes / 1024} KB; it is not an HCG Connect configuration. The file was ignored.");
         try
         {
-            var text = File.ReadAllText(path);
             using var doc = JsonDocument.Parse(text);
             foreach (var key in Keys(doc.RootElement))
                 if (ForbiddenKeyFragments.Any(f => key.Contains(f, StringComparison.OrdinalIgnoreCase)))
@@ -172,4 +187,25 @@ public sealed record HcgConnectConfiguration
     }
 
     public string ToJson() => JsonSerializer.Serialize(this, Json);
+
+    public const string ClientName = "HCG Executable Maker";
+
+    /// <summary>
+    /// The client metadata HCG registers for this desktop app (RFC 7591 field names), produced from this configuration:
+    /// a public native client (no secret: token_endpoint_auth_method "none"), authorization code + refresh token,
+    /// PKCE S256, loopback redirect URIs and the scopes the app requests. For HCG's registration; the app never calls a
+    /// registration endpoint itself.
+    /// </summary>
+    public string RegistrationRequestJson() => JsonSerializer.Serialize(new Dictionary<string, object>
+    {
+        ["client_name"] = ClientName,
+        ["application_type"] = "native",
+        ["client_type"] = "public",
+        ["token_endpoint_auth_method"] = "none",
+        ["grant_types"] = new[] { "authorization_code", "refresh_token" },
+        ["response_types"] = new[] { "code" },
+        ["redirect_uris"] = RedirectUris.Select(u => u.ToString()).ToArray(),
+        ["scope"] = string.Join(' ', Scopes),
+        ["code_challenge_method"] = "S256",
+    }, Json);
 }

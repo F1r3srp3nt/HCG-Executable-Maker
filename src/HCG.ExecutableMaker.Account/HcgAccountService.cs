@@ -63,8 +63,8 @@ public sealed class HcgAccountService : IDisposable
         Message = missing.Count == 0 ? "Not signed in." : "HCG sign-in is not available in this build yet: " + string.Join("; ", missing) + ".";
     }
 
-    public HcgConnectConfiguration Configuration { get; }
-    public string? ConfigurationProblem { get; }
+    public HcgConnectConfiguration Configuration { get; private set; }
+    public string? ConfigurationProblem { get; private set; }
     /// <summary>Set when the session cannot be kept between runs (no OS credential store).</summary>
     public string? StoreNote { get; }
     public string StoreDescription => _store.Description;
@@ -229,6 +229,32 @@ public sealed class HcgAccountService : IDisposable
     /// has no sign-out endpoint for app (OAuth client) sessions, so the server-side session ends when it expires or
     /// when HCG ends it; HCG's API checks that the session still exists on every request.
     /// </summary>
+    /// <summary>
+    /// Uses a new HCG Connect configuration from now on (an imported hcg-connect.json). A session issued to a different
+    /// client or identity server is removed from this computer; a session for the same client is kept. Nothing is
+    /// contacted: the next sign-in, restore or connection check uses the new configuration.
+    /// </summary>
+    public async Task ApplyConfigurationAsync(HcgConnectConfiguration config, CancellationToken ct = default)
+    {
+        _signInCts?.Cancel();
+        var previous = Configuration;
+        var sameClient = previous.ClientId == config.ClientId && previous.Issuer == config.Issuer && previous.TokenEndpoint == config.TokenEndpoint;
+        Configuration = config;
+        _auth.Configuration = config;
+        ConfigurationProblem = null;
+        var missing = config.MissingForSignIn();
+        if (!sameClient) await ForgetAsync().ConfigureAwait(false);
+        if (missing.Count > 0)
+        {
+            await ForgetAsync().ConfigureAwait(false);
+            Set(HcgAccountStatus.NotConfigured, "HCG sign-in is not available with this configuration: " + string.Join("; ", missing) + ".", null);
+            return;
+        }
+        if (sameClient && _session is not null) { Changed?.Invoke(this, EventArgs.Empty); return; }
+        Set(HcgAccountStatus.SignedOut, sameClient ? "Not signed in." : "The new HCG Connect configuration is in use. Sign in to connect your HCG account.", null);
+        if (sameClient) await InitializeAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task SignOutAsync()
     {
         await ForgetAsync().ConfigureAwait(false);

@@ -15,6 +15,9 @@
 //   dotnet run --project tools/ui-driver -- --electron --source <folder|zip> [--project <dir>] [--arch arm64|x64]
 //       [--formats app,zip,dmg | folder] [--expect-name N] [--expect-bundle-id ID] [--expect-version V] --output <dir> --screenshots <dir>
 //   --expect-not-desktop: prove a web-only / service project is explained (what is missing) and cannot be configured.
+// Usage (browser app → desktop app: preview, create the desktop workspace, then build it as above):
+//   dotnet run --project tools/ui-driver -- --electron --prepare-desktop --source <Vite + React folder> [--desktop-name N]
+//       [--desktop-app-id ID] [--formats app,zip,dmg | folder] --output <dir> --screenshots <dir>
 //   Distribution (macOS): --formats …,pkg,mas  --select-xcode <Xcode.app> (HCG-only selection via Toolchains › Browse…)
 //       --expect-xcode-state Ready  --signing adhoc|devid  --confirm-entitlements  --test-install [launch]
 using System.Diagnostics;
@@ -192,6 +195,7 @@ internal static partial class Program
         await WaitUntil(() => !wizard.IsImporting && (wizard.IsInspectStep || wizard.ImportError is not null), TimeSpan.FromMinutes(5), "import");
         Check(wizard.ImportError is null, $"Imported {(isZip ? "ZIP" : "folder")} {Path.GetFileName(source)}" + (wizard.ImportError is { } e ? ": " + e : ""));
         if (wizard.ImportError is not null) return 1;
+        if (_args.ContainsKey("prepare-desktop") && !await RunPrepareDesktopAsync(wizard)) return 1;
         if (_args.ContainsKey("electron")) return await RunElectronAsync(wizard, host, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
 
@@ -367,7 +371,7 @@ internal static partial class Program
         public Task<string?> PickZipAsync() => Task.FromResult<string?>(File.Exists(source) ? source : null);
         public Task<string?> PickFolderAsync(string title) => Task.FromResult<string?>(Directory.Exists(source) ? source : null);
         public Task<string?> PickIconAsync() => Task.FromResult<string?>(null);
-        public Task<string?> PickFileAsync(string title, string typeName, params string[] patterns) => Task.FromResult<string?>(null);
+        public Task<string?> PickFileAsync(string title, string typeName, params string[] patterns) => Task.FromResult(Arg("pick-file"));
         public Task CopyAsync(string text) => Task.CompletedTask;
         public Task<bool> OpenFolderAsync(string path) => Task.FromResult(Directory.Exists(path));
         public Task<string?> PickApplicationAsync(string title) => Task.FromResult(Arg("select-xcode"));
