@@ -39,6 +39,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private readonly HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService _validator;
     private MacDistributionOptions? _repeatDistribution;
     private readonly NavigationService _navigation;
+    private readonly IProcessRunner _processRunner;
     private readonly HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator _swiftEvaluator;
     private readonly ConcurrentQueue<BuildLogLine> _pendingLog = new();
     private readonly DispatcherTimer _uiTimer;
@@ -53,8 +54,10 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningInventoryReader signingReader,
         HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService notarization,
         HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller pkgTester,
-        HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService validator)
+        HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService validator,
+        IProcessRunner processRunner)
     {
+        _processRunner = processRunner;
         _signingReader = signingReader;
         _notarization = notarization;
         _pkgTester = pkgTester;
@@ -182,6 +185,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         SwiftEvaluationLog.Clear();
         HasSwiftEvaluationLog = false;
         IconPath = null;
+        ResetDesktopConversion();
         Step = WizardStep.Import;
         UpdateSteps();
     }
@@ -400,6 +404,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         HasMissing = MissingDependencies.Count > 0;
         RefreshSwiftPackage();
         RefreshElectronProject();
+        RefreshDesktopConversion();
         OnPropertyChanged(nameof(CanConfigure));
         NextCommand.NotifyCanExecuteChanged();
     }

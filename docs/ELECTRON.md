@@ -42,6 +42,48 @@ For a **web-only** project, such as the original Presentation Studio, HCG lists 
 - the app runs from a development server;
 - a separate backend (Express) that would have to start inside the main process.
 
+## Browser apps: "Prepare desktop app" (Vite + React)
+
+A browser app is not packaged as it is. The project is labelled a web app, and its missing desktop parts are listed as **project configuration**, separately from tools missing on this computer. For a supported project the wizard offers **Prepare desktop app**:
+
+1. **Analysis (static, nothing runs).** It reads `package.json`, `vite.config.*`, `index.html` and the app's source folder (`src/`, else `app/` or `lib/`; tests excluded).
+   - **Supported:** Vite + React with npm and a script that runs `vite build`.
+   - **Refused with the exact reason:**
+     - SSR frameworks (Next.js, Nuxt, Remix, SvelteKit, Astro, Angular SSR, Gatsby) and non-React Vite apps;
+     - pnpm, Yarn or Bun projects; npm workspaces; `file:`, `link:` or `workspace:` dependencies;
+     - an existing Electron app (use the normal Electron path);
+     - an existing `hcg-desktop/`, `electron-builder.*` or `desktop:*` script;
+     - no `vite build` script; an absolute `http(s)` base; an invalid app id or name;
+     - relative `/api` calls when the project also contains a server framework.
+   - **Warnings (backend and sign-in, shown with file and line):**
+     - relative `/api` calls, a dev-server proxy, `localhost` URLs and service workers;
+     - redirect sign-in (Supabase, Firebase, Auth0, OIDC, MSAL, Clerk, NextAuth, Amplify);
+     - real `.env` files (never copied).
+
+   Arbitrary websites are not claimed to work: a backend the app calls must be reachable from the desktop app, and redirect sign-in needs a desktop redirect URI registered with that provider.
+2. **Preview.** Every file is shown before anything is written:
+   - `hcg-desktop/main.cjs` (the Electron entry);
+   - `hcg-desktop/verify-build.cjs` (fails the build if `dist/index.html` is missing or still loads the Vite dev server);
+   - `electron-builder.yml` (arm64 `.app`, zip and dmg, ad-hoc signed; Linux app folder);
+   - `package.json` as a diff: `main`; scripts `desktop:build`, `desktop:dist:mac` and `desktop:dist:linux`; `electron` 45.2.3 and `electron-builder` 26.18.0; runtime dependencies moved to devDependencies, because Vite bundles them, so the app ships no `node_modules`;
+   - `package-lock.json`.
+
+   The app name and app id are editable. A change requires an updated preview before anything is written.
+3. **Create desktop workspace.** This writes a **separate copy**; the imported project is never modified. The copy leaves out `node_modules`, the build output, `release/`, VCS data, symlinks and `.env` files with values. It then runs `npm install --package-lock-only --ignore-scripts` with the inspected Node.js and the scrubbed build environment, so no project or package script runs. The workspace is imported as a new HCG project and builds through the existing Electron stages: `npm ci` → `npm run desktop:build` → electron-builder.
+
+**The packaged window:**
+- It serves the production build from a privileged `app://bundle` scheme: no web server, no dev server, no network for the app's own files.
+- Asset paths follow Vite's `base`. Paths outside `dist/` are refused.
+- Any extension-less path is answered with `index.html`, so `BrowserRouter` deep links and reloads work.
+- `contextIsolation`, `sandbox` and `webSecurity` are on, and `nodeIntegration` is off.
+- Permission requests are denied. `window.open` and navigation to other sites go to the user's browser (https and mailto only), and `<webview>` is refused.
+
+**Verified:**
+- Unit tests, including refusal cases.
+- **web-hcg-store** (F1r3srp3nt/store), locally on Linux: wizard → workspace → `npm ci`, `desktop:build`, electron-builder. The packaged app was launched with Playwright and **no dev server**: home and `/apps` after a hard reload rendered, the security preferences were checked, and traversal probes returned no files.
+- The fixture `tests/Fixtures/WebViteDesktop` through the real wizard (UI driver `--prepare-desktop`), plus `tools/electron-launch-check/launch-check.cjs`.
+- **CI job `web-desktop-macos`:** the fixture as an arm64 `.app`, zip and dmg. It checks codesign, lipo, hdiutil and asar contents, launches the app with no dev server (Playwright, plus LaunchServices `open`), and takes a window screenshot.
+
 ## Packaging scripts
 
 HCG splits scripts that call electron-builder at `&&`. For example:

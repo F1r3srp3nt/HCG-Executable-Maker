@@ -37,7 +37,8 @@ internal static partial class Program
         Log($"Electron app: [{wizard.ElectronTag.Text}] {wizard.ElectronStatus}");
         foreach (var line in wizard.ElectronFacts.Split('\n')) Log("  " + line);
         Log("Workflow: " + wizard.ElectronWorkflow);
-        foreach (var r in wizard.ElectronRemediation) Log("Missing: " + r);
+        foreach (var r in wizard.ElectronRemediation) Log("Missing (project configuration): " + r);
+        foreach (var r in wizard.ElectronToolchainRemediation) Log("Missing (installed toolchains): " + r);
         foreach (var n in wizard.ElectronNotes) Log("Note: " + n);
         Check(wizard.IsElectronBuild && wizard.CanConfigure, "Electron app is ready to configure");
         Shot("inspect");

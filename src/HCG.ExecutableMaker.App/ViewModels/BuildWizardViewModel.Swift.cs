@@ -34,9 +34,15 @@ public sealed partial class BuildWizardViewModel
           "signing settings, asset catalogs) is a separate capability that is NOT implemented in this version. HCG builds Swift Package Manager packages " +
           "(Package.swift) on a Mac. iOS Xcode projects are built in Mobile Build Studio, which does not produce macOS apps."
         : "";
-    public string MissingHint => Analysis?.Support == SupportLevel.RequiresDifferentHost
-        ? "Installing tools on this computer does not help: open the project in HCG Executable Maker on a suitable host."
-        : "Install the missing tools (see the Toolchains page), then press Re-inspect.";
+    public string MissingHint => Analysis?.Support switch
+    {
+        SupportLevel.RequiresDifferentHost => "Installing tools on this computer does not help: open the project in HCG Executable Maker on a suitable host.",
+        SupportLevel.RequiresConfiguration when ShowDesktopConversion =>
+            "These are missing from the project's configuration, not from this computer. “Prepare desktop app” makes these changes in a separate copy after showing them; or change the project yourself, then press Re-inspect.",
+        SupportLevel.RequiresConfiguration => "These are missing from the project's configuration, not from this computer: installing tools does not help. Change the project, then press Re-inspect.",
+        _ => "Install the missing tools (see the Toolchains page), then press Re-inspect.",
+    };
+    public string MissingTitle => Analysis?.Support == SupportLevel.RequiresConfiguration ? "Missing project configuration" : "Missing requirements";
     public string ProjectPickerLabel => IsSwiftProject ? "SWIFT PACKAGE TO BUILD" : "PROJECT TO BUILD";
     public string ProjectPickerPlaceholder => IsSwiftProject ? "Choose a Swift package…" : "No runnable application project found";
 

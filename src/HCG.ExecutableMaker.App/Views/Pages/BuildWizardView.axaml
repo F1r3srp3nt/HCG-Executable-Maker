@@ -291,6 +291,9 @@
                       <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Libraries and tests are not built into an app; only executable products are offered." />
                     </StackPanel>
                   </StackPanel>
+                  <Border Classes="callout success" IsVisible="{Binding DesktopWorkspaceNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <SelectableTextBlock FontSize="12.5" Text="{Binding DesktopWorkspaceNotice}" TextWrapping="Wrap" />
+                  </Border>
                   <!-- Electron app: what it is, what it still needs, and the build stages HCG will run -->
                   <StackPanel Spacing="12" IsVisible="{Binding IsElectronBuild}">
                     <Grid ColumnDefinitions="*,Auto">
@@ -301,7 +304,7 @@
                     <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding ElectronFacts}" TextWrapping="Wrap" />
                     <Border Classes="callout warning" IsVisible="{Binding HasElectronRemediation}">
                       <StackPanel Spacing="6">
-                        <TextBlock Text="Missing before HCG can build the desktop app" FontWeight="SemiBold" FontSize="12.5" />
+                        <TextBlock Text="Project configuration — change these in the project" FontWeight="SemiBold" FontSize="12.5" />
                         <ItemsControl ItemsSource="{Binding ElectronRemediation}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="x:String">
@@ -309,6 +312,19 @@
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="callout warning" IsVisible="{Binding HasElectronToolchainRemediation}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Installed toolchains — missing on this computer" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ElectronToolchainRemediation}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="Open Toolchains" Command="{Binding OpenToolchainsPageCommand}" />
                       </StackPanel>
                     </Border>
                     <ItemsControl ItemsSource="{Binding ElectronNotes}" IsVisible="{Binding HasElectronNotes}">
@@ -321,6 +337,132 @@
                     <Border Classes="inset" Padding="16,12" IsVisible="{Binding ElectronWorkflow, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                       <TextBlock FontSize="12.5" Text="{Binding ElectronWorkflow}" TextWrapping="Wrap" />
                     </Border>
+                  </StackPanel>
+                  <!-- Browser app (Vite + React): prepare a separate desktop workspace, after showing exactly what changes -->
+                  <StackPanel Spacing="12" IsVisible="{Binding ShowDesktopConversion}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="Prepare desktop app" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding ConversionTag}" />
+                    </Grid>
+                    <StackPanel Spacing="6" IsVisible="{Binding HasSeveralWebProjects}">
+                      <TextBlock Classes="formlabel" Text="BROWSER APP TO PREPARE" Margin="0" />
+                      <ComboBox ItemsSource="{Binding ConvertibleWebProjects}" SelectedItem="{Binding SelectedWebProject}" PlaceholderText="Choose a browser app…" HorizontalAlignment="Stretch">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:WebProjectChoice">
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="{Binding Name}" />
+                              <TextBlock Classes="muted mono" Text="{Binding Path}" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <TextBlock Classes="body secondary" Text="{Binding ConversionSummary}" TextWrapping="Wrap" />
+                    <Border Classes="callout error" IsVisible="{Binding HasConversionBlockers}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Project configuration — not supported as it is" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ConversionBlockers}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ConversionFindingItem">
+                              <StackPanel Spacing="1" Margin="0,2">
+                                <SelectableTextBlock FontSize="12.5" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" Margin="10,0,0,0" />
+                              </StackPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="callout warning" IsVisible="{Binding HasConversionToolchainGaps}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Installed toolchains — missing on this computer" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ConversionToolchainGaps}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="Open Toolchains" Command="{Binding OpenToolchainsPageCommand}" />
+                      </StackPanel>
+                    </Border>
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionToolchainText}" TextWrapping="Wrap"
+                               IsVisible="{Binding ConversionToolchainText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <Border Classes="callout warning" IsVisible="{Binding HasConversionWarnings}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Check before relying on the desktop app (backend, sign-in and network use)" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ConversionWarnings}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ConversionFindingItem">
+                              <StackPanel Spacing="1" Margin="0,2">
+                                <SelectableTextBlock FontSize="12.5" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" Margin="10,0,0,0" />
+                              </StackPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding ConversionInfos}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ConversionFindingItem">
+                          <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Spacing="10" IsVisible="{Binding ConversionPlan.CanApply, FallbackValue=False}">
+                      <Grid ColumnDefinitions="*,12,*">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="APP NAME" Margin="0" />
+                          <TextBox Text="{Binding ConversionAppName}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="APP ID" Margin="0" />
+                          <TextBox Text="{Binding ConversionAppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                        </StackPanel>
+                      </Grid>
+                      <TextBlock Classes="formlabel" Text="PROPOSED CHANGES (IN THE NEW DESKTOP WORKSPACE ONLY)" Margin="0" />
+                      <ItemsControl ItemsSource="{Binding ConversionChanges}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:ConversionChangeItem">
+                            <Expander HorizontalAlignment="Stretch" Margin="0,2">
+                              <Expander.Header>
+                                <StackPanel Spacing="1">
+                                  <TextBlock FontSize="12.5"><Run Text="{Binding KindLabel}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding RelativePath}" FontFamily="{DynamicResource Hcg.Font.Mono}" /></TextBlock>
+                                  <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Reason}" TextWrapping="Wrap" />
+                                </StackPanel>
+                              </Expander.Header>
+                              <ScrollViewer MaxHeight="260" HorizontalScrollBarVisibility="Auto">
+                                <SelectableTextBlock Classes="mono" FontSize="11" Text="{Binding Preview}" />
+                              </ScrollViewer>
+                            </Expander>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionDestinationText}" TextWrapping="Wrap" />
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Classes="ghost" Content="Update preview" Command="{Binding PreviewDesktopConversionCommand}" IsVisible="{Binding ConversionPreviewStale}" />
+                        <Button Classes="primary" Content="Create desktop workspace" Command="{Binding CreateDesktopWorkspaceCommand}" />
+                        <Button Classes="ghost" Content="Cancel" Command="{Binding CancelDesktopConversionCommand}" IsVisible="{Binding IsConverting}" />
+                        <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsConverting}" />
+                      </StackPanel>
+                      <TextBlock Classes="muted" FontSize="12" Text="The name or app id changed: update the preview before creating the workspace." TextWrapping="Wrap" IsVisible="{Binding ConversionPreviewStale}" />
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionStatus}" TextWrapping="Wrap" IsVisible="{Binding IsConverting}" />
+                    </StackPanel>
+                    <Border Classes="callout error" IsVisible="{Binding ConversionError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <SelectableTextBlock FontSize="12.5" Text="{Binding ConversionError}" TextWrapping="Wrap" />
+                    </Border>
+                    <Expander Header="Preparation output" IsVisible="{Binding HasConversionLog}" HorizontalAlignment="Stretch">
+                      <ScrollViewer MaxHeight="180">
+                        <ItemsControl ItemsSource="{Binding ConversionLog}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Expander>
                   </StackPanel>
                   <StackPanel Spacing="6" IsVisible="{Binding OtherNodeProjectsText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                     <TextBlock Classes="formlabel" Text="OTHER NODE.JS PROJECTS (NOT DESKTOP APPS)" Margin="0" />
@@ -354,7 +496,7 @@
               </Border>
               <Border Classes="callout warning" IsVisible="{Binding HasMissing}">
                 <StackPanel Spacing="6">
-                  <TextBlock Classes="h3 warning" Text="Missing requirements" />
+                  <TextBlock Classes="h3 warning" Text="{Binding MissingTitle}" />
                   <ItemsControl ItemsSource="{Binding MissingDependencies}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="x:String">

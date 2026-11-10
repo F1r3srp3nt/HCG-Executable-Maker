@@ -30,7 +30,11 @@ public sealed partial class BuildWizardViewModel
     [ObservableProperty] private string _electronStatus = "";
     [ObservableProperty] private string _electronFacts = "";
     [ObservableProperty] private string _electronWorkflow = "";
+    /// <summary>What the PROJECT lacks (its configuration): fixed in the project, not by installing tools.</summary>
     public ObservableCollection<string> ElectronRemediation { get; } = [];
+    /// <summary>What THIS COMPUTER lacks (installed toolchains): fixed on the Toolchains page.</summary>
+    public ObservableCollection<string> ElectronToolchainRemediation { get; } = [];
+    [ObservableProperty] private bool _hasElectronToolchainRemediation;
     public ObservableCollection<string> ElectronNotes { get; } = [];
     [ObservableProperty] private bool _hasElectronRemediation;
     [ObservableProperty] private bool _hasElectronNotes;
@@ -48,7 +52,9 @@ public sealed partial class BuildWizardViewModel
         OnPropertyChanged(nameof(IsDotNetBuild));
         OnPropertyChanged(nameof(IdentityEditable));
         ElectronRemediation.Clear();
+        ElectronToolchainRemediation.Clear();
         ElectronNotes.Clear();
+        OnPropertyChanged(nameof(ShowDesktopConversion));
         OtherNodeProjectsText = Analysis?.Node is { } node && IsNodeProject
             ? string.Join("\n", node.Projects.Where(p => p.Kind != NodeProjectKind.ElectronDesktop)
                 .Select(p => $"{p.DisplayDirectory} — {NodeProjectInspector.KindLabel(p.Kind)}{(p.Frameworks.Count > 0 ? " (" + string.Join(", ", p.Frameworks) + ")" : "")}"))
@@ -63,7 +69,8 @@ public sealed partial class BuildWizardViewModel
             return;
         }
         var a = NodeCapabilities.Evaluate(p, _toolchains.Latest);
-        foreach (var r in a.Remediation) ElectronRemediation.Add(r);
+        foreach (var r in a.Remediation)
+            (p.MissingForDesktop.Contains(r) ? ElectronRemediation : ElectronToolchainRemediation).Add(r);
         foreach (var n in p.Notes) ElectronNotes.Add(n);
         ElectronTag = new StatusTag(a.Support == SupportLevel.Supported ? "Ready" : Format.Label(a.Support), a.Support == SupportLevel.Supported ? "success" : Format.Tone(a.Support));
         ElectronStatus = a.Summary;
@@ -91,6 +98,7 @@ public sealed partial class BuildWizardViewModel
     private void FinishElectronRefresh()
     {
         HasElectronRemediation = ElectronRemediation.Count > 0;
+        HasElectronToolchainRemediation = ElectronToolchainRemediation.Count > 0;
         HasElectronNotes = ElectronNotes.Count > 0;
         OnPropertyChanged(nameof(CanConfigure));
         NextCommand.NotifyCanExecuteChanged();
