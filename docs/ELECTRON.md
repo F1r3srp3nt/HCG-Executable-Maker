@@ -82,7 +82,17 @@ A browser app is not packaged as it is. The project is labelled a web app, and i
 - Unit tests, including refusal cases.
 - **web-hcg-store** (F1r3srp3nt/store), locally on Linux: wizard → workspace → `npm ci`, `desktop:build`, electron-builder. The packaged app was launched with Playwright and **no dev server**: home and `/apps` after a hard reload rendered, the security preferences were checked, and traversal probes returned no files.
 - The fixture `tests/Fixtures/WebViteDesktop` through the real wizard (UI driver `--prepare-desktop`), plus `tools/electron-launch-check/launch-check.cjs`.
-- **CI job `web-desktop-macos`:** the fixture as an arm64 `.app`, zip and dmg. It checks codesign, lipo, hdiutil and asar contents, launches the app with no dev server (Playwright, plus LaunchServices `open`), and takes a window screenshot.
+- **CI job `web-desktop-macos`, passed in run 48 (10 Nov 2026, macOS 26 arm64):** the fixture went through the real wizard (preview, rename, create workspace, import) into an arm64 `.app`, zip and dmg, with the fixture left unchanged.
+  - The artifacts pass `codesign --verify --deep --strict`, `lipo` (arm64) and `hdiutil verify`, and the zip passes `unzip -t`.
+  - `app.asar` holds `dist/`, the shell and `package.json`, with no `node_modules` and no source.
+  - Launched with no dev server:
+    - the page loads from `app://bundle/`;
+    - `/notes/ridge` survives a reload;
+    - context isolation, sandbox and webSecurity are on, and Node integration is off;
+    - no Node.js is visible in the page;
+    - paths outside the bundle are not served;
+    - no request failed.
+  - Opened through LaunchServices, it stayed up and was screenshotted, with no crash report.
 
 ## Packaging scripts
 
