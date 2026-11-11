@@ -1,5 +1,7 @@
 # Porting Studio — source-based cross-platform ports
 
+> Porting Studio is also the **desktop → mobile conversion workspace**: compatibility report, support matrix, conversion modes and web-based mobile packaging (Vite + React → Capacitor). See [MOBILE-CONVERSION.md](MOBILE-CONVERSION.md).
+
 Porting Studio converts **source code** to another platform, within explicitly supported languages and frameworks.
 It is not a universal converter, and it never converts a compiled app or relabels a file.
 
@@ -7,6 +9,7 @@ It is not a universal converter, and it never converts a compiled app or relabel
 |---|---|---|
 | **macOS → iOS** | SwiftUI apps in Swift: a Swift package executable target, or a macOS Xcode project with a single app target | A new iPhone/iPad Xcode project (iOS 17+) |
 | **Linux → Android** | C/C++ command-line programs built with CMake, using the standard libraries and POSIX APIs available in Android's bionic libc | An Android Gradle project (API 24+, arm64-v8a + x86_64), built with the NDK, with a console screen |
+| **Web → Android / iOS** | Vite + React web apps (npm) | A Capacitor 8.5.3 project (see [MOBILE-CONVERSION.md](MOBILE-CONVERSION.md)) |
 
 Everything else is reported as **not supported**, with the reason. That includes:
 - Objective-C/AppKit storyboards and multi-target Xcode projects;

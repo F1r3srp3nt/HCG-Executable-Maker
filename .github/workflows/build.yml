@@ -830,6 +830,10 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Toolchain
         run: |
           mkdir -p "$OUT/screens"
@@ -858,6 +862,13 @@ jobs:
           --name "Hello HCG" --bundle-id com.hakmicapital.hellomac
           --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
           --output "$OUT/hellomac" --screenshots "$OUT/screens" --prefix hellomac-ios --window-height 3600
+
+      - name: Web app (WebViteDesktop, Vite + React) → iOS with Capacitor — inspect, generate, validate, compile, launch in Simulator
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/WebViteDesktop --port "web:" --path WebToIOS
+          --name "Field Notes" --bundle-id com.hakmicapital.fieldnotes --expect-capability GenerateTarget
+          --validate --expect-validate Passed --compile --expect-compile Passed --launch --expect-launch Passed
+          --output "$OUT/fieldnotes" --screenshots "$OUT/screens" --prefix web-ios --window-height 3600
 
       - name: Oslo-Sprint (real apps) — Relay and Distil are assessed as blocked, with specific blockers; Relay draft
         run: |
@@ -973,6 +984,86 @@ jobs:
           path: |
             ${{ github.workspace }}/port-android-out/screens
             ${{ github.workspace }}/port-android-out/*/ports/*/HCG-PORT
+          if-no-files-found: warn
+          retention-days: 7
+
+  port-web-android:
+    name: Mobile conversion — Vite + React web app → Android (Capacitor), compiled and launched on an emulator
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/port-web-android-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Toolchain (JDK 21 for Capacitor 8, Android SDK from the runner image)
+        run: |
+          mkdir -p "$OUT/screens"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ls "$sdk/platforms" "$sdk/platform-tools"
+          node --version; npm --version
+
+      - name: Build the UI driver
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: An executable alone is refused, and a backend-dependent web app is classified (inspection only)
+        run: |
+          mkdir -p "$OUT/exe-only" && printf 'MZ not a real program' > "$OUT/exe-only/Field Notes.exe"
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/exe-only" --port x --expect-executable-only \
+            --output "$OUT/exe" --screenshots "$OUT/screens" --prefix exe-only --window-height 2400
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/WebViteReact --port "web:" --path WebToAndroid --assess-only \
+            --expect-capability GenerateTarget --output "$OUT/api" --screenshots "$OUT/screens" --prefix web-api --window-height 3600
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Convert, validate, compile (Gradle) and launch on the emulator; the app must show its heading
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
+          script: tools/ui-driver/ci-port-web-android.sh
+
+      - name: The original fixture is unchanged
+        run: git diff --exit-code -- tests/Fixtures && test -z "$(git status --porcelain -- tests/Fixtures)"
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          python3 -m pip install --quiet pillow
+          for f in "$OUT"/screens/*.png "$OUT"/*/ports/*/HCG-PORT/launch-*.png; do
+            j="$OUT/screens/$(basename "${f%.png}").jpg"
+            python3 -c "import sys; from PIL import Image; im=Image.open(sys.argv[1]).convert('RGB'); im.thumbnail((1600,1600)); im.save(sys.argv[2], quality=55)" "$f" "$j"
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -w0 "$j"; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload the generated project report, logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: port-web-android-outputs
+          path: |
+            ${{ github.workspace }}/port-web-android-out/screens
+            ${{ github.workspace }}/port-web-android-out/*/ports/*/HCG-PORT
           if-no-files-found: warn
           retention-days: 7
 

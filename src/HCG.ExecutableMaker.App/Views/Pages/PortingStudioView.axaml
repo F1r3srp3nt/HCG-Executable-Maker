@@ -58,7 +58,7 @@
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2">
               <TextBlock Classes="label" Text="1 · SOURCE PROJECT" />
-              <TextBlock Classes="h2" Text="Project to port" />
+              <TextBlock Classes="h2" Text="Source project" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsEnabled="{Binding !IsWorking}">
               <Button Command="{Binding ImportFolderCommand}">
@@ -126,6 +126,7 @@
             <StackPanel Spacing="12">
               <StackPanel Spacing="6">
                 <TextBlock Classes="formlabel" Text="UNSUPPORTED BY THE CURRENT CONVERTER" Margin="0" />
+                <TextBlock Classes="muted" FontSize="12" Text="None found." IsVisible="{Binding !UnsupportedFeatures.Count}" />
                 <ItemsControl ItemsSource="{Binding UnsupportedFeatures}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
@@ -141,6 +142,7 @@
               </StackPanel>
               <StackPanel Spacing="6">
                 <TextBlock Classes="formlabel" Text="REQUIRES A BACKEND OR COMPANION COMPUTER" Margin="0" />
+                <TextBlock Classes="muted" FontSize="12" Text="None found." IsVisible="{Binding !CompanionFeatures.Count}" />
                 <ItemsControl ItemsSource="{Binding CompanionFeatures}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
@@ -158,6 +160,7 @@
             <StackPanel Grid.Column="2" Spacing="12">
               <StackPanel Spacing="6">
                 <TextBlock Classes="formlabel" Text="REQUIRES ADAPTATION" Margin="0" />
+                <TextBlock Classes="muted" FontSize="12" Text="None found." IsVisible="{Binding !AdaptationFeatures.Count}" />
                 <ItemsControl ItemsSource="{Binding AdaptationFeatures}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
@@ -173,6 +176,7 @@
               </StackPanel>
               <StackPanel Spacing="6">
                 <TextBlock Classes="formlabel" Text="REUSABLE" Margin="0" />
+                <TextBlock Classes="muted" FontSize="12" Text="None found." IsVisible="{Binding !ReusableFeatures.Count}" />
                 <ItemsControl ItemsSource="{Binding ReusableFeatures}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
@@ -370,7 +374,7 @@
       <Border Classes="card" IsVisible="{Binding HasSelection}">
         <StackPanel Spacing="12">
           <StackPanel Spacing="2">
-            <TextBlock Classes="label" Text="4 · GENERATE" />
+            <TextBlock Classes="label" Text="5 · GENERATE" />
             <TextBlock Classes="h2" Text="New platform target (separate copy)" />
           </StackPanel>
           <Border Classes="callout" Padding="12" IsVisible="{Binding IsBuildExisting}">
@@ -431,7 +435,7 @@
         <StackPanel Spacing="12">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2">
-              <TextBlock Classes="label" Text="5 · MIGRATION PLAN AND DIFF" />
+              <TextBlock Classes="label" Text="6 · REVIEW THE CONVERSION PLAN AND DIFF" />
               <TextBlock Classes="h2" Text="Review the changes" />
               <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding PlanSummary}" TextWrapping="Wrap" />
             </StackPanel>

@@ -35,7 +35,7 @@ public static partial class CompatibilityInspector
             foreach (var unit in first.Reusable)
                 features.Add(new CompatibilityFeature(group.Key, unit.FilesWithBlockers == unit.Files && unit.Files > 0 ? FeatureClass.Unsupported : FeatureClass.Reusable, "Code",
                     unit.Name, $"{unit.Files} file(s){(unit.Lines > 0 ? $", {unit.Lines:N0} lines" : "")}: {unit.Kind}. {unit.FilesUnchanged} unchanged, {unit.FilesAdapted} adapted, {unit.FilesWithBlockers} with blockers."));
-            foreach (var f in group.SelectMany(a => a.Findings).DistinctBy(f => (f.Title, f.Location, f.Detail)))
+            foreach (var f in group.SelectMany(a => a.Findings).DistinctBy(f => (f.Title, f.Location)))
                 features.Add(new CompatibilityFeature(group.Key, f.Class, Area(f.Category), f.Title, f.Detail, f.Location.Length == 0 ? null : f.Location, f.Guidance));
             foreach (var target in Enum.GetValues<MobileTarget>())
                 options.Add(Option(group.Key, framework, target, group.FirstOrDefault(a => a.Target == target)));

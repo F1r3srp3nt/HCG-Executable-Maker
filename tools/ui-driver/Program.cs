@@ -382,12 +382,34 @@ internal static partial class Program
             Log($"Path {path.Title}: {(path.HasSources ? "" : path.EmptyText)}");
             foreach (var s in path.Sources) Log($"  source {s.Assessment.Source.Key} [{s.Kind}] → {s.Assessment.Capability}: {s.Summary}");
         }
+        // The compatibility report (read-only inspection), before any target is chosen.
+        if (studio.Compatibility is { } compat)
+        {
+            Log("Compatibility: " + studio.CompatibilitySummary);
+            foreach (var src in compat.Sources) Log($"  source [{src.Framework}] {src.Language} · {src.Directory} · {src.Evidence}");
+            foreach (var f in compat.Features) Log($"  feature [{f.Class.DisplayName()}] {f.Area}: {f.Title}{(f.Location is null ? "" : " (" + f.Location + ")")}");
+            foreach (var o in compat.Options) Log($"  option {o.SourceKey} → {o.Target.DisplayName()}: {o.Status} · {o.Mode.DisplayName()}{(o.Path is { } p ? " · " + p : "")}{(o.Capability is { } c ? " · " + c : "")}");
+            foreach (var b in compat.Blockers) Log("  blocker: " + b);
+            Check(studio.Matrix.Count == HCG.ExecutableMaker.Porting.ConversionCatalog.Matrix.Count, "Support matrix shown in full (implemented and planned rows)");
+            if (_args.ContainsKey("expect-executable-only"))
+            {
+                Check(compat.ExecutableOnly && compat.Options.Count == 0 && compat.Blockers.Any(b => b.Contains("cannot be converted", StringComparison.Ordinal)),
+                    "An executable alone is refused as conversion source, with the reason");
+                Shot("compatibility-executable-only");
+                return Failures.Count == 0 ? 0 : 1;
+            }
+            Shot("compatibility-report");
+        }
+        else Check(false, "Compatibility report shown");
         var key = _args["port"];
-        Check(studio.SelectSourceByKey(key), $"Source {key} listed");
+        var chosen = Arg("path") is { } pathArg && Enum.TryParse<HCG.ExecutableMaker.Domain.PortingPath>(pathArg, out var portingPath)
+            ? studio.SelectSource(key, portingPath) : studio.SelectSourceByKey(key);
+        Check(chosen, $"Source {key} listed{(Arg("path") is { } pa ? " on " + pa : "")}");
         if (studio.SelectedSource is null) { Shot("port-sources"); return 1; }
         var a = studio.SelectedSource.Assessment;
         foreach (var u in a.Reusable) Log($"  reusable {u.Name}: {u.Files} files ({u.Lines} lines) · unchanged {u.FilesUnchanged} · adapted {u.FilesAdapted} · with blockers {u.FilesWithBlockers}");
-        foreach (var f in a.Findings) Log($"  [{f.Disposition}] {f.Category} {f.Location}: {f.Title}{(f.Guidance is null ? "" : " → " + f.Guidance)}");
+        foreach (var f in a.Findings) Log($"  [{f.Class.DisplayName()} / {f.Disposition}] {f.Category} {f.Location}: {f.Title}{(f.Guidance is null ? "" : " → " + f.Guidance)}");
+        foreach (var m in a.ManualSteps) Log("  manual step: " + m);
         foreach (var t in a.Toolchains) Log($"  toolchain {t.DisplayName}: {(t.IsSatisfied ? "OK" : "MISSING")} {t.Detail}");
         if (Arg("expect-capability") is { } cap) Check(a.Capability.ToString() == cap, $"Capability {a.Capability} (expected {cap})");
         Shot("port-assessment");
@@ -412,6 +434,22 @@ internal static partial class Program
         foreach (var c in report.Plan.Changes.Where(c => c.Kind != HCG.ExecutableMaker.Domain.FileChangeKind.CopiedUnchanged)) Log($"  {c.Kind}: {c.Path} — {c.Reason}");
         Log("Output: " + report.OutputDirectory);
         Shot("port-plan-diff");
+        var hcgPort = Path.Combine(report.OutputDirectory, HCG.ExecutableMaker.Porting.PortingService.ReportFolder);
+        Check(File.Exists(Path.Combine(hcgPort, "MIGRATION.md")) && File.Exists(Path.Combine(hcgPort, "conversion.json")), "Migration report and conversion record written");
+        Check(report.Source is not null, "Source revision recorded: " + report.Source?.Describe());
+
+        if (_args.ContainsKey("validate"))
+        {
+            studio.TrustAcknowledged = true;
+            await studio.ValidateCommand.ExecuteAsync(null);
+            await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(30), "validate");
+            foreach (var c in studio.ValidationChecks) Log($"  validate {(c.Passed ? "PASS" : "FAIL")} {c.Name}: {c.Detail}");
+            var v = studio.Report!.Level(HCG.ExecutableMaker.Domain.VerificationLevel.Validated);
+            Log($"Validated: {v.Status} — {v.Detail}");
+            if (Arg("expect-validate") is { } ev) Check(v.Status.ToString() == ev, $"Validate status {v.Status} (expected {ev})");
+            ShotScrolledToEnd("port-validated");
+        }
+        if (Arg("expect-text") is { } text) studio.ExpectText = text;
 
         if (_args.ContainsKey("compile"))
         {

@@ -2,6 +2,29 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/mobile-conversion`
+
+### Added — desktop → mobile conversion workspace ([docs/MOBILE-CONVERSION.md](docs/MOBILE-CONVERSION.md))
+- **Porting Studio as the conversion workspace.** The flow is: import → inspect compatibility → choose target → review plan → generate → validate → build/export.
+  - Porting Studio was brought onto current main.
+- **Compatibility report:**
+  - sources (framework, language, entry point, evidence);
+  - every feature in one of four classes (reusable, requires adaptation, requires a backend or companion computer, unsupported by the current converter);
+  - per-target options with mode, status and requirements;
+  - plain-language blockers. An executable alone is refused as conversion source.
+- **Support matrix** (`ConversionCatalog`): every recognized framework × iOS/iPadOS and Android, implemented, planned (with precise requirements) or not planned. It includes companion mode and HCG Server, which are planned.
+- **Web-based mobile packaging:** Vite + React → Android and iOS/iPadOS with Capacitor 8.5.3 (pinned).
+  - Generation runs nothing: it writes a separate copy, the Capacitor config without a dev-server URL, the viewport, and touch/safe-area/accessibility styles.
+  - Server calls, sign-in callbacks, tokens in web storage, desktop-only browser APIs and permissions are classified and listed as manual steps; secrets in the web build are blockers.
+- **Validate** (a new level between generated and compiled): the original and the imported copy are unchanged (SHA-256), output is complete, plus path checks. For web packaging, after trust: npm install, the web build, and `cap add` creating the native project.
+- **Reproducibility and migration report:** each generated project records its source revision (Git commit/branch, content fingerprints) and conversion configuration in `HCG-PORT/conversion.json`. `HCG-PORT/MIGRATION.md` lists modifications, unresolved features and manual steps.
+- **Mobile Build Studio: Capacitor framework.** Detection; readiness (Node 22+, JDK 21, SDK/Xcode); a planner that runs npm ci → web build → cap sync → Gradle/xcodebuild.
+- **Launch check for apps:** install, still running, no crash, screenshot, visible text through uiautomator, optional expected text.
+- **Tests and CI:** `MobileConversionTests` (17), the opt-in `MobileConversionRealTests`, UI driver `--path/--validate/--expect-text/--expect-executable-only`, CI job `port-web-android` (emulator), and a web → iOS step in `port-ios`.
+
+### Changed
+- The web → desktop conversion's change kind is now `WorkspaceChangeKind`, so it no longer clashes with the porting domain's `FileChangeKind`.
+
 ## [Unreleased] — `feature/web-desktop-app`
 
 ### Changed — Web app to desktop app ([docs/ELECTRON.md](docs/ELECTRON.md#browser-apps-create-desktop-application-vite--react))
