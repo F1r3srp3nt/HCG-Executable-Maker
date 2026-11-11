@@ -8,6 +8,8 @@ public enum MobileFramework
     NativeIos,
     Flutter,
     DotNetMaui,
+    /// <summary>Capacitor: a web app (npm) with native android/ and/or ios/ projects.</summary>
+    Capacitor,
 }
 
 /// <summary>What Mobile Build Studio is asked to produce. Each maps to a real toolchain operation.</summary>
@@ -119,6 +121,24 @@ public sealed record IosProjectInfo
     public IEnumerable<IosTargetInfo> AppTargets => Targets.Where(t => t.IsApplication);
 }
 
+/// <summary>A Capacitor app: the web project (package.json) and its native platform projects.</summary>
+public sealed record CapacitorProjectInfo
+{
+    /// <summary>Workspace-relative folder of package.json and capacitor.config.*.</summary>
+    public required string Root { get; init; }
+    public required string ConfigFile { get; init; }
+    public string? AppId { get; init; }
+    public string? AppName { get; init; }
+    /// <summary>The web build folder Capacitor copies into the native projects (webDir).</summary>
+    public string WebDir { get; init; } = "dist";
+    /// <summary>The npm script that builds the web app (null when the project has none).</summary>
+    public string? BuildScript { get; init; }
+    public string? CapacitorVersion { get; init; }
+    public bool HasLockFile { get; init; }
+    public bool HasAndroid { get; init; }
+    public bool HasIos { get; init; }
+}
+
 public sealed record FlutterProjectInfo
 {
     public required string Root { get; init; }
@@ -149,6 +169,7 @@ public sealed record MobileAnalysis
     public IosProjectInfo? Ios { get; init; }
     public FlutterProjectInfo? Flutter { get; init; }
     public MauiProjectInfo? Maui { get; init; }
+    public CapacitorProjectInfo? Capacitor { get; init; }
     public IReadOnlyList<string> ApplicationIds { get; init; } = [];
     /// <summary>For imported artifacts (.apk/.aab/.apks/.ipa): the file, relative to the workspace source.</summary>
     public string? ArtifactPath { get; init; }
@@ -192,6 +213,7 @@ public static class MobileNames
         MobileFramework.NativeIos => "iOS (Xcode)",
         MobileFramework.Flutter => "Flutter",
         MobileFramework.DotNetMaui => ".NET MAUI",
+        MobileFramework.Capacitor => "Capacitor (web app)",
         _ => f.ToString(),
     };
 

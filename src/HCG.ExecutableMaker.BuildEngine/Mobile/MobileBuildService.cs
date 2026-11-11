@@ -188,7 +188,7 @@ public sealed class MobileBuildService(
             }
             else
             {
-                if (options.Framework == MobileFramework.NativeAndroid && analysis!.Android is { } android &&
+                if (options.Framework is MobileFramework.NativeAndroid or MobileFramework.Capacitor && analysis!.Android is { } android &&
                     GradlePlanner.ReadWrapper(MobileArgs.Inside(sourceDir, android.Root)) is { } wrapper)
                 {
                     Log(BuildLogKind.Info, $"Gradle wrapper: {wrapper.DistributionUrl ?? "(no distributionUrl)"} · wrapper jar SHA-256 {wrapper.JarSha256}");
@@ -199,6 +199,7 @@ public sealed class MobileBuildService(
                     MobileFramework.NativeAndroid => GradlePlanner.Plan(input),
                     MobileFramework.NativeIos => XcodePlanner.Plan(input),
                     MobileFramework.Flutter => FlutterPlanner.Plan(input),
+                    MobileFramework.Capacitor => CapacitorPlanner.Plan(input),
                     _ => MauiPlanner.Plan(input),
                 };
                 await RunStepsAsync(plan).ConfigureAwait(false);

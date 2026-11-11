@@ -54,7 +54,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             : hostBlocked.Count == options.Count ? (SupportLevel.RequiresDifferentHost, "iOS builds require a Mac with Xcode.")
             : (SupportLevel.MissingToolchain, "Mobile project recognized, but required toolchains are missing on this computer.");
 
-        var name = mobile.Flutter?.Name ?? mobile.Maui?.ApplicationTitle ?? Path.GetFileNameWithoutExtension(mobile.Maui?.ProjectPath)
+        var name = mobile.Capacitor?.AppName ?? mobile.Flutter?.Name ?? mobile.Maui?.ApplicationTitle ?? Path.GetFileNameWithoutExtension(mobile.Maui?.ProjectPath)
                    ?? mobile.Android?.AppModules.FirstOrDefault()?.ApplicationId?.Split('.').Last()
                    ?? mobile.Ios?.AppTargets.FirstOrDefault()?.Name
                    ?? new DirectoryInfo(index.Root).Name;
@@ -62,6 +62,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
         {
             MobileFramework.Flutter => "Dart",
             MobileFramework.DotNetMaui => "C#",
+            MobileFramework.Capacitor => "TypeScript / JavaScript",
             MobileFramework.NativeIos => "Swift / Objective-C",
             _ => mobile.Android?.UsesKotlin == true ? "Kotlin" : "Java",
         };
@@ -70,6 +71,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             MobileFramework.NativeAndroid => "Android Gradle" + (mobile.Android?.AgpVersion is { } agp ? $" · AGP {agp}" : ""),
             MobileFramework.NativeIos => "Xcode" + (mobile.Ios?.UsesSwiftPackages == true ? " · Swift packages" : "") + (mobile.Ios?.UsesCocoaPods == true ? " · CocoaPods" : ""),
             MobileFramework.Flutter => "Flutter" + (mobile.Flutter?.SdkConstraint is { } c ? $" (Dart SDK {c})" : ""),
+            MobileFramework.Capacitor => "Capacitor" + (mobile.Capacitor?.CapacitorVersion is { } cv ? $" {cv}" : "") + " · web app",
             _ => ".NET MAUI · " + string.Join(", ", mobile.Maui?.TargetFrameworks ?? []),
         };
         var recommended = new List<PackagingFormat>();
@@ -81,6 +83,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
         if (mobile.Platforms.Contains(TargetPlatform.Android)) { Req(ToolchainIds.Jdk, "JDK 17+"); Req(ToolchainIds.AndroidSdk, "Android SDK"); }
         if (mobile.Platforms.Contains(TargetPlatform.IOS)) { Req(ToolchainIds.Xcode, "Xcode (macOS)"); Req(ToolchainIds.IosSdk, "iOS SDK"); }
         if (mobile.Framework == MobileFramework.Flutter) Req(ToolchainIds.Flutter, "Flutter SDK");
+        if (mobile.Framework == MobileFramework.Capacitor) Req(ToolchainIds.Node, "Node.js 22+ and npm");
         if (mobile.Framework == MobileFramework.DotNetMaui) { Req(ToolchainIds.DotNetSdk, ".NET SDK"); Req(ToolchainIds.MauiWorkloads, ".NET MAUI workloads"); }
 
         if (mobile.Android is { } and && and.AgpVersion is not null)
@@ -101,6 +104,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             {
                 MobileFramework.Flutter => "Flutter application",
                 MobileFramework.DotNetMaui => ".NET MAUI application",
+                MobileFramework.Capacitor => "Capacitor application (web app in a native shell)",
                 MobileFramework.NativeIos => "iOS application",
                 _ => mobile.Platforms.Contains(TargetPlatform.IOS) ? "Android + iOS applications" : "Android application",
             },
@@ -117,6 +121,28 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
 
     public static MobileAnalysis Analyze(SourceIndex index, List<AnalysisDiagnostic> diagnostics)
     {
+        // Capacitor first: its android/ and ios/ folders are native projects that only build after npm installs @capacitor/*.
+        if (CapacitorAnalyzer.FindRoots(index).FirstOrDefault() is { } capRoot)
+        {
+            var cap = CapacitorAnalyzer.Analyze(index, capRoot);
+            var platforms = new List<TargetPlatform>();
+            AndroidProjectInfo? capAndroid = null;
+            IosProjectInfo? capIos = null;
+            if (cap.HasAndroid) { platforms.Add(TargetPlatform.Android); capAndroid = AndroidGradleAnalyzer.Analyze(index, CapacitorAnalyzer.Join(capRoot, "android"), out _); }
+            if (cap.HasIos && XcodeProjectAnalyzer.FindMobileProjects(index).FirstOrDefault(p => p.StartsWith(CapacitorAnalyzer.Join(capRoot, "ios/"), StringComparison.Ordinal)) is { } xp)
+            {
+                platforms.Add(TargetPlatform.IOS);
+                capIos = XcodeProjectAnalyzer.Analyze(index, xp, out _);
+            }
+            if (platforms.Count == 0) diagnostics.Add(new(DiagnosticSeverity.Warning, "Capacitor app without android/ or ios/ projects (add one with npx cap add android|ios).", cap.ConfigFile));
+            if (cap.BuildScript is null) diagnostics.Add(new(DiagnosticSeverity.Warning, "package.json has no build script, so the web app cannot be built before syncing.", CapacitorAnalyzer.Join(capRoot, "package.json")));
+            return new MobileAnalysis
+            {
+                Framework = MobileFramework.Capacitor, Platforms = platforms, Capacitor = cap, Android = capAndroid, Ios = capIos,
+                ApplicationIds = cap.AppId is { } id ? [id] : [],
+            };
+        }
+
         var pubspec = FlutterAnalyzer.FindPubspecs(index).FirstOrDefault();
         if (pubspec is not null)
         {

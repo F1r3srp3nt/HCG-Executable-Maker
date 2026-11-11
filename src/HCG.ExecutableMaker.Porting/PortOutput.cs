@@ -61,6 +61,13 @@ public sealed class PortOutput
         }
     }
 
+    /// <summary>Copies one source file unchanged (relative to the source root) to <paramref name="outputRelative"/>.</summary>
+    public void CopyFile(string sourceRelative, string outputRelative)
+    {
+        File.Copy(Path.Combine(SourceRoot, sourceRelative.Replace('/', Path.DirectorySeparatorChar)), Target(outputRelative), overwrite: true);
+        _changes[outputRelative] = new PlannedFileChange(outputRelative, FileChangeKind.CopiedUnchanged, "Copied from " + sourceRelative, "");
+    }
+
     /// <summary>Replaces a copied file's content, recording the diff against the original source file.</summary>
     public void Modify(string outputRelative, string originalRelative, string newText, string reason)
     {

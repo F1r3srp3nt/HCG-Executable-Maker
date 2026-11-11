@@ -173,3 +173,51 @@ public static class MauiPlanner
         })], outputs) { Notes = notes };
     }
 }
+
+/// <summary>
+/// Capacitor apps: install the npm dependencies, build the web app with its own script, copy the build into the native
+/// project with Capacitor's CLI (cap sync), then build that native project with the Gradle or Xcode planner.
+/// </summary>
+public static class CapacitorPlanner
+{
+    public static MobilePlan Plan(MobilePlanInput input)
+    {
+        var o = input.Options;
+        var cap = input.Analysis.Capacitor ?? throw new BuildValidationException("This is not a Capacitor project.");
+        var android = o.Output.Platform() == TargetPlatform.Android;
+        var platform = android ? "android" : "ios";
+        if (android ? !cap.HasAndroid : !cap.HasIos)
+            throw new BuildValidationException($"The Capacitor app has no {platform}/ project. Add it with npx cap add {platform} (or with HCG's Validate step for a converted project).");
+        if (cap.BuildScript is null) throw new BuildValidationException("package.json has no build script, so the web app cannot be built before syncing.");
+        var node = input.Toolchains.NodeInstallations.FirstOrDefault(n => int.TryParse(n.Version.TrimStart('v').Split('.')[0], out var major) && major >= 22)
+                   ?? throw new BuildValidationException("Capacitor 8 needs Node.js 22 or newer, and none was found.");
+        if (node.NpmCli is null) throw new BuildValidationException($"npm was not found next to Node.js {node.Version} ({node.NodePath}).");
+        var root = MobileArgs.Inside(input.SourceDirectory, cap.Root);
+        var env = new Dictionary<string, string>(Electron.ElectronBuildPlanner.Environment(input.Environment, node)) { ["CI"] = "true", ["CAPACITOR_TELEMETRY"] = "false" };
+        ProcessSpec Npm(params string[] args) => new()
+        {
+            Executable = node.NodePath, Arguments = [node.NpmCli, .. args], WorkingDirectory = root, Environment = env, Timeout = TimeSpan.FromMinutes(20),
+        };
+        var steps = new List<MobileStep>
+        {
+            new(BuildStage.Restoring, cap.HasLockFile ? "Install dependencies (npm ci)" : "Install dependencies (npm install)",
+                Npm(cap.HasLockFile ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"])),
+            new(BuildStage.Compiling, $"Build the web app (npm run {cap.BuildScript})", Npm("run", cap.BuildScript)),
+            new(BuildStage.Compiling, $"Copy the web build into {platform}/ (cap sync {platform})", new ProcessSpec
+            {
+                Executable = node.NodePath, Arguments = [Path.Combine(root, "node_modules", "@capacitor", "cli", "bin", "capacitor"), "sync", platform],
+                WorkingDirectory = root, Environment = env, Timeout = TimeSpan.FromMinutes(10),
+            }),
+        };
+        var nativeInput = input with
+        {
+            Analysis = input.Analysis with { Framework = android ? MobileFramework.NativeAndroid : MobileFramework.NativeIos },
+            Options = o with { Framework = android ? MobileFramework.NativeAndroid : MobileFramework.NativeIos },
+        };
+        var native = android ? GradlePlanner.Plan(nativeInput) : XcodePlanner.Plan(nativeInput);
+        return new MobilePlan([.. steps, .. native.Steps], native.Outputs)
+        {
+            Notes = [$"Capacitor app: the web build ({cap.WebDir}/) is copied into the {platform}/ project before the native build.", .. native.Notes],
+        };
+    }
+}

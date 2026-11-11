@@ -34,7 +34,7 @@ public static class MobileReadiness
     {
         var artifactOnly = m.ArtifactPath is not null;
         items.Add(JavaItem(r, artifactOnly ? null : m.Android?.WrapperGradleVersion, artifactOnly ? null : m.Android?.AgpVersion,
-            m.Framework == MobileFramework.DotNetMaui ? 17 : null));
+            m.Framework == MobileFramework.DotNetMaui ? 17 : m.Framework == MobileFramework.Capacitor ? 21 : null));
 
         if (artifactOnly)
         {
@@ -54,7 +54,7 @@ public static class MobileReadiness
             AddSdkComponents(items, m, sdk);
         }
 
-        if (m.Framework == MobileFramework.NativeAndroid)
+        if (m.Framework is MobileFramework.NativeAndroid or MobileFramework.Capacitor)
         {
             items.Add(m.Android is not { AppModules.Count: > 0 }
                 ? new("Android app module", ReadinessState.SetupRequired, true, "No Android application module was found in the project.")
@@ -72,7 +72,7 @@ public static class MobileReadiness
         if (sdk is null) return;
         var compile = m.Android?.AppModules.Select(a => a.CompileSdk).FirstOrDefault(c => c is not null);
         var licences = sdk.LicensesAccepted;
-        if (compile is { } api && m.Framework == MobileFramework.NativeAndroid)
+        if (compile is { } api && m.Framework is MobileFramework.NativeAndroid or MobileFramework.Capacitor)
         {
             var installed = sdk.Platforms.Contains(api.ToString());
             items.Add(installed
@@ -177,7 +177,7 @@ public static class MobileReadiness
 
         var simulator = output == MobileOutput.IosSimulatorApp;
         var sdkName = simulator ? "iphonesimulator" : "iphoneos";
-        if (m.Framework == MobileFramework.NativeIos)
+        if (m.Framework is MobileFramework.NativeIos or MobileFramework.Capacitor)
         {
             if (m.Ios is not { } ios || !ios.AppTargets.Any())
                 items.Add(new("iOS app target", ReadinessState.SetupRequired, true, "No iOS application target was found in the Xcode project."));
@@ -284,6 +284,17 @@ public static class MobileReadiness
                         "Install Flutter, then add flutter/bin to PATH or set FLUTTER_ROOT, and press Refresh.", SetupUrl: "https://docs.flutter.dev/get-started/install"));
                 if (r.Host.Platform == TargetPlatform.Windows && android)
                     items.Add(new("Host", ReadinessState.OtherHost, true, "Flutter builds from HCG run on macOS and Linux hosts in this version."));
+                break;
+            case MobileFramework.Capacitor:
+                var node = r.NodeInstallations.FirstOrDefault(n => int.TryParse(n.Version.TrimStart('v').Split('.')[0], out var major) && major >= 22);
+                items.Add(node is not null
+                    ? new("Node.js", ReadinessState.Ready, true, $"Node.js {node.Version} ({node.NodePath}) installs the web app and runs Capacitor's CLI.", Path: node.NodePath, Version: node.Version)
+                    : new("Node.js", ReadinessState.NotFound, true, r.NodeInstallations.Count == 0 ? "Node.js was not found." : $"Capacitor 8 needs Node.js 22 or newer; found {string.Join(", ", r.NodeInstallations.Select(n => n.Version))}.",
+                        "Install Node.js 22 or newer, then press Refresh.", SetupUrl: "https://nodejs.org/en/download"));
+                items.Add(m.Capacitor?.BuildScript is not null
+                    ? new("Web build", ReadinessState.Ready, true, $"npm run {m.Capacitor.BuildScript}, then Capacitor copies {m.Capacitor.WebDir}/ into the native project.")
+                    : new("Web build", ReadinessState.SetupRequired, true, "package.json has no build script, so the web app cannot be built before syncing.", "Add a build script (e.g. \"build\": \"vite build\")."));
+                items.Add(new("Flutter SDK", ReadinessState.NotNeeded, false, "Not a Flutter project."));
                 break;
             case MobileFramework.DotNetMaui:
                 var workloads = r.Find(ToolchainIds.MauiWorkloads)?.AdditionalVersions ?? [];
