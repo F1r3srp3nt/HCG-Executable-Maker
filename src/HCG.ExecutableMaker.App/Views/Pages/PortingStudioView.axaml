@@ -1,0 +1,379 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:d="using:HCG.ExecutableMaker.Domain"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.PortingStudioView"
+             x:DataType="vm:PortingStudioViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.formlabel">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextSecondary}" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="TextBlock.diff">
+      <Setter Property="FontFamily" Value="{DynamicResource Hcg.Font.Mono}" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="#B7C4D1" />
+    </Style>
+    <Style Selector="TextBlock.diff.added"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Success}" /></Style>
+    <Style Selector="TextBlock.diff.removed"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Error}" /></Style>
+    <Style Selector="TextBlock.diff.hunk"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Cyan}" /></Style>
+    <Style Selector="TextBlock.log">
+      <Setter Property="FontFamily" Value="{DynamicResource Hcg.Font.Mono}" />
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="Foreground" Value="#B7C4D1" />
+    </Style>
+    <Style Selector="TextBlock.log.error"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Error}" /></Style>
+    <Style Selector="TextBlock.log.warning"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Warning}" /></Style>
+    <Style Selector="TextBlock.log.success"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Success}" /></Style>
+    <Style Selector="TextBlock.log.command"><Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.Cyan}" /></Style>
+    <Style Selector="Border.source">
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.Surface2}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Hcg.Brush.Border}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="14,12" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style Selector="Border.source.selected">
+      <Setter Property="BorderBrush" Value="{DynamicResource Hcg.Brush.Cyan}" />
+    </Style>
+  </UserControl.Styles>
+
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18">
+
+      <Border Classes="callout" Padding="16,12">
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <PathIcon Data="{StaticResource Icon.Info}" Foreground="{DynamicResource Hcg.Brush.Cyan}" Width="16" Height="16" VerticalAlignment="Top" />
+          <TextBlock Classes="body secondary" Text="{Binding HonestyNote}" TextWrapping="Wrap" MaxWidth="1150" />
+        </StackPanel>
+      </Border>
+
+      <!-- 1 · PROJECT -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="1 · SOURCE PROJECT" />
+              <TextBlock Classes="h2" Text="Project to port" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" IsEnabled="{Binding !IsWorking}">
+              <Button Command="{Binding ImportFolderCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Folder}" /><TextBlock Text="Import Folder" /></StackPanel>
+              </Button>
+              <Button Command="{Binding ImportZipCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Zip}" /><TextBlock Text="Import ZIP" /></StackPanel>
+              </Button>
+              <Button Command="{Binding AssessCommand}" ToolTip.Tip="Re-assess (read-only)">
+                <PathIcon Data="{StaticResource Icon.Refresh}" />
+              </Button>
+            </StackPanel>
+          </Grid>
+          <ComboBox ItemsSource="{Binding ProjectList}" SelectedItem="{Binding SelectedProject}" HorizontalAlignment="Stretch" MaxWidth="560"
+                    PlaceholderText="Import or choose a project" IsEnabled="{Binding !IsWorking}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:ProjectItem">
+                <StackPanel Spacing="1">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                  <TextBlock Classes="muted" Text="{Binding Summary}" />
+                </StackPanel>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding IsWorking}">
+            <ProgressBar IsIndeterminate="True" Width="160" VerticalAlignment="Center" />
+            <TextBlock Classes="muted" Text="{Binding WorkStatus}" VerticalAlignment="Center" />
+            <Button Classes="small ghost" Content="Cancel" Command="{Binding CancelCommand}" />
+          </StackPanel>
+          <Border Classes="callout error" Padding="12" IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <!-- 2 · PATHS -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="label" Text="2 · CONVERSION PATHS" />
+            <TextBlock Classes="h2" Text="What can be ported" />
+            <TextBlock Classes="muted" TextWrapping="Wrap" Text="Each path lists the sources found in the project with what HCG can do: build an existing target, generate a new one, or explain the blockers." />
+          </StackPanel>
+          <ItemsControl ItemsSource="{Binding Paths}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PortPathItem">
+                <Border Classes="inset" Margin="0,0,10,0" Padding="16,14" VerticalAlignment="Stretch">
+                  <StackPanel Spacing="10">
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="h3" Text="{Binding Title}" />
+                      <TextBlock Classes="muted" Text="{Binding Subtitle}" />
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Sources}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PortSourceItem">
+                          <Button Background="Transparent" BorderThickness="0" Padding="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding $parent[UserControl].((vm:PortingStudioViewModel)DataContext).SelectSourceCommand}" CommandParameter="{Binding}">
+                            <Border Classes="source" Classes.selected="{Binding IsSelected}">
+                              <StackPanel Spacing="4">
+                                <Grid ColumnDefinitions="*,Auto">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                  <c:StatusChip Grid.Column="1" Status="{Binding Capability}" />
+                                </Grid>
+                                <TextBlock Classes="muted" Text="{Binding Kind}" />
+                              </StackPanel>
+                            </Border>
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding EmptyText}" IsVisible="{Binding !HasSources}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- 3 · ASSESSMENT -->
+      <Border Classes="card" IsVisible="{Binding HasSelection}">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="3 · COMPATIBILITY ASSESSMENT" />
+              <TextBlock Classes="h2" Text="{Binding SelectedSource.Name, FallbackValue=''}" />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding SelectedSource.Capability, FallbackValue={x:Null}}" VerticalAlignment="Top" />
+          </Grid>
+          <SelectableTextBlock Classes="body" Text="{Binding SelectedSource.Summary, FallbackValue=''}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{Binding FindingCounts}" />
+
+          <Grid ColumnDefinitions="3*,2*">
+            <StackPanel Spacing="10" Margin="0,0,14,0">
+              <TextBlock Classes="formlabel" Text="REUSABLE CODE" Margin="0" />
+              <ItemsControl ItemsSource="{Binding Units}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="d:ReusableUnit">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                      <StackPanel Spacing="1">
+                        <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                        <TextBlock Classes="muted" Text="{Binding Kind}" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Classes="muted" VerticalAlignment="Center">
+                        <Run Text="{Binding FilesUnchanged}" /><Run Text=" unchanged · " /><Run Text="{Binding FilesAdapted}" /><Run Text=" adapted · " /><Run Text="{Binding FilesWithBlockers}" /><Run Text=" with blockers · " /><Run Text="{Binding Lines}" /><Run Text=" lines" />
+                      </TextBlock>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <TextBlock Classes="formlabel" Text="PLATFORM APIS, UI ADAPTATIONS, DEPENDENCIES" Margin="0,8,0,0" />
+              <ItemsControl ItemsSource="{Binding Findings}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:FindingItem">
+                    <Grid ColumnDefinitions="Auto,*" Margin="0,5">
+                      <c:StatusChip Status="{Binding Disposition}" VerticalAlignment="Top" Margin="0,0,10,0" />
+                      <StackPanel Grid.Column="1" Spacing="2">
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding Category}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
+                        <TextBlock Classes="muted mono" FontSize="11.5" Text="{Binding Location}" IsVisible="{Binding HasLocation}" />
+                        <TextBlock FontSize="12.5" Text="{Binding Detail}" TextWrapping="Wrap" />
+                        <TextBlock Classes="mono" FontSize="11" Foreground="{DynamicResource Hcg.Brush.TextMuted}" Text="{Binding Evidence}" IsVisible="{Binding HasEvidence}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock FontSize="12" Foreground="{DynamicResource Hcg.Brush.Cyan}" Text="{Binding Guidance}" TextWrapping="Wrap" IsVisible="{Binding HasGuidance}" />
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Spacing="12">
+              <TextBlock Classes="formlabel" Text="REQUIRED TOOLCHAINS" Margin="0" />
+              <ItemsControl ItemsSource="{Binding Requirements}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:RequirementItem">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                      <StackPanel Spacing="1">
+                        <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                        <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="1" Status="{Binding Status}" VerticalAlignment="Top" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Classes="formlabel" Text="SIGNING AND DISTRIBUTION" Margin="0,6,0,0" />
+              <ItemsControl ItemsSource="{Binding Signing}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String"><TextBlock FontSize="12.5" TextWrapping="Wrap" Margin="0,2" Text="{Binding StringFormat='• {0}'}" /></DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Classes="formlabel" Text="SCOPE OF THIS PATH" Margin="0,6,0,0" />
+              <ItemsControl ItemsSource="{Binding Scope}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String"><TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="0,2" Text="{Binding StringFormat='• {0}'}" /></DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- 4 · GENERATE -->
+      <Border Classes="card" IsVisible="{Binding HasSelection}">
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="label" Text="4 · GENERATE" />
+            <TextBlock Classes="h2" Text="New platform target (separate copy)" />
+          </StackPanel>
+          <Border Classes="callout" Padding="12" IsVisible="{Binding IsBuildExisting}">
+            <StackPanel Spacing="8">
+              <TextBlock TextWrapping="Wrap" Text="This project already has a target for this platform. Nothing needs to be generated: build it in Mobile Build Studio." />
+              <Button Classes="primary" HorizontalAlignment="Left" Command="{Binding OpenInMobileStudioCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Open in Mobile Build Studio" /></StackPanel>
+              </Button>
+            </StackPanel>
+          </Border>
+          <Border Classes="callout error" Padding="12" IsVisible="{Binding IsNotSupported}">
+            <TextBlock TextWrapping="Wrap" Text="This source is outside the supported scope of this conversion path (see the assessment). No target is generated — a placeholder would be misleading." />
+          </Border>
+          <StackPanel Spacing="12" IsVisible="{Binding CanGenerateTarget}">
+            <UniformGrid Columns="4">
+              <StackPanel Margin="0,0,8,0"><TextBlock Classes="formlabel" Text="APP NAME" /><TextBox Text="{Binding AppName}" /></StackPanel>
+              <StackPanel Margin="0,0,8,0"><TextBlock Classes="formlabel" Text="BUNDLE ID / APPLICATION ID" /><TextBox Text="{Binding AppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" /></StackPanel>
+              <StackPanel Margin="0,0,8,0"><TextBlock Classes="formlabel" Text="VERSION" /><TextBox Text="{Binding Version}" /></StackPanel>
+              <StackPanel><TextBlock Classes="formlabel" Text="BUILD NUMBER" /><NumericUpDown Value="{Binding BuildNumber}" Minimum="1" Maximum="2100000000" FormatString="0" /></StackPanel>
+            </UniformGrid>
+            <StackPanel IsVisible="{Binding IsAndroid}">
+              <TextBlock Classes="formlabel" Text="DEFAULT COMMAND-LINE ARGUMENTS (EDITABLE IN THE APP)" />
+              <TextBox Text="{Binding DefaultArguments}" FontFamily="{DynamicResource Hcg.Font.Mono}" PlaceholderText="e.g. -n 100000 -l" />
+            </StackPanel>
+            <StackPanel Spacing="8" IsVisible="{Binding HasRequiredTexts}">
+              <TextBlock Classes="formlabel" Text="PRIVACY USAGE DESCRIPTIONS (REQUIRED BY iOS)" Margin="0" />
+              <ItemsControl ItemsSource="{Binding RequiredTexts}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:UsageTextItem">
+                    <StackPanel Spacing="4" Margin="0,0,0,8">
+                      <TextBlock Classes="mono" FontSize="12" Text="{Binding Key}" />
+                      <TextBox Text="{Binding Text}" PlaceholderText="Shown to the user in the permission prompt" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+            <TextBlock Classes="formlabel" Text="OUTPUT FOLDER (A NEW SUB-FOLDER IS CREATED; THE ORIGINAL PROJECT IS NEVER MODIFIED)" Margin="0" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Text="{Binding OutputParent}" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" />
+              <Button Grid.Column="1" Content="Browse…" Margin="8,0,0,0" Command="{Binding BrowseOutputCommand}" />
+            </Grid>
+            <Border Classes="callout warning" Padding="12" IsVisible="{Binding IsBlocked}">
+              <StackPanel Spacing="8">
+                <TextBlock TextWrapping="Wrap" Text="Blockers need manual porting. You can still generate a DRAFT for that work: every blocker site gets an explicit compile-time error marker for the target platform, so the draft cannot be mistaken for a working port and does not compile until the blockers are ported." />
+                <CheckBox IsChecked="{Binding Draft}" Content="Generate a draft with blocker markers (will not compile)" />
+              </StackPanel>
+            </Border>
+            <Button Classes="primary" HorizontalAlignment="Left" Command="{Binding GenerateCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Play}" /><TextBlock Text="Generate port" /></StackPanel>
+            </Button>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- 5 · PLAN AND DIFF -->
+      <Border Classes="card" IsVisible="{Binding HasReport}">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="5 · MIGRATION PLAN AND DIFF" />
+              <TextBlock Classes="h2" Text="Review the changes" />
+              <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding PlanSummary}" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" Command="{Binding OpenOutputCommand}" VerticalAlignment="Top">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Open}" /><TextBlock Text="Open output folder" /></StackPanel>
+            </Button>
+          </Grid>
+          <ItemsControl ItemsSource="{Binding PlanSteps}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String"><TextBlock FontSize="12.5" TextWrapping="Wrap" Margin="0,2" Text="{Binding StringFormat='→ {0}'}" /></DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Grid ColumnDefinitions="340,*">
+            <ListBox ItemsSource="{Binding Changes}" SelectedItem="{Binding SelectedChange}" MaxHeight="520" Margin="0,0,12,0">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:FileChangeItem">
+                  <StackPanel Spacing="2" Margin="0,2">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <c:StatusChip Status="{Binding Kind}" Margin="0,0,8,0" />
+                      <TextBlock Grid.Column="1" Classes="mono" FontSize="11.5" Text="{Binding Path}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    </Grid>
+                    <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Reason}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <Border Grid.Column="1" Classes="inset" Padding="12" MaxHeight="520">
+              <ScrollViewer HorizontalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding DiffLines}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DiffLineItem">
+                      <TextBlock Classes="diff" Classes.added="{Binding IsAdded}" Classes.removed="{Binding IsRemoved}" Classes.hunk="{Binding IsHunk}" Text="{Binding Text}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Border>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- 6 · VERIFICATION -->
+      <Border Classes="card" IsVisible="{Binding HasReport}">
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="label" Text="6 · VERIFICATION" />
+            <TextBlock Classes="h2" Text="Generated · compiled · launched · device-tested" />
+            <TextBlock Classes="muted" TextWrapping="Wrap" Text="Each level is reported on its own; passing one never implies the next. Compiling uses Mobile Build Studio's engine (the port appears in Projects and Build History). Publishing and store submission are not performed." />
+          </StackPanel>
+          <ItemsControl ItemsSource="{Binding Verification}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:VerificationItem">
+                <Grid ColumnDefinitions="260,150,*" Margin="0,5">
+                  <TextBlock Text="{Binding Level}" FontWeight="SemiBold" VerticalAlignment="Top" />
+                  <c:StatusChip Grid.Column="1" Status="{Binding Status}" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                  <SelectableTextBlock Grid.Column="2" FontSize="12.5" Text="{Binding Detail}" TextWrapping="Wrap" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <CheckBox IsChecked="{Binding TrustAcknowledged}">
+            <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
+          </CheckBox>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="primary" Command="{Binding CompileCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Play}" /><TextBlock Text="Compile" /></StackPanel>
+            </Button>
+            <Button Command="{Binding LaunchCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Launch in simulator / emulator" /></StackPanel>
+            </Button>
+          </StackPanel>
+          <Image Source="{Binding Screenshot}" MaxHeight="520" HorizontalAlignment="Left" IsVisible="{Binding Screenshot, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <ListBox Classes="log" ItemsSource="{Binding LogLines}" Height="260" IsVisible="{Binding HasLog}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:LogLineItem">
+                <Grid ColumnDefinitions="70,*">
+                  <TextBlock Classes="log" Text="{Binding Time}" Opacity="0.45" />
+                  <TextBlock Grid.Column="1" Classes="log" Text="{Binding Text}" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.success="{Binding IsSuccess}" Classes.command="{Binding IsCommand}" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

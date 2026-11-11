@@ -52,7 +52,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -150,7 +150,7 @@ internal static partial class Program
         var services = AppClass.Services ?? throw new InvalidOperationException("The app did not initialize its services.");
         _services = services;
         var main = services.GetRequiredService<MainWindowViewModel>();
-        _window = new MainWindow { DataContext = main, Width = 1480, Height = 1500 };
+        _window = new MainWindow { DataContext = main, Width = 1480, Height = double.Parse(Arg("window-height", "1500"), System.Globalization.CultureInfo.InvariantCulture) };
         services.GetRequiredService<MainWindowProvider>().Window = _window;
         _window.Show();
         await services.GetRequiredService<ThemeService>().ApplySavedAsync();
@@ -188,6 +188,8 @@ internal static partial class Program
             if (Arg("expect-xcode-state") is { } expectedState)
                 Check(toolchainsPage.XcodeState.Text == expectedState, $"Xcode state: expected {expectedState}, got {toolchainsPage.XcodeState.Text}");
         }
+
+        if (_args.ContainsKey("port")) return await PortAsync(main, output, host);
 
         // 1. Import through the wizard's own "Import ZIP" / "Import folder" commands (scripted picker returns --source).
         var source = _args["source"];
@@ -358,6 +360,83 @@ internal static partial class Program
             Artifacts = result.Artifacts.Select(a => new { a.Format, a.Path, a.Sha256, a.SizeBytes, a.Verification, a.Checks }),
         }, new JsonSerializerOptions { WriteIndented = true }));
         return result.Status == BuildStatus.Succeeded ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Porting Studio: import → assess → select source → generate (plan + diff) → [compile] → [launch], through the
+    /// page's own commands. Expectations: --expect-capability, --expect-compile pass|fail|notpossible, --expect-launch …
+    /// </summary>
+    private static async Task<int> PortAsync(MainWindowViewModel main, string output, HCG.ExecutableMaker.Domain.HostEnvironment host)
+    {
+        await main.NavigateAsync("porting", null);
+        var studio = (PortingStudioViewModel)main.CurrentPage!;
+        var source = _args["source"];
+        var isZip = File.Exists(source) && source.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+        await (isZip ? studio.ImportZipCommand.ExecuteAsync(null) : studio.ImportFolderCommand.ExecuteAsync(null));
+        await WaitUntil(() => !studio.IsWorking && studio.SelectedProject is not null, TimeSpan.FromMinutes(5), "import");
+        await Task.Delay(300);
+        await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(5), "assessment");
+        Check(studio.Error is null, "Imported and assessed" + (studio.Error is { } e ? ": " + e : ""));
+        foreach (var path in studio.Paths)
+        {
+            Log($"Path {path.Title}: {(path.HasSources ? "" : path.EmptyText)}");
+            foreach (var s in path.Sources) Log($"  source {s.Assessment.Source.Key} [{s.Kind}] → {s.Assessment.Capability}: {s.Summary}");
+        }
+        var key = _args["port"];
+        Check(studio.SelectSourceByKey(key), $"Source {key} listed");
+        if (studio.SelectedSource is null) { Shot("port-sources"); return 1; }
+        var a = studio.SelectedSource.Assessment;
+        foreach (var u in a.Reusable) Log($"  reusable {u.Name}: {u.Files} files ({u.Lines} lines) · unchanged {u.FilesUnchanged} · adapted {u.FilesAdapted} · with blockers {u.FilesWithBlockers}");
+        foreach (var f in a.Findings) Log($"  [{f.Disposition}] {f.Category} {f.Location}: {f.Title}{(f.Guidance is null ? "" : " → " + f.Guidance)}");
+        foreach (var t in a.Toolchains) Log($"  toolchain {t.DisplayName}: {(t.IsSatisfied ? "OK" : "MISSING")} {t.Detail}");
+        if (Arg("expect-capability") is { } cap) Check(a.Capability.ToString() == cap, $"Capability {a.Capability} (expected {cap})");
+        Shot("port-assessment");
+        if (_args.ContainsKey("assess-only")) return Failures.Count == 0 ? 0 : 1;
+
+        if (Arg("name") is { } name) studio.AppName = name;
+        if (Arg("bundle-id") is { } id) studio.AppId = id;
+        if (Arg("args") is { } defArgs) studio.DefaultArguments = defArgs;
+        foreach (var usage in _args.Where(x => x.Key.StartsWith("usage", StringComparison.Ordinal)).Select(x => x.Value))
+        {
+            var eq = usage.IndexOf('=');
+            if (studio.RequiredTexts.FirstOrDefault(t => t.Key == usage[..eq]) is { } item) item.Text = usage[(eq + 1)..];
+        }
+        studio.OutputParent = Path.Combine(output, "ports");
+        if (_args.ContainsKey("draft")) studio.Draft = true;
+        Check(studio.GenerateCommand.CanExecute(null), "Generate enabled");
+        await studio.GenerateCommand.ExecuteAsync(null);
+        await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(5), "generation");
+        Check(studio.Error is null && studio.Report is not null, "Port generated" + (studio.Error is { } ge ? ": " + ge : ""));
+        if (studio.Report is not { } report) { Shot("port-generate-failed"); return 1; }
+        foreach (var step in report.Plan.Steps) Log("  plan: " + step);
+        foreach (var c in report.Plan.Changes.Where(c => c.Kind != HCG.ExecutableMaker.Domain.FileChangeKind.CopiedUnchanged)) Log($"  {c.Kind}: {c.Path} — {c.Reason}");
+        Log("Output: " + report.OutputDirectory);
+        Shot("port-plan-diff");
+
+        if (_args.ContainsKey("compile"))
+        {
+            studio.TrustAcknowledged = true;
+            await studio.CompileCommand.ExecuteAsync(null);
+            await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(50), "compile");
+            foreach (var l in studio.LogLines.Where(l => l.IsError || l.IsWarning).Take(40)) Log("  build: " + l.Text);
+        }
+        if (_args.ContainsKey("launch") && studio.Report!.Level(HCG.ExecutableMaker.Domain.VerificationLevel.Compiled).Status == HCG.ExecutableMaker.Domain.LevelStatus.Passed)
+        {
+            await studio.LaunchCommand.ExecuteAsync(null);
+            await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(15), "launch");
+        }
+        report = studio.Report!;
+        foreach (var v in report.Verification.OrderBy(v => v.Level)) Log($"VERIFY {v.Level}: {v.Status} — {v.Detail}{(v.Evidence is null ? "" : " [" + v.Evidence + "]")}");
+        if (Arg("expect-compile") is { } ec) Check(report.Level(HCG.ExecutableMaker.Domain.VerificationLevel.Compiled).Status.ToString() == ec, $"Compile status {report.Level(HCG.ExecutableMaker.Domain.VerificationLevel.Compiled).Status} (expected {ec})");
+        if (Arg("expect-launch") is { } el) Check(report.Level(HCG.ExecutableMaker.Domain.VerificationLevel.LaunchedInSimulatorOrEmulator).Status.ToString() == el, $"Launch status {report.Level(HCG.ExecutableMaker.Domain.VerificationLevel.LaunchedInSimulatorOrEmulator).Status} (expected {el})");
+        Check(report.Level(HCG.ExecutableMaker.Domain.VerificationLevel.TestedOnDevice).Status != HCG.ExecutableMaker.Domain.LevelStatus.Passed || _args.ContainsKey("device"), "Device testing is not claimed without a physical device");
+        Shot("port-verification");
+        if (Arg("copy-port-to") is { } copyTo)
+        {
+            Directory.CreateDirectory(copyTo);
+            File.WriteAllText(Path.Combine(copyTo, "port-output-path.txt"), report.OutputDirectory);
+        }
+        return Failures.Count == 0 ? 0 : 1;
     }
 
     private static void ExpectSet(string arg, IEnumerable<string> actual, string what)

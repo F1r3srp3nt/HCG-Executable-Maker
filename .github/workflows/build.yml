@@ -814,6 +814,168 @@ jobs:
           grep -Eq "^[[:space:]]*Total tests:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
           grep -Eq "^[[:space:]]*Passed:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
 
+  port-ios:
+    name: Porting — macOS source → iOS app, compiled and launched in the Simulator
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/port-ios-out
+      OSLO_REPO: https://github.com/F1r3srp3nt/Oslo-Sprint.git
+      OSLO_COMMIT: 45431255bcc50c0e48c553c1f522ed67adf7e954
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Toolchain
+        run: |
+          mkdir -p "$OUT/screens"
+          xcodebuild -version
+          xcrun simctl list runtimes | grep -i ios || true
+
+      - name: The sources are real Mac apps (build them for macOS first)
+        run: |
+          (cd tests/Fixtures/TallyPackage && swift build --scratch-path "$OUT/tally-mac" 2>&1 | tail -3)
+          xcodebuild -project tests/Fixtures/HelloMac/HelloMac.xcodeproj -scheme HelloMac -configuration Release -derivedDataPath "$OUT/hellomac-mac" build -quiet
+          echo "Both fixtures build as macOS apps."
+
+      - name: Build the UI driver
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Swift package app (TallyPackage) → iOS — assess, generate, compile, launch in Simulator
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/TallyPackage --port "swiftpm::TallyApp"
+          --name Tally --bundle-id com.hakmicapital.tally "--usage" "NSMicrophoneUsageDescription=Tally shows whether the microphone may be used for voice notes."
+          --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
+          --output "$OUT/tally" --screenshots "$OUT/screens" --prefix tally-ios --window-height 3600
+
+      - name: macOS Xcode project (HelloMac) → iOS — assess, generate, compile, launch in Simulator
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/HelloMac --port "xcode:HelloMac.xcodeproj"
+          --name "Hello HCG" --bundle-id com.hakmicapital.hellomac
+          --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
+          --output "$OUT/hellomac" --screenshots "$OUT/screens" --prefix hellomac-ios --window-height 3600
+
+      - name: Oslo-Sprint (real apps) — Relay and Distil are assessed as blocked, with specific blockers; Relay draft
+        run: |
+          git clone --quiet "$OSLO_REPO" "$OUT/Oslo-Sprint" && git -C "$OUT/Oslo-Sprint" checkout --quiet "$OSLO_COMMIT"
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --port "swiftpm:relay:RelayApp" \
+            --name Relay --bundle-id com.oslosprint.relay "--usage" "NSMicrophoneUsageDescription=Push to talk." --draft \
+            --expect-capability BlockedNeedsPorting --compile --expect-compile NotPerformed \
+            --output "$OUT/relay" --screenshots "$OUT/screens" --prefix relay-ios --window-height 3600
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --port "swiftpm:distil:TokenLabApp" \
+            --assess-only --expect-capability BlockedNeedsPorting --output "$OUT/distil" --screenshots "$OUT/screens" --prefix distil-ios --window-height 3600
+          # The draft really does not compile for iOS, and fails only on HCG's explicit blocker marker.
+          relay_out="$(find "$OUT/relay/ports" -maxdepth 1 -type d -name '*-ios-port-*' | head -1)"
+          set +e
+          xcodebuild -project "$relay_out/relay/iOS/Relay.xcodeproj" -scheme Relay -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$OUT/relay-dd" build CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:" | sort -u | head -10
+          set -e
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png "$OUT"/*/ports/*/HCG-PORT/launch-*.png; do
+            j="$OUT/screens/$(basename "$(dirname "$(dirname "$f")")")-$(basename "${f%.png}").jpg"
+            case "$f" in "$OUT"/screens/*) j="${f%.png}.jpg" ;; esac
+            sips -s format jpeg -s formatOptions 55 -Z 1600 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload ports, reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: port-ios-outputs
+          path: |
+            ${{ github.workspace }}/port-ios-out/screens
+            ${{ github.workspace }}/port-ios-out/*/ports/*/HCG-PORT
+            ${{ github.workspace }}/port-ios-out/*/*.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  port-android:
+    name: Porting — Linux C program → Android app, compiled with the NDK and launched on an emulator
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/port-android-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Toolchain (JDK 17, Android SDK + NDK + CMake from the runner image)
+        run: |
+          mkdir -p "$OUT/screens"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ls "$sdk/ndk" "$sdk/cmake" "$sdk/platform-tools"
+
+      - name: The source is a real Linux program (build and run it natively)
+        run: |
+          cmake -S tests/Fixtures/LinuxPrimes -B "$OUT/native" -DCMAKE_BUILD_TYPE=Release >/dev/null
+          cmake --build "$OUT/native"
+          printf "97\n100\n" | "$OUT/native/primes" -n 100000 -l -i
+
+      - name: Build the UI driver
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: GTK program is assessed as blocked (specific blockers), draft generated
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/LinuxGtkHello --port "cmake::gtk-hello"
+          --name "GTK Hello" --bundle-id com.hakmicapital.gtkhello --draft --expect-capability BlockedNeedsPorting
+          --output "$OUT/gtk" --screenshots "$OUT/screens" --prefix gtk-android --window-height 3600
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Port LinuxPrimes → Android, compile (Gradle + NDK) and launch on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
+          script: tools/ui-driver/ci-port-android.sh
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          python3 -m pip install --quiet pillow
+          for f in "$OUT"/screens/*.png "$OUT"/*/ports/*/HCG-PORT/launch-*.png; do
+            j="$OUT/screens/$(basename "${f%.png}").jpg"
+            python3 -c "import sys; from PIL import Image; im=Image.open(sys.argv[1]).convert('RGB'); im.thumbnail((1600,1600)); im.save(sys.argv[2], quality=55)" "$f" "$j"
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -w0 "$j"; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload ports, reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: port-android-outputs
+          path: |
+            ${{ github.workspace }}/port-android-out/screens
+            ${{ github.workspace }}/port-android-out/*/ports/*/HCG-PORT
+          if-no-files-found: warn
+          retention-days: 7
+
   release:
     name: Publish pre-release
     if: startsWith(github.ref, 'refs/tags/v')

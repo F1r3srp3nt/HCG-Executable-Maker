@@ -27,6 +27,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             new("dashboard", "Dashboard", "Icon.Dashboard", typeof(DashboardViewModel)),
             new("new-build", "New Build", "Icon.NewBuild", typeof(BuildWizardViewModel)),
             new("mobile", "Mobile Build Studio", "Icon.Mobile", typeof(MobileBuildStudioViewModel)),
+            new("porting", "Porting Studio", "Icon.Repeat", typeof(PortingStudioViewModel)),
             new("projects", "Projects", "Icon.Projects", typeof(ProjectsViewModel)),
             new("history", "Build History", "Icon.History", typeof(BuildHistoryViewModel)),
             new("artifacts", "Artifacts", "Icon.Artifacts", typeof(ArtifactsViewModel)),

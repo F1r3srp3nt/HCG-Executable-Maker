@@ -24,10 +24,10 @@ public sealed record ConversionFinding(ConversionFindingLevel Level, string Area
     public string Location => Path is null ? "" : Line is { } l ? $"{Path}:{l}" : Path;
 }
 
-public enum FileChangeKind { Add, Modify, Remove }
+public enum WorkspaceChangeKind { Add, Modify, Remove }
 
 /// <summary>One file the conversion writes in the desktop project (never in the imported source).</summary>
-public sealed record ConversionFileChange(string RelativePath, FileChangeKind Kind, string Reason, string? Before, string After)
+public sealed record ConversionFileChange(string RelativePath, WorkspaceChangeKind Kind, string Reason, string? Before, string After)
 {
     /// <summary>Binary content copied from this file (the icon) instead of <see cref="After"/>.</summary>
     public string? CopyFrom { get; init; }
@@ -387,33 +387,33 @@ public static partial class WebDesktopConversion
         if (findings.All(f => f.Level != ConversionFindingLevel.Blocker))
         {
             if (mode == DesktopConversionMode.WrapBrowserApp)
-                changes.Add(new(MainEntry, FileChangeKind.Add, "Electron main process: serves the production build from the app bundle and opens the window with the security settings above.", null, MainScript(opts, outDir, basePath)));
-            changes.Add(new(VerifyScript, FileChangeKind.Add, "Runs after the production build: stops the desktop build when index.html or an asset it references is missing, or when the build still loads the development server.", null, VerifyBuildScript()));
-            changes.Add(new("electron-builder.yml", FileChangeKind.Add, $"electron-builder configuration: app id, name, {(mode == DesktopConversionMode.WrapBrowserApp ? "the files packaged (the production build and the shell only), " : "")}icon, macOS {string.Join(" and ", opts.MacTargets)} for {string.Join(", ", opts.MacArchs)} ({(opts.MacIdentity is null ? "ad-hoc signed" : "Developer ID signed")}), publishing off.",
+                changes.Add(new(MainEntry, WorkspaceChangeKind.Add, "Electron main process: serves the production build from the app bundle and opens the window with the security settings above.", null, MainScript(opts, outDir, basePath)));
+            changes.Add(new(VerifyScript, WorkspaceChangeKind.Add, "Runs after the production build: stops the desktop build when index.html or an asset it references is missing, or when the build still loads the development server.", null, VerifyBuildScript()));
+            changes.Add(new("electron-builder.yml", WorkspaceChangeKind.Add, $"electron-builder configuration: app id, name, {(mode == DesktopConversionMode.WrapBrowserApp ? "the files packaged (the production build and the shell only), " : "")}icon, macOS {string.Join(" and ", opts.MacTargets)} for {string.Join(", ", opts.MacArchs)} ({(opts.MacIdentity is null ? "ad-hoc signed" : "Developer ID signed")}), publishing off.",
                 null, BuilderConfig(opts, outDir, iconTarget, mode)));
             if (iconTarget is not null)
-                changes.Add(new(iconTarget, FileChangeKind.Add, $"The app icon ({iconSummary}).", null, "") { CopyFrom = opts.IconPath, Preview = $"Copied from {opts.IconPath}" });
+                changes.Add(new(iconTarget, WorkspaceChangeKind.Add, $"The app icon ({iconSummary}).", null, "") { CopyFrom = opts.IconPath, Preview = $"Copied from {opts.IconPath}" });
             if (opts.MacIdentity is not null)
-                changes.Add(new(EntitlementsFile, FileChangeKind.Add, "Hardened-runtime entitlements for Developer ID signing (JIT for V8 only).", null, Entitlements()));
+                changes.Add(new(EntitlementsFile, WorkspaceChangeKind.Add, "Hardened-runtime entitlements for Developer ID signing (JIT for V8 only).", null, Entitlements()));
             if (publicEnv.Count > 0)
-                changes.Add(new(EnvironmentFile, FileChangeKind.Add, $"The public VITE_ settings the web build uses ({string.Join(", ", publicEnv)}), so the desktop build matches it.", null, envText)
+                changes.Add(new(EnvironmentFile, WorkspaceChangeKind.Add, $"The public VITE_ settings the web build uses ({string.Join(", ", publicEnv)}), so the desktop build matches it.", null, envText)
                     { Preview = string.Join("\n", publicEnv.Select(n => $"{n}=… (value from {string.Join(", ", envSources)})")) });
-            changes.Add(new("package.json", FileChangeKind.Modify,
+            changes.Add(new("package.json", WorkspaceChangeKind.Modify,
                 mode == DesktopConversionMode.WrapBrowserApp
                     ? $"Electron entry (\"main\"), the desktop scripts, electron {ElectronVersion} and electron-builder {ElectronBuilderVersion}. Runtime dependencies move to devDependencies: Vite bundles them into {outDir}/, so the packaged app ships no node_modules."
                     : $"The desktop scripts and electron-builder {ElectronBuilderVersion}; \"main\", electron and your dependencies are kept.",
                 currentPackageJson, PackageJson(pkg, buildScript!, outDir, basePath, mode)));
-            changes.Add(new("package-lock.json", hasOwnLock || previous is not null ? FileChangeKind.Modify : FileChangeKind.Add,
+            changes.Add(new("package-lock.json", hasOwnLock || previous is not null ? WorkspaceChangeKind.Modify : WorkspaceChangeKind.Add,
                 seed is not null ? $"Created from the monorepo lockfile {seed}, then completed with npm install --package-lock-only --ignore-scripts (no project or package script runs)."
                                  : "Updated for the new dependencies with npm install --package-lock-only --ignore-scripts when the desktop project is created (no project or package script runs).",
                 null, WrittenByNpm));
-            changes.Add(new(ReadmeFile, FileChangeKind.Add, "What HCG generated and why (for whoever maintains the desktop project).", null, Readme(opts, mode, outDir, buildScript!)));
-            changes.Add(new(RecordFile, FileChangeKind.Add, "The record of this conversion: source, options and every generated file with its SHA-256 (written last).", null, "(written when the files above are written)"));
+            changes.Add(new(ReadmeFile, WorkspaceChangeKind.Add, "What HCG generated and why (for whoever maintains the desktop project).", null, Readme(opts, mode, outDir, buildScript!)));
+            changes.Add(new(RecordFile, WorkspaceChangeKind.Add, "The record of this conversion: source, options and every generated file with its SHA-256 (written last).", null, "(written when the files above are written)"));
             if (previous is not null)
             {
                 var now = changes.Select(c => c.RelativePath).ToHashSet(StringComparer.Ordinal);
                 foreach (var stale in previous.Files.Where(f => !now.Contains(f.Path) && f.Path != RecordFile))
-                    changes.Add(new(stale.Path, FileChangeKind.Remove, "Generated by the earlier conversion and no longer needed with these options.", null, ""));
+                    changes.Add(new(stale.Path, WorkspaceChangeKind.Remove, "Generated by the earlier conversion and no longer needed with these options.", null, ""));
             }
         }
         return new DesktopConversionPlan
@@ -485,7 +485,7 @@ public static partial class WebDesktopConversion
             ct.ThrowIfCancellationRequested();
             var path = Path.GetFullPath(Path.Combine(destination, change.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
             if (!PathGuard.IsWithin(destination, path)) return new(false, destination, log, $"{change.RelativePath} is outside the desktop project.");
-            if (change.Kind == FileChangeKind.Remove)
+            if (change.Kind == WorkspaceChangeKind.Remove)
             {
                 if (File.Exists(path)) File.Delete(path);
                 Log($"Removed {change.RelativePath}");
@@ -495,7 +495,7 @@ public static partial class WebDesktopConversion
             if (change.CopyFrom is { } from) File.Copy(from, path, overwrite: true);
             else await File.WriteAllTextAsync(path, change.After, new UTF8Encoding(false), ct).ConfigureAwait(false);
             written.Add(new(change.RelativePath, Sha256File(path)));
-            Log($"{(change.Kind == FileChangeKind.Add ? "Added" : "Updated")} {change.RelativePath}");
+            Log($"{(change.Kind == WorkspaceChangeKind.Add ? "Added" : "Updated")} {change.RelativePath}");
         }
 
         if (plan.SeedLockFile is { } seed)

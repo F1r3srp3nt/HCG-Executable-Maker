@@ -500,7 +500,7 @@ public class WebDesktopConversionTests : IDisposable
         Assert.True(again.CanApply, string.Join(" | ", again.Blockers.Select(b => b.Message)));
         Assert.NotNull(again.PreviousRecord);
         Assert.Equal(DesktopConversionMode.WrapBrowserApp, again.Mode);
-        Assert.Contains(again.Changes, c => c.RelativePath == "hcg-desktop/entitlements.mac.plist" && c.Kind == FileChangeKind.Remove);
+        Assert.Contains(again.Changes, c => c.RelativePath == "hcg-desktop/entitlements.mac.plist" && c.Kind == WorkspaceChangeKind.Remove);
         var second = _t.Combine("second");
         var r2 = await Apply(again, first, second);
         Assert.True(r2.Success, r2.Error);

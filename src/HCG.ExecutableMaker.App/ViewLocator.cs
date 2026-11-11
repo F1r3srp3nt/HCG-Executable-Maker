@@ -13,6 +13,7 @@ public sealed class ViewLocator : IDataTemplate
         [typeof(DashboardViewModel)] = () => new DashboardView(),
         [typeof(BuildWizardViewModel)] = () => new BuildWizardView(),
         [typeof(MobileBuildStudioViewModel)] = () => new MobileBuildStudioView(),
+        [typeof(PortingStudioViewModel)] = () => new PortingStudioView(),
         [typeof(ProjectsViewModel)] = () => new ProjectsView(),
         [typeof(BuildHistoryViewModel)] = () => new BuildHistoryView(),
         [typeof(ArtifactsViewModel)] = () => new ArtifactsView(),

@@ -78,6 +78,8 @@ public static class Composition
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileArtifactVerifier>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileBuildService>();
+        services.AddSingleton<HCG.ExecutableMaker.Porting.DeviceLauncher>();
+        services.AddSingleton<HCG.ExecutableMaker.Porting.PortingService>();
 
         // UI services
         services.AddSingleton<MainWindowProvider>();
@@ -119,6 +121,7 @@ public static class Composition
         services.AddSingleton<DashboardViewModel>();
         services.AddSingleton<BuildWizardViewModel>();
         services.AddSingleton<MobileBuildStudioViewModel>();
+        services.AddSingleton<PortingStudioViewModel>();
         services.AddSingleton<ProjectsViewModel>();
         services.AddSingleton<BuildHistoryViewModel>();
         services.AddSingleton<ArtifactsViewModel>();

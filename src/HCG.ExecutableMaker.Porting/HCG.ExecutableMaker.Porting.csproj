@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>HCG.ExecutableMaker.Porting</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.ExecutableMaker.BuildEngine\HCG.ExecutableMaker.BuildEngine.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Android project template (Gradle wrapper + console host), copied into generated ports. -->
+    <EmbeddedResource Include="Templates\**\*" LogicalName="Templates/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

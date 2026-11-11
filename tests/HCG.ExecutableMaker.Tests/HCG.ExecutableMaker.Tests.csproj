@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.ProjectInspection\HCG.ExecutableMaker.ProjectInspection.csproj" />
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.BuildEngine\HCG.ExecutableMaker.BuildEngine.csproj" />
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.Account\HCG.ExecutableMaker.Account.csproj" />
+    <ProjectReference Include="..\..\src\HCG.ExecutableMaker.Porting\HCG.ExecutableMaker.Porting.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

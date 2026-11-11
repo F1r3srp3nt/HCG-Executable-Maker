@@ -7,6 +7,7 @@
     <Project Path="src/HCG.ExecutableMaker.Domain/HCG.ExecutableMaker.Domain.csproj" />
     <Project Path="src/HCG.ExecutableMaker.Infrastructure/HCG.ExecutableMaker.Infrastructure.csproj" />
     <Project Path="src/HCG.ExecutableMaker.Packaging/HCG.ExecutableMaker.Packaging.csproj" />
+    <Project Path="src/HCG.ExecutableMaker.Porting/HCG.ExecutableMaker.Porting.csproj" />
     <Project Path="src/HCG.ExecutableMaker.ProjectInspection/HCG.ExecutableMaker.ProjectInspection.csproj" />
     <Project Path="src/HCG.ExecutableMaker.Security/HCG.ExecutableMaker.Security.csproj" />
   </Folder>
