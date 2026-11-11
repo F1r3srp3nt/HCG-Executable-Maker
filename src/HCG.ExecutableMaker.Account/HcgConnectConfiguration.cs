@@ -79,22 +79,48 @@ public sealed record HcgConnectConfiguration
 
     public static HcgConnectConfiguration Default { get; } = new();
 
-    /// <summary>What is missing before sign-in can start (empty = ready).</summary>
-    public IReadOnlyList<string> MissingForSignIn()
+    public const string ClientIdPlaceholder = "<ISSUED_PUBLIC_CLIENT_ID>";
+
+    /// <summary>
+    /// Each field that is missing or invalid for sign-in, with the reason. These describe THIS computer's configuration
+    /// only; whether HCG has registered the client is never inferred from them (that needs HCG's own answer).
+    /// </summary>
+    public IReadOnlyList<ConfigurationIssue> Issues()
     {
-        var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(ClientId)) missing.Add("Executable Maker's OAuth client is not registered with HCG yet (client ID)");
+        var issues = new List<ConfigurationIssue>();
+        if (string.IsNullOrWhiteSpace(ClientId))
+            issues.Add(new("clientId", "missing: no client ID is configured on this computer or built into this version. HCG issues it when Executable Maker's public desktop client is registered; import the hcg-connect.json HCG provides."));
+        else if (ClientId == ClientIdPlaceholder)
+            issues.Add(new("clientId", $"\"{ClientIdPlaceholder}\" is the template placeholder, not an issued HCG client ID (HCG issues UUIDs); replace it with the issued public client ID."));
         else if (!Guid.TryParseExact(ClientId, "D", out var id) || id == Guid.Empty)
-            missing.Add($"The client ID \"{ClientId}\" is not an issued HCG client ID (HCG issues UUIDs); replace the placeholder with the issued public client ID");
-        if (RedirectUris.Count == 0) missing.Add("Redirect URI");
-        if (!Scopes.Contains("openid")) missing.Add("The scopes must include openid (the ID token proves who signed in)");
+            issues.Add(new("clientId", $"\"{ClientId}\" is not an issued HCG client ID (HCG issues UUIDs such as 3f6c…-…); check that it was copied completely."));
+        if (RedirectUris.Count == 0) issues.Add(new("redirectUris", "missing: at least one loopback redirect URI is required."));
         foreach (var uri in RedirectUris)
             if (uri.Scheme != "http" || uri.Host != "127.0.0.1" || uri.IsDefaultPort || !string.IsNullOrEmpty(uri.Fragment))
-                missing.Add($"Redirect URI {uri} must be http://127.0.0.1:<port>/<path> (loopback, explicit port, no fragment)");
-        Uri[] identity = [Issuer, AuthorizationEndpoint, TokenEndpoint, UserinfoEndpoint, JwksEndpoint];
-        if (identity.Any(u => u.Scheme != "https" && !IsLoopbackHttp(u)))
-            missing.Add("Identity endpoints must use HTTPS");
-        return missing;
+                issues.Add(new("redirectUris", $"{uri} must be http://127.0.0.1:<port>/<path> (loopback, explicit port, no fragment)."));
+        if (!Scopes.Contains("openid")) issues.Add(new("scopes", "must include openid (the ID token proves who signed in)."));
+        foreach (var (field, uri) in new[] { ("issuer", Issuer), ("authorizationEndpoint", AuthorizationEndpoint), ("tokenEndpoint", TokenEndpoint), ("userinfoEndpoint", UserinfoEndpoint), ("jwksEndpoint", JwksEndpoint), ("apiBaseUrl", ApiBaseUrl) })
+            if (!uri.IsAbsoluteUri) issues.Add(new(field, $"{uri} is not an absolute URL."));
+            else if (uri.Scheme != "https" && !IsLoopbackHttp(uri)) issues.Add(new(field, $"{uri} must use HTTPS."));
+        if (!IsLoopbackHttp(Issuer) && (AuthorizationEndpoint.Host != Issuer.Host || TokenEndpoint.Host != Issuer.Host || JwksEndpoint.Host != Issuer.Host))
+            issues.Add(new("authorizationEndpoint/tokenEndpoint/jwksEndpoint", $"must be on the issuer's host ({Issuer.Host})."));
+        return issues;
+    }
+
+    /// <summary>What is missing before sign-in can start (empty = ready), as "field: reason".</summary>
+    public IReadOnlyList<string> MissingForSignIn() => Issues().Select(i => $"{i.Field}: {i.Problem}").ToList();
+
+    /// <summary>
+    /// A non-secret hcg-connect.json template with exactly the keys the loader accepts, this build's values, and the
+    /// client ID placeholder. HCG fills in the issued client ID; nothing else needs to change for live HCG.
+    /// </summary>
+    public static string TemplateJson()
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse((Default with { ClientId = ClientIdPlaceholder }).ToJson())!.AsObject();
+        var template = new System.Text.Json.Nodes.JsonObject { ["$schema"] = "./hcg-connect.schema.json" };
+        foreach (var (key, value) in node)
+            if (KnownKeys.Contains(key) && value is not null) template[key] = value.DeepClone();
+        return template.ToJsonString(new JsonSerializerOptions(Json) { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + "\n";
     }
 
     /// <summary>
@@ -161,7 +187,8 @@ public sealed record HcgConnectConfiguration
         }
         catch (JsonException ex)
         {
-            return new LoadResult(Default, $"{FileName} is not valid JSON ({ex.Message}). The file was ignored.");
+            var field = ex.Path is { Length: > 2 } path ? $" (field {path.TrimStart('$', '.')})" : "";
+            return new LoadResult(Default, $"{FileName} is not valid JSON{field}: {ex.Message.Split(" Path:")[0]} The file was ignored.");
         }
     }
 
@@ -209,3 +236,6 @@ public sealed record HcgConnectConfiguration
         ["code_challenge_method"] = "S256",
     }, Json);
 }
+
+/// <summary>One missing or invalid field of the HCG Connect configuration.</summary>
+public sealed record ConfigurationIssue(string Field, string Problem);

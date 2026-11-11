@@ -2,6 +2,26 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `fix/account-connection`
+
+### Fixed
+- **The app no longer claims its client is "not registered" without evidence.** A missing client ID is a *local configuration* state (Not set up on this computer), with the exact missing or invalid fields. *Rejected by HCG* is shown only when HCG's identity service itself answers `oauth_client_not_found`, `invalid_client` or `unauthorized_client`. Previously a token-endpoint `invalid_client` was folded into "not configured".
+- **Cancelling sign-in was reported as "timed out after 5 minutes".** It now says the sign-in was cancelled. A real timeout says so and why.
+- Support-request upload progress could finish below 100% (reports were posted to the thread pool out of order); they are now reported in order. This also fixes an intermittent test failure.
+- The exported configuration template keeps `<ISSUED_PUBLIC_CLIENT_ID>` readable (it was escaped as `\u003C…`).
+
+### Added
+- **Account › HCG Connect:**
+  - Import HCG connection configuration… (validated; persisted in the data folder; applied at once);
+  - Check configuration (a rejection is recorded only from HCG's answer);
+  - Retry connection (re-reads the saved file, restores the session, re-reads plan and access);
+  - Export registration request… (`hcg-executable-maker-registration.json`, `hcg-connect.template.json`, `HCG-CONNECT-SETUP.txt`).
+- **Sign-in preflight:** before the browser opens, the app asks the identity service (no credentials) whether it accepts the client and redirect URI. A rejected client never opens an error page in the browser.
+- **Field-level validation:** `HcgConnectConfiguration.Issues()` returns field and reason pairs. JSON type errors name the field. The identity endpoints must be on the issuer's host and use HTTPS.
+- The organisation in use is shown with the signed-in identity.
+- **CLI:** `--hcg-session export <folder>`. `sign-in` exits with 7 when HCG rejects the client.
+- **Tests:** import and persistence across restart, Retry re-reading a replaced file, field errors, rejection only on HCG's evidence (preflight and token endpoint), network failure vs rejection, browser cancellation and failure to open, the template and export. UI driver: unconfigured, rejected by HCG, cleared, Retry, then sign-in (MOCK HCG).
+
 ## [Unreleased] — `feature/hcg-connect`
 
 ### Added — HCG Connect ([docs/hcg-connect/HANDOFF.md](docs/hcg-connect/HANDOFF.md))

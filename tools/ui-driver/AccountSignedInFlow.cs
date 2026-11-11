@@ -77,6 +77,8 @@ internal static partial class Program
     {
         Log($"Account: [{account.AccountTag.Text}] [{account.ConnectTag.Text}] {account.AccountMessage}");
         Check(account.IsNotConfigured && !account.CanSignIn, "Unconfigured build: sign-in is not offered and the reason is shown");
+        Check(account.ConfigIssues.Any(i => i.Field == "clientId") && !account.AccountMessage.Contains("not registered", StringComparison.OrdinalIgnoreCase),
+            "The missing field is named (clientId) and nothing is claimed about HCG's registration");
         account.CheckConnectionCommand.Execute(null);
         await WaitUntil(() => !account.IsCheckingConnection && account.ConnectionSteps.Count > 0, TimeSpan.FromSeconds(30), "connection check (unconfigured)");
         Check(account.ConnectionSteps[0].State.Text == "Failed" && account.ConnectionSteps.Skip(1).All(s => s.State.Text == "Not checked"),
@@ -93,6 +95,19 @@ internal static partial class Program
             "The placeholder example is refused with the reason; nothing changes");
         Shot("connect-placeholder-refused");
 
+        // A configuration with a client ID HCG does not know: only HCG's own answer marks it as rejected.
+        var unknown = Path.Combine(Path.GetDirectoryName(issued)!, "unknown-client-hcg-connect.json");
+        File.WriteAllText(unknown, File.ReadAllText(issued).Replace(JsonDocument.Parse(File.ReadAllText(issued)).RootElement.GetProperty("clientId").GetString()!, "99999999-9999-4999-8999-999999999999", StringComparison.Ordinal));
+        _args["pick-file"] = unknown;
+        await account.ImportConfigurationCommand.ExecuteAsync(null);
+        Check(account.ConnectImportError is null && !account.IsNotConfigured, "A well-formed configuration is imported (not yet checked with HCG)");
+        account.CheckConnectionCommand.Execute(null);
+        await WaitUntil(() => !account.IsCheckingConnection && account.ConnectionSteps.Count == 6, TimeSpan.FromSeconds(60), "connection check (unknown client)");
+        Log($"Account: [{account.AccountTag.Text}] {account.AccountMessage}");
+        Check(account.IsClientRejected && account.AccountTag.Text == "Rejected by HCG" && account.AccountMessage.Contains("99999999-9999-4999-8999-999999999999", StringComparison.Ordinal),
+            "An unknown client ID is reported as rejected by HCG, from the identity service's answer");
+        Shot("connect-rejected-by-hcg");
+
         _args["pick-file"] = issued;
         await account.ImportConfigurationCommand.ExecuteAsync(null);
         Log("Import issued: " + (account.ConnectImportMessage ?? account.ConnectImportError));
@@ -101,6 +116,9 @@ internal static partial class Program
         await WaitUntil(() => !account.IsCheckingConnection && account.ConnectionSteps.Count == 6, TimeSpan.FromSeconds(60), "connection check");
         foreach (var step in account.ConnectionSteps) Log($"Check {step.Title}: [{step.State.Text}] {step.Detail}");
         Check(account.ConnectionReady, "Connection check: identity server, keys and client registration pass (sign-in not yet proven)");
+        Check(!account.IsClientRejected && account.CanSignIn, "The rejection is cleared once HCG accepts the client");
+        await account.RetryConnectionCommand.ExecuteAsync(null);
+        Check(account.CanSignIn && account.ConfigIssues.Count == 0, "Retry connection re-reads the saved configuration (persisted in the data folder)");
         Shot("connect-checked");
     }
 

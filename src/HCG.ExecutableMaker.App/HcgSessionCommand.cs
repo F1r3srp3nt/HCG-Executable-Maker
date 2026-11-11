@@ -43,13 +43,14 @@ internal static class HcgSessionCommand
             "import" => Import(args.SkipWhile(a => a != "import").Skip(1).FirstOrDefault(), paths, account, services.GetRequiredService<HcgConnectionCheck>()),
             "check" => Check(account.Configuration, services.GetRequiredService<HcgConnectionCheck>()),
             "registration" => Registration(account.Configuration),
+            "export" => Export(args.SkipWhile(a => a != "export").Skip(1).FirstOrDefault(), account.Configuration),
             _ => Usage(),
         };
     }
 
     private static int Usage()
     {
-        Console.Error.WriteLine("Usage: HCGExecutableMaker --hcg-session status|sign-in|sign-out|check|registration|import <hcg-connect.json>");
+        Console.Error.WriteLine("Usage: HCGExecutableMaker --hcg-session status|sign-in|sign-out|check|registration|import <hcg-connect.json>|export <folder>");
         return 2;
     }
 
@@ -74,6 +75,14 @@ internal static class HcgSessionCommand
         return result.ReadyToSignIn ? 0 : 5;
     }
 
+    private static int Export(string? folder, HcgConnectConfiguration config)
+    {
+        if (folder is null) return Usage();
+        foreach (var f in HcgRegistrationExport.Write(Path.GetFullPath(folder), config)) Console.WriteLine("Wrote " + f);
+        Console.WriteLine("Nothing was sent. Give the registration request to HCG; HCG returns the template with the issued client ID.");
+        return 0;
+    }
+
     private static int Registration(HcgConnectConfiguration config)
     {
         Console.WriteLine("Client registration HCG needs for HCG Executable Maker (RFC 7591 metadata, from this build's configuration).");
@@ -94,7 +103,7 @@ internal static class HcgSessionCommand
 
     private static int SignIn(HcgAccountService account, AccountPlanService plan)
     {
-        if (account.Status == HcgAccountStatus.NotConfigured)
+        if (account.Status is HcgAccountStatus.NotConfigured)
         {
             Print(account);
             return 4;
@@ -104,6 +113,7 @@ internal static class HcgSessionCommand
             Console.WriteLine("Opening HCG sign-in in your browser. Finish there; this command waits up to 5 minutes.");
         account.SignInAsync(browser).GetAwaiter().GetResult();
         Print(account);
+        if (account.Status == HcgAccountStatus.ClientRejected) return 7; // HCG's own answer: the client is not accepted
         if (!account.IsSignedIn) return 3;
         plan.RefreshAsync().GetAwaiter().GetResult();
         PrintPlan(plan);

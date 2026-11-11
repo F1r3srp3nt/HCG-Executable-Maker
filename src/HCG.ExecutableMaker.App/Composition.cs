@@ -98,7 +98,8 @@ public static class Composition
         services.AddSingleton(credentialStore);
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAuthClient(hcgHttp, hcgConfig, TimeProvider.System));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAccountService(hcgConfig, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAuthClient>(),
-            credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>()));
+            credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>(),
+            sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgConnectionCheck>()));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgApiClient(hcgHttp, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>()));
         // Connection check: never follows redirects (the authorization request is probed, not opened), 15 s per step.
         services.AddSingleton(_ => new HCG.ExecutableMaker.Account.HcgConnectionCheck(new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) }));

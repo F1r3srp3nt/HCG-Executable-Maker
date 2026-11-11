@@ -68,8 +68,8 @@ public sealed partial class MyRequestsViewModel(HcgAccountService account, AppAc
         if (!account.IsSignedIn)
         {
             CanLoad = false;
-            State = account.Status == HcgAccountStatus.NotConfigured
-                ? "HCG sign-in is not available in this version yet, so there are no requests to show."
+            State = account.Status is HcgAccountStatus.NotConfigured or HcgAccountStatus.ClientRejected
+                ? "The HCG connection is not set up yet (Account › HCG Connect), so there are no requests to show."
                 : "Sign in with HCG (Account page) to see your support requests.";
             Requests.Clear();
             IsEmpty = false;

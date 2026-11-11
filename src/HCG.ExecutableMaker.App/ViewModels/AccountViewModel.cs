@@ -87,6 +87,13 @@ public sealed partial class AccountViewModel : PageViewModel
     [ObservableProperty] private string _connectionVerdict = "";
     [ObservableProperty] private bool _connectionReady;
     public ObservableCollection<AccountPermissionRow> ConnectionSteps { get; } = [];
+    /// <summary>Exactly which configuration fields are missing or invalid on this computer.</summary>
+    public ObservableCollection<ConfigurationIssue> ConfigIssues { get; } = [];
+    [ObservableProperty] private bool _hasConfigIssues;
+    [ObservableProperty] private bool _isClientRejected;
+    [ObservableProperty] private string _organisationSummary = "";
+    [ObservableProperty] private string? _exportMessage;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(RetryConnectionCommand))] private bool _isRetrying;
     public string LocalBuildsNote => "Local builds, packaging and toolchains work without an HCG account. Sign-in is needed only for support requests and HCG AI assistance.";
     public string PrivacyNote => "Sign-in happens in your own browser on HCG's sign-in page. HCG Executable Maker never sees your password. It keeps a renewable session in the system credential store and never writes it to a file or a log.";
 
@@ -104,7 +111,8 @@ public sealed partial class AccountViewModel : PageViewModel
         IsSignedIn = _account.IsSignedIn;
         IsSigningIn = s == HcgAccountStatus.SigningIn;
         IsNotConfigured = s == HcgAccountStatus.NotConfigured;
-        CanSignIn = s is HcgAccountStatus.SignedOut or HcgAccountStatus.Expired or HcgAccountStatus.Revoked or HcgAccountStatus.Denied
+        IsClientRejected = s == HcgAccountStatus.ClientRejected;
+        CanSignIn = s is HcgAccountStatus.SignedOut or HcgAccountStatus.Expired or HcgAccountStatus.Revoked or HcgAccountStatus.Denied or HcgAccountStatus.ClientRejected
                     || (s == HcgAccountStatus.Unavailable && _account.Identity is null);
         CanRetry = s == HcgAccountStatus.Unavailable && _account.Identity is not null;
         (AccountTag, AccountHeadline) = s switch
@@ -116,7 +124,8 @@ public sealed partial class AccountViewModel : PageViewModel
             HcgAccountStatus.Revoked => (new StatusTag("Access withdrawn", "error"), "HCG has withdrawn access"),
             HcgAccountStatus.Denied => (new StatusTag("Not allowed", "error"), "Sign-in was not allowed"),
             HcgAccountStatus.Unavailable => (new StatusTag("HCG unavailable", "warning"), "HCG cannot be reached right now"),
-            HcgAccountStatus.NotConfigured => (new StatusTag("Not available yet", "neutral"), "HCG sign-in is not available in this version yet"),
+            HcgAccountStatus.NotConfigured => (new StatusTag("Not set up on this computer", "neutral"), "The HCG connection is not set up on this computer"),
+            HcgAccountStatus.ClientRejected => (new StatusTag("Rejected by HCG", "error"), "HCG's identity service rejected this app's sign-in client"),
             _ => (new StatusTag("Not signed in", "neutral"), "Sign in with your HCG account"),
         };
         AccountMessage = _account.Message + (_account.ConfigurationProblem is { } p ? " " + p : "");
@@ -128,9 +137,20 @@ public sealed partial class AccountViewModel : PageViewModel
               (_account.SessionExpiresAt is { } e ? $" · renews automatically (current token until {e.LocalDateTime:t})" : "")
             : _account.StoreNote ?? "";
         ConfigurationHelp = IsNotConfigured
-            ? "HCG Executable Maker's sign-in client has not been registered with HCG yet, so account features are switched off and nothing is contacted. " +
-              $"After registration, HCG provides a configuration file ({HcgConnectConfiguration.FileName}). Import it here; it contains the public client ID only and never a secret."
+            ? "Sign-in needs this app's public client ID from HCG, and none is configured on this computer or built into this version, so nothing is contacted. " +
+              $"Import the {HcgConnectConfiguration.FileName} HCG provides (public values only, never a secret). Whether HCG has registered the client is checked with HCG's answer, not assumed — use Check configuration after importing. " +
+              "Until then, Export registration request gives HCG the exact client to register."
+            : IsClientRejected
+            ? "This is HCG's own answer about the configured client ID. Compare the client ID with the one HCG issued (ERP › App integrations); if none was issued, send HCG the exported registration request. Import the corrected file, then Retry connection."
             : "";
+        ConfigIssues.Clear();
+        foreach (var issue in _account.Configuration.Issues()) ConfigIssues.Add(issue);
+        if (_account.ConfigurationProblem is { } prob) ConfigIssues.Insert(0, new ConfigurationIssue(HcgConnectConfiguration.FileName, prob));
+        HasConfigIssues = ConfigIssues.Count > 0;
+        OrganisationSummary = !IsSignedIn ? ""
+            : _plan.Organisations.Count == 0 ? "Organisation: none reported by HCG (personal account)."
+            : _plan.OrganisationId is { } oid ? $"Organisation: {_plan.Organisations.First(o => o.Id == oid).Name}" + (_plan.Organisations.Count > 1 ? $" (one of {_plan.Organisations.Count} available)" : "")
+            : $"Organisation: not chosen ({_plan.Organisations.Count} available).";
         RefreshConnect();
 
         (AccessTag, AccessMessage) = _access.State switch
@@ -290,7 +310,7 @@ public sealed partial class AccountViewModel : PageViewModel
         if (_account.IsSignedIn && !c.UsesLocalIdentityServer) ConnectTag = new StatusTag("Signed in with HCG", "success");
         ConnectSummary = string.Join("\n", new[]
         {
-            $"Client ID: {(string.IsNullOrWhiteSpace(c.ClientId) ? "(none: not registered yet)" : c.ClientId)} (public client, PKCE S256, no secret)",
+            $"Client ID: {(string.IsNullOrWhiteSpace(c.ClientId) ? "(none configured on this computer)" : c.ClientId)} (public client, PKCE S256, no secret)",
             $"Identity server: {c.Issuer}",
             $"Redirect URIs: {string.Join(", ", c.RedirectUris)}",
             $"Scopes: {string.Join(" ", c.Scopes)}",
@@ -338,6 +358,10 @@ public sealed partial class AccountViewModel : PageViewModel
                     _ => new StatusTag("Not checked", "neutral"),
                 }));
             ConnectionReady = result.ReadyToSignIn;
+            // Only HCG's own answer about the client changes the account state.
+            if (result.Steps.FirstOrDefault(x => x.ClientRejectedByHcg) is { } rejected) _account.MarkClientRejected(rejected.Detail);
+            else if (result.ReadyToSignIn) _account.ClearClientRejection();
+            Refresh();
             ConnectionVerdict = result.ReadyToSignIn
                 ? "Sign-in can be attempted with this configuration. The check does not sign in: only a completed sign-in proves it works."
                 : "Sign-in cannot work with this configuration yet. The failed check says what is missing.";
@@ -347,6 +371,42 @@ public sealed partial class AccountViewModel : PageViewModel
 
     [RelayCommand]
     private Task CopyRegistrationAsync() => _shell.CopyAsync(RegistrationJson);
+
+    private bool CanRetryConnection() => !IsRetrying;
+
+    /// <summary>
+    /// Re-reads hcg-connect.json from the data folder and applies it (a file replaced by hand counts too), restores a
+    /// stored session for the same client, and re-reads plan and access from HCG.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRetryConnection))]
+    private async Task RetryConnectionAsync()
+    {
+        IsRetrying = true;
+        try
+        {
+            await _account.ReloadConfigurationAsync(_paths.Root);
+            if (_account.Status == HcgAccountStatus.Unavailable) await _account.RetryAsync();
+            if (_account.IsSignedIn)
+            {
+                await _plan.RefreshAsync();
+                await _access.RefreshAsync();
+            }
+        }
+        finally { IsRetrying = false; Refresh(); }
+    }
+
+    /// <summary>
+    /// Writes the registration request HCG needs (derived from this build's callback URIs, scopes and flow) and a
+    /// non-secret hcg-connect.json template with exactly the keys the loader accepts. Nothing is sent anywhere.
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportRegistrationAsync()
+    {
+        ExportMessage = null;
+        if (await _shell.PickFolderAsync("Choose where to save the HCG registration request") is not { } folder) return;
+        var files = HcgRegistrationExport.Write(folder, _account.Configuration);
+        ExportMessage = $"Saved {string.Join(", ", files.Select(Path.GetFileName))} in {folder}. Send the registration request to HCG; nothing was sent from here.";
+    }
 }
 
 /// <summary>Opens HCG's sign-in page in the user's default browser (never an embedded view).</summary>

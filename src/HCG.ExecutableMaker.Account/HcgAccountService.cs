@@ -6,8 +6,16 @@ namespace HCG.ExecutableMaker.Account;
 
 public enum HcgAccountStatus
 {
-    /// <summary>This build has no registered HCG sign-in client yet: account features are unavailable, nothing is contacted.</summary>
+    /// <summary>
+    /// The HCG connection is not configured on this computer (fields missing or invalid; see the configuration issues).
+    /// Nothing is contacted. This says nothing about HCG's registration.
+    /// </summary>
     NotConfigured,
+    /// <summary>
+    /// HCG's identity service answered that it does not accept this app's client (evidence: its own error code).
+    /// Only set from HCG's answer, never inferred from local configuration.
+    /// </summary>
+    ClientRejected,
     SignedOut,
     Restoring,
     SigningIn,
@@ -48,9 +56,12 @@ public sealed class HcgAccountService : IDisposable
     private CancellationTokenSource? _refreshTimer;
     private CancellationTokenSource? _signInCts;
 
+    private readonly HcgConnectionCheck? _check;
+
     public HcgAccountService(HcgConnectConfiguration config, HcgAuthClient auth, ISecureCredentialStore store, TimeProvider time,
-        string? configurationProblem = null, string? storeProblem = null, ILogger<HcgAccountService>? logger = null)
+        string? configurationProblem = null, string? storeProblem = null, ILogger<HcgAccountService>? logger = null, HcgConnectionCheck? check = null)
     {
+        _check = check;
         Configuration = config;
         _auth = auth;
         _store = store;
@@ -59,8 +70,8 @@ public sealed class HcgAccountService : IDisposable
         ConfigurationProblem = configurationProblem;
         StoreNote = storeProblem;
         var missing = config.MissingForSignIn();
-        Status = missing.Count == 0 ? HcgAccountStatus.SignedOut : HcgAccountStatus.NotConfigured;
-        Message = missing.Count == 0 ? "Not signed in." : "HCG sign-in is not available in this build yet: " + string.Join("; ", missing) + ".";
+        Status = missing.Count == 0 && configurationProblem is null ? HcgAccountStatus.SignedOut : HcgAccountStatus.NotConfigured;
+        Message = Status == HcgAccountStatus.SignedOut ? "Not signed in." : NotConfiguredMessage(config, configurationProblem);
     }
 
     public HcgConnectConfiguration Configuration { get; private set; }
@@ -125,10 +136,21 @@ public sealed class HcgAccountService : IDisposable
     /// <summary>Sign in with HCG: system browser → HCG sign-in/consent → loopback callback → verified session.</summary>
     public async Task SignInAsync(ISystemBrowser browser, CancellationToken ct = default)
     {
-        if (Configuration.MissingForSignIn() is { Count: > 0 } missing)
+        if (Configuration.MissingForSignIn().Count > 0)
         {
-            Set(HcgAccountStatus.NotConfigured, "HCG sign-in is not available in this build yet: " + string.Join("; ", missing) + ".", null);
+            Set(HcgAccountStatus.NotConfigured, NotConfiguredMessage(Configuration, ConfigurationProblem), null);
             return;
+        }
+        // Preflight (no browser, no credentials): ask HCG's identity service whether it accepts this client and redirect
+        // URI, so a rejected client is reported with HCG's own answer instead of an error page in the browser.
+        if (_check is not null)
+        {
+            var probe = await _check.ProbeClientAsync(Configuration, ct).ConfigureAwait(false);
+            if (probe.State == ConnectionCheckState.Failed)
+            {
+                Set(probe.Code is { } code && HcgConnectionCheck.IsClientRejection(code) ? HcgAccountStatus.ClientRejected : HcgAccountStatus.Unavailable, probe.Detail, null);
+                return;
+            }
         }
         using var listener = LoopbackCallbackListener.StartFirstAvailable(Configuration.RedirectUris);
         if (listener is null)
@@ -137,9 +159,10 @@ public sealed class HcgAccountService : IDisposable
             return;
         }
         _signInCts?.Cancel();
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // Separate sources so a user's Cancel is never reported as a timeout.
+        using var timeout = new CancellationTokenSource(SignInTimeout);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         _signInCts = cts;
-        cts.CancelAfter(SignInTimeout);
         try
         {
             var attempt = _auth.BeginSignIn(listener.RedirectUri);
@@ -155,8 +178,8 @@ public sealed class HcgAccountService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            Set(HcgAccountStatus.SignedOut, ct.IsCancellationRequested || !cts.IsCancellationRequested
-                ? "Sign-in was cancelled." : "Sign-in timed out after 5 minutes. Start it again when you are ready.", null);
+            Set(HcgAccountStatus.SignedOut, timeout.IsCancellationRequested && !ct.IsCancellationRequested
+                ? "Sign-in timed out after 5 minutes (no answer came back from the browser). Start it again when you are ready." : "Sign-in was cancelled.", null);
         }
         catch (HcgAuthException ex)
         {
@@ -165,6 +188,7 @@ public sealed class HcgAccountService : IDisposable
                 HcgAuthFailure.Denied => HcgAccountStatus.Denied,
                 HcgAuthFailure.Unavailable => HcgAccountStatus.Unavailable,
                 HcgAuthFailure.NotConfigured => HcgAccountStatus.NotConfigured,
+                HcgAuthFailure.ClientRejected => HcgAccountStatus.ClientRejected,
                 _ => HcgAccountStatus.SignedOut,
             }, ex.Message, null);
         }
@@ -247,12 +271,55 @@ public sealed class HcgAccountService : IDisposable
         if (missing.Count > 0)
         {
             await ForgetAsync().ConfigureAwait(false);
-            Set(HcgAccountStatus.NotConfigured, "HCG sign-in is not available with this configuration: " + string.Join("; ", missing) + ".", null);
+            Set(HcgAccountStatus.NotConfigured, NotConfiguredMessage(config, null), null);
             return;
         }
         if (sameClient && _session is not null) { Changed?.Invoke(this, EventArgs.Empty); return; }
         Set(HcgAccountStatus.SignedOut, sameClient ? "Not signed in." : "The new HCG Connect configuration is in use. Sign in to connect your HCG account.", null);
         if (sameClient) await InitializeAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Plain-language "configuration missing locally" message with every missing or invalid field.</summary>
+    public static string NotConfiguredMessage(HcgConnectConfiguration config, string? problem) =>
+        "The HCG connection is not set up on this computer" + (problem is null ? "" : $" ({problem})") +
+        (config.Issues().Count > 0 ? ". Missing or invalid: " + string.Join(", ", config.Issues().Select(i => i.Field).Distinct()) + " (details under HCG Connect)" : "") +
+        ". This is a local configuration state; it does not mean HCG rejected the app.";
+
+    /// <summary>A later check found that HCG's identity service accepts the client: the rejection no longer applies.</summary>
+    public void ClearClientRejection()
+    {
+        if (Status == HcgAccountStatus.ClientRejected) Set(HcgAccountStatus.SignedOut, "HCG's identity service accepts this app's client. Sign in to connect your HCG account.", null);
+    }
+
+    /// <summary>HCG's identity service rejected the client (evidence from its answer). Removes nothing but the in-progress sign-in.</summary>
+    public void MarkClientRejected(string evidence)
+    {
+        _signInCts?.Cancel();
+        Set(HcgAccountStatus.ClientRejected, evidence, null);
+    }
+
+    /// <summary>
+    /// Re-reads hcg-connect.json from the data folder (e.g. after it was replaced) and applies it; a stored session for
+    /// the same client is restored. Used by "Retry connection".
+    /// </summary>
+    public async Task ReloadConfigurationAsync(string appDataRoot, CancellationToken ct = default)
+    {
+        var (config, problem) = HcgConnectConfiguration.Load(appDataRoot);
+        await ApplyConfigurationAsync(config, ct).ConfigureAwait(false);
+        if (problem is not null || config.MissingForSignIn().Count > 0)
+        {
+            ConfigurationProblem = problem;
+            await ForgetSessionInMemoryAsync().ConfigureAwait(false);
+            Set(HcgAccountStatus.NotConfigured, NotConfiguredMessage(config, problem), null);
+        }
+        else if (!IsSignedIn) await InitializeAsync(ct).ConfigureAwait(false);
+    }
+
+    private Task ForgetSessionInMemoryAsync()
+    {
+        _refreshTimer?.Cancel();
+        lock (_gate) _session = null;
+        return Task.CompletedTask;
     }
 
     public async Task SignOutAsync()

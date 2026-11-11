@@ -7,7 +7,12 @@ namespace HCG.ExecutableMaker.Account;
 
 public enum ConnectionCheckState { Passed, Warning, Failed, Skipped }
 
-public sealed record ConnectionCheckStep(string Name, ConnectionCheckState State, string Detail);
+/// <param name="Code">The identity service's own error code, when it gave one (evidence, e.g. oauth_client_not_found).</param>
+public sealed record ConnectionCheckStep(string Name, ConnectionCheckState State, string Detail, string? Code = null)
+{
+    /// <summary>HCG's identity service itself rejected the client (not a local or network problem).</summary>
+    public bool ClientRejectedByHcg => State == ConnectionCheckState.Failed && Code is { } c && HcgConnectionCheck.IsClientRejection(c);
+}
 
 public sealed record ConnectionCheckResult(IReadOnlyList<ConnectionCheckStep> Steps)
 {
@@ -35,7 +40,7 @@ public sealed class HcgConnectionCheck(HttpClient http)
         var steps = new List<ConnectionCheckStep>();
         var missing = config.MissingForSignIn();
         steps.Add(missing.Count > 0
-            ? new("Configuration", ConnectionCheckState.Failed, string.Join("; ", missing) + ".")
+            ? new("Configuration", ConnectionCheckState.Failed, string.Join(" ", missing))
             : new("Configuration", ConnectionCheckState.Passed,
                 $"Public client {config.ClientId}, issuer {config.Issuer}, redirect URIs {string.Join(", ", config.RedirectUris)}, scopes {string.Join(" ", config.Scopes)}." +
                 (config.UsesLocalIdentityServer ? " This is a local test identity server on this computer, not HCG." : "")));
@@ -118,6 +123,14 @@ public sealed class HcgConnectionCheck(HttpClient http)
     /// An authorization request for the configured client and first redirect URI, not followed: a redirect means the
     /// identity server accepted the client, redirect URI and PKCE parameters; an error names what it rejected.
     /// </summary>
+    public static bool IsClientRejection(string code) => code is "oauth_client_not_found" or "invalid_client" or "unauthorized_client";
+
+    /// <summary>
+    /// Asks the identity service whether it accepts this client and its first redirect URI, without opening a browser
+    /// or sending credentials. Failed with <see cref="ConnectionCheckStep.Code"/> = the service's own error code.
+    /// </summary>
+    public Task<ConnectionCheckStep> ProbeClientAsync(HcgConnectConfiguration c, CancellationToken ct = default) => ClientAsync(c, ct);
+
     private async Task<ConnectionCheckStep> ClientAsync(HcgConnectConfiguration c, CancellationToken ct)
     {
         const string name = "Client registration";
@@ -142,14 +155,14 @@ public sealed class HcgConnectionCheck(HttpClient http)
             var detail = code switch
             {
                 "oauth_client_not_found" or "invalid_client" =>
-                    $"{c.Issuer.Host} does not know client ID {c.ClientId}: the client is not registered with HCG (or was removed). HCG must register Executable Maker's public desktop client and issue its ID.",
+                    $"HCG's identity service ({c.Issuer.Host}) answered {code}: it does not know client ID {c.ClientId}. Either this configuration has a wrong client ID, or the client is not registered (or was removed) at HCG. Compare the client ID with the one HCG issued in ERP › App integrations.",
                 _ when (code + " " + message).Contains("redirect", StringComparison.OrdinalIgnoreCase) =>
                     $"{c.Issuer.Host} knows the client but rejected the redirect URI {c.RedirectUris[0]}: HCG must register all of {string.Join(", ", c.RedirectUris)} exactly.",
                 _ when (code + " " + message).Contains("scope", StringComparison.OrdinalIgnoreCase) =>
                     $"{c.Issuer.Host} rejected the scopes \"{string.Join(' ', c.Scopes)}\": {message ?? code}.",
                 _ => $"{c.Issuer.Host} rejected the authorization request (HTTP {status}{(code is null ? "" : ", " + code)}{(message is null ? "" : ": " + message)}).",
             };
-            return new(name, ConnectionCheckState.Failed, detail);
+            return new(name, ConnectionCheckState.Failed, detail, code);
         }
     }
 

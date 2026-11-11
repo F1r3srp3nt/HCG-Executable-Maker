@@ -183,8 +183,8 @@ public sealed partial class SupportViewModel : PageViewModel
     {
         NeedsSignIn = !_account.IsSignedIn;
         CanUseSupport = _access.Has(HcgPermissions.SupportSubmit);
-        Availability = _account.Status == HcgAccountStatus.NotConfigured
-            ? "Support requests need HCG sign-in, which is not available in this version yet (" + _account.Message + "). You can still prepare a request below; nothing can be sent."
+        Availability = _account.Status is HcgAccountStatus.NotConfigured or HcgAccountStatus.ClientRejected
+            ? "Support requests need HCG sign-in, and the HCG connection is not working yet (see Account › HCG Connect). You can still prepare a request below; nothing can be sent."
             : !_account.IsSignedIn
                 ? "Sign in with HCG (Account page) to send support requests. You can prepare the request first."
                 : CanUseSupport ? "Ready: requests go to HCG Executable Maker support." : _access.Message;

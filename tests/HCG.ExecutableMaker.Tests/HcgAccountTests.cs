@@ -122,11 +122,15 @@ public class HcgAuthTests
     }
 
     [Fact]
-    public void Without_a_registered_client_sign_in_is_not_configured()
+    public void Without_a_local_client_id_sign_in_is_not_configured_and_nothing_is_claimed_about_HCG()
     {
-        var (client, _) = Client(HcgConnectConfiguration.Default);
+        var (client, server) = Client(HcgConnectConfiguration.Default);
         Assert.Equal(HcgAuthFailure.NotConfigured, Assert.Throws<HcgAuthException>(() => client.BeginSignIn(Redirect)).Failure);
-        Assert.Contains(HcgConnectConfiguration.Default.MissingForSignIn(), m => m.Contains("not registered"));
+        var issue = Assert.Single(HcgConnectConfiguration.Default.Issues());
+        Assert.Equal("clientId", issue.Field);
+        Assert.StartsWith("missing: no client ID is configured on this computer", issue.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(HcgConnectConfiguration.Default.MissingForSignIn(), m => m.Contains("not registered", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(server.Calls); // nothing is contacted
     }
 
     [Fact]

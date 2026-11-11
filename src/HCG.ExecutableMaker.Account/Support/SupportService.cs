@@ -70,8 +70,12 @@ public sealed class SupportService(HcgApiClient api, HttpClient uploadHttp)
                 throw new InvalidOperationException($"HCG asked for an attachment that was not selected ({slot.Name}).");
             try
             {
-                await UploadWithRenewalAsync(created.Request.Id, slot, file, new Progress<long>(sent =>
-                    progress?.Report(new UploadProgress(file.Name, sent, new FileInfo(file.Path).Length, index, created.Uploads.Count))), ct).ConfigureAwait(false);
+                // Reported synchronously and in order (Progress<T> would post each report to the thread pool, so the last
+                // one could arrive after the upload finished); the caller's IProgress marshals to the UI.
+                var total = new FileInfo(file.Path).Length;
+                var fileIndex = index;
+                await UploadWithRenewalAsync(created.Request.Id, slot, file, new InlineProgress(sent =>
+                    progress?.Report(new UploadProgress(file.Name, sent, total, fileIndex, created.Uploads.Count))), ct).ConfigureAwait(false);
                 var done = await api.PostAsync<AttachmentEnvelope>($"support/requests/{created.Request.Id}/attachments/{slot.AttachmentId}/complete", new { }, ct).ConfigureAwait(false);
                 attachments.Add(done.Attachment);
                 if (done.Attachment.State == "rejected")
@@ -141,6 +145,11 @@ public sealed class SupportService(HcgApiClient api, HttpClient uploadHttp)
     }
 
     /// <summary>Streams a file and reports bytes sent.</summary>
+    private sealed class InlineProgress(Action<long> report) : IProgress<long>
+    {
+        public void Report(long value) => report(value);
+    }
+
     private sealed class ProgressContent(Stream source, long length, IProgress<long> progress) : HttpContent
     {
         protected override async Task SerializeToStreamAsync(Stream target, TransportContext? context, CancellationToken ct)

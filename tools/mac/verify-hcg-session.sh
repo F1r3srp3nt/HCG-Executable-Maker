@@ -57,8 +57,10 @@ grep -q "HCG account: SignedIn" "$WORK/status.out" || fail "restart 1: session n
 run "Restart 2" status 0
 grep -q "HCG account: SignedIn" "$WORK/status.out" || fail "restart 2: session not restored"
 S=$(state); echo "mock: $S"
-python3 -c "import json,sys;s=json.loads(sys.argv[1]);assert s['codeExchanges']==1 and s['refreshes']==2 and s['authorizations']==1,s" "$S" \
-  || fail "expected one sign-in and one refresh per restart"
+# Two authorization requests: the app's preflight (asks the identity service whether it accepts the client, without a
+# browser; never redeemed) and the browser's. One code exchange = one sign-in.
+python3 -c "import json,sys;s=json.loads(sys.argv[1]);assert s['codeExchanges']==1 and s['refreshes']==2 and s['authorizations']==2,s" "$S" \
+  || fail "expected one sign-in (preflight + browser authorization, one code exchange) and one refresh per restart"
 pass "session restored after two restarts without the browser (one sign-in, one rotated refresh per start)"
 
 # 2. The GUI of the packaged app after a restart: Account page shows the restored session and plan.

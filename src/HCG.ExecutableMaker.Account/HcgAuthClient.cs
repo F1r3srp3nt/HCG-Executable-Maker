@@ -26,8 +26,10 @@ public sealed record HcgSession
 
 public enum HcgAuthFailure
 {
-    /// <summary>The sign-in has not been configured for this build (client not registered).</summary>
+    /// <summary>The configuration on this computer is missing or incomplete (see HcgConnectConfiguration.Issues). Says nothing about HCG.</summary>
     NotConfigured,
+    /// <summary>HCG's identity service itself rejected this app's client (invalid_client, unauthorized_client, oauth_client_not_found).</summary>
+    ClientRejected,
     /// <summary>The user declined on the consent page, or HCG refused the account.</summary>
     Denied,
     /// <summary>The session can no longer be refreshed: sign in again.</summary>
@@ -221,8 +223,9 @@ public sealed class HcgAuthClient(HttpClient http, HcgConnectConfiguration confi
             throw refreshing
                 ? new HcgAuthException(HcgAuthFailure.Expired, "Your HCG session has expired or was ended. Sign in again.")
                 : new HcgAuthException(HcgAuthFailure.Invalid, "The sign-in code was not accepted (it may have expired or been used). Start sign-in again.");
-        if (code is "unauthorized_client" or "invalid_client")
-            throw new HcgAuthException(HcgAuthFailure.NotConfigured, "HCG does not recognise this app's sign-in client. Its registration may be missing or changed.");
+        if (code is "unauthorized_client" or "invalid_client" or "oauth_client_not_found")
+            throw new HcgAuthException(HcgAuthFailure.ClientRejected,
+                $"HCG's identity service rejected this app's client {Configuration.ClientId} ({code}{(description is null ? "" : ": " + Clean(description))}). The client registration is missing, disabled or does not match this configuration; HCG must check it in ERP › App integrations.");
         throw new HcgAuthException(refreshing ? HcgAuthFailure.Expired : HcgAuthFailure.Invalid,
             $"HCG refused the {(refreshing ? "session refresh" : "sign-in")} ({Clean(code ?? ((int)status).ToString())}{(description is null ? "" : ": " + Clean(description))}).");
     }
