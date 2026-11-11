@@ -94,12 +94,148 @@
         </StackPanel>
       </Border>
 
-      <!-- 2 · PATHS -->
+      <!-- 2 · COMPATIBILITY REPORT -->
+      <Border Classes="card" IsVisible="{Binding HasCompatibility}">
+        <StackPanel Spacing="14">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="label" Text="2 · INSPECT COMPATIBILITY" />
+            <TextBlock Classes="h2" Text="Compatibility report" />
+            <TextBlock Classes="muted" TextWrapping="Wrap" Text="Read-only: project files and source are read as text, nothing runs. A successful inspection is not a conversion." />
+          </StackPanel>
+          <SelectableTextBlock Classes="body" Text="{Binding CompatibilitySummary}" TextWrapping="Wrap" />
+          <Border Classes="callout error" IsVisible="{Binding HasProjectBlockers}">
+            <ItemsControl ItemsSource="{Binding ProjectBlockers}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String"><SelectableTextBlock FontSize="12.5" TextWrapping="Wrap" Margin="0,2" Text="{Binding StringFormat='• {0}'}" /></DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+          <TextBlock Classes="formlabel" Text="SOURCES FOUND (FRAMEWORK, LANGUAGE, ENTRY POINT)" Margin="0" />
+          <ItemsControl ItemsSource="{Binding DetectedSources}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:DetectedSourceItem">
+                <StackPanel Spacing="1" Margin="0,3">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                  <TextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Entry}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Grid ColumnDefinitions="*,14,*">
+            <StackPanel Spacing="12">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="formlabel" Text="UNSUPPORTED BY THE CURRENT CONVERTER" Margin="0" />
+                <ItemsControl ItemsSource="{Binding UnsupportedFeatures}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
+                      <StackPanel Spacing="2" Margin="0,4">
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding Context}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
+                        <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" />
+                        <TextBlock FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                        <TextBlock FontSize="11.5" Foreground="{DynamicResource Hcg.Brush.Cyan}" Text="{Binding Guidance}" TextWrapping="Wrap" IsVisible="{Binding HasGuidance}" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+              <StackPanel Spacing="6">
+                <TextBlock Classes="formlabel" Text="REQUIRES A BACKEND OR COMPANION COMPUTER" Margin="0" />
+                <ItemsControl ItemsSource="{Binding CompanionFeatures}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
+                      <StackPanel Spacing="2" Margin="0,4">
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding Context}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
+                        <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" />
+                        <TextBlock FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                        <TextBlock FontSize="11.5" Foreground="{DynamicResource Hcg.Brush.Cyan}" Text="{Binding Guidance}" TextWrapping="Wrap" IsVisible="{Binding HasGuidance}" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="12">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="formlabel" Text="REQUIRES ADAPTATION" Margin="0" />
+                <ItemsControl ItemsSource="{Binding AdaptationFeatures}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
+                      <StackPanel Spacing="2" Margin="0,4">
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding Context}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
+                        <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" />
+                        <TextBlock FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                        <TextBlock FontSize="11.5" Foreground="{DynamicResource Hcg.Brush.Cyan}" Text="{Binding Guidance}" TextWrapping="Wrap" IsVisible="{Binding HasGuidance}" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+              <StackPanel Spacing="6">
+                <TextBlock Classes="formlabel" Text="REUSABLE" Margin="0" />
+                <ItemsControl ItemsSource="{Binding ReusableFeatures}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:CompatibilityFeatureItem">
+                      <StackPanel Spacing="2" Margin="0,4">
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding Context}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
+                        <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" />
+                        <TextBlock FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                        <TextBlock FontSize="11.5" Foreground="{DynamicResource Hcg.Brush.Cyan}" Text="{Binding Guidance}" TextWrapping="Wrap" IsVisible="{Binding HasGuidance}" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </StackPanel>
+          </Grid>
+          <TextBlock Classes="formlabel" Text="CHOOSE A TARGET (iOS / iPadOS OR ANDROID)" Margin="0,4,0,0" />
+          <ItemsControl ItemsSource="{Binding TargetOptions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TargetOptionItem">
+                <Border Classes="inset" Padding="14,10" Margin="0,3">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" />
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding Mode}" />
+                      <TextBlock FontSize="12.5" Text="{Binding Summary}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding Requirements}" TextWrapping="Wrap" IsVisible="{Binding HasRequirements}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6" Margin="12,0,0,0" HorizontalAlignment="Right">
+                      <c:StatusChip Status="{Binding Status}" HorizontalAlignment="Right" />
+                      <Button Classes="small" Content="Choose" HorizontalAlignment="Right" IsVisible="{Binding CanChoose}"
+                              Command="{Binding $parent[UserControl].((vm:PortingStudioViewModel)DataContext).ChooseTargetCommand}" CommandParameter="{Binding}" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Expander Header="Support matrix: every source framework × target, implemented or planned" HorizontalAlignment="Stretch">
+            <ItemsControl ItemsSource="{Binding Matrix}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:SupportRowItem">
+                  <Grid ColumnDefinitions="260,120,190,*" Margin="0,4">
+                    <TextBlock Text="{Binding Source}" FontWeight="Medium" TextWrapping="Wrap" />
+                    <TextBlock Grid.Column="1" Text="{Binding Target}" />
+                    <StackPanel Grid.Column="2" Spacing="3"><c:StatusChip Status="{Binding Status}" HorizontalAlignment="Left" /><TextBlock Classes="muted" FontSize="11.5" Text="{Binding Mode}" /></StackPanel>
+                    <StackPanel Grid.Column="3" Spacing="2">
+                      <TextBlock FontSize="12" Text="{Binding Summary}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Requirements}" TextWrapping="Wrap" IsVisible="{Binding HasRequirements}" />
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Expander>
+        </StackPanel>
+      </Border>
+
+      <!-- 3 · PATHS -->
       <Border Classes="card">
         <StackPanel Spacing="12">
           <StackPanel Spacing="2">
-            <TextBlock Classes="label" Text="2 · CONVERSION PATHS" />
-            <TextBlock Classes="h2" Text="What can be ported" />
+            <TextBlock Classes="label" Text="3 · IMPLEMENTED CONVERSION PATHS" />
+            <TextBlock Classes="h2" Text="What HCG can convert in this project" />
             <TextBlock Classes="muted" TextWrapping="Wrap" Text="Each path lists the sources found in the project with what HCG can do: build an existing target, generate a new one, or explain the blockers." />
           </StackPanel>
           <ItemsControl ItemsSource="{Binding Paths}">
@@ -146,7 +282,7 @@
         <StackPanel Spacing="14">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2">
-              <TextBlock Classes="label" Text="3 · COMPATIBILITY ASSESSMENT" />
+              <TextBlock Classes="label" Text="4 · CONVERSION PLAN INPUTS" />
               <TextBlock Classes="h2" Text="{Binding SelectedSource.Name, FallbackValue=''}" />
             </StackPanel>
             <c:StatusChip Grid.Column="1" Status="{Binding SelectedSource.Capability, FallbackValue={x:Null}}" VerticalAlignment="Top" />
@@ -178,9 +314,9 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:FindingItem">
                     <Grid ColumnDefinitions="Auto,*" Margin="0,5">
-                      <c:StatusChip Status="{Binding Disposition}" VerticalAlignment="Top" Margin="0,0,10,0" />
+                      <c:StatusChip Status="{Binding ClassTag}" VerticalAlignment="Top" Margin="0,0,10,0" />
                       <StackPanel Grid.Column="1" Spacing="2">
-                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding Category}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
+                        <TextBlock TextWrapping="Wrap"><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding Category}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="  ·  " Foreground="{DynamicResource Hcg.Brush.TextMuted}" /><Run Text="{Binding DispositionText}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
                         <TextBlock Classes="muted mono" FontSize="11.5" Text="{Binding Location}" IsVisible="{Binding HasLocation}" />
                         <TextBlock FontSize="12.5" Text="{Binding Detail}" TextWrapping="Wrap" />
                         <TextBlock Classes="mono" FontSize="11" Foreground="{DynamicResource Hcg.Brush.TextMuted}" Text="{Binding Evidence}" IsVisible="{Binding HasEvidence}" TextTrimming="CharacterEllipsis" />
@@ -205,6 +341,12 @@
                       <c:StatusChip Grid.Column="1" Status="{Binding Status}" VerticalAlignment="Top" />
                     </Grid>
                   </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Classes="formlabel" Text="MANUAL STEPS (NOT GENERATED, NOT FAKED)" Margin="0,6,0,0" IsVisible="{Binding HasManualSteps}" />
+              <ItemsControl ItemsSource="{Binding ManualSteps}" IsVisible="{Binding HasManualSteps}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String"><TextBlock FontSize="12.5" TextWrapping="Wrap" Margin="0,2" Text="{Binding StringFormat='• {0}'}" /></DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               <TextBlock Classes="formlabel" Text="SIGNING AND DISTRIBUTION" Margin="0,6,0,0" />
@@ -335,8 +477,8 @@
       <Border Classes="card" IsVisible="{Binding HasReport}">
         <StackPanel Spacing="12">
           <StackPanel Spacing="2">
-            <TextBlock Classes="label" Text="6 · VERIFICATION" />
-            <TextBlock Classes="h2" Text="Generated · compiled · launched · device-tested" />
+            <TextBlock Classes="label" Text="7 · VALIDATE AND BUILD" />
+            <TextBlock Classes="h2" Text="Generated · validated · compiled · launched · device-tested" />
             <TextBlock Classes="muted" TextWrapping="Wrap" Text="Each level is reported on its own; passing one never implies the next. Compiling uses Mobile Build Studio's engine (the port appears in Projects and Build History). Publishing and store submission are not performed." />
           </StackPanel>
           <ItemsControl ItemsSource="{Binding Verification}">
@@ -354,6 +496,9 @@
             <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
           </CheckBox>
           <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Command="{Binding ValidateCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Check}" /><TextBlock Text="Validate" /></StackPanel>
+            </Button>
             <Button Classes="primary" Command="{Binding CompileCommand}">
               <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Play}" /><TextBlock Text="Compile" /></StackPanel>
             </Button>
@@ -361,6 +506,19 @@
               <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Launch in simulator / emulator" /></StackPanel>
             </Button>
           </StackPanel>
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding IsWebPackaging}"
+                     Text="Web packaging: Validate checks that your project is unchanged and, after you confirm trust, runs npm install, the project's web build and Capacitor's CLI, which creates the native project from its template. Compile then builds it with Mobile Build Studio's engine." />
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsWebPackaging}">
+            <TextBlock Classes="formlabel" Text="TEXT THE LAUNCHED APP MUST SHOW (OPTIONAL)" VerticalAlignment="Center" Margin="0,0,10,0" />
+            <TextBox Grid.Column="1" Text="{Binding ExpectText}" PlaceholderText="e.g. the app's heading" MaxWidth="320" HorizontalAlignment="Left" />
+          </Grid>
+          <ItemsControl ItemsSource="{Binding ValidationChecks}" IsVisible="{Binding HasValidationChecks}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="d:ValidationCheck">
+                <TextBlock FontSize="12" TextWrapping="Wrap" Margin="0,1"><Run Text="{Binding Passed, Converter={x:Static vm:PortingConverters.PassFail}}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding Name}" FontWeight="Medium" /><Run Text=" — " /><Run Text="{Binding Detail}" /></TextBlock>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
           <Image Source="{Binding Screenshot}" MaxHeight="520" HorizontalAlignment="Left" IsVisible="{Binding Screenshot, Converter={x:Static ObjectConverters.IsNotNull}}" />
           <ListBox Classes="log" ItemsSource="{Binding LogLines}" Height="260" IsVisible="{Binding HasLog}">
             <ListBox.ItemTemplate>

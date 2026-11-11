@@ -41,13 +41,14 @@ public sealed partial class PortingStudioViewModel : PageViewModel
         _paths = paths;
         OutputParent = Path.Combine(paths.DefaultOutputDirectory, "Ports");
         foreach (var p in porting.Porters) Paths.Add(new PortPathItem(p.Path, p.Scope));
+        foreach (var row in ConversionCatalog.Matrix) Matrix.Add(new SupportRowItem(row));
     }
 
     public override string Title => "Porting Studio";
-    public override string Subtitle => "Source-based ports: macOS → iOS and Linux → Android, with an honest assessment and a reviewable diff.";
+    public override string Subtitle => "Desktop → mobile conversion: inspect compatibility, choose iOS/iPadOS or Android, review the plan, generate a separate project, validate, build.";
 
     public string HonestyNote =>
-        "Porting works from source code, within the scopes listed for each path — it is not a universal converter. HCG generates a new target only " +
+        "Conversion works from source code (a compiled executable is never enough), within the scopes listed for each path and the support matrix — it is not a universal converter. A successful inspection is not a conversion, and a generated project is not a verified mobile build. HCG generates a new target only " +
         "with supported adaptations, lists every blocker that needs manual porting (never replacing it with a stub), writes the port to a separate " +
         "folder (your project is not modified), and reports separately whether the port was generated, compiled, launched in a simulator/emulator, " +
         "or tested on a device. Publishing and store submission stay manual.";
@@ -134,9 +135,10 @@ public sealed partial class PortingStudioViewModel : PageViewModel
     {
         if (SelectedProject is null) return;
         var project = SelectedProject.Project;
-        await RunAsync("Assessing (read-only — nothing is executed)…", async ct =>
+        await RunAsync("Inspecting compatibility (read-only — nothing is executed)…", async ct =>
         {
-            var assessments = await _porting.AssessAsync(project, ct);
+            var (compatibility, assessments) = await _porting.InspectAsync(project, ct);
+            ShowCompatibility(compatibility);
             foreach (var path in Paths)
             {
                 path.Sources.Clear();
@@ -149,6 +151,61 @@ public sealed partial class PortingStudioViewModel : PageViewModel
     }
 
     [RelayCommand] private void SelectSource(PortSourceItem item) => SelectedSource = item;
+
+    // ───────────── Compatibility report ─────────────
+
+    [ObservableProperty] private CompatibilityReport? _compatibility;
+    [ObservableProperty] private string _compatibilitySummary = "";
+    [ObservableProperty] private bool _hasProjectBlockers;
+    public bool HasCompatibility => Compatibility is not null;
+    public ObservableCollection<DetectedSourceItem> DetectedSources { get; } = [];
+    public ObservableCollection<CompatibilityFeatureItem> ReusableFeatures { get; } = [];
+    public ObservableCollection<CompatibilityFeatureItem> AdaptationFeatures { get; } = [];
+    public ObservableCollection<CompatibilityFeatureItem> CompanionFeatures { get; } = [];
+    public ObservableCollection<CompatibilityFeatureItem> UnsupportedFeatures { get; } = [];
+    public ObservableCollection<TargetOptionItem> TargetOptions { get; } = [];
+    public ObservableCollection<string> ProjectBlockers { get; } = [];
+    /// <summary>Every source framework × target × mode HCG knows, with its status (implemented, planned, not planned).</summary>
+    public ObservableCollection<SupportRowItem> Matrix { get; } = [];
+
+    private void ShowCompatibility(CompatibilityReport report)
+    {
+        Compatibility = report;
+        DetectedSources.Clear();
+        foreach (var src in report.Sources) DetectedSources.Add(new DetectedSourceItem(src));
+        foreach (var (list, cls) in new[] { (ReusableFeatures, FeatureClass.Reusable), (AdaptationFeatures, FeatureClass.RequiresAdaptation), (CompanionFeatures, FeatureClass.RequiresBackendOrCompanion), (UnsupportedFeatures, FeatureClass.Unsupported) })
+        {
+            list.Clear();
+            foreach (var f in report.Features.Where(f => f.Class == cls)) list.Add(new CompatibilityFeatureItem(f, report.Sources.FirstOrDefault(x => x.Key == f.SourceKey)));
+        }
+        TargetOptions.Clear();
+        foreach (var o in report.Options.OrderBy(o => o.Status).ThenBy(o => o.SourceKey, StringComparer.Ordinal).ThenBy(o => o.Target))
+            TargetOptions.Add(new TargetOptionItem(o, report.Sources.FirstOrDefault(x => x.Key == o.SourceKey)));
+        ProjectBlockers.Clear();
+        foreach (var b in report.Blockers) ProjectBlockers.Add(b);
+        HasProjectBlockers = ProjectBlockers.Count > 0;
+        CompatibilitySummary = report.ExecutableOnly
+            ? "Only compiled programs were imported — there is nothing to convert."
+            : $"{report.Sources.Count} source(s) · {report.Count(FeatureClass.Reusable)} reusable · {report.Count(FeatureClass.RequiresAdaptation)} need adaptation · " +
+              $"{report.Count(FeatureClass.RequiresBackendOrCompanion)} need a backend or companion computer · {report.Count(FeatureClass.Unsupported)} unsupported by the current converter" +
+              (report.Revision is { } r ? $" · {r.Describe()}" : "");
+        OnPropertyChanged(nameof(HasCompatibility));
+    }
+
+    /// <summary>Choose a target for a source: selects that source on the implemented path (the plan inputs follow).</summary>
+    [RelayCommand]
+    private void ChooseTarget(TargetOptionItem item)
+    {
+        if (item.Option.Path is { } path) SelectSource(item.Option.SourceKey, path);
+    }
+
+    public bool SelectSource(string key, PortingPath path)
+    {
+        var match = Paths.Where(p => p.Path == path).SelectMany(p => p.Sources).FirstOrDefault(s => s.Assessment.Source.Key == key);
+        if (match is null) return false;
+        SelectedSource = match;
+        return true;
+    }
 
     // ───────────── 3 · Assessment ─────────────
 
@@ -166,6 +223,9 @@ public sealed partial class PortingStudioViewModel : PageViewModel
     public bool IsBuildExisting => SelectedSource?.Assessment.Capability == PortingCapability.BuildExistingTarget;
     public bool IsNotSupported => SelectedSource?.Assessment.Capability == PortingCapability.NotSupported;
     public bool IsAndroid => SelectedSource?.Assessment.Path == PortingPath.LinuxToAndroid;
+    public bool IsWebPackaging => SelectedSource is { } s && PortingService.IsWebPackaging(s.Assessment.Path);
+    public ObservableCollection<string> ManualSteps { get; } = [];
+    public bool HasManualSteps => ManualSteps.Count > 0;
     public bool HasRequiredTexts => RequiredTexts.Count > 0;
 
     partial void OnSelectedSourceChanged(PortSourceItem? value)
@@ -177,17 +237,20 @@ public sealed partial class PortingStudioViewModel : PageViewModel
         Signing.Clear();
         Scope.Clear();
         RequiredTexts.Clear();
+        ManualSteps.Clear();
         if (value is { } item)
         {
             var a = item.Assessment;
+            foreach (var m in a.ManualSteps) ManualSteps.Add(m);
             foreach (var f in a.Findings) Findings.Add(new FindingItem(f));
             foreach (var u in a.Reusable) Units.Add(u);
             foreach (var r in a.Toolchains) Requirements.Add(new RequirementItem(r));
             foreach (var s in a.Signing) Signing.Add(s);
             foreach (var s in a.Scope) Scope.Add(s);
             foreach (var key in a.RequiredTexts) RequiredTexts.Add(new UsageTextItem(key));
-            FindingCounts = $"{a.Blockers.Count()} blocker(s) · {a.Findings.Count(f => f.Disposition == FindingDisposition.NeedsReview)} to review · " +
-                            $"{a.Findings.Count(f => f.Disposition == FindingDisposition.AutoAdapted)} supported adaptation(s)";
+            FindingCounts = $"{a.Mode.DisplayName()} → {a.Target.DisplayName()} · {a.Findings.Count(f => f.Class == FeatureClass.Reusable)} reusable · " +
+                            $"{a.Findings.Count(f => f.Class == FeatureClass.RequiresAdaptation)} require adaptation ({a.Findings.Count(f => f.Disposition == FindingDisposition.AutoAdapted)} done by HCG) · " +
+                            $"{a.Findings.Count(f => f.Class == FeatureClass.RequiresBackendOrCompanion)} need a backend or companion · {a.Blockers.Count()} unsupported";
             AppName = a.SuggestedAppName ?? a.Source.Target;
             AppId = a.SuggestedAppId ?? "com.example.app";
             DefaultArguments = "";
@@ -199,6 +262,8 @@ public sealed partial class PortingStudioViewModel : PageViewModel
         OnPropertyChanged(nameof(IsBuildExisting));
         OnPropertyChanged(nameof(IsNotSupported));
         OnPropertyChanged(nameof(IsAndroid));
+        OnPropertyChanged(nameof(IsWebPackaging));
+        OnPropertyChanged(nameof(HasManualSteps));
         OnPropertyChanged(nameof(HasRequiredTexts));
         GenerateCommand.NotifyCanExecuteChanged();
     }
@@ -281,7 +346,11 @@ public sealed partial class PortingStudioViewModel : PageViewModel
 
     public ObservableCollection<VerificationItem> Verification { get; } = [];
     public ObservableCollection<LogLineItem> LogLines { get; } = [];
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CompileCommand), nameof(LaunchCommand))] private bool _trustAcknowledged;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(CompileCommand), nameof(LaunchCommand), nameof(ValidateCommand))] private bool _trustAcknowledged;
+    /// <summary>Optional: text the launched app must show (checked through the accessibility tree on Android).</summary>
+    [ObservableProperty] private string _expectText = "";
+    public ObservableCollection<ValidationCheck> ValidationChecks { get; } = [];
+    public bool HasValidationChecks => ValidationChecks.Count > 0;
     [ObservableProperty] private Bitmap? _screenshot;
     [ObservableProperty] private bool _hasLog;
     public string TrustLabel => TrustPolicy.AcknowledgementLabel;
@@ -291,6 +360,10 @@ public sealed partial class PortingStudioViewModel : PageViewModel
         Verification.Clear();
         if (Report is null) return;
         foreach (var level in Enum.GetValues<VerificationLevel>()) Verification.Add(new VerificationItem(Report.Level(level)));
+        ValidationChecks.Clear();
+        foreach (var c in Report.ValidationChecks) ValidationChecks.Add(c);
+        OnPropertyChanged(nameof(HasValidationChecks));
+        ValidateCommand.NotifyCanExecuteChanged();
         var shot = Report.Verification.Select(v => v.Evidence).LastOrDefault(e => e is not null && e.EndsWith(".png", StringComparison.Ordinal) && File.Exists(e));
         try { Screenshot = shot is null ? null : new Bitmap(shot); } catch (Exception) { Screenshot = null; }
         CompileCommand.NotifyCanExecuteChanged();
@@ -298,6 +371,24 @@ public sealed partial class PortingStudioViewModel : PageViewModel
     }
 
     private bool CanCompile() => Report is not null && TrustAcknowledged && !IsWorking;
+    private bool CanValidate() => Report is not null && !IsWorking;
+
+    /// <summary>Validate: source preserved, output complete, path checks; for web packaging (with trust) the web build and the native project.</summary>
+    [RelayCommand(CanExecute = nameof(CanValidate))]
+    private async Task ValidateAsync()
+    {
+        if (Report is not { } report) return;
+        LogLines.Clear();
+        var timer = new DispatcherTimer(TimeSpan.FromMilliseconds(150), DispatcherPriority.Background, (_, _) => FlushLog());
+        timer.Start();
+        await RunAsync(PortingService.IsWebPackaging(report.Assessment.Path) && TrustAcknowledged
+            ? "Validating: npm install, web build, Capacitor creates the native project…" : "Validating (source preserved, output complete)…", async ct =>
+            Report = await Task.Run(() => _porting.ValidateAsync(report, TrustAcknowledged,
+                line => _pendingLog.Enqueue(new BuildLogLine(DateTimeOffset.Now, line.StartsWith("FAIL", StringComparison.Ordinal) ? BuildLogKind.Error : line.StartsWith("PASS", StringComparison.Ordinal) ? BuildLogKind.Success : BuildLogKind.Output, line)), ct), ct));
+        timer.Stop();
+        FlushLog();
+        RefreshVerification();
+    }
     private bool CanLaunch() => Report?.Level(VerificationLevel.Compiled).Status == LevelStatus.Passed && TrustAcknowledged && !IsWorking;
 
     partial void OnIsWorkingChanged(bool value)
@@ -305,6 +396,7 @@ public sealed partial class PortingStudioViewModel : PageViewModel
         CompileCommand.NotifyCanExecuteChanged();
         LaunchCommand.NotifyCanExecuteChanged();
         GenerateCommand.NotifyCanExecuteChanged();
+        ValidateCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanCompile))]
@@ -314,7 +406,8 @@ public sealed partial class PortingStudioViewModel : PageViewModel
         LogLines.Clear();
         var timer = new DispatcherTimer(TimeSpan.FromMilliseconds(150), DispatcherPriority.Background, (_, _) => FlushLog());
         timer.Start();
-        await RunAsync(report.Assessment.Path == PortingPath.MacOSToIOS ? "Compiling for the iOS Simulator…" : "Compiling a debug APK (Gradle + NDK)…", async ct =>
+        await RunAsync(report.Assessment.Target == MobileTarget.Ios ? "Compiling for the iOS Simulator…"
+            : PortingService.IsWebPackaging(report.Assessment.Path) ? "Compiling a debug APK (npm install, web build, cap sync, Gradle)…" : "Compiling a debug APK (Gradle + NDK)…", async ct =>
         {
             var outcome = await Task.Run(() => _porting.CompileAsync(report, TrustAcknowledged, new Observer(this), ct), ct);
             Report = outcome.Report;
@@ -329,8 +422,8 @@ public sealed partial class PortingStudioViewModel : PageViewModel
     private async Task LaunchAsync()
     {
         if (Report is not { } report) return;
-        await RunAsync(report.Assessment.Path == PortingPath.MacOSToIOS ? "Launching in the iOS Simulator…" : "Installing and launching on the emulator/device…", async ct =>
-            Report = await Task.Run(() => _porting.LaunchAsync(report, TrustAcknowledged, ct), ct));
+        await RunAsync(report.Assessment.Target == MobileTarget.Ios ? "Launching in the iOS Simulator…" : "Installing and launching on the emulator/device…", async ct =>
+            Report = await Task.Run(() => _porting.LaunchAsync(report, TrustAcknowledged, ct, string.IsNullOrWhiteSpace(ExpectText) ? null : ExpectText.Trim()), ct));
         RefreshVerification();
     }
 
@@ -362,8 +455,8 @@ public sealed partial class PortingStudioViewModel : PageViewModel
 public sealed partial class PortPathItem(PortingPath path, IReadOnlyList<string> scope) : ObservableObject
 {
     public PortingPath Path { get; } = path;
-    public string Title => Path == PortingPath.MacOSToIOS ? "macOS → iOS" : "Linux → Android";
-    public string Subtitle => Path == PortingPath.MacOSToIOS ? "SwiftUI source → iPhone / iPad Xcode project" : "C/C++ (CMake) program → Android app (NDK)";
+    public string Title => Path.DisplayName();
+    public string Subtitle => $"{Path.Mode().DisplayName()} · {Path.Target().DisplayName()}";
     public IReadOnlyList<string> Scope { get; } = scope;
     public string ScopeSummary => Scope.FirstOrDefault() ?? "";
     public ObservableCollection<PortSourceItem> Sources { get; } = [];
@@ -391,6 +484,12 @@ public sealed partial class PortSourceItem(PortingAssessment assessment) : Obser
 public sealed class FindingItem(PortingFinding f)
 {
     public PortingFinding Finding { get; } = f;
+    public StatusTag ClassTag => FeatureClassTags.Tag(f.Class);
+    public string DispositionText => f.Disposition switch
+    {
+        FindingDisposition.AutoAdapted => "adapted by HCG", FindingDisposition.NeedsReview => "adapt by hand", FindingDisposition.RequiresCompanion => "needs a server or companion",
+        FindingDisposition.Blocker => "blocker", _ => "unchanged",
+    };
     public StatusTag Disposition => f.Disposition switch
     {
         FindingDisposition.Blocker => new StatusTag("Blocker", "error"),
@@ -449,4 +548,79 @@ public sealed class VerificationItem(VerificationEntry e)
     };
     public string Detail => e.Detail;
     public string When => e.At is { } at ? Format.When(at) : "";
+}
+
+public static class FeatureClassTags
+{
+    public static StatusTag Tag(FeatureClass c) => c switch
+    {
+        FeatureClass.Reusable => new StatusTag("Reusable", "success"),
+        FeatureClass.RequiresAdaptation => new StatusTag("Requires adaptation", "info"),
+        FeatureClass.RequiresBackendOrCompanion => new StatusTag("Backend / companion", "warning"),
+        _ => new StatusTag("Unsupported", "error"),
+    };
+
+    public static StatusTag Tag(SupportStatus s) => s switch
+    {
+        SupportStatus.Implemented => new StatusTag("Implemented", "success"),
+        SupportStatus.Planned => new StatusTag("Planned", "warning"),
+        _ => new StatusTag("Not planned", "neutral"),
+    };
+}
+
+public sealed class DetectedSourceItem(DetectedSource s)
+{
+    public DetectedSource Source { get; } = s;
+    public string Name => s.Framework;
+    public string Detail => $"{s.Language} · {(s.Directory.Length == 0 ? "project root" : s.Directory + "/")} · {s.Evidence}";
+    public string Entry => s.EntryPoints.Count > 0 ? "Entry: " + string.Join(", ", s.EntryPoints) : "";
+}
+
+public sealed class CompatibilityFeatureItem(CompatibilityFeature f, DetectedSource? source)
+{
+    public StatusTag ClassTag => FeatureClassTags.Tag(f.Class);
+    public string Title => f.Title;
+    public string Context => $"{f.Area}{(source is null ? "" : " · " + source.Framework)}";
+    public string Explanation => f.Explanation;
+    public string Location => f.Location ?? "";
+    public bool HasLocation => f.Location is { Length: > 0 };
+    public string? Guidance => f.Guidance;
+    public bool HasGuidance => f.Guidance is not null;
+}
+
+public sealed class TargetOptionItem(TargetOption o, DetectedSource? source)
+{
+    public TargetOption Option { get; } = o;
+    public string Heading => $"{source?.Framework ?? o.SourceKey} → {o.Target.DisplayName()}";
+    public string Mode => o.Mode.DisplayName() + (o.Path is { } p ? " · " + p.DisplayName() : "");
+    public StatusTag Status => o.Status == SupportStatus.Implemented && o.Capability is { } c
+        ? c switch
+        {
+            PortingCapability.GenerateTarget => new StatusTag("Implemented · can generate", "success"),
+            PortingCapability.BuildExistingTarget => new StatusTag("Already mobile · build it", "success"),
+            PortingCapability.BlockedNeedsPorting => new StatusTag("Implemented · blocked", "warning"),
+            _ => new StatusTag("Implemented · not applicable", "neutral"),
+        }
+        : FeatureClassTags.Tag(o.Status);
+    public string Summary => o.Summary;
+    public string Requirements => string.Join("\n", o.Requirements.Select(r => "• " + r));
+    public bool HasRequirements => o.Requirements.Count > 0;
+    public bool CanChoose => o.Status == SupportStatus.Implemented && o.Path is not null;
+}
+
+public sealed class SupportRowItem(SupportRow r)
+{
+    public string Source => r.SourceFramework;
+    public string Target => r.Target.DisplayName();
+    public string Mode => r.Mode.DisplayName();
+    public StatusTag Status => FeatureClassTags.Tag(r.Status);
+    public string Summary => r.Summary;
+    public string Requirements => string.Join("\n", r.Requirements.Select(x => "• " + x));
+    public bool HasRequirements => r.Requirements.Count > 0;
+}
+
+public static class PortingConverters
+{
+    public static readonly Avalonia.Data.Converters.IValueConverter PassFail =
+        new Avalonia.Data.Converters.FuncValueConverter<bool, string>(passed => passed ? "PASS" : "FAIL");
 }

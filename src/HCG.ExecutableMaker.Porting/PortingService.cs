@@ -268,7 +268,7 @@ public sealed class PortingService(IToolchainService toolchains, ProjectService 
                          : new[] { (ToolchainIds.AndroidNdk, "Android NDK"), (ToolchainIds.AndroidCmake, "CMake (Android SDK)"), (ToolchainIds.AndroidSdk, "Android SDK"), (ToolchainIds.Jdk, "JDK") })
                 if (!report.IsAvailable(id))
                     return new(Record(port, new VerificationEntry(VerificationLevel.Compiled, LevelStatus.NotPossibleHere,
-                        $"{name} is not installed, so the native build cannot run here. {report.Find(id)?.InstallHint} The generated project pins the NDK/CMake versions found when it was generated, so Gradle does not download them either.", time.GetUtcNow())), null, null);
+                        $"{name} is not installed, so the native build cannot run here. {report.Find(id)?.InstallHint}" + (web ? " HCG does not install SDKs; the generated project is complete and can also be opened in Android Studio." : " The generated project pins the NDK/CMake versions found when it was generated, so Gradle does not download them either."), time.GetUtcNow())), null, null);
 
         // The port is imported like any project, then built by Mobile Build Studio's engine (logging, history, verification).
         var import = await projects.ImportDirectoryAsync(port.OutputDirectory, null, cancellationToken).ConfigureAwait(false);

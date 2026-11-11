@@ -46,6 +46,8 @@ public static class ConversionCatalog
             "SwiftUI does not run on Android. The interface would have to be rewritten (for example in Jetpack Compose); only platform-neutral logic could be shared, through Swift for Android, which HCG does not build."),
         Row(AppKit, "Objective-C, Swift (AppKit)", MobileTarget.Ios, ConversionMode.MobileAdaptation, SupportStatus.NotPlanned, null,
             "AppKit interfaces (NSView, NSWindow, XIBs, storyboards) have no automated UIKit equivalent. Move the interface to SwiftUI first; the SwiftUI path then applies."),
+        Row(AppKit, "Objective-C, Swift (AppKit)", MobileTarget.Android, ConversionMode.MobileAdaptation, SupportStatus.NotPlanned, null,
+            "AppKit and Objective-C interfaces do not run on Android; the interface would be written again for Android."),
         Row(CmakeConsole, "C, C++", MobileTarget.Android, ConversionMode.MobileAdaptation, SupportStatus.Implemented, PortingPath.LinuxToAndroid,
             "An Android Gradle project built with the NDK. The program's own main() runs unchanged in a touch console (output, input field, editable arguments)."),
         Row(CmakeConsole, "C, C++", MobileTarget.Ios, ConversionMode.MobileAdaptation, SupportStatus.Planned, null,
