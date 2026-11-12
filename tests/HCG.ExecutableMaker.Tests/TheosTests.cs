@@ -243,8 +243,10 @@ public class TheosTests : IDisposable
             if (compression == "gz") return Gzip(data);
             var tmp = _t.Combine(Guid.NewGuid().ToString("N"));
             File.WriteAllBytes(tmp, data);
-            using var p = Process.Start(new ProcessStartInfo("xz", ["--format=" + (compression == "lzma" ? "lzma" : "xz"), "-k", "-f", tmp]) { UseShellExecute = false })!;
-            p.WaitForExit();
+            using var p = Process.Start(new ProcessStartInfo("xz", ["--format=" + (compression == "lzma" ? "lzma" : "xz"), "-k", "-f", tmp]) { UseShellExecute = false, RedirectStandardInput = true })!;
+            p.StandardInput.Close();
+            if (!p.WaitForExit(60_000)) { p.Kill(entireProcessTree: true); throw new TimeoutException("xz did not finish within 60 s"); }
+            Assert.Equal(0, p.ExitCode);
             return File.ReadAllBytes(tmp + (compression == "lzma" ? ".lzma" : ".xz"));
         }
         var controlTar = Gzip(Tar([("control", Encoding.UTF8.GetBytes(control)), .. scripts.Select(s => (s.Name, Encoding.UTF8.GetBytes(s.Text)))]));

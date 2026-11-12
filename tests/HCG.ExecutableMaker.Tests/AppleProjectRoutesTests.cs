@@ -56,7 +56,8 @@ public class AppleProjectRoutesTests : IDisposable
 
         // The same project imported without the rest of the repository: the import is named, not read.
         var partial = MsBuildProjectFile.Parse(ios, [Path.Combine(repo, "iOS App Store Submission", "Directory.Build.props")], null, Path.Combine(repo, "iOS App Store Submission"));
-        Assert.Contains(partial.OutsideWorkspace, o => o.EndsWith(Path.Combine("Windows-executable-Application", "Directory.Build.props"), StringComparison.Ordinal));
+        // Outside files are named relative to the import, with "/" on every host.
+        Assert.Contains("../Windows-executable-Application/Directory.Build.props", partial.OutsideWorkspace);
         Assert.Null(partial.Get("Version"));
     }
 
