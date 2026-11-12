@@ -4,6 +4,25 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 
 ## [Unreleased] — `feature/web-desktop-app`
 
+### Added — Swift packaging contracts (`AppPackaging.json`) ([docs/SWIFT-MACOS.md](docs/SWIFT-MACOS.md#packaging-contracts-apppackagingjson))
+- **Swift packages can declare what a complete .app contains:** helper executables built by prebuild commands,
+  resources, an Info.plist template and an icon (schema `hcg-app-packaging/1`). Apps such as HCG Server, whose Go
+  agent lives in `Contents/Helpers`, are now packaged complete instead of without their helper.
+- **Read as data during inspection, with strict validation:**
+  - unknown keys and schemas are rejected;
+  - commands must be argument lists;
+  - paths must stay inside the workspace;
+  - helpers go only to `Contents/Helpers` and resources to `Contents/Resources`;
+  - invalid contracts are reported in Configure.
+- **Configure shows the prebuild commands verbatim.** They run only after explicit confirmation, and the build refuses
+  if the file changed after it was confirmed (SHA-256).
+- **Required tools** (for example `go >= 1.25`) are located (PATH, Homebrew, `/usr/local`) and version-checked, then
+  put first on the command's PATH.
+- **Helpers are placed in `Contents/Helpers` and signed before the app** (ad hoc, or Developer ID with the hardened
+  runtime). They are verified: present, executable, promised slices, own signature, and `<helper> version` matching
+  the app version.
+- Identity is prefilled from the contract and its Info.plist template; the template's other keys are kept in the app.
+
 ### Changed — Web app to desktop app ([docs/ELECTRON.md](docs/ELECTRON.md#browser-apps-create-desktop-application-vite--react))
 - **A recognised web app is now a selectable conversion candidate.** Browser apps, including nested ones such as
   `web-hcg-store/`, are listed under *Project to build*, each with its category. The picker no longer says "No runnable
