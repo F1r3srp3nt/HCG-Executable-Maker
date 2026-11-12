@@ -5,6 +5,40 @@ desktop apps (docs/ELECTRON.md), guided toolchain setup (docs/TOOLCHAINS.md) and
 (docs/HCG-ACCOUNT.md — not live until HCG's external setup is done) to 0.2.0.
 0.2.0 contained M0.1, M0.2 (Windows installer) and M0.5 (Mobile Build Studio), merged into `main` with founder approval.
 
+# HCG Nexus, HCG Mail iOS, HCG Sentinel (unreleased, not pushed)
+
+Details: docs/HCG-PROJECTS.md. Repositories inspected at Nexus c7cd62c, Mail 46d4228, Sentinel 810c6f9.
+
+## Verified locally (Linux x64)
+
+- Tests (TheosTests, AppleProjectRoutesTests) with fixtures copied from the three repositories: Theos detection of
+  Nexus (tweak + preference bundle subproject, separate preview app, rootless/rootful/roothide), missing tools listed
+  one by one (incl. the iPhoneOS SDK a configuration needs), the build plan (whole-repository copy, one folder per
+  configuration, space-free path, argument list), `.deb` verification against real lzma/xz packages with synthesized
+  Mach-O binaries (rootless pass; wrong layout, wrong Architecture field, missing files, old arm64e ABI, maintainer
+  scripts each reported; a non-deb rejected); Mail's iOS head through the imported props chain at the repository root
+  and as a partial import; workload pin readiness; the .NET iOS plans; Sentinel's targets/schemes, the deployment-range
+  preflight, SDKSettings parsing, the project-level xcodebuild error, result bundles.
+- The real wizard / Mobile Build Studio (ui-driver, headless) on the real repositories: Nexus shows *Required toolchain
+  missing* with Theos, ldid and the iOS toolchain listed; Mail (repository root) shows *Required toolchain missing* (a
+  Mac is required) with the iOS head's evaluated properties; Mail (submission folder only) shows *Configuration required*.
+- Full test suite passes.
+
+## Real builds (CI on macOS, not yet run: needs a push)
+
+- `hcg-nexus-theos`: rootless and rootful `.deb` and the preview app's `.deb` through the wizard, then HCG Nexus' own
+  `inspect-package.py --require-new-arm64e-abi` on Maker's output.
+- `hcg-mail-ios`: Simulator build and unsigned device archive through Mobile Build Studio with Xcode 26.3 and the
+  pinned workload.
+- `hcg-sentinel-archive`: archive of both schemes with every installed Xcode on macos-15 and macos-26, with the range
+  inventory; complete logs and `.xcresult` bundles uploaded.
+
+## Not verified
+
+- Signed IPA export for Mail and Sentinel (no certificates or profiles in CI); installing the Nexus `.deb` or any app on
+  a physical device; an Xcode whose range excludes 14.7 (none is installed on hosted runners — the preflight is covered
+  by tests with that range).
+
 # C/C++ projects (unreleased, branch `feature/native-cpp`, not pushed)
 
 Details: docs/NATIVE-CPP.md. Development host: Linux x64 (Ubuntu 24.04), CMake 3.28.3, Ninja 1.11.1, GNU Make 4.3,

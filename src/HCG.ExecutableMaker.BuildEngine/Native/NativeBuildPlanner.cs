@@ -357,9 +357,16 @@ public sealed partial class NativeOutputParser : IBuildOutputParser
             m = new BuildMessage(DiagnosticSeverity.Error, l.Value.Trim(), "linker");
         else if (MakeRegex().Match(line) is { Success: true } mk)
             m = new BuildMessage(DiagnosticSeverity.Error, mk.Value.Trim(), "make");
+        else if (TheosErrorRegex().Match(line) is { Success: true } th)
+            m = new BuildMessage(DiagnosticSeverity.Error, th.Groups["msg"].Value.Trim(), "Theos");
+        else if (MakefileErrorRegex().Match(line) is { Success: true } me)
+            m = new BuildMessage(DiagnosticSeverity.Error, me.Groups["msg"].Value.Trim(), "make", me.Groups["file"].Value, int.Parse(me.Groups["line"].Value, System.Globalization.CultureInfo.InvariantCulture));
         if (m is null || m.Text.Length == 0) return null;
         return _seen.Add($"{m.Severity}|{m.File}|{m.Line}|{m.Text}") ? m : null;
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"==> (?:Error|ERROR):\s*(?<msg>.+)$")] private static partial System.Text.RegularExpressions.Regex TheosErrorRegex();
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?<file>(?:[^:\s][^:]*/)?(?:GNU)?[Mm]akefile):(?<line>\d+): \*\*\* (?<msg>.+)$")] private static partial System.Text.RegularExpressions.Regex MakefileErrorRegex();
 
     private static DiagnosticSeverity Severity(string s) => s.StartsWith("warning", StringComparison.OrdinalIgnoreCase) ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error;
 

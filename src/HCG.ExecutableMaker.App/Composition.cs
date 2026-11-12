@@ -59,6 +59,7 @@ public static class Composition
         services.AddSingleton<IPackager, ElectronZipPackager>();
         services.AddSingleton<IPackager, ElectronDmgPackager>();
         services.AddSingleton<IPackager, ElectronFolderPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.Packagers.JailbreakDebPackager>();
         // C/C++ app bundles (a project's own .app) before the generic packagers.
         services.AddSingleton<IPackager, NativeAppBundlePackager>();
         services.AddSingleton<IPackager, NativeAppZipPackager>();

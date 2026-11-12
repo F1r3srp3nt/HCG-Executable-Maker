@@ -16,6 +16,9 @@ public sealed partial class MobileOutputParser
         BuildMessage? m = null;
         if (FileDiagnostic().Match(line) is { Success: true } f)
             m = new BuildMessage(Severity(f.Groups["sev"].Value), f.Groups["msg"].Value.Trim(), null, f.Groups["file"].Value, int.Parse(f.Groups["line"].Value, System.Globalization.CultureInfo.InvariantCulture));
+        else if (ProjectDiagnostic().Match(line) is { Success: true } pd)
+            // xcodebuild's project-level diagnostics: "/…/App.xcodeproj: error: The iOS deployment target … (in target 'App' from project 'App')"
+            m = new BuildMessage(Severity(pd.Groups["sev"].Value), pd.Groups["msg"].Value.Trim(), "xcodebuild", pd.Groups["file"].Value);
         else if (_msbuild.Parse(line) is { } ms) return ms;
         else if (KotlinDiagnostic().Match(line) is { Success: true } k)
             m = new BuildMessage(k.Groups["sev"].Value == "e" ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning, k.Groups["msg"].Value.Trim());
@@ -32,6 +35,10 @@ public sealed partial class MobileOutputParser
     // "/src/Main.java:12: error: ';' expected", "/src/App.swift:3:5: error: cannot find 'x' in scope"
     [GeneratedRegex(@"^(?<file>(?:[A-Za-z]:)?[^:\r\n]+\.\w+):(?<line>\d+):(?:\d+:)?\s*(?<sev>error|warning|fatal error):\s*(?<msg>.+)$")]
     private static partial Regex FileDiagnostic();
+
+    // "/path/App.xcodeproj: error: …", "/path/Package.swift: warning: …", "App.xcworkspace: error: …" (no line number)
+    [GeneratedRegex(@"^(?<file>(?:[A-Za-z]:)?[^\s:\r\n][^:\r\n]*\.(?:xcodeproj|xcworkspace|swift|plist|entitlements|xcconfig|storyboard|xib|xcassets|pbxproj|csproj|props|targets)): (?<sev>error|warning|fatal error): (?<msg>.+)$")]
+    private static partial Regex ProjectDiagnostic();
 
     // Kotlin: "e: file:///src/Main.kt:3:5 Unresolved reference: x", "w: ..."
     [GeneratedRegex(@"^(?<sev>[ew]): (?<msg>.+)$")]

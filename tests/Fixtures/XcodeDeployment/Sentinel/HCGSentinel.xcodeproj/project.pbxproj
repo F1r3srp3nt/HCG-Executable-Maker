@@ -1,0 +1,880 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+		03DB76429F34AF7AD922F784 = {
+			isa = PBXBuildFile;
+			fileRef = 8F0E96B575BE00FE93154471;
+		};
+		06445E34B31FECFDA80BEF26 = {
+			isa = PBXBuildFile;
+			fileRef = C2EE7BFA497C83E8CB6CC4C5;
+		};
+		097A1B3FD549A24C3A5B094D = {
+			isa = PBXBuildFile;
+			fileRef = D1E3E66E4D5FEE69008260D7;
+		};
+		114BF76CCED53D3C43938ADA = {
+			isa = PBXBuildFile;
+			fileRef = BF58F56693ED85973A16363E;
+		};
+		1765642323B19698F68CA5A5 = {
+			isa = PBXBuildFile;
+			fileRef = 50B9C78F8D6CE7155EFFDE38;
+		};
+		1D44BA41B1836A9B04EFF63B = {
+			isa = PBXBuildFile;
+			fileRef = 2A5A747FB219F9D3C6BA1700;
+		};
+		243F6ED582899AD41241A7B0 = {
+			isa = PBXBuildFile;
+			fileRef = 5F2811738549F1EF373FB313;
+		};
+		26D59DA831A38EA6B7CB311C = {
+			isa = PBXBuildFile;
+			fileRef = 31C5859F99483F16DD7B2062;
+		};
+		304BCD622FA11070B734B848 = {
+			isa = PBXBuildFile;
+			fileRef = B2656B33FA9426E806C4D254;
+		};
+		38BC38D3C648A528AB7E0793 = {
+			isa = PBXBuildFile;
+			fileRef = A060F98EA53E595620A976B9;
+		};
+		3A34F2F87743BC90D7C3E317 = {
+			isa = PBXBuildFile;
+			fileRef = BCD7F464D35F9BBE2B3F584E;
+		};
+		3B0F85A94B9E7D2CBEEC19B3 = {
+			isa = PBXBuildFile;
+			productRef = 4F4264813A27B5494A4641E3;
+		};
+		41DE2BA7DE7F07ACF1C26025 = {
+			isa = PBXBuildFile;
+			fileRef = C2EE7BFA497C83E8CB6CC4C5;
+		};
+		42DA74FB899EDBB81DB35136 = {
+			isa = PBXBuildFile;
+			fileRef = E9904427C1AC4207661F6226;
+		};
+		54401FD0870082CB186859B5 = {
+			isa = PBXBuildFile;
+			fileRef = F2C03D9AF5A8FBEB20BF0832;
+		};
+		545093389D53CBA8247DB630 = {
+			isa = PBXBuildFile;
+			fileRef = ADB158B392D819399534D9D3;
+		};
+		5569C91EB42F4D9A37E647AD = {
+			isa = PBXBuildFile;
+			fileRef = CC890A1DE343FC8121DDF7A5;
+		};
+		59C3C87C9DFE2C7974F731C9 = {
+			isa = PBXBuildFile;
+			fileRef = BCD7F464D35F9BBE2B3F584E;
+		};
+		5AD8CB302B66DDC8D6E11F69 = {
+			isa = PBXBuildFile;
+			fileRef = 1872EE232338710C27AB82C7;
+		};
+		66B5498E9B41A9383E2A456F = {
+			isa = PBXBuildFile;
+			fileRef = 8F0E96B575BE00FE93154471;
+		};
+		68CA03619FB983DAF35777DB = {
+			isa = PBXBuildFile;
+			fileRef = C6B9776991A6ACE26BA549EE;
+		};
+		867B2F884CE9E3583F4CFA49 = {
+			isa = PBXBuildFile;
+			fileRef = 16B7D591CAA76D555A803EF1;
+		};
+		8761A8A77150FEDE77F3CE85 = {
+			isa = PBXBuildFile;
+			fileRef = CC890A1DE343FC8121DDF7A5;
+		};
+		8B3ACFFDC3B70DDDB8617E01 = {
+			isa = PBXBuildFile;
+			fileRef = BF58F56693ED85973A16363E;
+		};
+		8BE2A0906D77091D57CC855C = {
+			isa = PBXBuildFile;
+			fileRef = 5C4848C94B72C491235569FA;
+		};
+		8F7164C86593E399E677FBA3 = {
+			isa = PBXBuildFile;
+			fileRef = 5F2811738549F1EF373FB313;
+		};
+		B0497617C77CB7B2FA40EEF3 = {
+			isa = PBXBuildFile;
+			productRef = B1759CFEBF67FABEFEB2EC05;
+		};
+		B20E3EAB7B113D266D60C1EB = {
+			isa = PBXBuildFile;
+			fileRef = 16B7D591CAA76D555A803EF1;
+		};
+		B2BF4ED09B5D8EE2456D0ABA = {
+			isa = PBXBuildFile;
+			fileRef = 69F325EE7EC20A3C1C3AD4EE;
+		};
+		B46D08AF6D620EC4D5544037 = {
+			isa = PBXBuildFile;
+			fileRef = F2C03D9AF5A8FBEB20BF0832;
+		};
+		B91D1E3A79609A8AAE77087A = {
+			isa = PBXBuildFile;
+			fileRef = A060F98EA53E595620A976B9;
+		};
+		B9300E15DF194084287FBD06 = {
+			isa = PBXBuildFile;
+			fileRef = ADB158B392D819399534D9D3;
+		};
+		BB84D1EB4E6439E7F6EB5E09 = {
+			isa = PBXBuildFile;
+			fileRef = 2A5A747FB219F9D3C6BA1700;
+		};
+		BCF9D3424C7921671D089749 = {
+			isa = PBXBuildFile;
+			fileRef = A091C20761EA4F0FAF6E04A1;
+		};
+		C32BDB66B976D80BE2BDE744 = {
+			isa = PBXBuildFile;
+			fileRef = 31C5859F99483F16DD7B2062;
+		};
+		CAD584738CD9CCFF93A781E4 = {
+			isa = PBXBuildFile;
+			fileRef = E9904427C1AC4207661F6226;
+		};
+		D3E71E4C4E3A9531FEBCDE37 = {
+			isa = PBXBuildFile;
+			fileRef = C6B9776991A6ACE26BA549EE;
+		};
+		DE5A232D509A6E55ACDF16A7 = {
+			isa = PBXBuildFile;
+			fileRef = 50B9C78F8D6CE7155EFFDE38;
+		};
+		E50049314E2EA966A736FEFC = {
+			isa = PBXBuildFile;
+			fileRef = 1872EE232338710C27AB82C7;
+		};
+		E698F4B5A7F650E848DD6916 = {
+			isa = PBXBuildFile;
+			fileRef = D1E3E66E4D5FEE69008260D7;
+		};
+		E7C1FAE647C4436878A24595 = {
+			isa = PBXBuildFile;
+			fileRef = 69F325EE7EC20A3C1C3AD4EE;
+		};
+		ECFE217818CBDB65841F2FDB = {
+			isa = PBXBuildFile;
+			fileRef = B2656B33FA9426E806C4D254;
+		};
+		FF48EF547108BB631411DC55 = {
+			isa = PBXBuildFile;
+			fileRef = 5C4848C94B72C491235569FA;
+		};
+		E14AFF94513A8630C47A3475 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFF32A4E65AA1ACDBAD95ACA;
+			proxyType = 1;
+			remoteGlobalIDString = 3FF5336FD5D9D57BED527C38;
+			remoteInfo = HCGSentinel;
+		};
+		16B7D591CAA76D555A803EF1 = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder.assetcatalog;
+			path = Assets.xcassets;
+			sourceTree = "<group>";
+		};
+		1872EE232338710C27AB82C7 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Keychain.swift;
+			sourceTree = "<group>";
+		};
+		2A5A747FB219F9D3C6BA1700 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = LoopbackHelperTransport.swift;
+			sourceTree = "<group>";
+		};
+		2BC414E19A665A41E22010DE = {
+			isa = PBXFileReference;
+			lastKnownFileType = wrapper;
+			path = SentinelCore;
+			sourceTree = "<group>";
+		};
+		31C5859F99483F16DD7B2062 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = RadioLabView.swift;
+			sourceTree = "<group>";
+		};
+		3AA016A11901BA515A6789B9 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = HCGSentinel.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		50B9C78F8D6CE7155EFFDE38 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = NetworkInspectorView.swift;
+			sourceTree = "<group>";
+		};
+		5C4848C94B72C491235569FA = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = ToolModels.swift;
+			sourceTree = "<group>";
+		};
+		5F2811738549F1EF373FB313 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CoreBluetoothCentral.swift;
+			sourceTree = "<group>";
+		};
+		5FDF93948DB1C325BB601E53 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = HCGSentinelTests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		69F325EE7EC20A3C1C3AD4EE = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = WebSocketNodeTransport.swift;
+			sourceTree = "<group>";
+		};
+		8F0E96B575BE00FE93154471 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = BluetoothExplorerView.swift;
+			sourceTree = "<group>";
+		};
+		93361BA16006C6C084CEA5C8 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		A060F98EA53E595620A976B9 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SettingsView.swift;
+			sourceTree = "<group>";
+		};
+		A091C20761EA4F0FAF6E04A1 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppStateTests.swift;
+			sourceTree = "<group>";
+		};
+		AAAB233F8B9D0656D03DC2F3 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = HCGSentinel.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		ADB158B392D819399534D9D3 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = RequestComposerView.swift;
+			sourceTree = "<group>";
+		};
+		B2656B33FA9426E806C4D254 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = DashboardView.swift;
+			sourceTree = "<group>";
+		};
+		BCD7F464D35F9BBE2B3F584E = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CapabilitiesView.swift;
+			sourceTree = "<group>";
+		};
+		BF58F56693ED85973A16363E = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SystemViews.swift;
+			sourceTree = "<group>";
+		};
+		C2EE7BFA497C83E8CB6CC4C5 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = RootView.swift;
+			sourceTree = "<group>";
+		};
+		C6B9776991A6ACE26BA549EE = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Theme.swift;
+			sourceTree = "<group>";
+		};
+		CC890A1DE343FC8121DDF7A5 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppModel.swift;
+			sourceTree = "<group>";
+		};
+		D1E3E66E4D5FEE69008260D7 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = HCGSentinelApp.swift;
+			sourceTree = "<group>";
+		};
+		E9904427C1AC4207661F6226 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = ConnectionMonitor.swift;
+			sourceTree = "<group>";
+		};
+		F2C03D9AF5A8FBEB20BF0832 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = PreviewData.swift;
+			sourceTree = "<group>";
+		};
+		312B8DDB1885AA95C7E64651 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		95286E2FCCD5BE3D643FB4E6 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3B0F85A94B9E7D2CBEEC19B3,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C3E745B6020602A756E2F06F = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B0497617C77CB7B2FA40EEF3,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		08AE1AD6E254A8D757D862B6 = {
+			isa = PBXGroup;
+			children = (
+				CC890A1DE343FC8121DDF7A5,
+				D1E3E66E4D5FEE69008260D7,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		1525991CB063D1D1466ABC83 = {
+			isa = PBXGroup;
+			children = (
+				5BD7F93A153E6DBEEFBE76D4,
+				E3853F24D2F3FE3AE327E3E2,
+				2BC414E19A665A41E22010DE,
+				A83711B87911C996D0F39181,
+			);
+			sourceTree = "<group>";
+		};
+		217EB136436AAF0E238247D6 = {
+			isa = PBXGroup;
+			children = (
+				E9904427C1AC4207661F6226,
+				5F2811738549F1EF373FB313,
+				1872EE232338710C27AB82C7,
+				2A5A747FB219F9D3C6BA1700,
+				BF58F56693ED85973A16363E,
+				69F325EE7EC20A3C1C3AD4EE,
+			);
+			path = Platform;
+			sourceTree = "<group>";
+		};
+		5BD7F93A153E6DBEEFBE76D4 = {
+			isa = PBXGroup;
+			children = (
+				08AE1AD6E254A8D757D862B6,
+				98E8A36B4FB7934181228642,
+				217EB136436AAF0E238247D6,
+				BF8CEE9A6731B13ACDB87349,
+				7229A5697023DE7C9F50575C,
+			);
+			path = HCGSentinel;
+			sourceTree = "<group>";
+		};
+		7229A5697023DE7C9F50575C = {
+			isa = PBXGroup;
+			children = (
+				C6B9776991A6ACE26BA549EE,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		98E8A36B4FB7934181228642 = {
+			isa = PBXGroup;
+			children = (
+				8F0E96B575BE00FE93154471,
+				BCD7F464D35F9BBE2B3F584E,
+				B2656B33FA9426E806C4D254,
+				50B9C78F8D6CE7155EFFDE38,
+				F2C03D9AF5A8FBEB20BF0832,
+				31C5859F99483F16DD7B2062,
+				ADB158B392D819399534D9D3,
+				C2EE7BFA497C83E8CB6CC4C5,
+				A060F98EA53E595620A976B9,
+				5C4848C94B72C491235569FA,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		A83711B87911C996D0F39181 = {
+			isa = PBXGroup;
+			children = (
+				3AA016A11901BA515A6789B9,
+				AAAB233F8B9D0656D03DC2F3,
+				5FDF93948DB1C325BB601E53,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BF8CEE9A6731B13ACDB87349 = {
+			isa = PBXGroup;
+			children = (
+				16B7D591CAA76D555A803EF1,
+				93361BA16006C6C084CEA5C8,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		E3853F24D2F3FE3AE327E3E2 = {
+			isa = PBXGroup;
+			children = (
+				A091C20761EA4F0FAF6E04A1,
+			);
+			path = HCGSentinelTests;
+			sourceTree = "<group>";
+		};
+		3FF5336FD5D9D57BED527C38 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 21F023D2494A7BE93A90CB44;
+			buildPhases = (
+				57F7806976B16A471C431243,
+				C3E745B6020602A756E2F06F,
+				0A1AC18FFC80D23A300DD420,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HCGSentinel;
+			packageProductDependencies = (
+				B1759CFEBF67FABEFEB2EC05,
+			);
+			productName = HCGSentinel;
+			productReference = 3AA016A11901BA515A6789B9;
+			productType = "com.apple.product-type.application";
+		};
+		4411DF04F15D67072153D380 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AEED2B4CDCD0046F3748972F;
+			buildPhases = (
+				4EBB2578371A285F989CF525,
+				312B8DDB1885AA95C7E64651,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				487E04D0B8814E65E40F938B,
+			);
+			name = HCGSentinelTests;
+			productName = HCGSentinelTests;
+			productReference = 5FDF93948DB1C325BB601E53;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		8776530F491B39AE81E90336 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3933D83F92A2C33AE3B94974;
+			buildPhases = (
+				429749D7755279783EA4CD92,
+				95286E2FCCD5BE3D643FB4E6,
+				930F790481E16D0882C6295D,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = HCGSentinelModern;
+			packageProductDependencies = (
+				4F4264813A27B5494A4641E3,
+			);
+			productName = HCGSentinelModern;
+			productReference = AAAB233F8B9D0656D03DC2F3;
+			productType = "com.apple.product-type.application";
+		};
+		CFF32A4E65AA1ACDBAD95ACA = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					3FF5336FD5D9D57BED527C38 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					8776530F491B39AE81E90336 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					4411DF04F15D67072153D380 = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 3FF5336FD5D9D57BED527C38;
+					};
+				};
+			};
+			buildConfigurationList = 55CEF682326A4EBBDDA49B60;
+			compatibilityVersion = "Xcode 13.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1525991CB063D1D1466ABC83;
+			productRefGroup = A83711B87911C996D0F39181;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3FF5336FD5D9D57BED527C38,
+				8776530F491B39AE81E90336,
+				4411DF04F15D67072153D380,
+			);
+		};
+		0A1AC18FFC80D23A300DD420 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B20E3EAB7B113D266D60C1EB,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		930F790481E16D0882C6295D = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				867B2F884CE9E3583F4CFA49,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		429749D7755279783EA4CD92 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5569C91EB42F4D9A37E647AD,
+				E698F4B5A7F650E848DD6916,
+				66B5498E9B41A9383E2A456F,
+				59C3C87C9DFE2C7974F731C9,
+				ECFE217818CBDB65841F2FDB,
+				DE5A232D509A6E55ACDF16A7,
+				54401FD0870082CB186859B5,
+				C32BDB66B976D80BE2BDE744,
+				545093389D53CBA8247DB630,
+				41DE2BA7DE7F07ACF1C26025,
+				38BC38D3C648A528AB7E0793,
+				FF48EF547108BB631411DC55,
+				42DA74FB899EDBB81DB35136,
+				8F7164C86593E399E677FBA3,
+				5AD8CB302B66DDC8D6E11F69,
+				1D44BA41B1836A9B04EFF63B,
+				8B3ACFFDC3B70DDDB8617E01,
+				E7C1FAE647C4436878A24595,
+				68CA03619FB983DAF35777DB,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4EBB2578371A285F989CF525 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BCF9D3424C7921671D089749,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		57F7806976B16A471C431243 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8761A8A77150FEDE77F3CE85,
+				097A1B3FD549A24C3A5B094D,
+				03DB76429F34AF7AD922F784,
+				3A34F2F87743BC90D7C3E317,
+				304BCD622FA11070B734B848,
+				1765642323B19698F68CA5A5,
+				B46D08AF6D620EC4D5544037,
+				26D59DA831A38EA6B7CB311C,
+				B9300E15DF194084287FBD06,
+				06445E34B31FECFDA80BEF26,
+				B91D1E3A79609A8AAE77087A,
+				8BE2A0906D77091D57CC855C,
+				CAD584738CD9CCFF93A781E4,
+				243F6ED582899AD41241A7B0,
+				E50049314E2EA966A736FEFC,
+				BB84D1EB4E6439E7F6EB5E09,
+				114BF76CCED53D3C43938ADA,
+				B2BF4ED09B5D8EE2456D0ABA,
+				D3E71E4C4E3A9531FEBCDE37,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		487E04D0B8814E65E40F938B = {
+			isa = PBXTargetDependency;
+			target = 3FF5336FD5D9D57BED527C38;
+			targetProxy = E14AFF94513A8630C47A3475;
+		};
+		12431A5B282500319235D740 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		202F7D36104FEC08C1D3902D = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HCGSentinel.app/HCGSentinel";
+			};
+			name = Release;
+		};
+		27A0BA0275132FF4CD3530BF = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel;
+				PRODUCT_NAME = HCGSentinel;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+			};
+			name = Debug;
+		};
+		2B60E8FA74D08D8F2E543AA1 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel;
+				PRODUCT_NAME = HCGSentinel;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+			};
+			name = Release;
+		};
+		33066A76A4540DB6491D90CA = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel;
+				PRODUCT_NAME = HCGSentinel;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		6D3BE7146A6D69B639FE505D = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		9521DC7D0150DC148816729C = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HCGSentinel.app/HCGSentinel";
+			};
+			name = Debug;
+		};
+		F618E6A3209B9E2217605A4F = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel;
+				PRODUCT_NAME = HCGSentinel;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		21F023D2494A7BE93A90CB44 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				33066A76A4540DB6491D90CA,
+				F618E6A3209B9E2217605A4F,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		3933D83F92A2C33AE3B94974 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				27A0BA0275132FF4CD3530BF,
+				2B60E8FA74D08D8F2E543AA1,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		55CEF682326A4EBBDDA49B60 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6D3BE7146A6D69B639FE505D,
+				12431A5B282500319235D740,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AEED2B4CDCD0046F3748972F = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9521DC7D0150DC148816729C,
+				202F7D36104FEC08C1D3902D,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4F4264813A27B5494A4641E3 = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SentinelCore;
+		};
+		B1759CFEBF67FABEFEB2EC05 = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SentinelCore;
+		};
+	};
+	rootObject = CFF32A4E65AA1ACDBAD95ACA;
+}

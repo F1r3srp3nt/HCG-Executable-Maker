@@ -29,15 +29,41 @@ internal static partial class Program
         LogNative(wizard);
         Shot("native-inspect");
 
+        if (Arg("expect-native-state") is { } expectedNative)
+        {
+            if (Arg("theos-scheme") is { } ts && wizard.TheosSchemes.FirstOrDefault(x => x.Scheme.SelectorValue == ts || x.Scheme.PackageScheme == ts) is { } tsi) wizard.SelectedTheosScheme = tsi;
+            Check(wizard.NativeTag.Text == expectedNative, $"State: [{wizard.NativeTag.Text}] {wizard.NativeStatus}");
+            foreach (var g in wizard.NativeToolchainGaps) Log("  Missing: " + g);
+            Check(!wizard.CanConfigure && !wizard.NextCommand.CanExecute(null), "Cannot continue to Configure in this state");
+            return Failures.Count == 0 ? 0 : 1;
+        }
         if (_args.ContainsKey("expect-unsupported"))
         {
-            Check(wizard.NativeTag.Text == "Not supported", $"State: {wizard.NativeTag.Text}");
+            Check(wizard.NativeTag.Text is "Build adapter unavailable" or "Project implementation incomplete", $"State: {wizard.NativeTag.Text}");
             Check(!wizard.CanConfigure && !wizard.NextCommand.CanExecute(null), "Cannot continue to Configure");
             Check(wizard.NativeStatus.Length > 0, "Explains why: " + wizard.NativeStatus);
             return Failures.Count == 0 ? 0 : 1;
         }
 
-        if (wizard.ShowNativeCMake)
+        if (wizard.ShowNativeTheos)
+        {
+            Log("Theos products:\n" + wizard.TheosProducts);
+            Log("Theos package: " + wizard.TheosPackage.Replace("\n", " | "));
+            foreach (var sc in wizard.TheosSchemes) Log("Configuration offered: " + sc.Name);
+            var wantScheme = Arg("theos-scheme");
+            var item = wantScheme is null ? wizard.SelectedTheosScheme : wizard.TheosSchemes.FirstOrDefault(x => x.Scheme.SelectorValue == wantScheme || x.Scheme.PackageScheme == wantScheme);
+            Check(item is not null, $"Configuration {wantScheme ?? "(default)"} offered");
+            if (item is null) return 1;
+            wizard.SelectedTheosScheme = item;
+            Log("Configuration: " + wizard.TheosSchemeDetail.Replace("\n", " | "));
+            if (Arg("expect-refused") is { } refused)
+            {
+                wizard.SelectedTheosScheme = wizard.TheosSchemes.First(x => x.Scheme.SelectorValue == refused);
+                Check(wizard.NativeTag.Text == "Configuration required" && !wizard.CanConfigure, $"{refused} is refused by the project: [{wizard.NativeTag.Text}] {wizard.NativeStatus}");
+                wizard.SelectedTheosScheme = item;
+            }
+        }
+        else if (wizard.ShowNativeCMake)
         {
             Check(wizard.NativeTag.Text == "Configuration required", $"Before configuring: [{wizard.NativeTag.Text}]");
             Check(!wizard.CanConfigure, "Cannot continue before the project is configured");
@@ -85,7 +111,7 @@ internal static partial class Program
             Log("Generated build configuration:\n" + wizard.NativeGeneratedPreview);
         }
         LogNative(wizard);
-        Check(wizard.NativeTag.Text == "Ready" && wizard.CanConfigure, $"State: [{wizard.NativeTag.Text}] {wizard.NativeStatus}");
+        Check(wizard.NativeTag.Text == "Ready to build" && wizard.CanConfigure, $"State: [{wizard.NativeTag.Text}] {wizard.NativeStatus}");
         Shot("native-ready");
         ShotScrolledToEnd("native-ready-details");
         if (!wizard.CanConfigure) return 1;
@@ -95,7 +121,10 @@ internal static partial class Program
         if (_args.ContainsKey("expect-app-bundle")) Check(wizard.IsNativeMacBundle, "The target is a macOS app bundle (MACOSX_BUNDLE)");
         foreach (var p in wizard.PlatformOptions) Log($"Platform {p.Name}: {(p.IsEnabled ? "available" : "not available — " + p.Note)}");
         foreach (var o in wizard.ArchitectureOptions) Log($"Architecture option: {o.Name}");
-        Check(wizard.PlatformOptions.Where(p => p.IsEnabled).Select(p => p.Value).SequenceEqual([host.Platform]), "Only this computer's platform can be chosen");
+        if (wizard.IsTheosBuild)
+            Check(wizard.PlatformOptions.Where(p => p.IsEnabled).Select(p => p.Value).SequenceEqual([TargetPlatform.IOS]), "Theos: the only target is iOS (jailbroken, .deb)");
+        else
+            Check(wizard.PlatformOptions.Where(p => p.IsEnabled).Select(p => p.Value).SequenceEqual([host.Platform]), "Only this computer's platform can be chosen");
         if (Arg("arch") is { } archArg)
         {
             var arch = archArg switch { "universal" => TargetArchitecture.Universal, "x64" or "x86_64" => TargetArchitecture.X64, _ => TargetArchitecture.Arm64 };
@@ -115,10 +144,12 @@ internal static partial class Program
         await wizard.NextCommand.ExecuteAsync(null);
         Check(wizard.IsPackageStep, "Package step");
         foreach (var o in wizard.PackagingOptions) Log($"Format {o.Name}: {o.Status.Text}{(o.HasReason ? " — " + o.Reason : "")}");
-        var formats = Arg("formats", "folder,zip").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        if (wizard.IsTheosBuild)
+            Check(wizard.PackagingOptions.Where(o => o.IsEnabled).Select(o => o.Option.Format).SequenceEqual([PackagingFormat.JailbreakDeb]), "Theos: only the .deb is offered (never an IPA or archive)");
+        var formats = Arg("formats", wizard.IsTheosBuild ? "deb" : "folder,zip").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(f => f switch
             {
-                "app" => PackagingFormat.MacAppBundle, "zip" => PackagingFormat.PortableZip, "folder" => PackagingFormat.PortableFolder,
+                "app" => PackagingFormat.MacAppBundle, "zip" => PackagingFormat.PortableZip, "folder" => PackagingFormat.PortableFolder, "deb" => PackagingFormat.JailbreakDeb,
                 _ => throw new ArgumentException("Unknown format " + f),
             }).ToHashSet();
         foreach (var o in wizard.PackagingOptions) o.IsSelected = o.IsEnabled && formats.Contains(o.Option.Format);
@@ -145,7 +176,7 @@ internal static partial class Program
         Check(sawBuilding, "State shown while building: Building");
         var result = wizard.Result;
         Check(result?.Status == BuildStatus.Succeeded, $"Build {result?.Status}: {wizard.ResultDetail}");
-        Check(wizard.NativeTag.Text == "Verified", $"State after the build: [{wizard.NativeTag.Text}] {wizard.NativeStatus}");
+        Check(wizard.NativeTag.Text == "Artifact verified", $"State after the build: [{wizard.NativeTag.Text}] {wizard.NativeStatus}");
         Shot("native-results");
         if (result is null) return 1;
         foreach (var (k, v) in result.ToolchainVersions) Log($"Tool {k}: {v}");
@@ -158,7 +189,7 @@ internal static partial class Program
         }
         // For independent checks by the caller: the artifact folder (or .app) and the ZIP.
         File.WriteAllText(Path.Combine(output, $"{_prefix}-artifacts.txt"),
-            (result.Artifacts.FirstOrDefault(x => x.Format is PackagingFormat.MacAppBundle or PackagingFormat.PortableFolder)?.Path ?? "") + "\n" +
+            (result.Artifacts.FirstOrDefault(x => x.Format is PackagingFormat.MacAppBundle or PackagingFormat.PortableFolder or PackagingFormat.JailbreakDeb)?.Path ?? "") + "\n" +
             (result.Artifacts.FirstOrDefault(x => x.Format == PackagingFormat.PortableZip)?.Path ?? "") + "\n");
         File.WriteAllText(Path.Combine(output, $"{_prefix}-build.json"), JsonSerializer.Serialize(new
         {

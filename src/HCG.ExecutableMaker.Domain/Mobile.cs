@@ -8,6 +8,8 @@ public enum MobileFramework
     NativeIos,
     Flutter,
     DotNetMaui,
+    /// <summary>.NET for iOS application without MAUI (e.g. an Avalonia.iOS head), built by the .NET iOS workload.</summary>
+    DotNetIos,
 }
 
 /// <summary>What Mobile Build Studio is asked to produce. Each maps to a real toolchain operation.</summary>
@@ -92,7 +94,30 @@ public sealed record AndroidProjectInfo
     public IReadOnlyList<string> LibraryModules { get; init; } = [];
 }
 
-public sealed record IosSchemeInfo(string Name, string File, bool Shared);
+public sealed record IosSchemeInfo(string Name, string File, bool Shared)
+{
+    /// <summary>Targets the scheme's build action marks for archiving (BlueprintName).</summary>
+    public IReadOnlyList<string> ArchiveTargets { get; init; } = [];
+    /// <summary>The configuration the Archive action uses (usually Release).</summary>
+    public string? ArchiveConfiguration { get; init; }
+}
+
+/// <summary>
+/// The iOS deployment targets an Xcode's iPhoneOS SDK supports, read from its SDKSettings.json (SupportedTargets.iphoneos).
+/// Xcode reports targets outside this range as an error or warning when it builds.
+/// </summary>
+public sealed record IosDeploymentRange(string Minimum, string Maximum, string? Recommended, string? SdkVersion)
+{
+    public static Version? Parse(string? v) => v is null ? null : Version.TryParse(v.Contains('.') ? v : v + ".0", out var p) ? p : null;
+    /// <summary>True/false when both values parse; null when either is unknown.</summary>
+    public bool? Contains(string? target)
+    {
+        var t = Parse(target);
+        var min = Parse(Minimum);
+        var max = Parse(Maximum);
+        return t is null || min is null || max is null ? null : t >= min && t <= max;
+    }
+}
 
 public sealed record IosTargetInfo
 {
@@ -149,9 +174,40 @@ public sealed record MobileAnalysis
     public IosProjectInfo? Ios { get; init; }
     public FlutterProjectInfo? Flutter { get; init; }
     public MauiProjectInfo? Maui { get; init; }
+    public DotNetIosProjectInfo? DotNetIos { get; init; }
     public IReadOnlyList<string> ApplicationIds { get; init; } = [];
     /// <summary>For imported artifacts (.apk/.aab/.apks/.ipa): the file, relative to the workspace source.</summary>
     public string? ArtifactPath { get; init; }
+}
+
+/// <summary>
+/// A .NET for iOS application project (net*-ios, OutputType Exe, not MAUI), read statically with its imported
+/// Directory.*.props chain. Its shared projects may live elsewhere in the repository (e.g. HCG Mail's desktop code).
+/// </summary>
+public sealed record DotNetIosProjectInfo
+{
+    public required string ProjectPath { get; init; }
+    public required string TargetFramework { get; init; }
+    public string? AssemblyName { get; init; }
+    public string? ApplicationId { get; init; }
+    public string? ApplicationTitle { get; init; }
+    public string? DisplayVersion { get; init; }
+    public string? BuildNumber { get; init; }
+    public string? MinimumOS { get; init; }
+    /// <summary>"Avalonia" (Avalonia.iOS), or null for a plain .NET for iOS app.</summary>
+    public string? UiFramework { get; init; }
+    public string? UiFrameworkVersion { get; init; }
+    public string? Entitlements { get; init; }
+    /// <summary>Project references (transitively, statically), relative to the workspace source.</summary>
+    public IReadOnlyList<string> ProjectReferences { get; init; } = [];
+    /// <summary>Referenced projects, props or imports that lie outside the imported folder: the build cannot work from this import.</summary>
+    public IReadOnlyList<string> OutsideWorkspace { get; init; } = [];
+    /// <summary>Referenced projects that should be inside the workspace but are missing.</summary>
+    public IReadOnlyList<string> MissingReferences { get; init; } = [];
+    /// <summary>iOS workload pin from a workload rollback file next to the project (e.g. "26.2.10233/10.0.100").</summary>
+    public string? WorkloadPin { get; init; }
+    public string? WorkloadPinFile { get; init; }
+    public string? GlobalJsonSdk { get; init; }
 }
 
 /// <summary>Mobile-specific build settings, persisted with the build record.</summary>
@@ -182,6 +238,8 @@ public sealed record MobileBuildOptions
     public string? DeviceSpecPath { get; init; }
     /// <summary>Input artifact (relative to workspace source) for artifact operations such as AAB→APK.</summary>
     public string? InputArtifact { get; init; }
+    /// <summary>.NET iOS: the code-signing identity (certificate name, e.g. "Apple Distribution: … (TEAMID)") for CodesignKey. Not a secret.</summary>
+    public string? SigningIdentity { get; init; }
 }
 
 public static class MobileNames
@@ -192,6 +250,7 @@ public static class MobileNames
         MobileFramework.NativeIos => "iOS (Xcode)",
         MobileFramework.Flutter => "Flutter",
         MobileFramework.DotNetMaui => ".NET MAUI",
+        MobileFramework.DotNetIos => ".NET for iOS",
         _ => f.ToString(),
     };
 

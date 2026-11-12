@@ -124,4 +124,11 @@ public static class ToolchainIds
     public const string CxxCompiler = "cxx-compiler";
     /// <summary>Visual Studio with the C++ workload (Windows): CMake's default generator uses it.</summary>
     public const string MsvcTools = "msvc";
+    // Theos (jailbreak packages)
+    public const string DotNetIosWorkload = "dotnet-ios-workload";
+    public const string Theos = "theos";
+    public const string TheosMake = "theos-make";
+    public const string Ldid = "ldid";
+    public const string Perl = "perl";
+    public const string TheosIosToolchain = "theos-ios-toolchain";
 }

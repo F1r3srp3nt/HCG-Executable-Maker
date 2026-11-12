@@ -111,6 +111,9 @@ public sealed record NativeProjectInfo
     // Sources
     public IReadOnlyList<NativeSourceFile> Sources { get; init; } = [];
 
+    // Theos
+    public TheosProjectInfo? Theos { get; init; }
+
     public string DisplayDirectory => Directory.Length == 0 ? "(workspace root)" : Directory + "/";
 }
 
@@ -150,4 +153,109 @@ public sealed record NativeBuildOptions
     public IReadOnlyList<string> RuntimeFiles { get; init; } = [];
     /// <summary>The executable is a macOS application bundle produced by the project (kept as it is).</summary>
     public bool IsMacBundle { get; init; }
+    /// <summary>For Theos: the package configuration the project defines (rootless / rootful …), as the project selects it.</summary>
+    public TheosSchemeChoice? TheosScheme { get; init; }
+}
+
+/// <summary>What a Theos instance builds (from TWEAK_NAME, BUNDLE_NAME, APPLICATION_NAME, TOOL_NAME, LIBRARY_NAME, FRAMEWORK_NAME).</summary>
+public enum TheosInstanceType
+{
+    Tweak,
+    PreferenceBundle,
+    Bundle,
+    Application,
+    Tool,
+    Library,
+    Framework,
+}
+
+/// <summary>One built product of a Theos project or one of its subprojects.</summary>
+public sealed record TheosInstance
+{
+    public required TheosInstanceType Type { get; init; }
+    public required string Name { get; init; }
+    /// <summary>Makefile that defines it, relative to the workspace source.</summary>
+    public required string Makefile { get; init; }
+    /// <summary>The instance's *_INSTALL_PATH when the Makefile sets it (relative to the package prefix).</summary>
+    public string? InstallPath { get; init; }
+    /// <summary>For tweaks: the MobileSubstrate filter plist next to the Makefile, if present.</summary>
+    public string? FilterPlist { get; init; }
+    public string DisplayType => Type switch
+    {
+        TheosInstanceType.Tweak => "Jailbreak tweak (injected dynamic library)",
+        TheosInstanceType.PreferenceBundle => "Preference bundle (Settings pane)",
+        TheosInstanceType.Bundle => "Bundle",
+        TheosInstanceType.Application => "Application packaged in the .deb (not an IPA)",
+        TheosInstanceType.Tool => "Command-line tool",
+        TheosInstanceType.Library => "Dynamic library",
+        _ => "Framework",
+    };
+}
+
+/// <summary>
+/// A package configuration the project itself defines, e.g. Nexus' <c>HCG_ENV=rootless</c> → THEOS_PACKAGE_SCHEME=rootless,
+/// TARGET iphone:clang:16.5:15.0. When the Makefile has no selector, there is one scheme with <see cref="SelectorVariable"/> null.
+/// </summary>
+public sealed record TheosScheme
+{
+    /// <summary>The make variable the project uses to select the configuration (null: the Makefile is fixed).</summary>
+    public string? SelectorVariable { get; init; }
+    public string? SelectorValue { get; init; }
+    /// <summary>"rootless", "rootful" or "roothide" (Theos' THEOS_PACKAGE_SCHEME; empty means rootful).</summary>
+    public required string PackageScheme { get; init; }
+    /// <summary>SDK version from TARGET (iphone:clang:SDK:DEPLOYMENT), e.g. "16.5"; null = Theos' latest.</summary>
+    public string? SdkVersion { get; init; }
+    /// <summary>Deployment target from TARGET, e.g. "15.0".</summary>
+    public string? DeploymentTarget { get; init; }
+    /// <summary>The project's own refusal for this configuration ($(error …) in its branch), shown verbatim.</summary>
+    public string? ProjectError { get; init; }
+    public bool IsDefault { get; init; }
+    public string Label => SelectorVariable is null ? PackageScheme : $"{SelectorVariable}={SelectorValue} ({PackageScheme})";
+    /// <summary>Where files are installed on the device.</summary>
+    public string InstallPrefix => PackageScheme == "rootless" ? "/var/jb" : "/";
+    /// <summary>The Debian Architecture field Theos writes for this scheme.</summary>
+    public string DebArchitecture => PackageScheme switch { "rootless" => "iphoneos-arm64", "roothide" => "iphoneos-arm64e", _ => "iphoneos-arm" };
+}
+
+/// <summary>The configuration chosen for a Theos build (persisted with the build).</summary>
+public sealed record TheosSchemeChoice
+{
+    public string? SelectorVariable { get; init; }
+    public string? SelectorValue { get; init; }
+    public required string PackageScheme { get; init; }
+    public string? SdkVersion { get; init; }
+    public string? DeploymentTarget { get; init; }
+    public IReadOnlyList<string> Architectures { get; init; } = [];
+    /// <summary>The project's control file Package/Version, to check the built .deb against.</summary>
+    public string? PackageId { get; init; }
+    public string? PackageVersion { get; init; }
+    public IReadOnlyList<TheosInstance> Instances { get; init; } = [];
+    public string Label => SelectorVariable is null ? PackageScheme : $"{SelectorVariable}={SelectorValue} ({PackageScheme})";
+}
+
+/// <summary>A Theos project: its package (control file), products, subprojects and the configurations it defines.</summary>
+public sealed record TheosProjectInfo
+{
+    public required string Makefile { get; init; }
+    public string? ControlFile { get; init; }
+    public string? PackageId { get; init; }
+    public string? PackageName { get; init; }
+    public string? PackageVersion { get; init; }
+    /// <summary>The control file's own Architecture field (Theos rewrites it for rootless/roothide).</summary>
+    public string? ControlArchitecture { get; init; }
+    public string? Depends { get; init; }
+    public string? Section { get; init; }
+    public IReadOnlyList<TheosInstance> Instances { get; init; } = [];
+    /// <summary>SUBPROJECTS directories, relative to the workspace source.</summary>
+    public IReadOnlyList<string> Subprojects { get; init; } = [];
+    public IReadOnlyList<TheosScheme> Schemes { get; init; } = [];
+    /// <summary>ARCHS as the project sets them (after its own defaults), e.g. ["arm64", "arm64e"].</summary>
+    public IReadOnlyList<string> Architectures { get; init; } = [];
+    /// <summary>The variable the project uses for ARCHS (e.g. HCG_ARCHS), when it has one.</summary>
+    public string? ArchitectureVariable { get; init; }
+    /// <summary>Maintainer scripts (postinst …) in layout/DEBIAN or next to control: they run as root on install.</summary>
+    public IReadOnlyList<string> MaintainerScripts { get; init; } = [];
+    /// <summary>Paths outside the project folder its Makefiles reference (e.g. ROOT := .. with ../Sources): the build keeps the repository layout.</summary>
+    public bool UsesParentDirectory { get; init; }
+    public string Summary => string.Join(" + ", Instances.Select(i => $"{i.DisplayType}: {i.Name}"));
 }

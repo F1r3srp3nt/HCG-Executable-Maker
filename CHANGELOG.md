@@ -2,6 +2,29 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG Nexus, HCG Mail iOS, HCG Sentinel ([docs/HCG-PROJECTS.md](docs/HCG-PROJECTS.md))
+
+### Added
+- **Theos jailbreak packages:** detection before generic Make (tweak, preference bundle, app, tool, library; subprojects;
+  separately packaged projects), the configurations the Makefile defines (rootless / rootful, SDK and deployment target
+  from TARGET, project refusals shown verbatim), per-item toolchain checks (Theos, SDK, GNU make 4+, ldid, perl, iOS
+  clang), `make package` in a per-configuration copy, and `.deb` verification (metadata, Architecture, install prefix,
+  payload, binary slices, arm64e pointer-authentication ABI, minimum iOS, maintainer scripts) with INSTALL.txt.
+  Never an IPA; never installed; never a respring.
+- **.NET for iOS applications (non-MAUI, e.g. HCG Mail's Avalonia.iOS head):** detected through the imported props
+  chain; repository-root references; workload pin readiness; Simulator build, device archive (`ArchiveOnBuild` into
+  HCG's folder), signed IPA through a separate `xcodebuild -exportArchive` stage.
+- **Xcode deployment-range preflight** (from the selected Xcode's iPhoneOS SDKSettings.json) per archived target, with
+  the routes: another Xcode or another scheme. The project's target is never changed.
+- **Readable failures:** project-level xcodebuild diagnostics parsed; the first actionable error in full (copy), full log
+  and `.xcresult` export; result bundles kept for every xcodebuild action; wrapping log lines.
+- **Precise states** in New Build and Mobile Build Studio, and a pre-build summary (project, adapter, toolchain,
+  architecture, output type).
+
+### Changed
+- The static MSBuild reader follows `<Import>` with `$(MSBuildThisFileDirectory)` and never reads outside the import.
+- A net*-ios Exe is no longer listed as an "Avalonia desktop application".
+
 ## [Unreleased] — `feature/native-cpp`
 
 ### Added — C/C++ projects ([docs/NATIVE-CPP.md](docs/NATIVE-CPP.md))

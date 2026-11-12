@@ -118,6 +118,8 @@ public sealed class BuildService(
             Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
             Log(BuildLogKind.Info, settings.Electron is { } el
                 ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · Electron app {(el.ProjectDirectory.Length == 0 ? "(root)" : el.ProjectDirectory)} · electron-builder --{el.Platform} {string.Join(' ', el.Targets)}{(el.PackagingScript is null ? "" : $" (following script \"{el.PackagingScript}\")")}"
+                : settings.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } ts } theosOpts
+                ? $"Target: jailbroken iOS · Theos package {(theosOpts.ProjectDirectory.Length == 0 ? "(root)" : theosOpts.ProjectDirectory)} · {ts.Label} · iOS {ts.DeploymentTarget ?? "(Theos default)"}+ · SDK {ts.SdkVersion ?? "latest"} · {string.Join(" ", ts.Architectures)} · output .deb (not an IPA)"
                 : settings.Native is { } natOpts
                 ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · C/C++ {natOpts.Kind} project {(natOpts.ProjectDirectory.Length == 0 ? "(root)" : natOpts.ProjectDirectory)} · target {natOpts.Target} ({natOpts.BuildType}){(natOpts.Preset is { } presetName ? $" · preset {presetName}" : "")}"
                 : settings.Swift is { } sw
@@ -141,8 +143,11 @@ public sealed class BuildService(
             }
             var isSwift = settings.Swift is not null;
             var isElectron = settings.Electron is not null;
-            var isNative = settings.Native is not null;
+            var isTheos = settings.Native?.Kind == NativeProjectKind.Theos;
+            var isNative = settings.Native is not null && !isTheos;
             Native.NativeBuildPlanner.Tools? nativeTools = null;
+            Native.TheosBuildPlanner.Tools? theosTools = null;
+            NativeProjectInfo? theosProject = null;
             ToolchainInfo? sdk = null, swiftTool = null;
             NodeInstallation? node = null;
             string? electronDir = null;
@@ -175,6 +180,27 @@ public sealed class BuildService(
                 build.ToolchainVersions["npm"] = node.NpmVersion ?? "unknown";
                 Log(BuildLogKind.Info, $"Node.js: {detail}{(nodeManifest.EnginesNode is null ? "" : $"; package.json requires {nodeManifest.EnginesNode}")}");
                 Log(BuildLogKind.Info, $"npm: {node.NpmVersion ?? "(version unknown)"} ({node.NpmCli})");
+            }
+            else if (isTheos)
+            {
+                Native.TheosBuildPlanner.Validate(settings, host, PathGuard.GetRealPath(request.Project.SourceDirectory));
+                theosProject = request.Project.Analysis?.Native?.Projects.FirstOrDefault(p => p.Kind == NativeProjectKind.Theos && p.Directory == settings.Native!.ProjectDirectory)
+                               ?? throw new BuildValidationException("This Theos project is not in the workspace's inspection. Re-inspect the project.");
+                var chosen = settings.Native!.TheosScheme!;
+                var scheme = theosProject.Theos?.Schemes.FirstOrDefault(x => x.SelectorVariable == chosen.SelectorVariable && x.SelectorValue == chosen.SelectorValue && x.PackageScheme == chosen.PackageScheme)
+                             ?? throw new BuildValidationException($"The project does not define the configuration {chosen.Label}.");
+                var assessment = HCG.ExecutableMaker.ProjectInspection.Native.NativeCapabilities.EvaluateTheos(theosProject, scheme, report);
+                foreach (var req in assessment.Requirements) Log(req.IsSatisfied ? BuildLogKind.Info : BuildLogKind.Error, $"{(req.IsSatisfied ? "✓" : "✗")} {req.DisplayName}: {req.Detail}");
+                if (assessment.Support != SupportLevel.Supported)
+                {
+                    Fail(BuildStatus.Failed, assessment.Summary + " " + string.Join(" ", assessment.Remediation));
+                    return build;
+                }
+                theosTools = Native.TheosBuildPlanner.Tools.From(report)!;
+                foreach (var id in new[] { ToolchainIds.Theos, ToolchainIds.TheosMake, ToolchainIds.Ldid, ToolchainIds.Perl, ToolchainIds.TheosIosToolchain })
+                    if (report.Find(id) is { IsAvailable: true } t) build.ToolchainVersions[id] = $"{t.Version ?? "?"} ({t.ExecutablePath})";
+                Log(BuildLogKind.Info, $"Theos package build: make package FINALPACKAGE=1{(chosen.SelectorVariable is { } sv ? $" {sv}={chosen.SelectorValue}" : "")}, in a copy of the project " +
+                                       "(the imported source is not written to). HCG never runs make install, never connects to a device and never resprings.");
             }
             else if (isNative)
             {
@@ -236,7 +262,7 @@ public sealed class BuildService(
 
             // Icons are generated before compilation so the Windows icon can be embedded.
             GeneratedIcons? icons = null;
-            if (isNative && settings.Identity.IconSourcePath is not null)
+            if ((isNative || isTheos) && settings.Identity.IconSourcePath is not null)
                 Log(BuildLogKind.Warning, "The icon chosen in HCG is not used for C/C++ builds: the executable is packaged as the project built it (a project's own .app keeps its own icon).");
             else if (isElectron && settings.Identity.IconSourcePath is not null)
                 Log(BuildLogKind.Warning, "The icon chosen in HCG is not used for Electron apps: electron-builder takes the icon from its configuration (mac.icon / buildResources).");
@@ -261,6 +287,15 @@ public sealed class BuildService(
             var nativeWork = Path.Combine(PathGuard.GetRealPath(buildDir), "native");
             Native.NativeBuildPlanner.Prepared? nativePrepared = null;
             Native.NativeBuildPlanner.PlanInput? nativeInput = null;
+            Native.TheosBuildPlanner.Prepared? theosPrepared = null;
+            if (isTheos)
+            {
+                observer.OnStage(BuildStage.Preparing, "Copying the project into the build folder for this configuration");
+                theosPrepared = Native.TheosBuildPlanner.Prepare(settings, sourceDir, nativeWork, theosProject!.Theos!.UsesParentDirectory, overall.Token);
+                Log(BuildLogKind.Info, $"Theos build folder ({settings.Native!.TheosScheme!.Label}): {theosPrepared.WorkRoot}" +
+                                       (theosProject.Theos.UsesParentDirectory ? " — the whole repository was copied, because the Makefiles use paths outside the project folder." : "") +
+                                       (theosPrepared.IsTemporary ? " — a private temporary folder, because HCG's build folder path contains a space, which Theos' makefiles cannot handle." : ""));
+            }
             if (isNative)
             {
                 nativeInput = new Native.NativeBuildPlanner.PlanInput(settings, sourceDir, nativeWork, nativeTools!, scrub.Environment);
@@ -304,7 +339,9 @@ public sealed class BuildService(
                 Directory.CreateDirectory(helpersDir);
                 prebuild.AddRange(SwiftContractPlanner.PlanPrebuild(contract, sourceDir, helpersDir, tools, scrub.Environment, _executables));
             }
-            var steps = isNative
+            var steps = isTheos
+                ? [Native.TheosBuildPlanner.Plan(settings, theosPrepared!, theosTools!, scrub.Environment)]
+                : isNative
                 ? Native.NativeBuildPlanner.Plan(nativeInput!, nativePrepared!)
                 : isElectron
                 ? ElectronBuildPlanner.Plan(new ElectronBuildPlanner.PlanInput(settings, sourceDir, node!, electronOut, ElectronBuildPlanner.Environment(scrub.Environment, node!)))
@@ -316,7 +353,7 @@ public sealed class BuildService(
             if (prebuild.Count > 0) steps = [.. prebuild, .. steps];
 
             // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
-            IBuildOutputParser parser = isNative ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
+            IBuildOutputParser parser = isNative || isTheos ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
             var captured = new List<string>();
             foreach (var step in steps)
             {
@@ -380,7 +417,16 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.VerifyingOutput, isElectron ? "Verify: locate the app electron-builder produced" : "Verifying publish output");
             string? exeName;
             var packagingInput = publishDir;
-            if (isNative)
+            if (isTheos)
+            {
+                var deb = Native.TheosBuildPlanner.Locate(theosPrepared!);
+                Directory.CreateDirectory(publishDir);
+                var staged = Path.Combine(publishDir, Path.GetFileName(deb));
+                File.Copy(deb, staged, overwrite: true);
+                Log(BuildLogKind.Info, $"Theos package: {Path.GetFileName(deb)} ({new FileInfo(deb).Length:N0} bytes). It is checked in the packaging stage: metadata, install prefix, payload and binaries.");
+                exeName = Path.GetFileName(deb);
+            }
+            else if (isNative)
             {
                 var located = Native.NativeBuildPlanner.Locate(settings, nativePrepared!);
                 Log(BuildLogKind.Info, "Build output: " + located.Description);
@@ -450,7 +496,8 @@ public sealed class BuildService(
             }
             Log(BuildLogKind.Success, $"Found application executable: {exeName}");
 
-            observer.OnStage(BuildStage.Packaging, isElectron ? "Verify the packaged app (structure, architecture, payload, signature) and copy it to the output folder" : "Packaging artifacts");
+            observer.OnStage(BuildStage.Packaging, isElectron ? "Verify the packaged app (structure, architecture, payload, signature) and copy it to the output folder"
+                : isTheos ? "Verify the Debian package (metadata, install prefix, payload, binaries) and copy it to the output folder" : "Packaging artifacts");
             var baseName = ArtifactBaseName(settings);
             var outputRoot = PrepareOutputRoot(settings.OutputDirectory, baseName, request.AllowOverwriteOutput);
             createdOutputRoot = outputRoot;
@@ -515,7 +562,12 @@ public sealed class BuildService(
                 foreach (var check in output.Checks.Where(c => c.Status != VerificationStatus.Passed))
                     Log(check.Status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Warning, $"  {check.Name}: {check.Detail}");
             }
-            if (isNative)
+            if (theosPrepared is { IsTemporary: true })
+            {
+                try { Directory.Delete(Path.GetDirectoryName(theosPrepared.WorkRoot)!, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {theosPrepared.WorkRoot}: {ex.Message}"); }
+            }
+            if (isNative || isTheos)
             {
                 // The verified copies are in the output folder; the build tree (object files, CMake cache) is not kept.
                 try { Directory.Delete(nativeWork, recursive: true); }
@@ -603,8 +655,9 @@ public sealed class BuildService(
         (line.Contains("error MSB4018", StringComparison.Ordinal) || line.Contains("IOException", StringComparison.Ordinal));
 
     /// <summary>Base name shared by the per-build output folder and its artifacts, e.g. <c>MyApp-1.2.0-osx-arm64</c>.</summary>
-    public static string ArtifactBaseName(BuildSettings s) =>
-        $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier ?? (s.Platform == TargetPlatform.MacOS ? "osx" : s.Platform.ToString().ToLowerInvariant()) + "-" + s.Architecture.ToString().ToLowerInvariant()}";
+    public static string ArtifactBaseName(BuildSettings s) => s.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } theos }
+        ? $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-ios-{PathGuard.SanitizeFileName(theos.PackageScheme, "theos")}"
+        : $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier ?? (s.Platform == TargetPlatform.MacOS ? "osx" : s.Platform.ToString().ToLowerInvariant()) + "-" + s.Architecture.ToString().ToLowerInvariant()}";
 
     /// <summary>The per-build folder created inside the chosen output directory.</summary>
     public static string OutputRootFor(BuildSettings s) => Path.Combine(Path.GetFullPath(s.OutputDirectory), ArtifactBaseName(s));

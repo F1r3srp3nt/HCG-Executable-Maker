@@ -42,7 +42,11 @@ public static partial class NativeProjectScanner
         bool Claimed(string dir) => claimed.Any(c => c.Length == 0 || dir == c || dir.StartsWith(c + "/", StringComparison.Ordinal));
 
         // 1. Theos: before any generic Make classification.
-        foreach (var dir in Topmost(files.Where(f => MakefileNames.Contains(SourceIndex.FileName(f)) && Read(index, f) is { } t && TheosRegex().IsMatch(t)).Select(Dir)))
+        // Every Theos project with its own package is listed (e.g. a tweak and a separately packaged companion app);
+        // a directory named in another Theos project's SUBPROJECTS is part of that project's package instead.
+        var theosDirs = files.Where(f => MakefileNames.Contains(SourceIndex.FileName(f)) && Read(index, f) is { } t && TheosRegex().IsMatch(t)).Select(Dir).Distinct().ToList();
+        var subprojects = theosDirs.SelectMany(d => TheosAnalyzer.SubprojectNames(Read(index, MakefileIn(files, d)!) ?? "").Select(s => Join(d, s.TrimEnd('/')))).ToHashSet(StringComparer.Ordinal);
+        foreach (var dir in theosDirs.Where(d => !subprojects.Contains(d)).OrderBy(d => d.Length).ThenBy(d => d, StringComparer.Ordinal))
         {
             var makefile = MakefileIn(files, dir)!;
             projects.Add(Theos(index, files, dir, makefile, Read(index, makefile) ?? ""));
@@ -245,12 +249,23 @@ public static partial class NativeProjectScanner
             if (files.Contains(Join(dir, marker))) evidence.Add($"{Join(dir, marker)} (Debian package control file)");
         var logos = files.Count(f => (dir.Length == 0 || f.StartsWith(dir + "/", StringComparison.Ordinal)) && (f.EndsWith(".x", StringComparison.Ordinal) || f.EndsWith(".xm", StringComparison.Ordinal)));
         if (logos > 0) evidence.Add($"{logos} Logos source file(s) (.x/.xm)");
-        var name = TheosNameRegex().Match(text) is { Success: true } nm ? nm.Groups["n"].Value : (dir.Length == 0 ? new DirectoryInfo(index.Root).Name : dir[(dir.LastIndexOf('/') + 1)..]);
+        var theos = TheosAnalyzer.Analyze(index, dir, makefile);
+        var name = theos.PackageName ?? (TheosNameRegex().Match(text) is { Success: true } nm ? nm.Groups["n"].Value : (dir.Length == 0 ? new DirectoryInfo(index.Root).Name : dir[(dir.LastIndexOf('/') + 1)..]));
+        if (theos.Subprojects.Count > 0) evidence.Add("SUBPROJECTS: " + string.Join(", ", theos.Subprojects));
+        var notes = new List<string>
+        {
+            "A Theos project builds a Debian package (.deb) for jailbroken devices. It is not an IPA and not a desktop app; HCG never routes it through Xcode archiving.",
+        };
+        if (theos.ControlFile is null) notes.Add("No control file: Theos cannot package this project (add control next to the Makefile or in layout/DEBIAN/).");
+        if (theos.MaintainerScripts.Count > 0) notes.Add($"Maintainer scripts run as root when the package is installed: {string.Join(", ", theos.MaintainerScripts)}.");
+        if (theos.UsesParentDirectory) notes.Add("Its Makefiles reference files outside the project folder (..): HCG builds a copy of the whole imported repository so those paths keep working.");
         return new NativeProjectInfo
         {
-            Directory = dir, Kind = NativeProjectKind.Theos, ManifestPath = makefile, Name = name, Evidence = evidence,
-            UnsupportedReason = "Theos project: a jailbreak tweak, tool or app for iOS that Theos builds into a Debian package (.deb) for jailbroken devices. " +
-                                "It needs the Theos toolchain and a dedicated package workflow, which HCG Executable Maker does not have. HCG never packages it as a desktop app or an IPA.",
+            Directory = dir, Kind = NativeProjectKind.Theos, ManifestPath = makefile, Name = name, Version = theos.PackageVersion, Evidence = evidence,
+            Notes = notes, Theos = theos, Languages = ["OBJC"],
+            UnsupportedReason = theos.Instances.Count == 0
+                ? "The Theos Makefile defines no tweak, bundle, application, tool or library (TWEAK_NAME, BUNDLE_NAME, APPLICATION_NAME, TOOL_NAME, LIBRARY_NAME) that HCG could identify."
+                : theos.ControlFile is null ? "The Theos project has no control file, so it cannot be packaged." : null,
         };
     }
 

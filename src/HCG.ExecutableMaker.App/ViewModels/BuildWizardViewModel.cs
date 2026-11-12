@@ -528,12 +528,12 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         }
 
         PlatformOptions.Clear();
-        foreach (var p in new[] { TargetPlatform.Windows, TargetPlatform.MacOS, TargetPlatform.Linux, TargetPlatform.Android })
+        foreach (var p in IsTheosBuild ? [TargetPlatform.IOS] : new[] { TargetPlatform.Windows, TargetPlatform.MacOS, TargetPlatform.Linux, TargetPlatform.Android })
         {
             var compatible = detected.CompatiblePlatforms.Contains(p);
             var note = p == TargetPlatform.Android ? "not implemented" : compatible ? null
                 : IsNativeBuild ? $"build on a {p.DisplayName()} computer with its toolchain" : "not supported by this project";
-            var name = p == TargetPlatform.Linux ? "Linux (portable preview)" : p.DisplayName();
+            var name = p == TargetPlatform.Linux ? "Linux (portable preview)" : p == TargetPlatform.IOS ? "iOS — jailbroken devices (.deb, not an IPA)" : p.DisplayName();
             PlatformOptions.Add(new Choice<TargetPlatform>(p, name, compatible && p != TargetPlatform.Android, note));
         }
         SelectedPlatform = PlatformOptions.FirstOrDefault(o => o.IsEnabled && o.Value == SelectedPlatform?.Value)
@@ -588,6 +588,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         PlatformNote = value?.Value switch
         {
+            _ when IsTheosBuild => "Theos builds the package on this computer for jailbroken iPhones and iPads. The package scheme (rootless / rootful), deployment target and architectures come from the project; HCG does not change them or claim compatibility beyond them.",
             _ when IsNativeBuild => HostInfo.CurrentPlatform == TargetPlatform.MacOS
                 ? "C/C++ builds run on this Mac with its own compilers: arm64, x86_64, or both (universal, when every dependency is universal too). Windows, Linux and iOS binaries need those platforms' toolchains."
                 : $"C/C++ builds run on this computer with its own compilers, for {HostInfo.CurrentPlatform.DisplayName()} {HostInfo.CurrentArchitecture.DisplayName()} only. Other platforms or architectures need their own toolchains, which HCG does not set up.",
@@ -710,7 +711,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         return new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained, swiftKind)
         {
             IsElectron = IsElectronBuild,
-            IsNative = IsNativeBuild,
+            IsNative = IsNativeBuild && !IsTheosBuild,
+            IsTheos = IsTheosBuild,
             IsNativeMacBundle = IsNativeBuild && IsNativeMacBundle,
         };
     }
@@ -845,6 +847,17 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                                                  $"sandbox entitlements: {string.Join(", ", new[] { "com.apple.security.app-sandbox" }.Concat(d.AppStoreEntitlements))} · validation and upload stay manual"));
             var disabled = DisabledFeatures().ToList();
             if (disabled.Count > 0) Summary.Add(new("Disabled features", string.Join("; ", disabled)));
+        }
+        else if (s.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } th } tn)
+        {
+            Summary.Add(new("Adapter", "Theos: make package FINALPACKAGE=1 (the project's own makefiles), in a copy of the project"));
+            Summary.Add(new("Package configuration", $"{th.Label} · installs under {new TheosScheme { PackageScheme = th.PackageScheme }.InstallPrefix} · Architecture {new TheosScheme { PackageScheme = th.PackageScheme }.DebArchitecture}"));
+            Summary.Add(new("Deployment", $"iOS {th.DeploymentTarget ?? "(Theos default)"} and later · SDK iPhoneOS {th.SdkVersion ?? "latest"} · {string.Join(" + ", th.Architectures.DefaultIfEmpty("Theos default"))}"));
+            Summary.Add(new("Products", string.Join(", ", th.Instances.Select(i => $"{i.DisplayType} {i.Name}"))));
+            Summary.Add(new("Output type", "Debian package (.deb) for jailbroken devices — not an IPA. HCG does not install it or respring."));
+            var tc = _toolchains.Latest;
+            Summary.Add(new("Toolchain", string.Join(" · ", new[] { ToolchainIds.Theos, ToolchainIds.TheosMake, ToolchainIds.TheosIosToolchain, ToolchainIds.Ldid }
+                .Select(id => tc?.Find(id)).OfType<ToolchainInfo>().Select(t => $"{t.DisplayName} {t.Version ?? ""} {t.ExecutablePath}".Trim()))));
         }
         else if (s.Native is { } n)
         {
@@ -1036,7 +1049,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var notarized = build.Artifacts.Any(a => a.Checks.Any(c => c.Name == "Notarization" && c.Status == VerificationStatus.Passed));
         ResultDetail = build.Status == BuildStatus.Succeeded
             ? $"{build.Artifacts.Count} artifact(s) generated and verified · {build.WarningCount} warning(s). " +
-              (build.Settings.Native is { } nb
+              (build.Settings.Native is { Kind: NativeProjectKind.Theos }
+                ? "Debian package for jailbroken devices, checked by HCG (metadata, install prefix, payload, binaries). It was not installed: copy it to the device and install it yourself (INSTALL.txt next to the package explains how). Not an IPA."
+               : build.Settings.Native is { } nb
                 ? (nb.IsMacBundle ? "The project's .app was kept as built and signed in a separate stage (see its Code signature check); not notarized."
                                   : "Not code-signed: HCG does not sign C/C++ executables on this platform.") +
                   " HCG did not run the program. Runtime libraries are listed in RUNTIME-DEPENDENCIES.txt; a binary is portable only if every non-system library it needs ships with it."

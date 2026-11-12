@@ -13,6 +13,8 @@ public static class NativeCapabilities
 
     public static Assessment Evaluate(NativeProjectInfo project, ToolchainReport? report)
     {
+        if (project.Kind == NativeProjectKind.Theos && project.UnsupportedReason is null && project.Theos is { } theos)
+            return EvaluateTheos(project, theos.Schemes.FirstOrDefault(s => s.IsDefault && s.ProjectError is null) ?? theos.Schemes.FirstOrDefault(s => s.ProjectError is null), report);
         if (project.Kind is NativeProjectKind.Theos or NativeProjectKind.Unsupported)
             return new(SupportLevel.Unsupported, project.UnsupportedReason ?? "Not supported.", [], []);
         if (report is null)
@@ -59,6 +61,48 @@ public static class NativeCapabilities
         if (fixes.Count > 0)
             return new(SupportLevel.MissingToolchain, $"{project.Name}: this computer is missing tools the {KindLabel(project.Kind)} needs.", fixes, requirements);
         return new(SupportLevel.Supported, $"{KindLabel(project.Kind)} — builds for {report.Host.Platform.DisplayName()} {report.Host.Architecture.DisplayName()} with this computer's toolchain.", [], requirements);
+    }
+
+    /// <summary>
+    /// What a Theos package build needs for one of the project's configurations: Theos, GNU make 4+, ldid, perl, an
+    /// iOS-targeting clang, and the SDK the configuration's TARGET names. Each missing item is reported on its own.
+    /// </summary>
+    public static Assessment EvaluateTheos(NativeProjectInfo project, TheosScheme? scheme, ToolchainReport? report)
+    {
+        if (scheme is null)
+            return new(SupportLevel.RequiresConfiguration, $"{project.Name}: the Makefile defines no package configuration HCG can build (every branch stops with the project's own error).", [], []);
+        if (scheme.ProjectError is { } projectError)
+            return new(SupportLevel.RequiresConfiguration, $"The project refuses {scheme.Label}: {projectError}", [], []);
+        if (report is null) return new(SupportLevel.MissingToolchain, "Toolchains have not been detected yet.", ["Open the Toolchains page and press Refresh."], []);
+        if (report.Host.Platform == TargetPlatform.Windows)
+            return new(SupportLevel.RequiresDifferentHost, "Theos packages are built on macOS or Linux.", ["Build on a Mac (recommended: Xcode's clang produces the current arm64e ABI) or on Linux."], []);
+        var requirements = new List<ToolchainRequirement>();
+        var fixes = new List<string>();
+        void Need(string id, string name, string why)
+        {
+            var row = report.Find(id);
+            var ok = row?.IsAvailable == true;
+            requirements.Add(new ToolchainRequirement(id, name, null, ok, ok ? $"{row!.ExecutablePath} {row.Version}".Trim() : row?.Detail ?? why));
+            if (!ok) fixes.Add($"{name}: {(row?.Detail is { Length: > 0 } d ? d : why)} {row?.InstallHint ?? ""}".Trim());
+        }
+        Need(ToolchainIds.Theos, "Theos", "Theos' makefiles build and package the project.");
+        Need(ToolchainIds.TheosMake, "GNU make 4+", "Theos' makefiles need GNU make 4 or later.");
+        Need(ToolchainIds.TheosIosToolchain, "iOS toolchain (clang for iphoneos)", "compiles the project for iOS.");
+        Need(ToolchainIds.Ldid, "ldid", "signs the built binaries.");
+        Need(ToolchainIds.Perl, "perl", "runs Logos and the package builder.");
+        if (report.Find(ToolchainIds.Theos) is { IsAvailable: true } theosRow && scheme.SdkVersion is { } sdk)
+        {
+            var inTheos = theosRow.AdditionalVersions.Contains("iPhoneOS" + sdk + ".sdk");
+            requirements.Add(new ToolchainRequirement(ToolchainIds.Theos + "-sdk", $"iPhoneOS {sdk} SDK", null, inTheos,
+                inTheos ? $"{theosRow.ExecutablePath}/sdks/iPhoneOS{sdk}.sdk" : $"$THEOS/sdks has {(theosRow.AdditionalVersions.Count == 0 ? "no SDKs" : string.Join(", ", theosRow.AdditionalVersions))}"));
+            if (!inTheos)
+                fixes.Add($"iPhoneOS {sdk} SDK: {scheme.Label} builds with TARGET iphone:clang:{sdk}:{scheme.DeploymentTarget}, so Theos needs iPhoneOS{sdk}.sdk in {theosRow.ExecutablePath}/sdks. " +
+                          "Copy that SDK there yourself (for example from github.com/theos/sdks). HCG does not download SDKs or change the project's TARGET.");
+        }
+        if (fixes.Count > 0)
+            return new(SupportLevel.MissingToolchain, $"{project.Name} ({scheme.Label}): this computer is missing what the Theos build needs.", fixes, requirements);
+        return new(SupportLevel.Supported, $"Theos package — {scheme.Label}: iOS {scheme.DeploymentTarget ?? "(Theos default)"}+, SDK {scheme.SdkVersion ?? "latest"}, " +
+            $"installs under {scheme.InstallPrefix}. Built on this {report.Host.Platform.DisplayName()} computer into a .deb for jailbroken devices.", [], requirements);
     }
 
     public static string KindLabel(NativeProjectKind kind) => kind switch

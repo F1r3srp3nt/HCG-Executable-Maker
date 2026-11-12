@@ -30,7 +30,7 @@ and verified.
 | Import | ZIP archives and folders into isolated workspaces; rejects corrupt archives, path traversal, symlinks, duplicate entries, decompression bombs and oversize/over-count archives; preserves the original archive; never modifies your source |
 | Inspection | Static .NET analysis: `.sln`, `.slnx`, `.csproj/.fsproj/.vbproj`, `Directory.Build.props`, central package versions, `global.json` roll-forward, target frameworks, output types, RIDs, package/project references, entry points, icons, Avalonia/WPF/WinForms/MAUI/web detection, platform compatibility |
 | Node.js / Electron | Every `package.json` is classified (Electron desktop app, browser app, service, library). **Electron apps packaged with electron-builder are built** with the project's own workflow (see below); web-only projects get the exact list of what is missing |
-| C/C++ | **CMake** (executable targets from the CMake File API after a trusted configure; presets), **Make** (explicit target and output), **sources without a build system** (explicit file selection). Builds for this computer; verified executable, runtime-library report, portable folder/ZIP, macOS `.app` for bundle targets. Theos is recognized and explained, never built (see below) |
+| C/C++ | **CMake** (executable targets from the CMake File API after a trusted configure; presets), **Make** (explicit target and output), **sources without a build system** (explicit file selection). Builds for this computer; verified executable, runtime-library report, portable folder/ZIP, macOS `.app` for bundle targets. Theos jailbreak packages are built as `.deb` (never an IPA) — see [`docs/HCG-PROJECTS.md`](docs/HCG-PROJECTS.md) |
 | Other ecosystems | Rust, Python, Java, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
 | Build | `dotnet restore` → `build` → `publish` with structured arguments (no shell), Release/Debug, runtime selection (win/osx/linux × x64/arm64), self-contained, single-file, live log, warning/error parsing, cancellation, timeouts |
 | Packaging | Portable folder · portable ZIP (Unix permissions preserved) · **Windows Setup.exe installer** (Inno Setup, Windows hosts — M0.2, see below) · macOS `.app` bundle (Info.plist, `.icns`, exec bits) · `.dmg` on macOS hosts with `hdiutil` |
@@ -101,7 +101,7 @@ compilers:
    project's own `.app` on a Mac (signed in a separate stage).
 
 States: toolchain missing · configuration required · ready · building · failed · verified. Theos projects are
-recognized and explained, never packaged as a desktop app or IPA. Details: [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md).
+built as jailbreak `.deb` packages ([`docs/HCG-PROJECTS.md`](docs/HCG-PROJECTS.md)), never as a desktop app or IPA. Details: [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md).
 
 ## HCG account (unreleased, `feature/hcg-account`)
 
@@ -182,6 +182,7 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 - [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md) — Windows Setup.exe: features, requirements, CI route, tests
 - [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md) — HCG sign-in, ERP App Access, support requests, HCG AI: contract, configuration, verification
 - [`docs/ELECTRON.md`](docs/ELECTRON.md) — Electron apps: inspection, electron-builder stages, verification, offered targets
+- [`docs/HCG-PROJECTS.md`](docs/HCG-PROJECTS.md) — HCG Nexus (Theos .deb), HCG Mail iOS (.NET for iOS), HCG Sentinel (deployment-range preflight): routes, states, verification
 - [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md) — C/C++: supported project types, trusted CMake configure, Make/sources, verification, limits
 - [`docs/TOOLCHAINS.md`](docs/TOOLCHAINS.md) — toolchain discovery (Xcode, Java, Android SDK, Node.js, C/C++) and readiness
 - [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows

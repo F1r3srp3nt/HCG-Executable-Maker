@@ -58,13 +58,16 @@ public class NativeTests : IDisposable
 
     // ------------------------------------------------------------------ detection (static)
 
+    private static string TheosControlName() =>
+        File.ReadAllLines(Fixture("TheosTweak") + "/control").FirstOrDefault(l => l.StartsWith("Name:", StringComparison.Ordinal))?[5..].Trim() ?? "HCGTweak";
+
     [Fact]
     public void Each_kind_of_project_is_classified_from_its_files()
     {
         foreach (var (fixture, kind, name) in new[]
                  {
                      ("CHello", NativeProjectKind.CMake, "CHello"), ("CppHello", NativeProjectKind.CMake, "CppHello"), ("LibOnly", NativeProjectKind.CMake, "OnlyLib"),
-                     ("MakeHello", NativeProjectKind.Make, "MakeHello"), ("LooseSources", NativeProjectKind.Sources, "LooseSources"), ("TheosTweak", NativeProjectKind.Theos, "HCGTweak"),
+                     ("MakeHello", NativeProjectKind.Make, "MakeHello"), ("LooseSources", NativeProjectKind.Sources, "LooseSources"), ("TheosTweak", NativeProjectKind.Theos, TheosControlName()),
                  })
         {
             var dir = _t.Combine(fixture);
@@ -104,7 +107,7 @@ public class NativeTests : IDisposable
     }
 
     [Fact]
-    public void Theos_is_recognized_before_make_and_never_offered_as_a_desktop_app()
+    public void Theos_is_recognized_before_make_and_offered_only_as_a_jailbreak_package()
     {
         var repo = _t.Combine("tweaks");
         CopyDir(Fixture("TheosTweak"), Path.Combine(repo, "HCGTweak"));
@@ -113,16 +116,18 @@ public class NativeTests : IDisposable
         Assert.Equal(NativeProjectKind.Theos, theos.Kind);
         Assert.Contains(theos.Evidence, e => e.Contains("$(THEOS)/makefiles/common.mk"));
         Assert.Contains(theos.Evidence, e => e.Contains("Debian package control file"));
-        Assert.Contains("never packages it as a desktop app or an IPA", theos.UnsupportedReason);
+        Assert.Null(theos.UnsupportedReason);
+        Assert.Contains(theos.Notes, n => n.Contains("not an IPA and not a desktop app"));
+        var tweak = Assert.Single(theos.Theos!.Instances);
+        Assert.Equal((TheosInstanceType.Tweak, "HCGTweak"), (tweak.Type, tweak.Name));
 
         var analysis = NativeProjectInspector.Build(native, null, DateTimeOffset.UtcNow);
-        Assert.Equal(SupportLevel.Unsupported, analysis.Support);
-        Assert.Empty(analysis.RecommendedFormats);
+        Assert.Equal([PackagingFormat.JailbreakDeb], analysis.RecommendedFormats);
         var entry = Assert.Single(analysis.Projects);
-        Assert.False(entry.IsRunnableApplication);
-        Assert.Equal("Theos project — not a desktop app", entry.ApplicationType);
-        Assert.Empty(entry.CompatiblePlatforms);
-        Assert.Equal(SupportLevel.Unsupported, NativeCapabilities.Evaluate(theos, null).Support);
+        Assert.False(entry.IsRunnableApplication);                       // never a desktop app
+        Assert.StartsWith("Jailbreak package (.deb): tweak HCGTweak", entry.ApplicationType);
+        Assert.Equal([TargetPlatform.IOS], entry.CompatiblePlatforms);
+        Assert.Equal(SupportLevel.MissingToolchain, NativeCapabilities.Evaluate(theos, null).Support);   // toolchains not detected yet
     }
 
     [Fact]

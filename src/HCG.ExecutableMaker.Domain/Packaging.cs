@@ -26,6 +26,8 @@ public enum PackagingFormat
     IosArchive,
     /// <summary>iOS App Store Package (.ipa) exported from an archive.</summary>
     IosIpa,
+    /// <summary>Debian package for jailbroken iOS devices, built by Theos (a tweak, preference bundle, tool or app). Not an IPA.</summary>
+    JailbreakDeb,
 }
 
 public enum PackagingAvailability
@@ -75,6 +77,7 @@ public static class PackagingFormatNames
         PackagingFormat.IosSimulatorApp => "iOS Simulator app (.app)",
         PackagingFormat.IosArchive => "Xcode archive (.xcarchive)",
         PackagingFormat.IosIpa => "iOS app package (.ipa)",
+        PackagingFormat.JailbreakDeb => "Jailbreak package (.deb, Theos)",
         _ => format.ToString(),
     };
 }

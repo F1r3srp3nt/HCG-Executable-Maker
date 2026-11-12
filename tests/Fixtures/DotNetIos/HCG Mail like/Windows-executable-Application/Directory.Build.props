@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AnalysisLevel>latest</AnalysisLevel>
+
+    <Version>0.1.0</Version>
+    <InformationalVersion>0.1.0-mvp</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Company>Hakmi Capital Group</Company>
+    <Product>HCG Mail</Product>
+    <Copyright>© Hakmi Capital Group</Copyright>
+  </PropertyGroup>
+</Project>

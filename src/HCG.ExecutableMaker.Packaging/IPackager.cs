@@ -62,4 +62,6 @@ public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Hos
     public bool IsNative { get; init; }
     /// <summary>The C/C++ project produces its own macOS application bundle.</summary>
     public bool IsNativeMacBundle { get; init; }
+    /// <summary>A Theos project: the only output is its Debian package for jailbroken devices.</summary>
+    public bool IsTheos { get; init; }
 }

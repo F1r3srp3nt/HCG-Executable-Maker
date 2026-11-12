@@ -15,6 +15,20 @@ public static partial class XcodeProjectAnalyzer
             .OrderBy(SourceIndex.Depth).ThenBy(p => p, StringComparer.Ordinal)
             .ToList();
 
+    /// <summary>A scheme with the targets its Archive action builds and the configuration it archives with.</summary>
+    internal static IosSchemeInfo Scheme(SourceIndex index, string file, bool shared)
+    {
+        var info = new IosSchemeInfo(Path.GetFileNameWithoutExtension(file), file, shared);
+        try
+        {
+            var doc = XDocument.Parse(AndroidGradleAnalyzer.Read(index, file));
+            var archive = doc.Descendants("BuildActionEntry").Where(e => (string?)e.Attribute("buildForArchiving") == "YES")
+                .Select(e => (string?)e.Descendants("BuildableReference").FirstOrDefault()?.Attribute("BlueprintName")).OfType<string>().ToList();
+            return info with { ArchiveTargets = archive, ArchiveConfiguration = (string?)doc.Descendants("ArchiveAction").FirstOrDefault()?.Attribute("buildConfiguration") };
+        }
+        catch (System.Xml.XmlException) { return info; }
+    }
+
     public static IosProjectInfo Analyze(SourceIndex index, string projectPath, out List<AnalysisDiagnostic> diagnostics)
     {
         diagnostics = [];
@@ -30,13 +44,20 @@ public static partial class XcodeProjectAnalyzer
 
             var rootObject = Obj(root.GetValueOrDefault("rootObject"));
             var projectConfigs = Obj(rootObject?.GetValueOrDefault("buildConfigurationList"));
-            foreach (var cid in (projectConfigs?.GetValueOrDefault("buildConfigurations") as List<object>) ?? [])
-                if (Obj(cid)?.GetValueOrDefault("name") is string n) configurations.Add(n);
+            // Project-level settings are the base every target inherits (e.g. IPHONEOS_DEPLOYMENT_TARGET set once for the project).
+            var projectSettings = new Dictionary<string, string>(StringComparer.Ordinal);
+            var declared = ((projectConfigs?.GetValueOrDefault("buildConfigurations") as List<object>) ?? []).Select(Obj).OfType<Dictionary<string, object>>().ToList();
+            foreach (var c in declared)
+                if (c.GetValueOrDefault("name") is string n) configurations.Add(n);
+            var projectConfigObjects = declared.OrderByDescending(c => c.GetValueOrDefault("name") as string == "Release").ToList();
+            foreach (var c in projectConfigObjects.AsEnumerable().Reverse())
+                if (c.GetValueOrDefault("buildSettings") is Dictionary<string, object> pbs)
+                    foreach (var (k, v) in pbs) if (v is string sv) projectSettings[k] = sv;
             usesPackages = objects.Values.OfType<Dictionary<string, object>>().Any(o => o.GetValueOrDefault("isa") is "XCRemoteSwiftPackageReference" or "XCLocalSwiftPackageReference");
 
             foreach (var o in objects.Values.OfType<Dictionary<string, object>>().Where(o => o.GetValueOrDefault("isa") as string == "PBXNativeTarget"))
             {
-                var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+                var settings = new Dictionary<string, string>(projectSettings, StringComparer.Ordinal);
                 var list = Obj(o.GetValueOrDefault("buildConfigurationList"));
                 // Prefer Release values, fall back to any configuration.
                 var configs = ((list?.GetValueOrDefault("buildConfigurations") as List<object>) ?? []).Select(Obj).OfType<Dictionary<string, object>>()
@@ -64,7 +85,7 @@ public static partial class XcodeProjectAnalyzer
         // Shared schemes (committed); user schemes are per-developer and normally not in source control.
         var schemes = index.Files
             .Where(f => f.StartsWith(projectPath + "/", StringComparison.Ordinal) && f.EndsWith(".xcscheme", StringComparison.Ordinal))
-            .Select(f => new IosSchemeInfo(Path.GetFileNameWithoutExtension(f), f, f.Contains("/xcshareddata/", StringComparison.Ordinal)))
+            .Select(f => Scheme(index, f, f.Contains("/xcshareddata/", StringComparison.Ordinal)))
             .ToList();
 
         var dir = AndroidGradleAnalyzer.Dir(projectPath);
@@ -75,7 +96,7 @@ public static partial class XcodeProjectAnalyzer
         if (workspace is not null)
             schemes.AddRange(index.Files
                 .Where(f => f.StartsWith(workspace + "/xcshareddata/", StringComparison.Ordinal) && f.EndsWith(".xcscheme", StringComparison.Ordinal))
-                .Select(f => new IosSchemeInfo(Path.GetFileNameWithoutExtension(f), f, true)));
+                .Select(f => Scheme(index, f, true)));
 
         var usesPods = index.Files.Contains(AndroidGradleAnalyzer.Join(dir, "Podfile"));
         if (usesPods && !index.Files.Any(f => f.StartsWith(AndroidGradleAnalyzer.Join(dir, "Pods/"), StringComparison.Ordinal)))

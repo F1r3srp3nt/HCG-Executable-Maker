@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Domain model, validation and service contracts. Deliberately free of UI, MailKit and OS dependencies. -->
+  <PropertyGroup>
+    <RootNamespace>HCG.Mail.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.Mail.Tests" />
+  </ItemGroup>
+</Project>

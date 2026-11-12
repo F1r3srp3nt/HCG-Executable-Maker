@@ -54,7 +54,8 @@ public sealed class NativeProjectInspector(TimeProvider time) : IProjectInspecto
         }
         diagnostics.Add(new(DiagnosticSeverity.Info, "CMakeLists.txt, Makefiles and sources were read as text. No CMake, make, compiler or project script ran during inspection; configuring a CMake project runs its code and needs your confirmation first."));
 
-        var buildable = native.Projects.Where(p => p.Kind is NativeProjectKind.CMake or NativeProjectKind.Make or NativeProjectKind.Sources).ToList();
+        var buildable = native.Projects.Where(p => p.Kind is NativeProjectKind.CMake or NativeProjectKind.Make or NativeProjectKind.Sources
+                                                   || p is { Kind: NativeProjectKind.Theos, UnsupportedReason: null }).ToList();
         var best = buildable.Select(p => (Project: p, A: assessments[p.ManifestPath])).OrderBy(x => Rank(x.A.Support)).FirstOrDefault();
         SupportLevel support;
         string summary;
@@ -80,7 +81,7 @@ public sealed class NativeProjectInspector(TimeProvider time) : IProjectInspecto
             else
             {
                 var p = best.Project;
-                var ready = p.Kind == NativeProjectKind.CMake && p.Configured is { } c && c.Executables.Any();
+                var ready = (p.Kind == NativeProjectKind.CMake && p.Configured is { } c && c.Executables.Any()) || p.Kind == NativeProjectKind.Theos;
                 support = ready ? SupportLevel.Supported : SupportLevel.RequiresConfiguration;
                 summary = p.Kind switch
                 {
@@ -91,6 +92,8 @@ public sealed class NativeProjectInspector(TimeProvider time) : IProjectInspecto
                         $"{p.Name}: configured, but it defines no executable target{(empty.Libraries.Any() ? $" — only libraries ({string.Join(", ", empty.Libraries.Select(t => t.Name))}), which are not runnable applications" : "")}.",
                     NativeProjectKind.CMake =>
                         $"{p.Name}: CMake project. Configure it on this computer (after confirming you trust it) so HCG can list its real executable targets through the CMake File API.",
+                    NativeProjectKind.Theos => $"{p.Name}: Theos package ({p.Theos!.Summary}). {best.A.Summary}" +
+                                               (buildable.Count(x => x.Kind == NativeProjectKind.Theos) > 1 ? " The repository has more Theos packages; choose one under Project to build." : ""),
                     NativeProjectKind.Make => $"{p.Name}: Makefile project. Choose the make target and the file it produces.",
                     _ => $"{p.Name}: C/C++ sources without a build system. Choose the files to compile; HCG generates the build configuration in its own build folder.",
                 };
@@ -117,7 +120,8 @@ public sealed class NativeProjectInspector(TimeProvider time) : IProjectInspecto
             PrimaryProjectPath = runnable.Count == 1 ? runnable[0].RelativePath : null,
             RequiredToolchains = requirements,
             MissingDependencies = missing,
-            RecommendedFormats = buildable.Count == 0 ? [] : bundle ? [PackagingFormat.MacAppBundle, PackagingFormat.PortableZip] : [PackagingFormat.PortableFolder, PackagingFormat.PortableZip],
+            RecommendedFormats = buildable.Count == 0 ? [] : buildable.All(x => x.Kind == NativeProjectKind.Theos) ? [PackagingFormat.JailbreakDeb]
+                : bundle ? [PackagingFormat.MacAppBundle, PackagingFormat.PortableZip] : [PackagingFormat.PortableFolder, PackagingFormat.PortableZip],
             Diagnostics = diagnostics,
             Native = native,
             AnalyzedAt = now,
@@ -160,11 +164,17 @@ public sealed class NativeProjectInspector(TimeProvider time) : IProjectInspecto
                 NativeProjectKind.CMake => "CMake project — configure to list its targets",
                 NativeProjectKind.Make => "Makefile project — choose the target and its output",
                 NativeProjectKind.Sources => "C/C++ sources — choose the files to compile",
-                NativeProjectKind.Theos => "Theos project — not a desktop app",
+                NativeProjectKind.Theos when p.Theos is { } t && p.UnsupportedReason is null => "Jailbreak package (.deb): " + string.Join(" + ", t.Instances.Select(i => i.Type switch
+                {
+                    TheosInstanceType.Tweak => "tweak", TheosInstanceType.PreferenceBundle => "preference bundle", TheosInstanceType.Application => "app (in a .deb, not an IPA)",
+                    TheosInstanceType.Tool => "tool", TheosInstanceType.Library => "library", _ => i.Type.ToString().ToLowerInvariant(),
+                } + " " + i.Name)),
+                NativeProjectKind.Theos => "Theos project — cannot be packaged as it is",
                 _ => "C/C++ project — build system not supported",
             },
             IsRunnableApplication = false,
-            CompatiblePlatforms = p.Kind is NativeProjectKind.Make or NativeProjectKind.Sources ? [host] : [],
+            CompatiblePlatforms = p.Kind is NativeProjectKind.Make or NativeProjectKind.Sources ? [host]
+                : p is { Kind: NativeProjectKind.Theos, UnsupportedReason: null } ? [TargetPlatform.IOS] : [],
         };
     }
 
@@ -172,7 +182,7 @@ public sealed class NativeProjectInspector(TimeProvider time) : IProjectInspecto
     {
         var c = languages.Contains("C");
         var cxx = languages.Contains("CXX");
-        return c && cxx ? "C/C++" : cxx ? "C++" : c ? "C" : languages.Count > 0 ? string.Join("/", languages) : "C/C++";
+        return c && cxx ? "C/C++" : cxx ? "C++" : c ? "C" : languages.Count > 0 ? string.Join("/", languages.Select(l => l == "OBJC" ? "Objective-C (Logos)" : l)) : "C/C++";
     }
 
     private static int Rank(SupportLevel s) => s switch

@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    The iOS app shares the language, version and product settings of the one HCG Mail code base in
+    ../Windows-executable-Application. Only iOS-specific projects live in this folder.
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)../Windows-executable-Application/Directory.Build.props" />
+  <PropertyGroup>
+    <HcgSharedSource>$(MSBuildThisFileDirectory)../Windows-executable-Application/src/</HcgSharedSource>
+  </PropertyGroup>
+</Project>

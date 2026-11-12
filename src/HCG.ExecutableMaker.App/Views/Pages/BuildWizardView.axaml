@@ -323,6 +323,24 @@
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
+                    <!-- Theos: jailbreak package (.deb), the configuration the project defines -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeTheos}">
+                      <Border Classes="inset" Padding="16,12">
+                        <StackPanel Spacing="8">
+                          <TextBlock Text="What the package contains" FontWeight="SemiBold" />
+                          <SelectableTextBlock FontSize="12.5" Text="{Binding TheosProducts}" TextWrapping="Wrap" />
+                          <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding TheosPackage}" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Border>
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="PACKAGE CONFIGURATION (DEFINED BY THE PROJECT'S MAKEFILE)" Margin="0" />
+                        <ComboBox ItemsSource="{Binding TheosSchemes}" SelectedItem="{Binding SelectedTheosScheme}" HorizontalAlignment="Stretch" />
+                        <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding TheosSchemeDetail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="Each configuration builds in its own folder, so rootless and rootful packages never mix. HCG runs only 'make package' — never 'make install', never a respring, never a connection to a device — and checks the resulting .deb before showing it." />
+                    </StackPanel>
+
                     <!-- CMake -->
                     <StackPanel Spacing="10" IsVisible="{Binding ShowNativeCMake}">
                       <Border Classes="inset" Padding="16,12">
@@ -1426,7 +1444,7 @@
                 <DataTemplate x:DataType="vm:LogLineItem">
                   <Grid ColumnDefinitions="70,*">
                     <TextBlock Classes="log" Text="{Binding Time}" Opacity="0.45" />
-                    <TextBlock Grid.Column="1" Classes="log" Text="{Binding Text}"
+                    <TextBlock Grid.Column="1" Classes="log" TextWrapping="Wrap" Text="{Binding Text}"
                                Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.success="{Binding IsSuccess}"
                                Classes.command="{Binding IsCommand}" Classes.info="{Binding IsInfo}" />
                   </Grid>

@@ -20,6 +20,15 @@ public static class PackagingCatalog
             EvaluateElectron(ctx, Add);
             return list;
         }
+        if (ctx.IsTheos)
+        {
+            Add(PackagingFormat.JailbreakDeb, "The Debian package Theos builds (make package FINALPACKAGE=1), checked: metadata, install prefix, payload, binaries and their architectures. " +
+                "For jailbroken devices only; installed by you with Sileo, Zebra, Filza or dpkg.", ctx.Host.Platform is TargetPlatform.MacOS or TargetPlatform.Linux
+                    ? PackagingAvailability.Available : PackagingAvailability.RequiresDifferentHost, ctx.Host.Platform is TargetPlatform.MacOS or TargetPlatform.Linux ? null : "Theos builds on macOS or Linux.");
+            Add(PackagingFormat.IosIpa, "IPA.", PackagingAvailability.NotApplicable, "A Theos package is not an iOS app package: tweaks and preference bundles are injected or loaded by the jailbreak, and HCG never relabels a .deb as an IPA.");
+            Add(PackagingFormat.IosArchive, "Xcode archive.", PackagingAvailability.NotApplicable, "Theos projects are built by Theos' makefiles, not archived with Xcode.");
+            return list;
+        }
         if (ctx.IsNative)
         {
             EvaluateNative(ctx, Add);

@@ -23,6 +23,10 @@
 #                 (targets from the CMake File API; libraries listed separately), builds a target, a Makefile target
 #                 with an explicit output, explains a Theos project without building it, and on macOS keeps a
 #                 MACOSX_BUNDLE .app (universal, ad-hoc signed as its own stage, zipped); CI then checks the outputs.
+#   hcg-nexus-theos / hcg-mail-ios / hcg-sentinel-archive — the three HCG projects at pinned commits through the real
+#                 wizard and Mobile Build Studio: Nexus' Theos .deb (rootless, rootful, preview app) checked by HCG and by
+#                 Nexus' own script; Mail's .NET for iOS head (Simulator build, unsigned device archive); Sentinel archived
+#                 with every installed Xcode, with the deployment-range preflight, full logs and .xcresult bundles kept.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -818,6 +822,209 @@ jobs:
           grep -Eq "^[[:space:]]*Total tests:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
           grep -Eq "^[[:space:]]*Passed:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
 
+  hcg-nexus-theos:
+    name: HCG Nexus — Theos .deb (rootless + rootful + preview app) through the New Build wizard
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/nexus-out
+      NEXUS_COMMIT: c7cd62cc065bc2bddd7cdf431b5f8e5e078173b9
+      # Theos and its SDKs are set up on this disposable runner the way HCG Nexus' own CI does; HCG never installs them.
+      THEOS: ${{ github.workspace }}/theos
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Runner setup — Theos, iPhoneOS 16.5/14.5 SDKs, ldid, GNU make, dpkg (for HCG Nexus' own package check)
+        run: |
+          brew install ldid make dpkg
+          git clone --depth 1 --recursive https://github.com/theos/theos.git "$THEOS"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$RUNNER_TEMP/sdks"
+          git -C "$RUNNER_TEMP/sdks" sparse-checkout set iPhoneOS16.5.sdk iPhoneOS14.5.sdk
+          cp -R "$RUNNER_TEMP/sdks/iPhoneOS16.5.sdk" "$RUNNER_TEMP/sdks/iPhoneOS14.5.sdk" "$THEOS/sdks/"
+          xcodebuild -version
+      - name: HCG Nexus at a pinned commit, in a path with spaces
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Nexus.git "$OUT/src/HCG Nexus"
+          git -C "$OUT/src/HCG Nexus" checkout --quiet "$NEXUS_COMMIT"
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      - name: Rootless (the project's default, iOS 15.0+, /var/jb) — roothide is refused by the project itself
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          --project Makefile --theos-scheme rootless --expect-refused roothide
+          --output "$OUT/rootless" --screenshots "$OUT/screens" --prefix nexus-rootless
+      - name: Rootful (iOS 14.0+, /), built in its own folder
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          --project Makefile --theos-scheme rootful
+          --output "$OUT/rootful" --screenshots "$OUT/screens" --prefix nexus-rootful
+      - name: Preview app (separate package, packaged as a .deb — not an IPA)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          --project PreviewHarness/Makefile --theos-scheme rootless
+          --output "$OUT/preview" --screenshots "$OUT/screens" --prefix nexus-preview
+      - name: HCG Nexus' own package check agrees with HCG's (new arm64e ABI required)
+        working-directory: ${{ github.workspace }}/nexus-out/src/HCG Nexus
+        run: |
+          for scheme in rootless rootful; do
+            deb="$(sed -n 1p "$OUT/$scheme/nexus-$scheme-artifacts.txt")"
+            echo "== $scheme: $deb"; ls -l "$deb"
+            python3 scripts/inspect-package.py "$deb" "$scheme" --require-new-arm64e-abi
+            cat "$(dirname "$deb")/INSTALL.txt"
+          done
+          # The imported source was not written to: no .theos/ or packages/ appeared in the user's folder.
+          if [ -e "$OUT/src/HCG Nexus/.theos" ] || [ -e "$OUT/src/HCG Nexus/packages" ]; then echo "build output in the source"; exit 1; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-nexus-theos
+          path: |
+            ${{ github.workspace }}/nexus-out/screens
+            ${{ github.workspace }}/nexus-out/*/artifacts/**/*.deb
+            ${{ github.workspace }}/nexus-out/*/artifacts/**/*.txt
+            ${{ github.workspace }}/nexus-out/*/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  hcg-mail-ios:
+    name: HCG Mail iOS — .NET for iOS (Avalonia) Simulator build and unsigned device archive through Mobile Build Studio
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/mail-out
+      MAIL_COMMIT: 46d422806434d1938553cf62717c1683a67d5676
+      XCODE_VERSION: "26.3"   # what HCG Mail's pinned iOS workload (26.2.10233) requires
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.1xx"
+      - name: HCG Mail at a pinned commit (whole repository, path with spaces)
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Mail.git "$OUT/src/HCG Mail"
+          git -C "$OUT/src/HCG Mail" checkout --quiet "$MAIL_COMMIT"
+      - name: Runner setup — Xcode ${{ env.XCODE_VERSION }} and the iOS workload version the project pins (HCG never installs workloads)
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          xcodebuild -version
+          cd "$OUT/src/HCG Mail/iOS App Store Submission"
+          dotnet workload config --update-mode manifests
+          dotnet workload install ios --from-rollback-file scripts/workload-rollback.json --skip-sign-check
+          dotnet workload list
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      - name: The submission folder alone is "Configuration required" (its shared projects are outside it)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail/iOS App Store Submission"
+          --output sim --expect-state "Configuration required" --output "$OUT/partial" --screenshots "$OUT/screens" --prefix mail-partial
+      - name: Simulator build from the repository root (shared projects resolved from the repository)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
+          --output sim --expect-state "Ready to build" --output "$OUT/sim" --screenshots "$OUT/screens" --prefix mail-sim
+      - name: Unsigned device archive (ios-arm64, AOT) — inspection only, never exported to an IPA
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
+          --output archive --signing unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
+      - name: Independent checks of what HCG produced
+        run: |
+          app="$(find "$OUT/sim/artifacts" -maxdepth 3 -name '*.app' -type d | head -1)"
+          echo "Simulator app: $app"
+          plutil -p "$app/Info.plist" | grep -E 'CFBundle(Identifier|ShortVersionString|Version)|MinimumOSVersion'
+          test -f "$app/Assets.car"
+          xcrun vtool -show-build "$app/HCGMail.iOS" | grep -E 'platform|minos'
+          archive="$(find "$OUT/archive/artifacts" -maxdepth 3 -name '*.xcarchive' -type d | head -1)"
+          echo "Archive: $archive"
+          plutil -p "$archive/Info.plist" | head -30
+          dev="$(find "$archive/Products/Applications" -maxdepth 1 -name '*.app' | head -1)"
+          lipo -archs "$dev/HCGMail.iOS"; xcrun vtool -show-build "$dev/HCGMail.iOS" | grep -E 'platform|minos'
+          if codesign -dv "$dev" 2>/dev/null; then codesign -dv "$dev" 2>&1 | grep -E 'Signature|Authority'; else echo "unsigned (as chosen)"; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-mail-ios
+          path: |
+            ${{ github.workspace }}/mail-out/screens
+            ${{ github.workspace }}/mail-out/*/*.json
+            ${{ github.workspace }}/mail-out/*/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  hcg-sentinel-archive:
+    name: HCG Sentinel — archive through Mobile Build Studio with every installed Xcode (reproduction, full logs and .xcresult kept)
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      OUT: ${{ github.workspace }}/sentinel-out
+      SENTINEL_COMMIT: 810c6f99103a5e4f60e91a6fecda8259be01e0da
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: HCG Sentinel at a pinned commit, in a path with spaces
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Sentinel.git "$OUT/src/HCG Sentinel"
+          git -C "$OUT/src/HCG Sentinel" checkout --quiet "$SENTINEL_COMMIT"
+      - name: Xcode inventory — version and the iOS deployment range each iPhoneOS SDK supports (SDKSettings.json)
+        run: |
+          for x in /Applications/Xcode*.app; do
+            s="$x/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json"
+            [ -f "$s" ] || continue
+            v="$(DEVELOPER_DIR="$x/Contents/Developer" xcodebuild -version | head -1)"
+            r="$(python3 -c 'import json,sys; t=json.load(open(sys.argv[1]))["SupportedTargets"]["iphoneos"]; print(t["MinimumDeploymentTarget"], "to", t["MaximumDeploymentTarget"])' "$s")"
+            echo "$x · $v · iOS deployment $r" | tee -a "$OUT/xcodes.txt"
+          done
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      - name: Archive HCGSentinel (iOS 14.7) and HCGSentinelModern (iOS 15.0) with each Xcode, unsigned, as Maker does
+        run: |
+          i=0
+          for x in /Applications/Xcode*.app; do
+            [ -f "$x/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json" ] || continue
+            [ -L "$x" ] && continue
+            i=$((i+1)); name="$(basename "$x" .app)"
+            for scheme in HCGSentinel HCGSentinelModern; do
+              DEVELOPER_DIR="$x/Contents/Developer" dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Sentinel" \
+                --output archive --scheme "$scheme" --signing unsigned --record-only \
+                --output "$OUT/$name-$scheme" --screenshots "$OUT/screens" --prefix "sentinel-$name-$scheme" > "$OUT/$name-$scheme.driver.log" 2>&1 || true
+              state="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["state"], "|", (d.get("firstError") or d.get("detail") or "")[:400])' "$OUT/$name-$scheme/sentinel-$name-$scheme-mobile.json" 2>/dev/null \
+                       || grep -E 'State: \[' "$OUT/$name-$scheme.driver.log" | tail -1)"
+              echo "$name · $scheme · $state" | tee -a "$OUT/results.txt"
+            done
+          done
+          echo "### HCG Sentinel archive through HCG Executable Maker (${{ matrix.runner }})" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/- /' "$OUT/xcodes.txt" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/- /' "$OUT/results.txt" >> "$GITHUB_STEP_SUMMARY"
+          # The default scheme must be archivable with an Xcode whose range includes 14.7 (preflight passed, build ran).
+          grep -E "· HCGSentinel · Artifact verified" "$OUT/results.txt"
+      - name: Collect complete logs and .xcresult bundles
+        if: always()
+        run: |
+          mkdir -p "$OUT/diagnostics"
+          find "$OUT" -path '*hcg-data/builds/*' -name build.log -exec sh -c 'cp "$1" "$OUT/diagnostics/$(basename "$(dirname "$1")").log"' _ {} \;
+          find "$OUT" -path '*hcg-data/builds/*' -name '*.xcresult' -type d -exec cp -R {} "$OUT/diagnostics/" \; || true
+          ls -la "$OUT/diagnostics"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-sentinel-archive-${{ matrix.runner }}
+          path: |
+            ${{ github.workspace }}/sentinel-out/*.txt
+            ${{ github.workspace }}/sentinel-out/*.driver.log
+            ${{ github.workspace }}/sentinel-out/diagnostics
+            ${{ github.workspace }}/sentinel-out/screens
+          if-no-files-found: warn
+          retention-days: 14
+
   native-cpp:
     name: C/C++ — CMake and Make fixtures through the New Build wizard (${{ matrix.os }})
     needs: test
@@ -864,9 +1071,9 @@ jobs:
           --make-target all --expected-output bin/makehello --make-vars "GREETING=from CI"
           --output "$OUT/make" --screenshots "$OUT/screens" --prefix native-make
 
-      - name: Theos — recognized and explained, never built
+      - name: Theos — recognized as a jailbreak package; without Theos on this runner the missing tools are listed (never a desktop build)
         run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/TheosTweak copy" --expect-unsupported
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/TheosTweak copy" --expect-native-state "Required toolchain missing"
           --output "$OUT/theos" --screenshots "$OUT/screens" --prefix native-theos
 
       - name: The produced programs are real (run here by CI, never by HCG)

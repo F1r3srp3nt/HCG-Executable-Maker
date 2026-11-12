@@ -30,6 +30,9 @@ public static class XcodePlanner
     public static string Xcodebuild(MobilePlanInput input) =>
         input.Toolchains.Find(ToolchainIds.IosSdk)?.ExecutablePath ?? "/usr/bin/xcodebuild";
 
+    /// <summary>The .xcresult bundle of one xcodebuild action, kept in HCG's build folder with the complete log (also on failure).</summary>
+    public static string ResultBundle(MobilePlanInput input, string scheme, string action) => Path.Combine(input.WorkDirectory, $"{scheme}-{action}.xcresult");
+
     public static string ArchivePath(MobilePlanInput input, string scheme) => Path.Combine(input.WorkDirectory, scheme + ".xcarchive");
 
     public static MobilePlan Plan(MobilePlanInput input)
@@ -47,7 +50,7 @@ public static class XcodePlanner
         {
             case MobileOutput.IosSimulatorApp:
             {
-                var args = new List<string>(common) { "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator", "COMPILER_INDEX_STORE_ENABLE=NO", "build" };
+                var args = new List<string>(common) { "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator", "-resultBundlePath", ResultBundle(input, c.Scheme, "simulator"), "COMPILER_INDEX_STORE_ENABLE=NO", "build" };
                 var products = Path.Combine(derived, "Build", "Products", configuration + "-iphonesimulator");
                 return new MobilePlan([Step(input, BuildStage.Compiling, $"xcodebuild build ({c.Scheme}, Simulator)", args)],
                     [new OutputRule(PackagingFormat.IosSimulatorApp, products, "*.app", IsDirectory: true, Recursive: false)])
@@ -59,7 +62,7 @@ public static class XcodePlanner
             case MobileOutput.IosIpa:
             {
                 var archive = ArchivePath(input, c.Scheme);
-                var args = new List<string>(common) { "-destination", "generic/platform=iOS", "-archivePath", archive, "COMPILER_INDEX_STORE_ENABLE=NO" };
+                var args = new List<string>(common) { "-destination", "generic/platform=iOS", "-archivePath", archive, "-resultBundlePath", ResultBundle(input, c.Scheme, "archive"), "COMPILER_INDEX_STORE_ENABLE=NO" };
                 var notes = new List<string>();
                 args.AddRange(SigningArguments(o, notes));
                 args.Add("archive");
@@ -122,7 +125,7 @@ public static class XcodePlanner
         var exportDir = Path.Combine(input.WorkDirectory, "export");
         var optionsPath = Path.Combine(input.WorkDirectory, "ExportOptions.plist");
         File.WriteAllText(optionsPath, ExportOptions(o, method, bundleId), new UTF8Encoding(false));
-        var args = new List<string> { "-exportArchive", "-archivePath", archivePath, "-exportPath", exportDir, "-exportOptionsPlist", optionsPath };
+        var args = new List<string> { "-exportArchive", "-archivePath", archivePath, "-exportPath", exportDir, "-exportOptionsPlist", optionsPath, "-resultBundlePath", ResultBundle(input, Path.GetFileNameWithoutExtension(archivePath), "export") };
         if (o.Signing == MobileSigningMode.AppleAutomatic && o.AllowProvisioningUpdates) args.Add("-allowProvisioningUpdates");
         return new MobilePlan([Step(input, BuildStage.Packaging, $"xcodebuild -exportArchive ({method.XcodeValue()})", args)],
             [new OutputRule(PackagingFormat.IosIpa, exportDir, "*.ipa", IsDirectory: false, Recursive: false)])
