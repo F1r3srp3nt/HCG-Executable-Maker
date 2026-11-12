@@ -46,7 +46,9 @@ public static partial class SwiftPackagingContractReader
         using var doc = JsonDocument.Parse(bytes, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false, MaxDepth = 16 });
         var root = doc.RootElement;
         if (root.ValueKind != JsonValueKind.Object) throw new ContractException("the top level must be a JSON object.");
-        Keys(root, "the top level", "schema", "product", "bundle", "prebuild", "helpers", "resources");
+        // "description" is for people reading the file (JSON has no comments); it is checked to be text and ignored.
+        Keys(root, "the top level", "schema", "description", "product", "bundle", "prebuild", "helpers", "resources");
+        _ = OptStr(root, "description", "the top level");
         var schema = Str(root, "schema", "the top level");
         if (schema != SwiftPackagingContract.Schema)
             throw new ContractException($"schema \"{schema}\" is not supported. This version of HCG reads \"{SwiftPackagingContract.Schema}\".");
