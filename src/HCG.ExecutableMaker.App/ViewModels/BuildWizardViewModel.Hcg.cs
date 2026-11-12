@@ -49,7 +49,13 @@ public sealed partial class BuildWizardViewModel
     }
 
     partial void OnAnalysisChanged(ProjectAnalysis? value) => _ = RefreshHcgActionsAsync();
-    partial void OnResultChanged(BuildRecord? value) => _ = RefreshHcgActionsAsync();
+    partial void OnResultChanged(BuildRecord? value)
+    {
+        _ = RefreshHcgActionsAsync();
+        RefreshNativeState();
+        OnPropertyChanged(nameof(ShowDistributionSteps));
+    }
+    partial void OnIsBuildingChanged(bool value) => RefreshNativeState();
 
     [RelayCommand]
     private async Task ViewDiagnosticsAsync()

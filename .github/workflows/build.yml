@@ -19,6 +19,10 @@
 #                 Oslo-Sprint repository as a folder and as a ZIP, evaluates Package.swift after trust, and builds
 #                 Distil.app (+ ZIP, DMG), Relay.app (universal, + ZIP) and the relay-runner CLI; the apps are then
 #                 verified independently (codesign, plutil, lipo), launched and screenshotted.
+#   native-cpp  — on Linux and macOS: the real New Build wizard configures a multi-target CMake fixture after trust
+#                 (targets from the CMake File API; libraries listed separately), builds a target, a Makefile target
+#                 with an explicit output, explains a Theos project without building it, and on macOS keeps a
+#                 MACOSX_BUNDLE .app (universal, ad-hoc signed as its own stage, zipped); CI then checks the outputs.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -813,6 +817,95 @@ jobs:
           # Normal verbosity prints "Total tests: 3" and "     Passed: 3"; require exactly 3 run and 3 passed.
           grep -Eq "^[[:space:]]*Total tests:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
           grep -Eq "^[[:space:]]*Passed:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
+
+  native-cpp:
+    name: C/C++ — CMake and Make fixtures through the New Build wizard (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      OUT: ${{ github.workspace }}/native-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Host C/C++ toolchain (preinstalled on the runner; HCG installs nothing)
+        run: |
+          cmake --version | head -1
+          ninja --version || echo "ninja: not installed (CMake uses make)"
+          make --version | head -1
+          cc --version | head -1
+          c++ --version | head -1
+
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Fixtures copied to paths with spaces (the imported source is never written to)
+        run: |
+          mkdir -p "$OUT/src"
+          for f in MultiTarget MakeHello TheosTweak MacBundle; do cp -R "tests/Fixtures/Native/$f" "$OUT/src/$f copy"; rm -rf "$OUT/src/$f copy/build"; done
+
+      - name: CMake — trusted configure lists calc and greeter (libraries separately), builds calc, verified
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/MultiTarget copy"
+          --target calc --expect-targets calc,greeter --expect-libraries mathlib,greet
+          --output "$OUT/multi" --screenshots "$OUT/screens" --prefix native-multi
+
+      - name: Make — explicit target, variable and expected output
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/MakeHello copy"
+          --make-target all --expected-output bin/makehello --make-vars "GREETING=from CI"
+          --output "$OUT/make" --screenshots "$OUT/screens" --prefix native-make
+
+      - name: Theos — recognized and explained, never built
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/TheosTweak copy" --expect-unsupported
+          --output "$OUT/theos" --screenshots "$OUT/screens" --prefix native-theos
+
+      - name: The produced programs are real (run here by CI, never by HCG)
+        run: |
+          calc="$(sed -n 1p "$OUT/multi/native-multi-artifacts.txt")/calc"
+          file "$calc"; "$calc" 2 3 | tee /dev/stderr | grep -qx "2 + 3 = 5 (dep 42)"
+          mk="$(sed -n 1p "$OUT/make/native-make-artifacts.txt")/makehello"
+          "$mk" | grep -qx "Hello from make: from CI"
+          unzip -tq "$(sed -n 2p "$OUT/multi/native-multi-artifacts.txt")"
+          cat "$(sed -n 1p "$OUT/multi/native-multi-artifacts.txt")/RUNTIME-DEPENDENCIES.txt"
+          if ls "$OUT/src/MultiTarget copy" | grep -qx build; then echo "a build folder was created in the imported source"; exit 1; fi
+
+      - name: macOS — MACOSX_BUNDLE target kept as the project's .app (universal), ad-hoc signed as a separate stage, zipped
+        if: runner.os == 'macOS'
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/MacBundle copy" \
+            --expect-targets MacHello --expect-app-bundle --arch universal --formats app,zip --expect-version 1.2.0 \
+            --output "$OUT/bundle" --screenshots "$OUT/screens" --prefix native-bundle
+          APP="$(sed -n 1p "$OUT/bundle/native-bundle-artifacts.txt")"
+          echo "App: $APP"; [[ "$APP" == *"/MacHello.app" ]]
+          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle(Name|Identifier|Executable|ShortVersionString)'
+          plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist" | grep -qx com.example.machello
+          lipo -archs "$APP/Contents/MacOS/MacHello" | tee /dev/stderr | grep -q "x86_64" && lipo -archs "$APP/Contents/MacOS/MacHello" | grep -q "arm64"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Signature=adhoc"
+          ditto -x -k "$(sed -n 2p "$OUT/bundle/native-bundle-artifacts.txt")" "$OUT/unzipped" && codesign --verify --deep --strict "$OUT/unzipped/MacHello.app"
+          "$APP/Contents/MacOS/MacHello" | grep -qx "Hello from a CMake app bundle"
+
+      - name: Upload C/C++ outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-cpp-${{ matrix.os }}
+          path: |
+            ${{ github.workspace }}/native-out/screens
+            ${{ github.workspace }}/native-out/*/*.txt
+            ${{ github.workspace }}/native-out/*/*.json
+          if-no-files-found: warn
+          retention-days: 7
 
   release:
     name: Publish pre-release

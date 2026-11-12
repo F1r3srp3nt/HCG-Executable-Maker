@@ -2,6 +2,33 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/native-cpp`
+
+### Added — C/C++ projects ([docs/NATIVE-CPP.md](docs/NATIVE-CPP.md))
+- **The "C/C++ support planned" placeholder is gone.** C/C++ projects are inspected, configured, built, verified and
+  packaged through the New Build wizard.
+- **Detection (static):** CMake (topmost `project()`), generic Make, sources without a build system (only when a
+  `main()` exists) and Theos, checked before Make. Project roots inside repositories skip `build/`, `_deps/`,
+  `third_party/`, `vendor/`, `cmake-build-*` and similar folders. Meson, Autotools without a Makefile and Visual Studio
+  solutions are recognized and explained.
+- **CMake:** a trusted *Configure with CMake* step runs CMake in HCG's own folder and reads the targets through the
+  CMake File API. Presets, build type, cache entries and an explicit downloads switch
+  (`FETCHCONTENT_FULLY_DISCONNECTED` by default). Each executable target is an entry under *Project to build*;
+  libraries are listed separately and never offered as runnable.
+- **Make:** an explicit target, expected output and variables; the build runs in a copy of the project.
+- **Sources:** explicit file selection, language and standard; the generated CMakeLists.txt lives in HCG's build folder.
+- **Build:** the existing trusted-build flow and worker, argument lists only, streamed logs, GCC/Clang/MSVC/CMake/linker
+  error parsing with file and line, cancellation and time limits that stop child processes.
+- **Verification:** real executable image (ELF/Mach-O/PE), format and architecture, a runtime-library report
+  (`RUNTIME-DEPENDENCIES.txt`) with a warning when the project's own shared libraries are not found from the
+  executable's folder. Portable folder/ZIP; on a Mac, the project's own `.app` with a separate signing stage and a
+  ditto ZIP. HCG never runs or installs the produced program.
+- **Wizard states:** toolchain missing · configuration required · ready · building · failed · verified (or not
+  supported). Only this computer's platform and architectures can be chosen.
+- **Toolchains:** a C / C++ group (CMake 3.20+, Ninja, make, C and C++ compilers, MSVC via vswhere).
+- **Tests and CI:** 28 tests with fixtures under `tests/Fixtures/Native/`, a `--native` UI-driver flow, and a
+  `native-cpp` CI job on Linux and macOS (including a universal `MACOSX_BUNDLE` app).
+
 ## [Unreleased] — `feature/web-desktop-app`
 
 ### Changed — Web app to desktop app ([docs/ELECTRON.md](docs/ELECTRON.md#browser-apps-create-desktop-application-vite--react))

@@ -116,6 +116,8 @@ public sealed class BuildService(
             Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
             Log(BuildLogKind.Info, settings.Electron is { } el
                 ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · Electron app {(el.ProjectDirectory.Length == 0 ? "(root)" : el.ProjectDirectory)} · electron-builder --{el.Platform} {string.Join(' ', el.Targets)}{(el.PackagingScript is null ? "" : $" (following script \"{el.PackagingScript}\")")}"
+                : settings.Native is { } natOpts
+                ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · C/C++ {natOpts.Kind} project {(natOpts.ProjectDirectory.Length == 0 ? "(root)" : natOpts.ProjectDirectory)} · target {natOpts.Target} ({natOpts.BuildType}){(natOpts.Preset is { } presetName ? $" · preset {presetName}" : "")}"
                 : settings.Swift is { } sw
                 ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()}, {settings.Configuration} · Swift package {(sw.PackageDirectory.Length == 0 ? "(root)" : sw.PackageDirectory)} · product {sw.Product} ({(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")})"
                 : $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} ({settings.RuntimeIdentifier}), {settings.Configuration}, {(settings.SelfContained ? "self-contained" : "framework-dependent")}{(settings.SingleFile ? ", single-file" : "")}");
@@ -137,6 +139,8 @@ public sealed class BuildService(
             }
             var isSwift = settings.Swift is not null;
             var isElectron = settings.Electron is not null;
+            var isNative = settings.Native is not null;
+            Native.NativeBuildPlanner.Tools? nativeTools = null;
             ToolchainInfo? sdk = null, swiftTool = null;
             NodeInstallation? node = null;
             string? electronDir = null;
@@ -169,6 +173,28 @@ public sealed class BuildService(
                 build.ToolchainVersions["npm"] = node.NpmVersion ?? "unknown";
                 Log(BuildLogKind.Info, $"Node.js: {detail}{(nodeManifest.EnginesNode is null ? "" : $"; package.json requires {nodeManifest.EnginesNode}")}");
                 Log(BuildLogKind.Info, $"npm: {node.NpmVersion ?? "(version unknown)"} ({node.NpmCli})");
+            }
+            else if (isNative)
+            {
+                var nat = settings.Native!;
+                Native.NativeBuildPlanner.Validate(settings, host, PathGuard.GetRealPath(request.Project.SourceDirectory));
+                nativeTools = Native.NativeBuildPlanner.Tools.From(report);
+                if (nat.Kind == NativeProjectKind.Make && nativeTools.Make is null)
+                {
+                    Fail(BuildStatus.Failed, "make was not found. " + (report.Find(ToolchainIds.Make)?.InstallHint ?? "Install make, then press Refresh on the Toolchains page."));
+                    return build;
+                }
+                if (nat.Kind != NativeProjectKind.Make && nativeTools.CMake is null)
+                {
+                    Fail(BuildStatus.Failed, "CMake 3.20 or later was not found. " + (report.Find(ToolchainIds.CMake)?.InstallHint ?? "Install CMake, then press Refresh on the Toolchains page."));
+                    return build;
+                }
+                foreach (var id in new[] { ToolchainIds.CMake, ToolchainIds.Ninja, ToolchainIds.Make, ToolchainIds.CCompiler, ToolchainIds.CxxCompiler, ToolchainIds.MsvcTools })
+                    if (report.Find(id) is { IsAvailable: true } t) build.ToolchainVersions[id] = $"{t.Version ?? "?"} ({t.ExecutablePath})";
+                Log(BuildLogKind.Info, nat.Kind == NativeProjectKind.Make
+                    ? $"make: {nativeTools.Make}. The project is copied into HCG's build folder and built there; the imported source is not written to."
+                    : $"CMake: {nativeTools.CMake}; generator: {(nat.Preset is { } pr ? $"from preset {pr}" : Native.NativeBuildPlanner.ChooseGenerator(nativeTools, null) ?? "CMake's default")}. Build folder: HCG's own (outside the imported source)." +
+                      (nat.AllowDownloads ? " Downloads by FetchContent are ALLOWED for this project." : " FetchContent downloads are blocked (FETCHCONTENT_FULLY_DISCONNECTED=ON)."));
             }
             else if (isSwift)
             {
@@ -207,7 +233,9 @@ public sealed class BuildService(
 
             // Icons are generated before compilation so the Windows icon can be embedded.
             GeneratedIcons? icons = null;
-            if (isElectron && settings.Identity.IconSourcePath is not null)
+            if (isNative && settings.Identity.IconSourcePath is not null)
+                Log(BuildLogKind.Warning, "The icon chosen in HCG is not used for C/C++ builds: the executable is packaged as the project built it (a project's own .app keeps its own icon).");
+            else if (isElectron && settings.Identity.IconSourcePath is not null)
                 Log(BuildLogKind.Warning, "The icon chosen in HCG is not used for Electron apps: electron-builder takes the icon from its configuration (mac.icon / buildResources).");
             else if (settings.Identity.IconSourcePath is { } iconSource)
             {
@@ -227,7 +255,19 @@ public sealed class BuildService(
             var swiftScratch = Path.Combine(PathGuard.GetRealPath(buildDir), "swiftpm");
             // electron-builder writes into HCG's per-build folder (never into the imported source's release/dist folder).
             var electronOut = Path.Combine(PathGuard.GetRealPath(buildDir), "electron-out");
-            var steps = isElectron
+            var nativeWork = Path.Combine(PathGuard.GetRealPath(buildDir), "native");
+            Native.NativeBuildPlanner.Prepared? nativePrepared = null;
+            Native.NativeBuildPlanner.PlanInput? nativeInput = null;
+            if (isNative)
+            {
+                nativeInput = new Native.NativeBuildPlanner.PlanInput(settings, sourceDir, nativeWork, nativeTools!, scrub.Environment);
+                nativePrepared = Native.NativeBuildPlanner.Prepare(nativeInput, overall.Token);
+                if (settings.Native!.Kind == NativeProjectKind.Sources)
+                    Log(BuildLogKind.Info, "Generated build configuration (in HCG's build folder):\n" + Native.NativeBuildPlanner.GeneratedCMakeLists(settings.Native, nativePrepared.ProjectDirectory));
+            }
+            var steps = isNative
+                ? Native.NativeBuildPlanner.Plan(nativeInput!, nativePrepared!)
+                : isElectron
                 ? ElectronBuildPlanner.Plan(new ElectronBuildPlanner.PlanInput(settings, sourceDir, node!, electronOut, ElectronBuildPlanner.Environment(scrub.Environment, node!)))
                 : isSwift
                 ? SwiftBuildPlanner.Plan(new SwiftBuildPlanner.PlanInput(settings, sourceDir, swiftTool!.ExecutablePath!, swiftScratch, scrub.Environment))
@@ -236,7 +276,7 @@ public sealed class BuildService(
                     icons?.IcoPath, scrub.Environment));
 
             // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
-            IBuildOutputParser parser = isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
+            IBuildOutputParser parser = isNative ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
             var captured = new List<string>();
             foreach (var step in steps)
             {
@@ -300,7 +340,29 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.VerifyingOutput, isElectron ? "Verify: locate the app electron-builder produced" : "Verifying publish output");
             string? exeName;
             var packagingInput = publishDir;
-            if (isElectron)
+            if (isNative)
+            {
+                var located = Native.NativeBuildPlanner.Locate(settings, nativePrepared!);
+                Log(BuildLogKind.Info, "Build output: " + located.Description);
+                var outputChecks = Native.NativeBinaryVerifier.VerifyExecutable(located.Executable, settings.Platform, settings.Architecture);
+                foreach (var c in outputChecks) Log(c.Status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Success, $"  {c.Name}: {c.Detail}");
+                if (outputChecks.FirstOrDefault(c => c.Status == VerificationStatus.Failed) is { } bad)
+                {
+                    Fail(BuildStatus.Failed, $"{bad.Name}: {bad.Detail}");
+                    return build;
+                }
+                var (stagedExe, copied) = Native.NativeBuildPlanner.Stage(located, settings, nativePrepared!, publishDir, overall.Token);
+                Log(BuildLogKind.Info, "Packaged files: " + string.Join(", ", copied) + ". Object files and other build intermediates are not packaged.");
+                var runtime = await Native.NativeBinaryVerifier.InspectRuntimeAsync(new WorkerRunner(worker, scrub.Environment), Path.Combine(publishDir, stagedExe.Replace('/', Path.DirectorySeparatorChar)),
+                    host.Platform, located.ProjectSharedLibraries, overall.Token).ConfigureAwait(false);
+                foreach (var line in runtime.Text.TrimEnd().Split('\n')) Log(runtime.Check.Status == VerificationStatus.Passed ? BuildLogKind.Info : BuildLogKind.Warning, line);
+                if (runtime.Check.Status != VerificationStatus.Passed)
+                    AddMessage(new BuildMessage(DiagnosticSeverity.Warning, runtime.Check.Detail, "HCG-RUNTIME"));
+                if (located.Bundle is null)
+                    await File.WriteAllTextAsync(Path.Combine(publishDir, "RUNTIME-DEPENDENCIES.txt"), runtime.Text, overall.Token).ConfigureAwait(false);
+                exeName = stagedExe;
+            }
+            else if (isElectron)
             {
                 var (relative, problem) = ElectronBuildPlanner.Discover(electronOut, settings, settings.Electron!.ProductName is { Length: > 0 } pn ? pn : nodeManifest!.ProductName ?? settings.Identity.ApplicationName);
                 if (relative is null)
@@ -409,6 +471,12 @@ public sealed class BuildService(
                     $"{Path.GetFileName(output.Path)} — {size:N0} bytes — SHA-256 {sha} — verification {status}");
                 foreach (var check in output.Checks.Where(c => c.Status != VerificationStatus.Passed))
                     Log(check.Status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Warning, $"  {check.Name}: {check.Detail}");
+            }
+            if (isNative)
+            {
+                // The verified copies are in the output folder; the build tree (object files, CMake cache) is not kept.
+                try { Directory.Delete(nativeWork, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {nativeWork}: {ex.Message}"); }
             }
             if (isElectron)
             {
@@ -564,4 +632,11 @@ public sealed class BuildService(
         public void Info(string message) => log(BuildLogKind.Info, message);
         public void Warning(string message) => log(BuildLogKind.Warning, message);
     }
+}
+
+/// <summary>Runs read-only inspection tools (readelf, otool) through the build worker with the scrubbed environment.</summary>
+internal sealed class WorkerRunner(IBuildWorker worker, IReadOnlyDictionary<string, string> environment) : IProcessRunner
+{
+    public Task<ProcessResult> RunAsync(ProcessSpec spec, Action<OutputStream, string>? onOutput, CancellationToken cancellationToken) =>
+        worker.RunAsync(spec.Environment is null ? spec with { Environment = environment } : spec, onOutput ?? ((_, _) => { }), cancellationToken);
 }

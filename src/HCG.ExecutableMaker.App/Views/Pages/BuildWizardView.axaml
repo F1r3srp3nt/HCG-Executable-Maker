@@ -294,6 +294,178 @@
                   <Border Classes="callout success" IsVisible="{Binding DesktopWorkspaceNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                     <SelectableTextBlock FontSize="12.5" Text="{Binding DesktopWorkspaceNotice}" TextWrapping="Wrap" />
                   </Border>
+                  <!-- C/C++: CMake targets (after a trusted configure), Makefile targets, selected sources; Theos and others explained -->
+                  <StackPanel Spacing="12" IsVisible="{Binding ShowNativePanel}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="{Binding NativeKindLabel}" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding NativeTag}" />
+                    </Grid>
+                    <TextBlock Classes="body secondary" Text="{Binding NativeStatus}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding NativeFacts}" TextWrapping="Wrap" />
+                    <Border Classes="callout warning" IsVisible="{Binding HasNativeToolchainGaps}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Installed toolchains — missing on this computer" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding NativeToolchainGaps}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="Open Toolchains" Command="{Binding OpenToolchainsPageCommand}" />
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding NativeNotes}" IsVisible="{Binding HasNativeNotes}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <TextBlock Classes="muted" FontSize="12" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- CMake -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeCMake}">
+                      <Border Classes="inset" Padding="16,12">
+                        <SelectableTextBlock FontSize="12.5" Text="{Binding NativeConfiguredSummary}" TextWrapping="Wrap" />
+                      </Border>
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding NativeLibrariesText}" TextWrapping="Wrap"
+                                 IsVisible="{Binding NativeLibrariesText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                      <Border Classes="inset" Padding="16,14">
+                        <StackPanel Spacing="10">
+                          <TextBlock Text="Configure with CMake on this computer" FontWeight="SemiBold" />
+                          <TextBlock Classes="muted" TextWrapping="Wrap"
+                                     Text="Configuring runs the project's CMake code (and anything it executes). HCG runs it through the isolated build worker — scrubbed environment, its own build folder outside the project, cancellable, 10-minute limit — and reads the targets from the CMake File API. Downloads by FetchContent are blocked unless you allow them." />
+                          <Grid ColumnDefinitions="*,12,*">
+                            <StackPanel Spacing="4">
+                              <TextBlock Classes="formlabel" Text="CONFIGURE PRESET" Margin="0" />
+                              <ComboBox ItemsSource="{Binding NativePresets}" SelectedItem="{Binding SelectedNativePreset}" HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Spacing="4">
+                              <TextBlock Classes="formlabel" Text="BUILD TYPE" Margin="0" />
+                              <ComboBox ItemsSource="{Binding NativeBuildTypes}" SelectedItem="{Binding SelectedNativeBuildType}" HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                          </Grid>
+                          <StackPanel Spacing="4">
+                            <TextBlock Classes="formlabel" Text="CACHE ENTRIES (ONE NAME=VALUE PER LINE, OPTIONAL)" Margin="0" />
+                            <TextBox Text="{Binding NativeCacheEntriesText}" AcceptsReturn="True" MinHeight="54" FontFamily="{DynamicResource Hcg.Font.Mono}"
+                                     Watermark="e.g. MYAPP_ENABLE_GUI=OFF" TextWrapping="NoWrap" />
+                          </StackPanel>
+                          <CheckBox IsChecked="{Binding NativeAllowDownloads}" IsEnabled="{Binding !IsConfiguringNative}">
+                            <TextBlock TextWrapping="Wrap" Text="Allow the project to download dependencies while configuring (FetchContent / ExternalProject)" />
+                          </CheckBox>
+                          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding NativeHasDownloads}"
+                                     Text="This project's CMake files use FetchContent or ExternalProject. Without downloads, configuration fails unless the dependency is already available." />
+                          <CheckBox IsChecked="{Binding NativeConfigureTrusted}" IsEnabled="{Binding !IsConfiguringNative}">
+                            <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
+                          </CheckBox>
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Classes="primary" Content="Configure with CMake" Command="{Binding ConfigureNativeCommand}" />
+                            <Button Classes="ghost" Content="Cancel" Command="{Binding CancelNativeConfigureCommand}" IsVisible="{Binding IsConfiguringNative}" />
+                            <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsConfiguringNative}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="callout error" IsVisible="{Binding NativeConfigureError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <SelectableTextBlock FontSize="12.5" Text="{Binding NativeConfigureError}" TextWrapping="Wrap" />
+                      </Border>
+                      <Expander Header="Configuration output" IsVisible="{Binding HasNativeConfigureLog}" HorizontalAlignment="Stretch">
+                        <ScrollViewer MaxHeight="200">
+                          <ItemsControl ItemsSource="{Binding NativeConfigureLog}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="x:String">
+                                <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </ScrollViewer>
+                      </Expander>
+                    </StackPanel>
+
+                    <!-- Make -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeMake}">
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="HCG does not guess what a Makefile builds. Name the target and the file it produces; HCG copies the project into its own build folder, runs make there and packages exactly that file." />
+                      <Grid ColumnDefinitions="*,12,*">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="MAKE TARGET" Margin="0" />
+                          <TextBox Text="{Binding NativeMakeTarget}" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. all" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="EXPECTED OUTPUT (RELATIVE TO THE PROJECT FOLDER)" Margin="0" />
+                          <TextBox Text="{Binding NativeExpectedOutput}" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. bin/myapp" />
+                        </StackPanel>
+                      </Grid>
+                      <StackPanel Spacing="4" IsVisible="{Binding HasNativeMakeTargets}">
+                        <TextBlock Classes="formlabel" Text="TARGETS READ FROM THE MAKEFILE (CLICK TO USE)" Margin="0" />
+                        <ItemsControl ItemsSource="{Binding NativeMakeTargets}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <Button Classes="small ghost" Margin="0,0,6,6" Content="{Binding}" FontFamily="{DynamicResource Hcg.Font.Mono}"
+                                      Command="{Binding $parent[UserControl].((vm:BuildWizardViewModel)DataContext).UseNativeMakeTargetCommand}" CommandParameter="{Binding}" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="MAKE VARIABLES (ONE NAME=VALUE PER LINE, OPTIONAL)" Margin="0" />
+                        <TextBox Text="{Binding NativeMakeVariablesText}" AcceptsReturn="True" MinHeight="54" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. PREFIX=/opt/app" />
+                      </StackPanel>
+                    </StackPanel>
+
+                    <!-- Sources without a build system -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeSources}">
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="No build system was found. Choose exactly the files that make up one program (one main()). HCG writes a small CMakeLists.txt in its own build folder — never in the project — and compiles only the files you select." />
+                      <Border Classes="inset" Padding="12,8">
+                        <ScrollViewer MaxHeight="200">
+                          <ItemsControl ItemsSource="{Binding NativeSourceItems}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:NativeSourceItem">
+                                <CheckBox IsChecked="{Binding IsSelected}">
+                                  <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Classes="mono" Text="{Binding Path}" />
+                                    <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Detail}" />
+                                  </StackPanel>
+                                </CheckBox>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </ScrollViewer>
+                      </Border>
+                      <Grid ColumnDefinitions="*,12,*,12,*">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="LANGUAGE" Margin="0" />
+                          <ComboBox ItemsSource="{Binding NativeLanguages}" SelectedItem="{Binding SelectedNativeLanguage}" HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="STANDARD" Margin="0" />
+                          <ComboBox ItemsSource="{Binding NativeStandards}" SelectedItem="{Binding SelectedNativeStandard}" HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="EXECUTABLE NAME" Margin="0" />
+                          <TextBox Text="{Binding NativeOutputName}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                        </StackPanel>
+                      </Grid>
+                      <Expander Header="Generated build configuration (written to HCG's build folder)" HorizontalAlignment="Stretch">
+                        <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding NativeGeneratedPreview}" TextWrapping="Wrap" />
+                      </Expander>
+                    </StackPanel>
+
+                    <!-- Runtime files the app needs next to it -->
+                    <StackPanel Spacing="4" IsVisible="{Binding ShowNativeRuntimeFiles}">
+                      <TextBlock Classes="formlabel" Text="RUNTIME FILES TO SHIP NEXT TO THE EXECUTABLE (ONE PATH PER LINE, OPTIONAL)" Margin="0" />
+                      <TextBox Text="{Binding NativeRuntimeFilesText}" AcceptsReturn="True" MinHeight="54" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. assets/  or  data/config.ini (relative to the project folder)" />
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="HCG copies the executable, the project's own shared libraries and the files listed here. It lists every library the binary loads (RUNTIME-DEPENDENCIES.txt) and warns about ones that are not system libraries — a binary is not portable just because it compiled." />
+                    </StackPanel>
+
+                    <Border Classes="callout warning" IsVisible="{Binding NativeConfigurationProblem, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <SelectableTextBlock FontSize="12.5" Text="{Binding NativeConfigurationProblem}" TextWrapping="Wrap" />
+                    </Border>
+                  </StackPanel>
                   <!-- Electron app: what it is, what it still needs, and the build stages HCG will run -->
                   <StackPanel Spacing="12" IsVisible="{Binding IsElectronBuild}">
                     <Grid ColumnDefinitions="*,Auto">
@@ -691,7 +863,7 @@
                     <TextBlock Text="{Binding PlatformNote}" FontSize="12" TextWrapping="Wrap" />
                   </Border>
                   <UniformGrid Columns="2">
-                    <StackPanel Margin="0,0,6,0" IsVisible="{Binding IdentityEditable}">
+                    <StackPanel Margin="0,0,6,0" IsVisible="{Binding ShowConfigurationChoice}">
                       <TextBlock Classes="formlabel" Text="CONFIGURATION" />
                       <ComboBox ItemsSource="{Binding ConfigurationOptions}" SelectedItem="{Binding SelectedConfiguration}" />
                     </StackPanel>
@@ -1028,7 +1200,7 @@
               </Grid>
             </Border>
 
-            <Border Classes="card" IsVisible="{Binding ResultSucceeded}">
+            <Border Classes="card" IsVisible="{Binding ShowDistributionSteps}">
               <StackPanel Spacing="10">
                 <TextBlock Classes="h2" Text="Distribution steps" />
                 <TextBlock Classes="muted" TextWrapping="Wrap"

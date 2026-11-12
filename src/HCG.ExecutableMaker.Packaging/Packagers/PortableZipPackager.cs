@@ -7,7 +7,7 @@ namespace HCG.ExecutableMaker.Packaging.Packagers;
 public sealed class PortableZipPackager : IPackager
 {
     public PackagingFormat Format => PackagingFormat.PortableZip;
-    public bool Handles(BuildSettings settings) => settings.Swift is not { Kind: SwiftAppKind.GuiApp } && settings.Electron is null; // Swift GUI apps: SwiftAppZipPackager; Electron: ElectronZipPackager
+    public bool Handles(BuildSettings settings) => settings.Swift is not { Kind: SwiftAppKind.GuiApp } && settings.Electron is null && settings.Native is not { IsMacBundle: true }; // Swift GUI apps: SwiftAppZipPackager; Electron: ElectronZipPackager
 
     public Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken) => Task.Run(() =>
     {

@@ -20,6 +20,11 @@ public static class PackagingCatalog
             EvaluateElectron(ctx, Add);
             return list;
         }
+        if (ctx.IsNative)
+        {
+            EvaluateNative(ctx, Add);
+            return list;
+        }
         if (ctx.SwiftKind is { } swiftKind)
         {
             EvaluateSwift(ctx, swiftKind, Add);
@@ -90,6 +95,37 @@ public static class PackagingCatalog
     /// Swift packages (SwiftPM) on macOS. A GUI product becomes a .app (and optionally the .app as ZIP or DMG); a
     /// command-line product becomes a portable folder/ZIP. Never offered for local builds on Windows/Linux.
     /// </summary>
+    /// <summary>
+    /// C/C++ builds for this host: the executable in a portable folder or ZIP (with the project's own shared libraries
+    /// and the runtime files the user listed), or — when the project builds a macOS app bundle — that .app and its ZIP.
+    /// Installers are not offered: HCG does not know what a native program needs installed.
+    /// </summary>
+    private static void EvaluateNative(PackagingContext ctx, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
+    {
+        const string notNative = "Not implemented for C/C++ builds in this version.";
+        if (ctx.Target != ctx.Host.Platform)
+        {
+            add(PackagingFormat.PortableFolder, "C/C++ projects are built for this computer's platform.", PackagingAvailability.RequiresDifferentHost,
+                $"Building {ctx.Target.DisplayName()} binaries needs a {ctx.Target.DisplayName()} toolchain; HCG builds C/C++ for {ctx.Host.Platform.DisplayName()} on this computer.", null);
+            return;
+        }
+        if (ctx.IsNativeMacBundle)
+        {
+            add(PackagingFormat.MacAppBundle, "The .app the project builds (MACOSX_BUNDLE), kept as built, verified and signed as the distribution setting says.", PackagingAvailability.Available, null, null);
+            add(PackagingFormat.PortableZip, "The .app compressed with ditto (keeps permissions, links and the signature).", PackagingAvailability.Available, null, null);
+            add(PackagingFormat.PortableFolder, "Loose executable.", PackagingAvailability.NotApplicable, "The project builds an app bundle; its executable runs from inside the .app.", null);
+        }
+        else
+        {
+            add(PackagingFormat.PortableFolder, "The executable, the project's own shared libraries it uses, the runtime files you listed and RUNTIME-DEPENDENCIES.txt.", PackagingAvailability.Available, null, null);
+            add(PackagingFormat.PortableZip, "The same folder as a ZIP with the executable bit recorded.", PackagingAvailability.Available, null, null);
+            if (ctx.Target == TargetPlatform.MacOS)
+                add(PackagingFormat.MacAppBundle, "App bundle.", PackagingAvailability.NotApplicable, "This target is a command-line executable. HCG does not wrap command-line programs in an .app; projects that build a GUI app bundle (MACOSX_BUNDLE) keep their own.", null);
+        }
+        foreach (var f in new[] { PackagingFormat.MacDmg, PackagingFormat.MacPkg, PackagingFormat.WindowsInstallerExe, PackagingFormat.LinuxAppImage, PackagingFormat.LinuxDeb })
+            add(f, f.DisplayName() + ".", PackagingAvailability.NotImplemented, notNative, null);
+    }
+
     private static void EvaluateSwift(PackagingContext ctx, SwiftAppKind kind, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
     {
         var offMac = ctx.Host.Platform != TargetPlatform.MacOS;
@@ -194,7 +230,8 @@ public static class PackagingCatalog
             set.Insert(0, PackagingFormat.MacAppBundle);
         var swiftGui = settings?.Swift?.Kind == SwiftAppKind.GuiApp;
         var needsBundle = set.Contains(PackagingFormat.MacDmg) || set.Contains(PackagingFormat.MacPkg) || set.Contains(PackagingFormat.MacAppStore)
-                          || (swiftGui && set.Contains(PackagingFormat.PortableZip));
+                          || (swiftGui && set.Contains(PackagingFormat.PortableZip))
+                          || (settings?.Native is { IsMacBundle: true } && set.Contains(PackagingFormat.PortableZip));
         if (needsBundle && !set.Contains(PackagingFormat.MacAppBundle))
             set.Insert(0, PackagingFormat.MacAppBundle);
         // Bundles must exist before the DMG / ZIP that wraps them.

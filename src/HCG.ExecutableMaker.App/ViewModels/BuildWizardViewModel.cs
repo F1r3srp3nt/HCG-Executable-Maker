@@ -41,6 +41,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private readonly NavigationService _navigation;
     private readonly IProcessRunner _processRunner;
     private readonly HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator _swiftEvaluator;
+    private readonly HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator _nativeConfigurator;
     private readonly ConcurrentQueue<BuildLogLine> _pendingLog = new();
     private readonly DispatcherTimer _uiTimer;
     private readonly Stopwatch _buildClock = new();
@@ -55,9 +56,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService notarization,
         HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller pkgTester,
         HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService validator,
-        IProcessRunner processRunner)
+        IProcessRunner processRunner,
+        HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator nativeConfigurator)
     {
         _processRunner = processRunner;
+        _nativeConfigurator = nativeConfigurator;
         _signingReader = signingReader;
         _notarization = notarization;
         _pkgTester = pkgTester;
@@ -332,7 +335,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [ObservableProperty] private bool _hasDiagnostics;
     [ObservableProperty] private bool _hasMissing;
 
-    public bool CanConfigure => IsSwiftProject
+    public bool CanConfigure => IsNativeProject
+        ? NativeReadyToConfigure
+        : IsSwiftProject
         ? SwiftReadyToConfigure
         : IsNodeProject
         ? ElectronReadyToConfigure
@@ -343,6 +348,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         RefreshSwiftPackage();
         RefreshElectronProject();
         RefreshDesktopConversion();
+        RefreshNativeProject();
         OnPropertyChanged(nameof(CanConfigure));
     }
 
@@ -375,6 +381,12 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             AnalysisRows.Add(new("Node.js projects", string.Join("\n", na.Projects.Select(p =>
                 $"{p.DisplayDirectory} — {HCG.ExecutableMaker.ProjectInspection.Node.NodeProjectInspector.KindLabel(p.Kind)}"))));
         }
+        else if (a is { InspectorId: "native", Native: { } cn })
+        {
+            AnalysisRows.Add(new("C/C++ projects", string.Join("\n", cn.Projects.Select(p =>
+                $"{p.DisplayDirectory} — {HCG.ExecutableMaker.ProjectInspection.Native.NativeCapabilities.KindLabel(p.Kind)}" +
+                (p.Configured is { } c ? $" (configured: {c.Executables.Count()} executable(s), {c.Libraries.Count()} librar{(c.Libraries.Count() == 1 ? "y" : "ies")})" : "")))));
+        }
         else if (a.Swift is { } sa)
         {
             AnalysisRows.Add(new("Swift packages", sa.Packages.Count > 0 ? string.Join(", ", sa.Packages.Select(p => p.DisplayDirectory)) : "None"));
@@ -394,10 +406,13 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         ProjectOptions.Clear();
         // Runnable apps, plus browser apps (each labelled with what Create desktop application can do with it).
         var webApps = a.Node?.Projects.Where(p => p.Kind == NodeProjectKind.WebApp).Select(p => p.ManifestPath).ToHashSet(StringComparer.Ordinal) ?? [];
-        foreach (var p in a.Projects.Where(p => p.IsRunnableApplication || p.IsDesktopConversionCandidate || webApps.Contains(p.RelativePath))) ProjectOptions.Add(new ProjectChoice(p));
+        // C/C++: every project is listed — executable targets, Makefile/source projects to configure, and Theos or
+        // unsupported projects (explained, never buildable). Libraries are not entries: they are listed in the panel.
+        var native = a.InspectorId == "native";
+        foreach (var p in a.Projects.Where(p => native || p.IsRunnableApplication || p.IsDesktopConversionCandidate || webApps.Contains(p.RelativePath))) ProjectOptions.Add(new ProjectChoice(p));
         // Several Swift packages: the user chooses (never silently the first). Otherwise keep the existing behaviour.
         SelectedProject = ProjectOptions.FirstOrDefault(p => p.Path == a.PrimaryProjectPath)
-                          ?? (a.Swift is { Packages.Count: > 0 } || (a.InspectorId == "node" && ProjectOptions.Count > 1) ? null : ProjectOptions.FirstOrDefault());
+                          ?? (a.Swift is { Packages.Count: > 0 } || (a.InspectorId is "node" or "native" && ProjectOptions.Count > 1) ? null : ProjectOptions.FirstOrDefault());
 
         Diagnostics.Clear();
         foreach (var d in a.Diagnostics.OrderByDescending(d => d.Severity)) Diagnostics.Add(new DiagnosticItem(d));
@@ -410,6 +425,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         RefreshSwiftPackage();
         RefreshElectronProject();
         RefreshDesktopConversion();
+        RefreshNativeProject();
+        OnPropertyChanged(nameof(ProjectPickerPlaceholder));
         OnPropertyChanged(nameof(CanConfigure));
         NextCommand.NotifyCanExecuteChanged();
     }
@@ -450,14 +467,19 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (detected is null) return;
         var settings = await _settings.LoadAsync();
         var swift = IsSwiftBuild;
-        if (!IsElectronBuild) SetArchitectureOptions(swift);
+        if (!IsElectronBuild && !IsNativeBuild) SetArchitectureOptions(swift);
         OnPropertyChanged(nameof(IsSwiftBuild));
         OnPropertyChanged(nameof(IsDotNetBuild));
         OnPropertyChanged(nameof(IsSwiftGui));
         var key = Project?.Id + "|" + detected.RelativePath + (swift ? "|" + SelectedSwiftProduct?.Name : "");
         OnPropertyChanged(nameof(IsElectronBuild));
         OnPropertyChanged(nameof(IdentityEditable));
-        if (IsElectronBuild)
+        OnPropertyChanged(nameof(ShowConfigurationChoice));
+        if (IsNativeBuild)
+        {
+            PrepareNativeConfiguration(key, settings);
+        }
+        else if (IsElectronBuild)
         {
             if (_identityPrefilledFor != key)
             {
@@ -509,7 +531,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         foreach (var p in new[] { TargetPlatform.Windows, TargetPlatform.MacOS, TargetPlatform.Linux, TargetPlatform.Android })
         {
             var compatible = detected.CompatiblePlatforms.Contains(p);
-            var note = p == TargetPlatform.Android ? "not implemented" : compatible ? null : "not supported by this project";
+            var note = p == TargetPlatform.Android ? "not implemented" : compatible ? null
+                : IsNativeBuild ? $"build on a {p.DisplayName()} computer with its toolchain" : "not supported by this project";
             var name = p == TargetPlatform.Linux ? "Linux (portable preview)" : p.DisplayName();
             PlatformOptions.Add(new Choice<TargetPlatform>(p, name, compatible && p != TargetPlatform.Android, note));
         }
@@ -529,6 +552,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         IconPath = s.Identity.IconSourcePath is { } i && File.Exists(i) ? i : null;
         SelectedPlatform = PlatformOptions.FirstOrDefault(p => p.Value == s.Platform && p.IsEnabled) ?? SelectedPlatform;
         if (s.Swift is { } swiftOptions) ApplySwiftSettings(swiftOptions);
+        if (s.Native is { } nativeOptions) ApplyNativeSettings(nativeOptions);
         _repeatDistribution = s.MacDistribution;
         SelectedArchitecture = ArchitectureOptions.FirstOrDefault(a => a.Value == s.Architecture) ?? SelectedArchitecture;
         SelectedConfiguration = ConfigurationOptions.First(c => c.Value == s.Configuration);
@@ -564,6 +588,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         PlatformNote = value?.Value switch
         {
+            _ when IsNativeBuild => HostInfo.CurrentPlatform == TargetPlatform.MacOS
+                ? "C/C++ builds run on this Mac with its own compilers: arm64, x86_64, or both (universal, when every dependency is universal too). Windows, Linux and iOS binaries need those platforms' toolchains."
+                : $"C/C++ builds run on this computer with its own compilers, for {HostInfo.CurrentPlatform.DisplayName()} {HostInfo.CurrentArchitecture.DisplayName()} only. Other platforms or architectures need their own toolchains, which HCG does not set up.",
             TargetPlatform.Windows when HostInfo.CurrentPlatform != TargetPlatform.Windows =>
                 "Cross-building for Windows from this host: the .exe is produced, but its embedded file icon requires a Windows build host.",
             TargetPlatform.MacOS when HostInfo.CurrentPlatform != TargetPlatform.MacOS =>
@@ -585,7 +612,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (SelectedArchitecture is null) ConfigErrors.Add("Choose a target architecture.");
         if (TimeoutMinutes is not (>= 1 and <= 720)) ConfigErrors.Add("Timeout must be between 1 and 720 minutes.");
         if (IconNotes.Any(n => n.IsError)) ConfigErrors.Add("The selected icon is invalid.");
-        if (ConfigErrors.Count == 0 && SelectedProject is not null && IsElectronBuild)
+        if (ConfigErrors.Count == 0 && SelectedProject is not null && IsNativeBuild)
+        {
+            ValidateNative();
+        }
+        else if (ConfigErrors.Count == 0 && SelectedProject is not null && IsElectronBuild)
         {
             ValidateElectron();
         }
@@ -653,6 +684,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         WindowsInstaller = CreateInstallerOptions(),
         Swift = CreateSwiftOptions(),
         Electron = CreateElectronOptions(formats),
+        Native = IsNativeBuild ? CreateNativeOptions() : null,
         MacDistribution = CreateDistributionOptions(),
         Identity = new AppIdentity
         {
@@ -678,6 +710,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         return new PackagingContext(SelectedPlatform?.Value ?? TargetPlatform.Windows, HostInfo.Detect(), _toolchains.Latest, isGui, SelfContained, swiftKind)
         {
             IsElectron = IsElectronBuild,
+            IsNative = IsNativeBuild,
+            IsNativeMacBundle = IsNativeBuild && IsNativeMacBundle,
         };
     }
 
@@ -692,6 +726,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             preselect ??= RecordedElectronFormats() ?? DefaultElectronFormats();
         if (swiftKind is not null)
             preselect ??= swiftKind == SwiftAppKind.GuiApp ? [PackagingFormat.MacAppBundle] : [PackagingFormat.PortableZip];
+        if (IsNativeBuild)
+            preselect ??= DefaultNativeFormats();
         foreach (var old in PackagingOptions) old.PropertyChanged -= OnPackagingOptionChanged;
         PackagingOptions.Clear();
         var recommended = preselect ?? Analysis?.RecommendedFormats ?? [];
@@ -809,6 +845,16 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                                                  $"sandbox entitlements: {string.Join(", ", new[] { "com.apple.security.app-sandbox" }.Concat(d.AppStoreEntitlements))} · validation and upload stay manual"));
             var disabled = DisabledFeatures().ToList();
             if (disabled.Count > 0) Summary.Add(new("Disabled features", string.Join("; ", disabled)));
+        }
+        else if (s.Native is { } n)
+        {
+            Summary.Add(new("C/C++ build", n.Kind switch
+            {
+                NativeProjectKind.CMake => $"CMake target {n.Target} · {n.BuildType}{(n.Preset is { } pr ? " · preset " + pr : "")}{(n.CacheEntries.Count > 0 ? " · " + string.Join(" ", n.CacheEntries.Select(e => "-D" + e)) : "")} · downloads {(n.AllowDownloads ? "allowed" : "blocked")}",
+                NativeProjectKind.Make => $"make {n.Target}{(n.MakeVariables.Count > 0 ? " " + string.Join(" ", n.MakeVariables) : "")} → {n.ExpectedOutput}",
+                _ => $"{n.Sources.Count} selected file(s) · {(n.Language == "CXX" ? "C++" : "C")}{n.Standard} · {n.BuildType} · generated CMakeLists.txt in HCG's build folder",
+            }));
+            Summary.Add(new("Runtime files", n.RuntimeFiles.Count > 0 ? string.Join(", ", n.RuntimeFiles) : "None listed (the project's own shared libraries are copied; others are reported, not bundled)"));
         }
         else
         {
@@ -990,12 +1036,16 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var notarized = build.Artifacts.Any(a => a.Checks.Any(c => c.Name == "Notarization" && c.Status == VerificationStatus.Passed));
         ResultDetail = build.Status == BuildStatus.Succeeded
             ? $"{build.Artifacts.Count} artifact(s) generated and verified · {build.WarningCount} warning(s). " +
-              (build.Settings.Electron is not null ? "Built with the project's electron-builder workflow" + (build.Settings.Platform == TargetPlatform.MacOS ? "; signed as its configuration says (see each artifact's Code signature check)." : ".")
+              (build.Settings.Native is { } nb
+                ? (nb.IsMacBundle ? "The project's .app was kept as built and signed in a separate stage (see its Code signature check); not notarized."
+                                  : "Not code-signed: HCG does not sign C/C++ executables on this platform.") +
+                  " HCG did not run the program. Runtime libraries are listed in RUNTIME-DEPENDENCIES.txt; a binary is portable only if every non-system library it needs ships with it."
+               : build.Settings.Electron is not null ? "Built with the project's electron-builder workflow" + (build.Settings.Platform == TargetPlatform.MacOS ? "; signed as its configuration says (see each artifact's Code signature check)." : ".")
                : build.Settings.Swift is null ? "Artifacts are unsigned (ad-hoc)."
                : build.Settings.MacDistribution.SigningMode == MacSigningMode.DeveloperId
                    ? notarized ? "Developer ID signed and notarized (see each artifact's checks)." : "Developer ID signed; not notarized yet (Notarize below)."
                    : "Ad-hoc signed only: not Developer ID signed or notarized.") +
-              (build.Settings.Electron is null ? " Installation and launch are tested only when you run Test install." : " Launching the app is not part of the build.")
+              (build.Settings.Native is not null ? "" : build.Settings.Electron is null ? " Installation and launch are tested only when you run Test install." : " Launching the app is not part of the build.")
             : build.FailureReason ?? "The build did not complete.";
         _ = PrepareDistributionActionsAsync(build);
         ResultDuration = Format.Duration(build.Duration);

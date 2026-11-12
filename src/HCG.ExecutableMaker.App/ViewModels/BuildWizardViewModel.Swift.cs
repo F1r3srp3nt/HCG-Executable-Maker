@@ -44,7 +44,9 @@ public sealed partial class BuildWizardViewModel
     };
     public string MissingTitle => Analysis?.Support == SupportLevel.RequiresConfiguration ? "Missing project configuration" : "Missing requirements";
     public string ProjectPickerLabel => IsSwiftProject ? "SWIFT PACKAGE TO BUILD" : "PROJECT TO BUILD";
-    public string ProjectPickerPlaceholder => IsSwiftProject ? "Choose a Swift package…" : ProjectOptions.Count > 0 ? "Choose a project…" : "No runnable application project found";
+    public string ProjectPickerPlaceholder => IsSwiftProject ? "Choose a Swift package…"
+        : IsNativeProject && ProjectOptions.Count > 0 ? "Choose an executable target or C/C++ project…"
+        : ProjectOptions.Count > 0 ? "Choose a project…" : "No runnable application project found";
 
     public SwiftPackageInfo? SelectedSwiftPackage =>
         Analysis?.Swift?.Packages.FirstOrDefault(p => SelectedProject is not null && p.ManifestPath == SelectedProject.Path);
@@ -79,7 +81,7 @@ public sealed partial class BuildWizardViewModel
 
     /// <summary>Configure/Package/Build steps work on a Swift package product rather than a .NET project.</summary>
     public bool IsSwiftBuild => HasSelectedSwiftPackage && SelectedSwiftProduct is not null;
-    public bool IsDotNetBuild => !IsSwiftBuild && !IsElectronBuild;
+    public bool IsDotNetBuild => !IsSwiftBuild && !IsElectronBuild && !IsNativeBuild;
 
     private bool SwiftReadyToConfigure =>
         SelectedSwiftPackage is { Evaluated: not null } pkg && SelectedSwiftProduct is not null && !IsEvaluatingSwift

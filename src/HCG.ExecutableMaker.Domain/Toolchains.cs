@@ -115,4 +115,13 @@ public static class ToolchainIds
     // Node.js / Electron
     public const string Node = "node";
     public const string Npm = "npm";
+
+    // C / C++
+    public const string CMake = "cmake";
+    public const string Ninja = "ninja";
+    public const string Make = "make";
+    public const string CCompiler = "c-compiler";
+    public const string CxxCompiler = "cxx-compiler";
+    /// <summary>Visual Studio with the C++ workload (Windows): CMake's default generator uses it.</summary>
+    public const string MsvcTools = "msvc";
 }

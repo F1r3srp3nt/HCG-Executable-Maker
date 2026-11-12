@@ -30,7 +30,8 @@ and verified.
 | Import | ZIP archives and folders into isolated workspaces; rejects corrupt archives, path traversal, symlinks, duplicate entries, decompression bombs and oversize/over-count archives; preserves the original archive; never modifies your source |
 | Inspection | Static .NET analysis: `.sln`, `.slnx`, `.csproj/.fsproj/.vbproj`, `Directory.Build.props`, central package versions, `global.json` roll-forward, target frameworks, output types, RIDs, package/project references, entry points, icons, Avalonia/WPF/WinForms/MAUI/web detection, platform compatibility |
 | Node.js / Electron | Every `package.json` is classified (Electron desktop app, browser app, service, library). **Electron apps packaged with electron-builder are built** with the project's own workflow (see below); web-only projects get the exact list of what is missing |
-| Other ecosystems | Rust, Python, Java, C/C++, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
+| C/C++ | **CMake** (executable targets from the CMake File API after a trusted configure; presets), **Make** (explicit target and output), **sources without a build system** (explicit file selection). Builds for this computer; verified executable, runtime-library report, portable folder/ZIP, macOS `.app` for bundle targets. Theos is recognized and explained, never built (see below) |
+| Other ecosystems | Rust, Python, Java, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
 | Build | `dotnet restore` → `build` → `publish` with structured arguments (no shell), Release/Debug, runtime selection (win/osx/linux × x64/arm64), self-contained, single-file, live log, warning/error parsing, cancellation, timeouts |
 | Packaging | Portable folder · portable ZIP (Unix permissions preserved) · **Windows Setup.exe installer** (Inno Setup, Windows hosts — M0.2, see below) · macOS `.app` bundle (Info.plist, `.icns`, exec bits) · `.dmg` on macOS hosts with `hdiutil` |
 | Verification | Executable present, PE/Mach-O/ELF format and CPU architecture, executable bit, bundle structure, code-signature presence, archive integrity, SHA-256 (+ per-file manifests for folders) |
@@ -81,6 +82,26 @@ Electron apps packaged with **electron-builder** are built through the New Build
 4. The `.app` (and zip/dmg) or the Linux app folder are found and verified (signature, architecture, app.asar contents).
 
 Offered on macOS (arm64/x64 `.app`, zip, dmg) and Linux (unpacked app). Details: [`docs/ELECTRON.md`](docs/ELECTRON.md).
+
+## C/C++ projects (unreleased, `feature/native-cpp`)
+
+CMake, Make and source-only C/C++ projects are built through the New Build wizard, for this computer with its own
+compilers:
+
+1. Inspection reads `CMakeLists.txt`, presets, Makefiles and sources without running anything, and finds project roots
+   inside repositories without treating `build/`, `_deps/`, `third_party/` and similar folders as apps.
+2. **CMake:** after you confirm that you trust the project, *Configure with CMake* runs CMake in HCG's own folder and
+   reads the real targets through the CMake File API. Each executable target becomes an entry under *Project to
+   build*; libraries are listed separately and never offered as runnable. **Make:** you name the target and the file it
+   produces. **Sources:** you select the files; HCG generates the CMakeLists.txt in its build folder.
+3. The build streams the compiler output, parses errors with file and line, supports cancel and time limits, and never
+   writes into the imported source.
+4. The output is checked (real executable, format, architecture), its runtime libraries are listed in
+   `RUNTIME-DEPENDENCIES.txt` with a warning when it is not portable, and it is packaged as a folder/ZIP, or kept as the
+   project's own `.app` on a Mac (signed in a separate stage).
+
+States: toolchain missing · configuration required · ready · building · failed · verified. Theos projects are
+recognized and explained, never packaged as a desktop app or IPA. Details: [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md).
 
 ## HCG account (unreleased, `feature/hcg-account`)
 
@@ -161,7 +182,8 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 - [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md) — Windows Setup.exe: features, requirements, CI route, tests
 - [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md) — HCG sign-in, ERP App Access, support requests, HCG AI: contract, configuration, verification
 - [`docs/ELECTRON.md`](docs/ELECTRON.md) — Electron apps: inspection, electron-builder stages, verification, offered targets
-- [`docs/TOOLCHAINS.md`](docs/TOOLCHAINS.md) — toolchain discovery (Xcode, Java, Android SDK, Node.js) and readiness
+- [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md) — C/C++: supported project types, trusted CMake configure, Make/sources, verification, limits
+- [`docs/TOOLCHAINS.md`](docs/TOOLCHAINS.md) — toolchain discovery (Xcode, Java, Android SDK, Node.js, C/C++) and readiness
 - [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows
 - [`docs/STATUS.md`](docs/STATUS.md) — what is complete, what is not, verification evidence, continuation instructions
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — solution structure, data flow, extension points

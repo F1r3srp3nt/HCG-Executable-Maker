@@ -46,6 +46,8 @@ public sealed record BuildSettings
     public SwiftBuildOptions? Swift { get; init; }
     /// <summary>Set for Electron desktop builds; null otherwise.</summary>
     public ElectronBuildOptions? Electron { get; init; }
+    /// <summary>Set for C/C++ builds (CMake, Make, sources); null otherwise.</summary>
+    public NativeBuildOptions? Native { get; init; }
     /// <summary>macOS signing (ad hoc / Developer ID), installer and Mac App Store settings.</summary>
     public MacDistributionOptions MacDistribution { get; init; } = new();
 

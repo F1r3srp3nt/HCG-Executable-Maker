@@ -58,4 +58,8 @@ public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Hos
     public DateTimeOffset Now { get; init; } = DateTimeOffset.UtcNow;
     /// <summary>An Electron app packaged by electron-builder (only the combinations HCG implements are offered).</summary>
     public bool IsElectron { get; init; }
+    /// <summary>A C/C++ build (CMake, Make or sources) for this host.</summary>
+    public bool IsNative { get; init; }
+    /// <summary>The C/C++ project produces its own macOS application bundle.</summary>
+    public bool IsNativeMacBundle { get; init; }
 }

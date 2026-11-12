@@ -33,6 +33,7 @@ public sealed partial class ToolchainDetector(
         };
         tasks.AddRange(MacTools(cancellationToken));
         tasks.AddRange(SwiftTools(cancellationToken));
+        tasks.AddRange(NativeTools(cancellationToken));
         tasks.AddRange(WindowsTools(cancellationToken));
         var saved = settings is null ? new AppSettings() : await settings.LoadAsync(cancellationToken).ConfigureAwait(false);
         var xcodeTask = Host.Platform == TargetPlatform.MacOS ? DetectXcodeAsync(cancellationToken) : null;

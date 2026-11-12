@@ -52,7 +52,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -199,6 +199,7 @@ internal static partial class Program
         if (wizard.ImportError is not null) return 1;
         if (_args.ContainsKey("prepare-desktop")) return await RunPrepareDesktopAsync(wizard, host, output);
         if (_args.ContainsKey("electron")) return await RunElectronAsync(wizard, host, output);
+        if (_args.ContainsKey("native")) return await RunNativeAsync(wizard, host, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
 
         // 2. Inspect: packages listed, none auto-selected when there are several.

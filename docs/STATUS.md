@@ -5,6 +5,37 @@ desktop apps (docs/ELECTRON.md), guided toolchain setup (docs/TOOLCHAINS.md) and
 (docs/HCG-ACCOUNT.md — not live until HCG's external setup is done) to 0.2.0.
 0.2.0 contained M0.1, M0.2 (Windows installer) and M0.5 (Mobile Build Studio), merged into `main` with founder approval.
 
+# C/C++ projects (unreleased, branch `feature/native-cpp`, not pushed)
+
+Details: docs/NATIVE-CPP.md. Development host: Linux x64 (Ubuntu 24.04), CMake 3.28.3, Ninja 1.11.1, GNU Make 4.3,
+GCC 13.3, Clang 18.
+
+## Verified locally (Linux)
+
+- The 28 C/C++ tests pass, including real builds: a C project in paths with spaces (configure refused without trust),
+  a C++17 project (Debug), a multi-target project (calc + greeter, shared library shipped with a portability warning),
+  a library-only project (refused), a Make target with a variable, a missing expected output, a compile error reported
+  at `main.c:4`, cancellation of a running make (child processes stopped), and loose sources.
+- The real New Build wizard (`tools/ui-driver --native`, Avalonia headless) on the fixtures: MultiTarget (trusted
+  configure → targets calc and greeter, libraries listed separately → build calc → Verified), CppHello, MakeHello
+  (target, variable, expected output), LooseSources (selected files), MacBundle (plain executable on Linux) and
+  TheosTweak (Not supported, explained). The produced programs were run afterwards by hand, outside HCG, and printed
+  the expected output.
+- The full test suite passes (see the commit for counts).
+
+## Implemented, not verified on that platform yet
+
+- macOS: `MACOSX_BUNDLE` and Makefile-built `.app` bundles kept as built, ad-hoc or Developer ID signing stage, ZIP
+  with ditto, universal (arm64 + x86_64) builds, `otool` runtime-library report, the `xcode-select` check before the
+  compiler probe. Covered by the new `native-cpp` CI job (macos-latest), which has not run yet.
+- Windows: Visual Studio generator with MSVC (`vswhere`), MinGW Makefiles, PE verification. Not run on Windows.
+
+## Not implemented
+
+- Cross-compilation of any kind; DMG, PKG, Windows installer, AppImage or .deb outputs for C/C++ builds; Theos,
+  Meson, Autotools-without-Makefile, Bazel and Visual-Studio-solution-only projects; installing compilers, packages or
+  package managers (vcpkg, Conan).
+
 # Swift macOS apps (unreleased, branch `feature/swift-macos`, not merged)
 
 Evidence: CI run #20 (<https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/runs/42428955743>), all jobs green.
