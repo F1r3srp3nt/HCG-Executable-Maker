@@ -15,7 +15,7 @@ public sealed partial class BuildWizardViewModel
     private AiAssistant? Ai => App.Services?.GetService<AiAssistant>();
 
     /// <summary>The project cannot be built as it is: offer diagnostics, a support request and (when available) AI analysis.</summary>
-    public bool ShowSupportActions => Analysis is { } a && a.Support != SupportLevel.Supported && a.Support != SupportLevel.MissingToolchain;
+    public bool ShowSupportActions => Analysis is { } a && a.Support != SupportLevel.Supported && a.Support != SupportLevel.MissingToolchain && !HasConvertibleWebProjects;
     [ObservableProperty] private bool _aiAnalysisAvailable;
     [ObservableProperty] private string _aiAnalysisNote = "";
     [ObservableProperty] private bool _aiExplainAvailable;

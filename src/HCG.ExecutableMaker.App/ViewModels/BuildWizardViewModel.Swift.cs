@@ -44,7 +44,7 @@ public sealed partial class BuildWizardViewModel
     };
     public string MissingTitle => Analysis?.Support == SupportLevel.RequiresConfiguration ? "Missing project configuration" : "Missing requirements";
     public string ProjectPickerLabel => IsSwiftProject ? "SWIFT PACKAGE TO BUILD" : "PROJECT TO BUILD";
-    public string ProjectPickerPlaceholder => IsSwiftProject ? "Choose a Swift package…" : "No runnable application project found";
+    public string ProjectPickerPlaceholder => IsSwiftProject ? "Choose a Swift package…" : ProjectOptions.Count > 0 ? "Choose a project…" : "No runnable application project found";
 
     public SwiftPackageInfo? SelectedSwiftPackage =>
         Analysis?.Swift?.Packages.FirstOrDefault(p => SelectedProject is not null && p.ManifestPath == SelectedProject.Path);

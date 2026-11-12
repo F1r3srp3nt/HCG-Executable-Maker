@@ -606,7 +606,7 @@ jobs:
           retention-days: 7
 
   web-desktop-macos:
-    name: Web → desktop — Vite + React app prepared and built through the New Build wizard (arm64 .app, zip, dmg; launched with no dev server)
+    name: Web → desktop — Create desktop application for a Vite + React app through the New Build wizard (arm64 .app, zip, dmg; launched with no dev server)
     needs: test
     runs-on: macos-latest
     timeout-minutes: 45
@@ -630,13 +630,15 @@ jobs:
           dotnet build tools/ui-driver -c Release
           sw_vers; uname -m; node --version; npm --version
 
-      # Inspect (browser app, not buildable as is) → Prepare desktop app: preview (Electron entry, builder config,
-      # package.json diff), rename, create the separate workspace (lockfile with --ignore-scripts) → import it → build it
-      # with the existing Electron pipeline (npm ci → desktop:build → electron-builder --mac zip dmg --arm64).
-      - name: Prepare the desktop workspace and build it through the wizard
+      # Inspect: the browser app is offered under Project to build as a conversion candidate → Create desktop application:
+      # name, target (arm64), formats (app, zip, dmg), output folder, icon (public/app-icon.png), ad-hoc signing; preview of
+      # every generated file → the separate desktop project is created (lockfile with --ignore-scripts) and opened at the
+      # Build step → trust → install (npm ci) → compile (desktop:build) → package (electron-builder) → verify. Then the
+      # same web app is converted again: the same desktop project is updated, nothing is duplicated.
+      - name: Create the desktop application and build it through the wizard
         run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --electron --prepare-desktop --source "$FIXTURE"
-          --desktop-name "Field Notes Desktop" --arch arm64 --formats app,zip,dmg --expect-name "Field Notes Desktop"
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --prepare-desktop --source "$FIXTURE"
+          --desktop-name "Field Notes Desktop" --arch arm64 --formats app,zip,dmg --expect-name "Field Notes Desktop" --convert-again
           --output "$OUT/fixture" --screenshots "$OUT/screens" --prefix webdesk
 
       - name: The imported project is unchanged; the .app, zip and dmg pass Apple's tools
@@ -647,8 +649,13 @@ jobs:
           echo "App: $APP"
           [[ "$APP" == *"/Field Notes Desktop.app" ]]
           codesign --verify --deep --strict --verbose=2 "$APP"
-          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle(Name|Identifier|Executable|ShortVersionString)'
+          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle(Name|Identifier|Executable|ShortVersionString|IconFile)'
           [ "$(lipo -archs "$(sed -n 2p "$OUT/fixture/webdesk-app.txt")")" = "arm64" ]
+          # The chosen icon (the project's 1024×1024 public/app-icon.png) became the app icon.
+          ICON="$(plutil -extract CFBundleIconFile raw "$APP/Contents/Info.plist")"
+          test -s "$APP/Contents/Resources/${ICON%.icns}.icns"
+          # Ad-hoc signature only: labelled unsigned for distribution, never presented as Developer ID signed.
+          codesign -dv "$APP" 2>&1 | tee "$OUT/codesign.txt" | grep -q "Signature=adhoc"
           dir="$(dirname "$APP")"
           hdiutil verify "$dir"/*.dmg
           unzip -tq "$dir"/*.zip
@@ -656,12 +663,13 @@ jobs:
           npx --yes @electron/asar@3.4.1 list "$APP/Contents/Resources/app.asar" | tee "$OUT/asar.txt" | grep -E "^/dist/index.html$"
           if grep -E "node_modules|/src/" "$OUT/asar.txt"; then echo "source or node_modules packaged"; exit 1; fi
 
-      - name: Launch the packaged app with no development server — content, deep route, window security
+      - name: Launch the packaged app with no development server — content, deep route, lazy chunk, reloads, links, CSP, window security
         run: |
           for port in 5173 4173 3000; do if nc -z 127.0.0.1 $port; then echo "port $port in use"; exit 1; fi; done
           npm install --prefix "$RUNNER_TEMP/pw" --no-audit --no-fund playwright-core@1.63.0
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node tools/electron-launch-check/launch-check.cjs \
-            "$(sed -n 2p "$OUT/fixture/webdesk-app.txt")" "$OUT/screens" "Field Notes" /notes/ridge "Ridge walk"
+            "$(sed -n 2p "$OUT/fixture/webdesk-app.txt")" "$OUT/screens" "Field Notes" /notes/ridge "Ridge walk" \
+            --lazy /archive/2024 "Archive 2024" --links --prefix webdesk-launch
 
       - name: Launch through LaunchServices (as Finder does) — stays up; window screenshot
         run: |

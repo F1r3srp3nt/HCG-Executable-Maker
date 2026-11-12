@@ -42,57 +42,194 @@ For a **web-only** project, such as the original Presentation Studio, HCG lists 
 - the app runs from a development server;
 - a separate backend (Express) that would have to start inside the main process.
 
-## Browser apps: "Prepare desktop app" (Vite + React)
+## Browser apps: "Create desktop application" (Vite + React)
 
-A browser app is not packaged as it is. The project is labelled a web app, and its missing desktop parts are listed as **project configuration**, separately from tools missing on this computer. For a supported project the wizard offers **Prepare desktop app**:
+A browser app is not packaged as it is, and it is not dismissed with "No runnable application project found" either.
+Every web app in the workspace, nested folders included, is listed under **Project to build** with what HCG can do
+with it. HCG never claims that every React app can become a static desktop app.
 
-1. **Analysis (static, nothing runs).** It reads `package.json`, `vite.config.*`, `index.html` and the app's source folder (`src/`, else `app/` or `lib/`; tests excluded).
-   - **Supported:** Vite + React with npm and a script that runs `vite build`.
-   - **Refused with the exact reason:**
-     - SSR frameworks (Next.js, Nuxt, Remix, SvelteKit, Astro, Angular SSR, Gatsby) and non-React Vite apps;
-     - pnpm, Yarn or Bun projects; npm workspaces; `file:`, `link:` or `workspace:` dependencies;
-     - an existing Electron app (use the normal Electron path);
-     - an existing `hcg-desktop/`, `electron-builder.*` or `desktop:*` script;
-     - no `vite build` script; an absolute `http(s)` base; an invalid app id or name;
-     - relative `/api` calls when the project also contains a server framework.
-   - **Warnings (backend and sign-in, shown with file and line):**
-     - relative `/api` calls, a dev-server proxy, `localhost` URLs and service workers;
-     - redirect sign-in (Supabase, Firebase, Auth0, OIDC, MSAL, Clerk, NextAuth, Amplify);
-     - real `.env` files (never copied).
+### 1. Inspection: static, nothing runs
 
-   Arbitrary websites are not claimed to work: a backend the app calls must be reachable from the desktop app, and redirect sign-in needs a desktop redirect URI registered with that provider.
-2. **Preview.** Every file is shown before anything is written:
-   - `hcg-desktop/main.cjs` (the Electron entry);
-   - `hcg-desktop/verify-build.cjs` (fails the build if `dist/index.html` is missing or still loads the Vite dev server);
-   - `electron-builder.yml` (arm64 `.app`, zip and dmg, ad-hoc signed; Linux app folder);
-   - `package.json` as a diff: `main`; scripts `desktop:build`, `desktop:dist:mac` and `desktop:dist:linux`; `electron` 45.2.3 and `electron-builder` 26.18.0; runtime dependencies moved to devDependencies, because Vite bundles them, so the app ships no `node_modules`;
-   - `package-lock.json`.
+HCG reads `package.json`, the lockfile, `vite.config.*`, `index.html` and the app's source folder (`src/`, else
+`app/` or `lib/`; tests are not scanned). No npm command, project script or JavaScript configuration runs. Each Node.js
+project is classified (`DesktopEligibilityRules`):
 
-   The app name and app id are editable. A change requires an updated preview before anything is written.
-3. **Create desktop workspace.** This writes a **separate copy**; the imported project is never modified. The copy leaves out `node_modules`, the build output, `release/`, VCS data, symlinks and `.env` files with values. It then runs `npm install --package-lock-only --ignore-scripts` with the inspected Node.js and the scrubbed build environment, so no project or package script runs. The workspace is imported as a new HCG project and builds through the existing Electron stages: `npm ci` → `npm run desktop:build` → electron-builder.
+| Category | When | What HCG does |
+| --- | --- | --- |
+| **Browser app** | Vite + React (`react` and `react-dom`), npm, a script that runs `vite build` | Offers **Create desktop application** |
+| **Electron app without packaging** | Electron, an existing main process, Vite, no electron-builder / Forge / packager | Adds packaging only and keeps the main process. It warns, with file and line, when the main process turns off a renderer protection or loads a dev server |
+| **Existing Electron app** | electron-builder (or Forge/packager) configuration, or a desktop project HCG generated | Builds it as it is; nothing is generated |
+| **Needs a server** | Next.js, Nuxt, Remix, SvelteKit, Astro, Angular SSR, Gatsby, React Router framework mode, TanStack Start, Vike; or Express, Fastify, Koa, Hono, NestJS, hapi or restify under `dependencies` | Explains why; does not convert |
+| **Not supported / ambiguous** | Not Vite + React; pnpm, Yarn or Bun (their lockfile would be ignored); a monorepo root; `file:`, `link:` or `workspace:` dependencies or a sibling monorepo package; no `vite build` script | Gives the exact reason; does not convert |
 
-**The packaged window:**
-- It serves the production build from a privileged `app://bundle` scheme: no web server, no dev server, no network for the app's own files.
-- Asset paths follow Vite's `base`. Paths outside `dist/` are refused.
-- Any extension-less path is answered with `index.html`, so `BrowserRouter` deep links and reloads work.
-- `contextIsolation`, `sandbox` and `webSecurity` are on, and `nodeIntegration` is off.
-- Permission requests are denied. `window.open` and navigation to other sites go to the user's browser (https and mailto only), and `<webview>` is refused.
+**npm workspace members:** a project without its own lockfile is pinned by the nearest ancestor lockfile. With npm's
+`package-lock.json`, the desktop project's lockfile starts from the monorepo's pinned versions: hoisted packages, plus
+the member's own nested ones, minus the other members and workspace links. pnpm or Yarn monorepos are refused.
+
+**Analysis rows:** "Recommended outputs" are listed only when something in the workspace can produce them. For a
+convertible app they read "… — after Create desktop application". The support card ("HCG cannot build this project")
+is hidden while a conversion is available.
+
+### 2. The Create desktop application panel
+
+The panel holds the selected web project and its category, and these choices:
+- **Product name and application identifier.** Defaults come from `index.html` and `package.json`; the version comes
+  from `package.json`.
+- **Icon.** The default is the largest square PNG of at least 512×512 found in the project (`public/`, `build/`,
+  `assets/`, …), or an `.icns`. Too small, non-square, ICO and SVG files are refused with the reason. Without an icon,
+  the app uses Electron's default icon.
+- **Target platform and architecture.** Only what this computer can package is offered: macOS arm64 or x64 on a Mac,
+  and the Linux app folder on Linux. Windows packaging of Electron apps is not implemented, so it is not offered. An
+  Electron package is never labelled as an iOS or Android app.
+- **Package formats:** `.app` (always built), ZIP and DMG on a Mac; the unpacked app folder on Linux.
+- **Output folder.**
+- **Signing and notarization, as separate operations:**
+  - Signing defaults to **ad-hoc**, labelled *not signed for distribution*.
+  - A *Developer ID Application* identity found in the keychain can be chosen. electron-builder then signs with the
+    hardened runtime and the JIT entitlement only. This path has no CI coverage, because CI has no certificate.
+  - Notarization is never run during the build. It is shown as a separate step (`xcrun notarytool submit … --wait`,
+    then `xcrun stapler staple`).
+- **Public settings.** The `VITE_` values that the project's production `.env` files give the web build (`.env`,
+  `.env.local`, `.env.production`, `.env.production.local`) are copied into the desktop build. Names that look like
+  credentials (`SECRET`, `TOKEN`, `PASSWORD`, `PRIVATE`, `SERVICE_ROLE`, `CREDENTIAL`, `API_KEY`, `ACCESS_KEY`) are
+  never copied, and non-`VITE_` variables (server-side) are never copied. The `.env` files themselves are never copied.
+
+**Findings** carry file and line:
+- relative `/api` calls, a dev-server proxy, `localhost` URLs, service workers;
+- redirect sign-in (Supabase, Firebase, Auth0, OIDC, MSAL, Clerk, NextAuth, Amplify) and **HCG Connect**, explained
+  below;
+- the HTTPS hosts the code calls. Remote services stay remote, and HCG bundles no server and no server credentials;
+- history routing and lazy chunks, and how each is served.
+
+**Preview:** every file to be added, changed or removed is shown before anything is written. `package.json` is shown
+as a diff, and `.env` values are not displayed.
+
+### 3. The generated desktop project: a separate copy
+
+**Create desktop application** plans again with the current options, then writes a **separate desktop project**. The
+imported project, and the website's own build, scripts and hosting files, are never modified. The copy leaves out
+`node_modules`, the build output, `release/`, VCS data, symlinks and `.env` files.
+
+| File | Purpose |
+| --- | --- |
+| `hcg-desktop/main.cjs` | Electron main process (wrap mode only; see the loading strategy below) |
+| `hcg-desktop/verify-build.cjs` | Runs after the web build. Fails if `dist/index.html` or **any script, stylesheet or icon it references** is missing, or the build loads the Vite dev server |
+| `electron-builder.yml` | App id, name, icon, mac targets and architecture, signing identity (`"-"` = ad-hoc), `publish: null`, Linux `dir` |
+| `hcg-desktop/icon.png` / `.icns` | The chosen icon |
+| `hcg-desktop/entitlements.mac.plist` | Only with Developer ID signing (`com.apple.security.cs.allow-jit`) |
+| `.env.production.local` | Only when public `VITE_` settings exist |
+| `package.json` | `main`, `desktop:build`, `desktop:dist:mac`, `desktop:dist:linux`, `electron` 45.3.0, `electron-builder` 26.18.0. In wrap mode, runtime dependencies move to devDependencies because Vite bundles them, so the app ships no `node_modules` |
+| `package-lock.json` | `npm install --package-lock-only --ignore-scripts`, starting from the project's (or monorepo's) lockfile, so no script runs |
+| `hcg-desktop/README.md`, `hcg-desktop/conversion.json` | The record: source project, source fingerprint, options, every generated file with its SHA-256, and the original `package.json` |
+
+Before writing, HCG checks that the chosen Node.js satisfies the project's `engines.node` **and** Electron 45's
+`>=22.12.0`. After the lockfile is resolved, it checks the resolved `vite`, `electron` and `electron-builder` engines
+against it.
+
+**Converting again never accumulates files:**
+- From the original web project, it **updates the desktop project generated earlier**. That project's source is
+  swapped (`ProjectService.ReplaceSourceAsync`) and its build history is kept; no second project is added.
+- In a folder that already holds HCG's output (for example, committed back into a repository), the recorded files are
+  replaced, files no longer needed are removed, and `package.json` is rebuilt from the recorded original. The same
+  options produce the same files.
+- A generated file **edited** afterwards is never overwritten: HCG stops and names it.
+
+The desktop project is imported (or updated) and opens at the **Build** step with the chosen target, formats and output
+folder. After the usual trust confirmation, it builds through the Electron stages, each shown separately:
+install dependencies (`npm ci`) → compile the web app (`npm run desktop:build`) → package (electron-builder) → verify
+(locate the app; check its structure, architecture, payload and signature; copy) → checksums.
+
+Cancellation stops the running process. An incomplete output folder is removed. Exit codes are recorded, and build log
+lines and messages pass through `SecretRedactor`. An ad-hoc build is logged as *UNSIGNED for distribution and NOT
+notarized*.
+
+### Loading strategy: the packaged window
+
+- The production build is served from a privileged, standard, secure `app://bundle` scheme: no web server, no dev
+  server, no network for the app's own files.
+  - Absolute asset paths (`/assets/…`), lazy-loaded chunks and their assets resolve exactly as on the web host.
+  - Any extension-less path is answered with `index.html` (the web host's rewrite). `BrowserRouter` navigation, deep
+    links and **reloads** therefore work.
+  - Vite's `base` is honoured, and paths outside `dist/` are refused.
+
+  `loadFile`/`file://` alone was not used, because history routes break on reload under `file://`.
+- `contextIsolation`, `sandbox` and `webSecurity` are on; `nodeIntegration` (also in workers and subframes) is off;
+  there is no preload script, because the page needs no native operation.
+- HTML responses carry a content security policy: scripts from the app only, `connect-src 'self' https: wss:` so remote
+  APIs stay reachable, `object-src 'none'`, and `nosniff`.
+- Permission requests and checks are denied. `<webview>` is refused, and a second launch focuses the first window.
+- `window.open` and navigation (including redirects) outside the app are refused. Only `https:` and `mailto:` links are
+  handed to the user's browser or mail program; every other scheme, `file:` included, is refused.
+- If the start page itself fails to load, the window shows an error page. Failed remote requests are logged with their
+  host; the page shows its own connection errors.
+
+### HCG Connect (central sign-in) in a desktop app
+
+HCG Store is prepared for HCG Connect: `VITE_HCG_CONNECT_*` settings, a redirect URI on the origin that serves the web
+build. A desktop app has no such origin. Desktop sign-in needs a **separate public desktop client registered centrally
+by HCG**, with:
+- a loopback redirect (`http://127.0.0.1:<port>/…`);
+- PKCE S256 and the system browser (how HCG Executable Maker itself signs in; see `docs/hcg-connect/`).
+
+Until HCG registers that client and the app implements the loopback flow, sign-in stays unavailable in the desktop
+app. HCG Executable Maker does not register clients, invent a login service or put a client secret in the app.
+
+### HCG Store: importing it and generating its macOS app
+
+1. In HCG Executable Maker on a Mac (Apple silicon or Intel), open **Toolchains** and press **Refresh**. You need
+   Node.js **22.12 or later**: HCG Store requires `>=22.12`, and Electron 45 requires `>=22.12.0`.
+2. **New Build › Import folder…** and choose the **repository root** of HCG Store (the folder that contains
+   `web-hcg-store/`). A ZIP of the repository works too.
+3. On **Inspect**, the analysis reads *Web app (browser only) — desktop conversion available*. Under
+   **Project to build**, choose `hcg-store-web · Browser app — can become a desktop app` (`web-hcg-store/package.json`).
+4. In **Create desktop application**:
+   - Check *HCG Store* and `com.hakmicapitalgroup.hcg-store-web`, or change them.
+   - Icon: `public/brand/icon-512.png`, chosen automatically.
+   - Target: *macOS · Apple silicon (arm64)* (or Intel).
+   - Formats: `.app`, ZIP and DMG; choose the output folder.
+   - Signing: Ad-hoc, or your Developer ID Application identity.
+   - Review the findings. HCG Connect sign-in is not available in the desktop app yet (see above). The catalogue is
+     the local seed catalogue, because no `.env` sets `VITE_CATALOGUE_PROVIDER`.
+5. Press **Create desktop application**. The desktop project is created, separate from the import, and opens at
+   **Build**.
+6. Tick the trust confirmation, then **Start Build**. The stages run in order: `npm ci` → `npm run desktop:build`, which
+   runs HCG Store's own `npm run build` (catalogue validation, `tsc -b`, `vite build`, the bundle-secrets check) and
+   then the asset verification → electron-builder → verify.
+7. **Results** lists `HCG Store.app`, the ZIP and the DMG, with their checks and SHA-256. Open the `.app` (it needs no
+   Node.js and no dev server). Ad-hoc builds run on the Mac that built them; for other Macs, sign with Developer ID and
+   notarize separately.
+
+Converting again later (step 4 onwards from the original import) updates the same desktop project.
 
 **Verified:**
-- Unit tests, including refusal cases.
-- **web-hcg-store** (F1r3srp3nt/store), locally on Linux: wizard → workspace → `npm ci`, `desktop:build`, electron-builder. The packaged app was launched with Playwright and **no dev server**: home and `/apps` after a hard reload rendered, the security preferences were checked, and traversal probes returned no files.
-- The fixture `tests/Fixtures/WebViteDesktop` through the real wizard (UI driver `--prepare-desktop`), plus `tools/electron-launch-check/launch-check.cjs`.
-- **CI job `web-desktop-macos`, passed in run 48 (10 Nov 2026, macOS 26 arm64):** the fixture went through the real wizard (preview, rename, create workspace, import) into an arm64 `.app`, zip and dmg, with the fixture left unchanged.
-  - The artifacts pass `codesign --verify --deep --strict`, `lipo` (arm64) and `hdiutil verify`, and the zip passes `unzip -t`.
-  - `app.asar` holds `dist/`, the shell and `package.json`, with no `node_modules` and no source.
-  - Launched with no dev server:
-    - the page loads from `app://bundle/`;
-    - `/notes/ridge` survives a reload;
-    - context isolation, sandbox and webSecurity are on, and Node integration is off;
-    - no Node.js is visible in the page;
-    - paths outside the bundle are not served;
-    - no request failed.
-  - Opened through LaunchServices, it stayed up and was screenshotted, with no crash report.
+- **Unit tests** (`WebDesktopConversionTests`, `ProjectServiceTests`):
+  - nested detection, as in the HCG Store layout;
+  - classification of every category;
+  - npm workspace lockfile seeding; pnpm and sibling refusal;
+  - findings and file/line;
+  - credential-like settings never copied;
+  - the shell's security settings and CSP;
+  - icon, targets and signing written to the configuration; unusable icons refused;
+  - idempotent re-conversion; edited files never overwritten;
+  - Electron app with packaging untouched; Electron app without packaging keeps its main process;
+  - engines checks; redacted npm output;
+  - source replacement without a second project.
+- **Linux, locally (12 Nov 2026), through the real wizard (UI driver `--prepare-desktop --convert-again`):**
+  - The fixture `tests/Fixtures/WebViteDesktop` and the real **HCG Store** (`F1r3srp3nt/store` at `c7270f3`,
+    repository root imported, app in `web-hcg-store/`) went through: picker → options → preview → create → Build step →
+    `npm ci` → `desktop:build` → electron-builder → verify. Converting again updated the same project (no extra
+    project, no leftover files).
+  - Both packaged apps were launched with **no dev server**:
+    - the page loaded from `app://bundle/`;
+    - a deep route survived a reload (`/notes/ridge`, HCG Store `/apps/hcg-mail`);
+    - for the fixture, the lazy `/archive/2024` chunk and its image loaded from the app, also after a reload; an
+      https link opened outside the app and a `file:` link was refused;
+    - the CSP was present, the window security settings were on, no Node.js was in the page, traversal probes failed,
+      and no app request failed.
+- **macOS:** see the CI job `web-desktop-macos`. It runs the same wizard flow on the fixture and produces an arm64
+  `.app`, zip and dmg, which are checked with codesign (ad-hoc), lipo, `hdiutil verify` and `unzip -t`; it also checks
+  the icon in the bundle. The app is launched with the checks above and through LaunchServices. HCG Store itself is
+  not built in CI: its repository is not available to this repository's CI.
 
 ## Packaging scripts
 

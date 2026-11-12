@@ -20,10 +20,12 @@ internal static partial class Program
         if (_args.ContainsKey("expect-not-desktop"))
         {
             foreach (var m in wizard.MissingDependencies) Log("Missing: " + m);
-            Check(wizard.ProjectOptions.Count == 0, "No desktop app is offered for a project without Electron");
+            foreach (var o in wizard.ProjectOptions) Log("Offered: " + o.Name);
+            Check(wizard.ProjectOptions.All(o => !o.Project.IsRunnableApplication && !o.Project.IsDesktopConversionCandidate), "No desktop app or conversion is offered");
             Check(!wizard.CanConfigure && !wizard.NextCommand.CanExecute(null), "Cannot continue to Configure");
-            Check(wizard.MissingDependencies.Any(m => m.Contains("No Electron dependency", StringComparison.Ordinal)), "Explains the missing Electron dependency");
-            Check(wizard.MissingDependencies.Any(m => m.Contains("electron-builder", StringComparison.Ordinal)), "Explains the missing packaging configuration");
+            if (wizard.ProjectOptions.FirstOrDefault() is { } web) wizard.SelectedProject = web;
+            Check(!wizard.CreateDesktopWorkspaceCommand.CanExecute(null), "Create desktop application is not available");
+            Check(wizard.MissingDependencies.Count > 0 || wizard.HasConversionBlockers, "Explains why");
             Shot("inspect-not-desktop");
             ShotScrolledToEnd("inspect-not-desktop-details");
             return 0;
@@ -84,8 +86,15 @@ internal static partial class Program
         Check(wizard.PackagingOptions.Where(o => o.Option.Availability != PackagingAvailability.Available).All(o => !o.IsSelected), "Unimplemented targets cannot be selected");
         Shot("package");
 
-        // Build: trust confirmation, then the three stages stream into the log.
+        // Build: trust confirmation, then the stages stream into the log.
         await wizard.NextCommand.ExecuteAsync(null);
+        return await RunElectronBuildStepAsync(wizard, output);
+    }
+
+    /// <summary>From the Build step: refused before trust, then install → compile → package → verify, then the artifacts.</summary>
+    private static async Task<int> RunElectronBuildStepAsync(BuildWizardViewModel wizard, string output)
+    {
+        Check(wizard.IsBuildStep, "Build step");
         foreach (var row in wizard.Summary) Log($"Summary {row.Label}: {row.Value}");
         Check(!wizard.StartBuildCommand.CanExecute(null), "Build refused before trust is confirmed");
         wizard.TrustAcknowledged = true;
@@ -100,9 +109,12 @@ internal static partial class Program
             await Task.Delay(250);
         }
         await buildTask;
+        stages = [.. wizard.StageHistory];
+        Log("Stages: " + string.Join(" → ", stages));
         Check(stages.Any(s => s.Contains("Install dependencies", StringComparison.Ordinal)), "Stage shown: install dependencies");
         Check(stages.Any(s => s.Contains("Compile", StringComparison.Ordinal)), "Stage shown: compile");
         Check(stages.Any(s => s.Contains("electron-builder", StringComparison.Ordinal)), "Stage shown: package with electron-builder");
+        Check(stages.Any(s => s.StartsWith("Verify", StringComparison.Ordinal)), "Stage shown: verify the packaged app");
         var result = wizard.Result;
         Check(result?.Status == BuildStatus.Succeeded, $"Build {result?.Status}: {wizard.ResultDetail}");
         Shot("results");

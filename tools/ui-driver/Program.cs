@@ -16,7 +16,8 @@
 //       [--formats app,zip,dmg | folder] [--expect-name N] [--expect-bundle-id ID] [--expect-version V] --output <dir> --screenshots <dir>
 //   --expect-not-desktop: prove a web-only / service project is explained (what is missing) and cannot be configured.
 // Usage (browser app → desktop app: preview, create the desktop workspace, then build it as above):
-//   dotnet run --project tools/ui-driver -- --electron --prepare-desktop --source <Vite + React folder> [--desktop-name N]
+//   dotnet run --project tools/ui-driver -- --prepare-desktop --source <folder with a Vite + React app> [--web-project dir/package.json]
+//     [--desktop-name N] [--arch arm64|x64] [--formats app,zip,dmg|folder] [--convert-again]
 //       [--desktop-app-id ID] [--formats app,zip,dmg | folder] --output <dir> --screenshots <dir>
 //   Distribution (macOS): --formats …,pkg,mas  --select-xcode <Xcode.app> (HCG-only selection via Toolchains › Browse…)
 //       --expect-xcode-state Ready  --signing adhoc|devid  --confirm-entitlements  --test-install [launch]
@@ -51,7 +52,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -147,6 +148,7 @@ internal static partial class Program
     private static async Task<int> RunAsync(string output)
     {
         var services = AppClass.Services ?? throw new InvalidOperationException("The app did not initialize its services.");
+        _services = services;
         var main = services.GetRequiredService<MainWindowViewModel>();
         _window = new MainWindow { DataContext = main, Width = 1480, Height = 1500 };
         services.GetRequiredService<MainWindowProvider>().Window = _window;
@@ -195,7 +197,7 @@ internal static partial class Program
         await WaitUntil(() => !wizard.IsImporting && (wizard.IsInspectStep || wizard.ImportError is not null), TimeSpan.FromMinutes(5), "import");
         Check(wizard.ImportError is null, $"Imported {(isZip ? "ZIP" : "folder")} {Path.GetFileName(source)}" + (wizard.ImportError is { } e ? ": " + e : ""));
         if (wizard.ImportError is not null) return 1;
-        if (_args.ContainsKey("prepare-desktop") && !await RunPrepareDesktopAsync(wizard)) return 1;
+        if (_args.ContainsKey("prepare-desktop")) return await RunPrepareDesktopAsync(wizard, host, output);
         if (_args.ContainsKey("electron")) return await RunElectronAsync(wizard, host, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
 

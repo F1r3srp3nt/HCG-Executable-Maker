@@ -56,7 +56,12 @@ public sealed class NodeProjectInspector(TimeProvider time) : IProjectInspector
                         s.Problem ?? $"Packaging script \"{s.Name}\": {(s.CompileSteps.Count == 0 ? "" : "compile with " + string.Join(" && ", s.CompileSteps.Select(c => c.Display)) + ", then ")}electron-builder{(s.Platforms.Count > 0 ? " --" + string.Join(" --", s.Platforms) : "")}{(s.Archs.Count > 0 ? " --" + string.Join(" --", s.Archs) : "")}{(s.Targets.Count > 0 ? " (" + string.Join(", ", s.Targets) + ")" : "")}.",
                         p.ManifestPath));
             }
-            else if (electron.Count == 0 && p.MissingForDesktop.Count > 0 && p == node.Projects[0])
+            else if (p.Kind == NodeProjectKind.WebApp && p.DesktopEligibility is { CanConvert: false } el)
+            {
+                diagnostics.Add(new(DiagnosticSeverity.Warning, el.Summary, p.ManifestPath));
+                foreach (var r in el.Reasons) diagnostics.Add(new(DiagnosticSeverity.Warning, r, p.ManifestPath));
+            }
+            else if (electron.Count == 0 && p.Kind != NodeProjectKind.WebApp && p.MissingForDesktop.Count > 0 && p == node.Projects[0])
             {
                 foreach (var gap in p.MissingForDesktop) diagnostics.Add(new(DiagnosticSeverity.Warning, gap, p.ManifestPath));
             }
@@ -83,17 +88,33 @@ public sealed class NodeProjectInspector(TimeProvider time) : IProjectInspector
             name = electron.Count == 1 ? electron[0].DisplayName : "";
             appType = electron.Count == 1 ? "Electron desktop app" : $"{electron.Count} Electron desktop apps";
         }
+        else if (node.Projects.Where(p => p.DesktopEligibility?.CanConvert == true).ToList() is { Count: > 0 } candidates)
+        {
+            // A browser app HCG can turn into a desktop app: say so, instead of listing what a hand-made Electron setup would need.
+            var c = candidates[0];
+            name = candidates.Count == 1 ? c.DisplayName : "";
+            appType = candidates.Count == 1 ? "Web app (browser only) — desktop conversion available" : $"{candidates.Count} web apps — desktop conversion available";
+            summary = candidates.Count == 1
+                ? $"{c.DisplayDirectory} is a Vite + React browser app, not a desktop app yet. Choose it under Project to build and use Create desktop application: HCG generates a separate Electron desktop project from a copy (the imported source is not changed), then builds it."
+                : $"{candidates.Count} browser apps can become desktop apps ({string.Join(", ", candidates.Select(x => x.DisplayDirectory))}). Choose one under Project to build; none is selected automatically.";
+            foreach (var x in candidates)
+                diagnostics.Add(new(DiagnosticSeverity.Info, $"Desktop conversion available: {x.DesktopEligibility!.Summary}", x.ManifestPath));
+        }
         else
         {
-            var top = node.Projects[0];
+            var top = node.Projects.FirstOrDefault(p => p.Kind == NodeProjectKind.WebApp) ?? node.Projects[0];
             var a = assessments[top.ManifestPath];
-            summary = a.Summary + " " + string.Join(" ", top.MissingForDesktop);
-            remediation = top.MissingForDesktop;
+            summary = top.DesktopEligibility is { } el && top.Kind == NodeProjectKind.WebApp
+                ? el.Summary + " " + string.Join(" ", el.Reasons)
+                : a.Summary + " " + string.Join(" ", top.MissingForDesktop);
+            remediation = top.DesktopEligibility is { } el2 && top.Kind == NodeProjectKind.WebApp ? el2.Reasons : top.MissingForDesktop;
             name = top.DisplayName;
-            appType = KindLabel(top.Kind);
+            appType = top.Kind == NodeProjectKind.WebApp && top.DesktopEligibility is { } el3 ? el3.Label : KindLabel(top.Kind);
         }
 
         var combos = toolchains is null ? [] : NodeCapabilities.Combinations(toolchains.Host);
+        // Outputs are recommended only when something here can produce them (an Electron app, or a convertible browser app).
+        var producible = electron.Count > 0 || node.Projects.Any(p => p.DesktopEligibility?.CanConvert == true);
         return new ProjectAnalysis
         {
             InspectorId = Id,
@@ -108,7 +129,7 @@ public sealed class NodeProjectInspector(TimeProvider time) : IProjectInspector
             PrimaryProjectPath = electron.Count == 1 ? electron[0].ManifestPath : null,
             RequiredToolchains = requirements,
             MissingDependencies = remediation,
-            RecommendedFormats = combos.SelectMany(c => c.Formats).Distinct().ToList(),
+            RecommendedFormats = producible ? combos.SelectMany(c => c.Formats).Distinct().ToList() : [],
             Diagnostics = diagnostics,
             Node = node,
             AnalyzedAt = time.GetUtcNow(),
@@ -133,8 +154,9 @@ public sealed class NodeProjectInspector(TimeProvider time) : IProjectInspector
         Product = p.ProductName,
         Description = p.Description,
         OutputType = p.Kind == NodeProjectKind.ElectronDesktop ? "Electron app" : null,
-        ApplicationType = KindLabel(p.Kind),
+        ApplicationType = p.Kind == NodeProjectKind.WebApp && p.DesktopEligibility is { } el ? el.Label : KindLabel(p.Kind),
         IsRunnableApplication = p.Kind == NodeProjectKind.ElectronDesktop,
+        IsDesktopConversionCandidate = p.DesktopEligibility?.CanConvert == true,
         CompatiblePlatforms = p.Kind == NodeProjectKind.ElectronDesktop ? combos.Select(c => c.Platform).Distinct().ToList() : [],
         EntryPointFiles = p.MainEntry is { } m ? [NodeProjectScanner.Join(p.Directory, m.TrimStart('.', '/'))] : [],
         PackageReferences = p.ElectronVersion is { } v ? [new PackageDependency("electron", v)] : [],

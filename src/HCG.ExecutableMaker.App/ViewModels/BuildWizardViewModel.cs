@@ -153,7 +153,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         UpdateSteps();
     }
 
-    private bool CanGoBack() => ShowBack && !IsBuilding && !IsImporting && !IsEvaluatingSwift;
+    private bool CanGoBack() => ShowBack && !IsBuilding && !IsImporting && !IsEvaluatingSwift && !IsConverting;
 
     [RelayCommand(CanExecute = nameof(CanGoBack))]
     private void Back()
@@ -342,6 +342,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         RefreshSwiftPackage();
         RefreshElectronProject();
+        RefreshDesktopConversion();
         OnPropertyChanged(nameof(CanConfigure));
     }
 
@@ -385,11 +386,15 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             AnalysisRows.Add(new("Projects found", a.Projects.Count.ToString()));
         }
         if (a.GlobalJsonSdkVersion is { } gj) AnalysisRows.Add(new("global.json SDK", $"{gj} (rollForward: {a.GlobalJsonRollForward ?? "patch"})"));
-        AnalysisRows.Add(new("Recommended outputs", a.RecommendedFormats.Count > 0 ? string.Join(", ", a.RecommendedFormats.Select(f => f.DisplayName())) : "—"));
+        var outputsNote = a is { InspectorId: "node", Node: { } nn } && nn.Projects.All(p => p.Kind != NodeProjectKind.ElectronDesktop) && a.RecommendedFormats.Count > 0
+            ? " — after Create desktop application" : "";
+        AnalysisRows.Add(new("Recommended outputs", a.RecommendedFormats.Count > 0 ? string.Join(", ", a.RecommendedFormats.Select(f => f.DisplayName())) + outputsNote : "— (nothing here can produce a desktop app as it is)"));
         AnalysisRows.Add(new("Icons found", a.DetectedIcons.Count > 0 ? string.Join(", ", a.DetectedIcons.Take(3)) : "None"));
 
         ProjectOptions.Clear();
-        foreach (var p in a.Projects.Where(p => p.IsRunnableApplication)) ProjectOptions.Add(new ProjectChoice(p));
+        // Runnable apps, plus browser apps (each labelled with what Create desktop application can do with it).
+        var webApps = a.Node?.Projects.Where(p => p.Kind == NodeProjectKind.WebApp).Select(p => p.ManifestPath).ToHashSet(StringComparer.Ordinal) ?? [];
+        foreach (var p in a.Projects.Where(p => p.IsRunnableApplication || p.IsDesktopConversionCandidate || webApps.Contains(p.RelativePath))) ProjectOptions.Add(new ProjectChoice(p));
         // Several Swift packages: the user chooses (never silently the first). Otherwise keep the existing behaviour.
         SelectedProject = ProjectOptions.FirstOrDefault(p => p.Path == a.PrimaryProjectPath)
                           ?? (a.Swift is { Packages.Count: > 0 } || (a.InspectorId == "node" && ProjectOptions.Count > 1) ? null : ProjectOptions.FirstOrDefault());
@@ -684,7 +689,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         OnPropertyChanged(nameof(ShowDistribution));
         OnPropertyChanged(nameof(IsSwiftGui));
         if (IsElectronBuild)
-            preselect ??= DefaultElectronFormats();
+            preselect ??= RecordedElectronFormats() ?? DefaultElectronFormats();
         if (swiftKind is not null)
             preselect ??= swiftKind == SwiftAppKind.GuiApp ? [PackagingFormat.MacAppBundle] : [PackagingFormat.PortableZip];
         foreach (var old in PackagingOptions) old.PropertyChanged -= OnPackagingOptionChanged;
@@ -816,7 +821,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             Summary.Add(new("Installer", $"{(w.Scope == InstallScope.AllUsers ? "All users (admin)" : "Current user")} · folder “{w.InstallFolderName ?? s.Identity.ApplicationName}” · Start-menu shortcut" +
                 $"{(w.OfferDesktopShortcut ? $" · optional desktop shortcut ({(w.DesktopShortcutCheckedByDefault ? "on" : "off")} by default)" : "")}{(w.OfferLaunchAfterInstall ? " · launch after install" : "")} · uninstaller"));
         }
-        Summary.Add(new("Icon", s.Identity.IconSourcePath is null ? "None" : Path.GetFileName(s.Identity.IconSourcePath)));
+        Summary.Add(new("Icon", IsElectronBuild
+            ? SelectedNodeProject?.BuilderConfig?.Source is { } cfg ? $"From the electron-builder configuration ({cfg})" : "From the electron-builder configuration"
+            : s.Identity.IconSourcePath is null ? "None" : Path.GetFileName(s.Identity.IconSourcePath)));
         Summary.Add(new("Output", BuildService.OutputRootFor(s)));
         Summary.Add(new("Time limit", $"{s.Timeout.TotalMinutes:0} minutes"));
     }
@@ -865,6 +872,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         LiveWarnings = LiveErrors = 0;
         StageNumber = 0;
         CurrentStage = "Starting…";
+        StageHistory.Clear();
         IsCancelling = false;
         IsBuilding = true;
         HasBuildStarted = true;
@@ -931,6 +939,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         LogAppended?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>Every stage this build went through, in order (install, compile, package, verify, …).</summary>
+    public ObservableCollection<string> StageHistory { get; } = [];
+
     private sealed class Observer(BuildWizardViewModel vm) : IBuildObserver
     {
         public void OnLog(BuildLogLine line) => vm._pendingLog.Enqueue(line);
@@ -940,6 +951,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             if (vm.IsCancelling) return;
             vm.StageNumber = (int)stage;
             vm.CurrentStage = description;
+            vm.StageHistory.Add(description);
         });
 
         public void OnMessage(BuildMessage message) => Dispatcher.UIThread.Post(() =>

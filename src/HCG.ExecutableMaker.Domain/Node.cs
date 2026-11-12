@@ -124,8 +124,52 @@ public sealed record NodeProjectInfo
     public IReadOnlyList<string> Notes { get; init; } = [];
     /// <summary>What is missing before this project can produce a desktop app (empty when nothing is).</summary>
     public IReadOnlyList<string> MissingForDesktop { get; init; } = [];
+    /// <summary>Every declared dependency (all sections): name → version spec.</summary>
+    public IReadOnlyDictionary<string, string> Dependencies { get; init; } = new Dictionary<string, string>();
+    /// <summary>Names declared under "dependencies" (shipped at run time), as opposed to devDependencies.</summary>
+    public IReadOnlyList<string> RuntimeDependencyNames { get; init; } = [];
+    /// <summary>package.json declares npm/yarn "workspaces" (a monorepo root).</summary>
+    public bool DeclaresWorkspaces { get; init; }
+    /// <summary>Directory of the monorepo root whose "workspaces" include this project (null when it is standalone).</summary>
+    public string? WorkspaceRoot { get; init; }
+    /// <summary>The lockfile of <see cref="WorkspaceRoot"/>, relative to the workspace source (it pins this member's dependencies).</summary>
+    public string? WorkspaceLockFile { get; init; }
+    /// <summary>hcg-desktop/conversion.json: this folder holds a desktop wrapper HCG generated earlier.</summary>
+    public string? HcgDesktopRecord { get; init; }
+    /// <summary>Whether and how "Create desktop application" applies (static, from the files only).</summary>
+    public DesktopEligibility? DesktopEligibility { get; init; }
     public string DisplayDirectory => Directory.Length == 0 ? "(workspace root)" : Directory + "/";
     public string DisplayName => ProductName ?? Name;
+}
+
+/// <summary>What "Create desktop application" can do with a Node.js project.</summary>
+public enum DesktopConversionCategory
+{
+    /// <summary>A static browser app (Vite + React) HCG can wrap in a generated Electron shell.</summary>
+    BrowserApp,
+    /// <summary>Already an Electron app with a main process but no packaging: HCG adds packaging and keeps the main process.</summary>
+    ElectronWithoutPackaging,
+    /// <summary>Already an Electron app (or a desktop project HCG generated): built as it is, nothing is generated.</summary>
+    ExistingElectron,
+    /// <summary>Needs a server at run time (server rendering, a backend in the project): not converted without additional setup.</summary>
+    ServerDependent,
+    /// <summary>Not supported, or ambiguous (another framework or package manager, a monorepo root, no production build).</summary>
+    Unsupported,
+}
+
+public sealed record DesktopEligibility(DesktopConversionCategory Category, string Summary, IReadOnlyList<string> Reasons)
+{
+    /// <summary>"Create desktop application" can generate (or regenerate) the desktop wrapper.</summary>
+    public bool CanConvert => Category is DesktopConversionCategory.BrowserApp or DesktopConversionCategory.ElectronWithoutPackaging;
+
+    public string Label => Category switch
+    {
+        DesktopConversionCategory.BrowserApp => "Browser app — can become a desktop app",
+        DesktopConversionCategory.ElectronWithoutPackaging => "Electron app without packaging — HCG can add it",
+        DesktopConversionCategory.ExistingElectron => "Existing Electron app — built as it is",
+        DesktopConversionCategory.ServerDependent => "Needs a server — additional setup required",
+        _ => "Not supported for desktop conversion",
+    };
 }
 
 public sealed record NodeAnalysis

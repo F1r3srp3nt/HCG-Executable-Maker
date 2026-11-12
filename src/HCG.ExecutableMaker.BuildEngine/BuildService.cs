@@ -77,12 +77,15 @@ public sealed class BuildService(
         var logGate = new object();
         void Log(BuildLogKind kind, string text)
         {
+            // Tools print what they are given (registry URLs with tokens, Authorization headers): credentials never reach the log.
+            text = Security.SecretRedactor.Redact(text);
             var line = new BuildLogLine(time.GetUtcNow(), kind, text);
             lock (logGate) logWriter.WriteLine($"[{line.Timestamp:HH:mm:ss}] {(kind is BuildLogKind.Output ? "  " : kind.ToString().ToUpperInvariant() + " ")}{text}");
             observer.OnLog(line);
         }
         void AddMessage(BuildMessage m)
         {
+            m = m with { Text = Security.SecretRedactor.Redact(m.Text) };
             lock (build.Messages)
             {
                 build.Messages.Add(m);
@@ -294,7 +297,7 @@ public sealed class BuildService(
                 Log(BuildLogKind.Success, $"{step.Title} completed in {result.Duration.TotalSeconds:F1}s");
             }
 
-            observer.OnStage(BuildStage.VerifyingOutput, "Verifying publish output");
+            observer.OnStage(BuildStage.VerifyingOutput, isElectron ? "Verify: locate the app electron-builder produced" : "Verifying publish output");
             string? exeName;
             var packagingInput = publishDir;
             if (isElectron)
@@ -310,6 +313,8 @@ public sealed class BuildService(
                 foreach (var pkg in new[] { "electron", "electron-builder" })
                     if (ElectronBuildPlanner.InstalledVersion(electronDir!, pkg) is { } v) build.ToolchainVersions[pkg] = v;
                 Log(BuildLogKind.Info, $"electron-builder output: {electronOut}");
+                if (settings.Platform == TargetPlatform.MacOS)
+                    Log(BuildLogKind.Warning, ElectronSigningLabel(electronDir!, settings.Electron!.ConfigPath));
                 foreach (var entry in Directory.EnumerateFileSystemEntries(electronOut).Order(StringComparer.Ordinal))
                     Log(BuildLogKind.Info, $"  {Path.GetFileName(entry)}{(Directory.Exists(entry) ? "/" : "")}");
             }
@@ -340,7 +345,7 @@ public sealed class BuildService(
             }
             Log(BuildLogKind.Success, $"Found application executable: {exeName}");
 
-            observer.OnStage(BuildStage.Packaging, "Packaging artifacts");
+            observer.OnStage(BuildStage.Packaging, isElectron ? "Verify the packaged app (structure, architecture, payload, signature) and copy it to the output folder" : "Packaging artifacts");
             var baseName = ArtifactBaseName(settings);
             var outputRoot = PrepareOutputRoot(settings.OutputDirectory, baseName, request.AllowOverwriteOutput);
             createdOutputRoot = outputRoot;
@@ -494,6 +499,18 @@ public sealed class BuildService(
     public static string OutputRootFor(BuildSettings s) => Path.Combine(Path.GetFullPath(s.OutputDirectory), ArtifactBaseName(s));
 
     /// <summary>Finds the native app host in publish output: assembly name first, then the runtimeconfig.json stem.</summary>
+    /// <summary>How electron-builder signed the macOS app, in words a user cannot misread (an ad-hoc signature is not a distribution signature).</summary>
+    internal static string ElectronSigningLabel(string projectDir, string? configPath)
+    {
+        var identity = HCG.ExecutableMaker.ProjectInspection.Node.ElectronBuilderConfigReader.Read(projectDir, configPath, null).Config?.MacIdentity;
+        return identity switch
+        {
+            "-" => "Signing: ad-hoc signature only (electron-builder identity \"-\"). UNSIGNED for distribution and NOT notarized: it runs on this Mac; other Macs show a Gatekeeper warning. Developer ID signing and notarization are separate steps.",
+            null => "Signing: electron-builder chose the identity automatically (no mac.identity in the configuration). The code signature check below shows what was used. The app is NOT notarized.",
+            _ => $"Signing: electron-builder signed with the identity \"{identity}\" from the configuration. The app is NOT notarized; notarization is a separate step.",
+        };
+    }
+
     internal static string? LocateExecutable(string publishDir, string? assemblyName, TargetPlatform platform)
     {
         if (!Directory.Exists(publishDir)) return null;

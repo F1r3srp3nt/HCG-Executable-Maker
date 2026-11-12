@@ -2,6 +2,56 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — `feature/web-desktop-app`
+
+### Changed — Web app to desktop app ([docs/ELECTRON.md](docs/ELECTRON.md#browser-apps-create-desktop-application-vite--react))
+- **A recognised web app is now a selectable conversion candidate.** Browser apps, including nested ones such as
+  `web-hcg-store/`, are listed under *Project to build*, each with its category. The picker no longer says "No runnable
+  application project found", and outputs are recommended only when something can produce them.
+- **Classification (static):**
+  - browser app (Vite + React, npm);
+  - Electron app without packaging (packaging added, main process kept);
+  - existing Electron app (built as it is);
+  - needs a server (SSR frameworks, a runtime backend);
+  - not supported or ambiguous (other frameworks or package managers, monorepo roots, local or sibling dependencies,
+    no `vite build`).
+- **Create desktop application** panel:
+  - product name, application identifier and version;
+  - icon (auto-detected, validated);
+  - target platform and architecture (only what this computer packages);
+  - package formats (`.app`, ZIP, DMG), output folder;
+  - signing status and choice (ad-hoc, or a Developer ID identity from the keychain);
+  - notarization shown as a separate step that the build never runs;
+  - public `VITE_` settings.
+- **The created desktop project opens at the Build step** with those choices. After the trust confirmation, it builds
+  in separate stages: install → compile the web app → package → verify.
+- **Converting again updates the desktop project generated earlier** instead of adding another.
+  `hcg-desktop/conversion.json` records every generated file (SHA-256), the options, the source and the original
+  `package.json`. Regeneration replaces recorded files, removes stale ones and never overwrites a file edited afterwards.
+- **Generated main process:**
+  - CSP on every page;
+  - `will-redirect` guard; only https/mailto links leave the app, every other scheme is refused;
+  - permission checks denied; single instance;
+  - an error page if the start page cannot load; failed remote requests logged by host.
+- **The verify step after the web build** also checks every asset `index.html` references.
+- **Electron 45.3.0** (requires Node.js `>=22.12.0`, checked before generating) and electron-builder 26.18.0. The resolved
+  `vite`, `electron` and `electron-builder` engines are checked against the chosen Node.js after the lockfile is resolved.
+- **npm workspace members** get a lockfile seeded from the monorepo's pinned versions.
+
+### Fixed
+- **Build logs and messages are passed through `SecretRedactor`.** npm or electron-builder output that contains
+  credentials no longer reaches the log.
+- **Electron builds on macOS log their signing state**, for example *UNSIGNED for distribution and NOT notarized* for an
+  ad-hoc signature.
+- The build summary shows that an Electron app's icon comes from its electron-builder configuration.
+
+### Verified
+- Unit tests.
+- On Linux, through the real wizard: the fixture and the real HCG Store were converted, built and launched with no dev
+  server (deep links, reloads, lazy chunk, links, CSP, window security), and converting again updated the same
+  project.
+- macOS: CI job `web-desktop-macos`.
+
 ## [Unreleased] — `fix/account-connection`
 
 ### Fixed

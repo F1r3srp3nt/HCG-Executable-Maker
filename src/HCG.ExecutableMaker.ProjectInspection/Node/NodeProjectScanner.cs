@@ -9,6 +9,9 @@ namespace HCG.ExecutableMaker.ProjectInspection.Node;
 /// </summary>
 public static class NodeProjectScanner
 {
+    /// <summary>The record HCG writes into every desktop project it generates.</summary>
+    public const string HcgDesktopRecordPath = "hcg-desktop/conversion.json";
+
     /// <summary>Folders that hold build output or vendored copies, never a project to build.</summary>
     private static readonly HashSet<string> OutputFolders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -46,7 +49,86 @@ public static class NodeProjectScanner
         // Drop packages that live inside another project's electron-builder output folder (unpacked app copies).
         projects = projects.Where(p => !projects.Any(o => o != p && o.BuilderConfig is { } c &&
             p.Directory.StartsWith(Join(o.Directory, c.OutputDirectory) + "/", StringComparison.Ordinal))).ToList();
+        projects = projects.Select(p => WithWorkspace(index, p)).ToList();
+        var membersByRoot = projects.Where(p => p.WorkspaceRoot is not null).Select(p => p.WorkspaceRoot!).Distinct()
+            .ToDictionary(r => r, r => WorkspacePackageNames(index.FullPath(r.Length == 0 ? "." : r)), StringComparer.Ordinal);
+        projects = projects.Select(p => p with
+        {
+            DesktopEligibility = DesktopEligibilityRules.Classify(p,
+                p.WorkspaceRoot is null ? [] : membersByRoot[p.WorkspaceRoot].Where(n => n != p.Name).ToHashSet(StringComparer.Ordinal)),
+        }).ToList();
         return new NodeAnalysis { Projects = projects };
+    }
+
+    /// <summary>
+    /// Names of the packages a monorepo root declares as its workspaces (package.json "workspaces", or pnpm-workspace.yaml),
+    /// read from the file system: folders such as packages/ are not part of the source index.
+    /// </summary>
+    private static HashSet<string> WorkspacePackageNames(string rootDir)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var patterns = new List<string>();
+        try
+        {
+            var manifest = Path.Combine(rootDir, "package.json");
+            if (File.Exists(manifest))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(manifest), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+                if (doc.RootElement.TryGetProperty("workspaces", out var ws))
+                {
+                    var list = ws.ValueKind == JsonValueKind.Object && ws.TryGetProperty("packages", out var pk) ? pk : ws;
+                    if (list.ValueKind == JsonValueKind.Array)
+                        patterns.AddRange(list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!));
+                }
+            }
+            var pnpm = Path.Combine(rootDir, "pnpm-workspace.yaml");
+            if (File.Exists(pnpm))
+                patterns.AddRange(File.ReadLines(pnpm).Select(l => l.Trim()).Where(l => l.StartsWith("- ", StringComparison.Ordinal)).Select(l => l[2..].Trim().Trim('\'', '"')));
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return names; }
+        foreach (var pattern in patterns.Where(x => !x.StartsWith('!') && !x.Contains("..", StringComparison.Ordinal)).Take(100))
+        {
+            var parts = pattern.TrimEnd('/').Split('/');
+            var baseDir = Path.Combine([rootDir, .. parts.TakeWhile(x => !x.Contains('*'))]);
+            if (!Directory.Exists(baseDir)) continue;
+            var dirs = parts.Any(x => x.Contains('*'))
+                ? Directory.EnumerateDirectories(baseDir, "*", new EnumerationOptions { RecurseSubdirectories = pattern.Contains("**", StringComparison.Ordinal), MaxRecursionDepth = 3, IgnoreInaccessible = true })
+                : [baseDir];
+            foreach (var d in dirs.Where(d => !d.Contains($"{Path.DirectorySeparatorChar}node_modules", StringComparison.Ordinal)).Take(500))
+            {
+                var pj = Path.Combine(d, "package.json");
+                if (!File.Exists(pj)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(pj), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+                    if (doc.RootElement.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String) names.Add(n.GetString()!);
+                }
+                catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { }
+            }
+        }
+        return names;
+    }
+
+    private static readonly string[] LockFileNames = ["package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock"];
+
+    /// <summary>
+    /// A project without its own lockfile inside a monorepo: its dependencies are pinned by the nearest ancestor's
+    /// lockfile (npm/yarn/pnpm workspaces), which also decides the package manager.
+    /// </summary>
+    private static NodeProjectInfo WithWorkspace(SourceIndex index, NodeProjectInfo p)
+    {
+        if (p.LockFile is not null || p.Directory.Length == 0) return p;
+        var dir = p.Directory;
+        while (dir.Length > 0)
+        {
+            dir = dir.Contains('/') ? dir[..dir.LastIndexOf('/')] : "";
+            var root = index.FullPath(dir.Length == 0 ? "." : dir);
+            var lockName = LockFileNames.FirstOrDefault(l => File.Exists(Path.Combine(root, l)));
+            if (lockName is null) continue;
+            var (pm, _) = DetectPackageManager(f => File.Exists(Path.Combine(root, f)), p.PackageManagerField);
+            return p with { WorkspaceRoot = dir, WorkspaceLockFile = dir.Length == 0 ? lockName : dir + "/" + lockName, PackageManager = pm };
+        }
+        return p;
     }
 
     public static NodeProjectInfo? ScanOne(SourceIndex index, string manifestPath)
@@ -226,6 +308,10 @@ public static class NodeProjectScanner
                 PackagingScripts = packagingScripts,
                 MissingForDesktop = missing,
                 Notes = notes,
+                Dependencies = deps.ToDictionary(d => d.Key, d => d.Value.Version, StringComparer.Ordinal),
+                RuntimeDependencyNames = deps.Where(d => d.Value.Section == "dependencies").Select(d => d.Key).ToList(),
+                DeclaresWorkspaces = root.TryGetProperty("workspaces", out _),
+                HcgDesktopRecord = Exists(HcgDesktopRecordPath) ? Join(dir, HcgDesktopRecordPath) : null,
             };
         }
     }

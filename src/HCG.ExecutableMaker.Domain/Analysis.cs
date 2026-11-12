@@ -50,6 +50,8 @@ public sealed record DetectedProject
     public required string ApplicationType { get; init; }
     public bool IsAvalonia { get; init; }
     public bool IsRunnableApplication { get; init; }
+    /// <summary>Not an app yet, but "Create desktop application" can generate one from it (a Vite + React browser app).</summary>
+    public bool IsDesktopConversionCandidate { get; init; }
     /// <summary>Platforms this project can produce output for, per its target frameworks and UI stack.</summary>
     public IReadOnlyList<TargetPlatform> CompatiblePlatforms { get; init; } = [];
     public IReadOnlyList<AnalysisDiagnostic> Diagnostics { get; init; } = [];

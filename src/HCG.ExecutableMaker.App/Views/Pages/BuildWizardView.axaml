@@ -338,29 +338,17 @@
                       <TextBlock FontSize="12.5" Text="{Binding ElectronWorkflow}" TextWrapping="Wrap" />
                     </Border>
                   </StackPanel>
-                  <!-- Browser app (Vite + React): prepare a separate desktop workspace, after showing exactly what changes -->
+                  <!-- Browser app (Vite + React): Create desktop application — a separate desktop project, after showing exactly what changes -->
                   <StackPanel Spacing="12" IsVisible="{Binding ShowDesktopConversion}">
                     <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Classes="h3" Text="Prepare desktop app" VerticalAlignment="Center" />
+                      <TextBlock Classes="h3" Text="Create desktop application" VerticalAlignment="Center" />
                       <c:StatusChip Grid.Column="1" Status="{Binding ConversionTag}" />
                     </Grid>
-                    <StackPanel Spacing="6" IsVisible="{Binding HasSeveralWebProjects}">
-                      <TextBlock Classes="formlabel" Text="BROWSER APP TO PREPARE" Margin="0" />
-                      <ComboBox ItemsSource="{Binding ConvertibleWebProjects}" SelectedItem="{Binding SelectedWebProject}" PlaceholderText="Choose a browser app…" HorizontalAlignment="Stretch">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate x:DataType="vm:WebProjectChoice">
-                            <StackPanel Spacing="1">
-                              <TextBlock Text="{Binding Name}" />
-                              <TextBlock Classes="muted mono" Text="{Binding Path}" />
-                            </StackPanel>
-                          </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </StackPanel>
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionCategory}" />
                     <TextBlock Classes="body secondary" Text="{Binding ConversionSummary}" TextWrapping="Wrap" />
                     <Border Classes="callout error" IsVisible="{Binding HasConversionBlockers}">
                       <StackPanel Spacing="6">
-                        <TextBlock Text="Project configuration — not supported as it is" FontWeight="SemiBold" FontSize="12.5" />
+                        <TextBlock Text="Project configuration — not converted as it is" FontWeight="SemiBold" FontSize="12.5" />
                         <ItemsControl ItemsSource="{Binding ConversionBlockers}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:ConversionFindingItem">
@@ -388,9 +376,74 @@
                     </Border>
                     <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionToolchainText}" TextWrapping="Wrap"
                                IsVisible="{Binding ConversionToolchainText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <StackPanel Spacing="12" IsVisible="{Binding CanEditConversion}">
+                      <Grid ColumnDefinitions="*,12,*,12,Auto">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="PRODUCT NAME" Margin="0" />
+                          <TextBox Text="{Binding ConversionAppName}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="APPLICATION IDENTIFIER" Margin="0" />
+                          <TextBox Text="{Binding ConversionAppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="VERSION" Margin="0" />
+                          <TextBlock Text="{Binding ConversionVersion}" VerticalAlignment="Center" Margin="0,6,0,0" ToolTip.Tip="From package.json" />
+                        </StackPanel>
+                      </Grid>
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="ICON" Margin="0" />
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                          <StackPanel Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding ConversionIconName}" FontWeight="Medium" />
+                            <TextBlock Classes="muted" FontSize="11.5" Text="{Binding ConversionIconStatus}" TextWrapping="Wrap" IsVisible="{Binding !ConversionIconInvalid}" />
+                            <TextBlock Classes="error" FontSize="11.5" Text="{Binding ConversionIconStatus}" TextWrapping="Wrap" IsVisible="{Binding ConversionIconInvalid}" />
+                          </StackPanel>
+                          <Button Grid.Column="1" Classes="small" Content="Choose…" Command="{Binding BrowseConversionIconCommand}" Margin="8,0,0,0" />
+                          <Button Grid.Column="2" Classes="small ghost" Content="Default" Command="{Binding ClearConversionIconCommand}" IsVisible="{Binding HasConversionIcon}" Margin="6,0,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <Grid ColumnDefinitions="*,12,*">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="TARGET PLATFORM AND ARCHITECTURE" Margin="0" />
+                          <ComboBox ItemsSource="{Binding ConversionTargets}" SelectedItem="{Binding SelectedConversionTarget}" HorizontalAlignment="Stretch" PlaceholderText="No desktop target can be built on this computer" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="PACKAGE FORMATS" Margin="0" />
+                          <ItemsControl ItemsSource="{Binding ConversionFormats}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:ConversionFormatItem">
+                                <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsEnabled}" Content="{Binding Label}" />
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </Grid>
+                      <TextBlock Classes="muted" FontSize="11.5" TextWrapping="Wrap"
+                                 Text="Only targets this computer can package are offered: macOS apps are built on a Mac, Linux app folders on Linux. Windows packaging of Electron apps is not implemented in this version. This is a desktop app; it is never labelled as an iOS or Android app." />
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="OUTPUT FOLDER" Margin="0" />
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox Text="{Binding ConversionOutputDirectory}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                          <Button Grid.Column="1" Classes="small" Content="Browse…" Command="{Binding BrowseConversionOutputCommand}" Margin="8,0,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <Border Classes="inset" Padding="14,12">
+                        <StackPanel Spacing="8">
+                          <TextBlock Text="Signing and notarization (separate operations)" FontWeight="SemiBold" FontSize="12.5" />
+                          <ComboBox ItemsSource="{Binding ConversionSigningChoices}" SelectedItem="{Binding SelectedConversionSigning}" HorizontalAlignment="Stretch" IsVisible="{Binding IsMacHost}" />
+                          <TextBlock FontSize="12" TextWrapping="Wrap"><Run Text="Signing: " FontWeight="SemiBold" /><Run Text="{Binding ConversionSigningStatus}" /></TextBlock>
+                          <TextBlock FontSize="12" TextWrapping="Wrap"><Run Text="Notarization: " FontWeight="SemiBold" /><Run Text="{Binding ConversionNotarizationStatus}" /></TextBlock>
+                        </StackPanel>
+                      </Border>
+                      <StackPanel Spacing="4">
+                        <CheckBox IsChecked="{Binding ConversionUsePublicEnvironment}" Content="Use the web build's public VITE_ settings from the project's .env files" />
+                        <TextBlock Classes="muted" FontSize="11.5" Text="{Binding ConversionEnvironmentText}" TextWrapping="Wrap" Margin="28,0,0,0" />
+                      </StackPanel>
+                    </StackPanel>
                     <Border Classes="callout warning" IsVisible="{Binding HasConversionWarnings}">
                       <StackPanel Spacing="6">
-                        <TextBlock Text="Check before relying on the desktop app (backend, sign-in and network use)" FontWeight="SemiBold" FontSize="12.5" />
+                        <TextBlock Text="Check before relying on the desktop app (backend, sign-in, network)" FontWeight="SemiBold" FontSize="12.5" />
                         <ItemsControl ItemsSource="{Binding ConversionWarnings}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:ConversionFindingItem">
@@ -403,25 +456,17 @@
                         </ItemsControl>
                       </StackPanel>
                     </Border>
-                    <ItemsControl ItemsSource="{Binding ConversionInfos}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ConversionFindingItem">
-                          <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" />
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <Expander Header="How HCG handles loading, routing, settings and security" HorizontalAlignment="Stretch" IsVisible="{Binding CanEditConversion}">
+                      <ItemsControl ItemsSource="{Binding ConversionInfos}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:ConversionFindingItem">
+                            <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" Margin="0,2" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Expander>
                     <StackPanel Spacing="10" IsVisible="{Binding ConversionPlan.CanApply, FallbackValue=False}">
-                      <Grid ColumnDefinitions="*,12,*">
-                        <StackPanel Spacing="4">
-                          <TextBlock Classes="formlabel" Text="APP NAME" Margin="0" />
-                          <TextBox Text="{Binding ConversionAppName}" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2" Spacing="4">
-                          <TextBlock Classes="formlabel" Text="APP ID" Margin="0" />
-                          <TextBox Text="{Binding ConversionAppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
-                        </StackPanel>
-                      </Grid>
-                      <TextBlock Classes="formlabel" Text="PROPOSED CHANGES (IN THE NEW DESKTOP WORKSPACE ONLY)" Margin="0" />
+                      <TextBlock Classes="formlabel" Text="FILES HCG WILL ADD OR CHANGE (IN THE NEW DESKTOP PROJECT ONLY)" Margin="0" />
                       <ItemsControl ItemsSource="{Binding ConversionChanges}">
                         <ItemsControl.ItemTemplate>
                           <DataTemplate x:DataType="vm:ConversionChangeItem">
@@ -440,19 +485,25 @@
                         </ItemsControl.ItemTemplate>
                       </ItemsControl>
                       <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionDestinationText}" TextWrapping="Wrap" />
-                      <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button Classes="ghost" Content="Update preview" Command="{Binding PreviewDesktopConversionCommand}" IsVisible="{Binding ConversionPreviewStale}" />
-                        <Button Classes="primary" Content="Create desktop workspace" Command="{Binding CreateDesktopWorkspaceCommand}" />
-                        <Button Classes="ghost" Content="Cancel" Command="{Binding CancelDesktopConversionCommand}" IsVisible="{Binding IsConverting}" />
-                        <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsConverting}" />
-                      </StackPanel>
-                      <TextBlock Classes="muted" FontSize="12" Text="The name or app id changed: update the preview before creating the workspace." TextWrapping="Wrap" IsVisible="{Binding ConversionPreviewStale}" />
-                      <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionStatus}" TextWrapping="Wrap" IsVisible="{Binding IsConverting}" />
                     </StackPanel>
+                    <Border Classes="callout" IsVisible="{Binding ConversionExistingProjectText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBlock FontSize="12.5" Text="{Binding ConversionExistingProjectText}" TextWrapping="Wrap" />
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding CanEditConversion}">
+                      <Button Classes="primary" Content="Create desktop application" Command="{Binding CreateDesktopWorkspaceCommand}" />
+                      <Button Classes="ghost" Content="Update preview" Command="{Binding PreviewDesktopConversionCommand}" IsVisible="{Binding ConversionPreviewStale}" />
+                      <Button Classes="ghost" Content="Cancel" Command="{Binding CancelDesktopConversionCommand}" IsVisible="{Binding IsConverting}" />
+                      <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsConverting}" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding ConversionPreviewStale}"
+                               Text="Options changed since the preview. Create desktop application checks them again before writing anything; Update preview shows the result first." />
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionStatus}" TextWrapping="Wrap" IsVisible="{Binding IsConverting}" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding CanEditConversion}"
+                               Text="Next: the desktop project opens at the Build step. After you confirm that you trust the project, HCG installs its dependencies (npm ci), compiles the web app, packages it and verifies the result — four separate stages, cancellable at any time." />
                     <Border Classes="callout error" IsVisible="{Binding ConversionError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                       <SelectableTextBlock FontSize="12.5" Text="{Binding ConversionError}" TextWrapping="Wrap" />
                     </Border>
-                    <Expander Header="Preparation output" IsVisible="{Binding HasConversionLog}" HorizontalAlignment="Stretch">
+                    <Expander Header="Generation output" IsVisible="{Binding HasConversionLog}" HorizontalAlignment="Stretch">
                       <ScrollViewer MaxHeight="180">
                         <ItemsControl ItemsSource="{Binding ConversionLog}">
                           <ItemsControl.ItemTemplate>
@@ -1086,6 +1137,9 @@
                   <PathIcon Data="{StaticResource Icon.Warning}" Foreground="{DynamicResource Hcg.Brush.Warning}" Width="18" Height="18" />
                   <TextBlock Classes="h2" Text="{Binding TrustTitle}" />
                 </StackPanel>
+                <Border Classes="callout success" IsVisible="{Binding DesktopWorkspaceNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                  <SelectableTextBlock FontSize="12.5" Text="{Binding DesktopWorkspaceNotice}" TextWrapping="Wrap" />
+                </Border>
                 <TextBlock Classes="body" Text="{Binding TrustExplanation}" />
                 <TextBlock Classes="body secondary" Text="{Binding SecretsStatement}" />
                 <Border Classes="chip warning">

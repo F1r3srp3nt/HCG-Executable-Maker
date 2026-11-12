@@ -70,6 +70,49 @@ public sealed class ProjectService(
     }
 
     /// <summary>
+    /// Replaces the HCG-owned source of an existing project with a freshly generated tree (a desktop project generated
+    /// again from its web app), keeping the project record and its build history, then inspects it again. The swap is
+    /// done by renaming folders inside the workspace, so an interrupted replace leaves the previous source in place.
+    /// </summary>
+    public async Task<ProjectAnalysis> ReplaceSourceAsync(ProjectRecord project, string newSource, CancellationToken cancellationToken)
+    {
+        var workspace = Path.GetFullPath(project.WorkspacePath);
+        if (!PathGuard.IsWithin(paths.WorkspacesDirectory, workspace))
+            throw new InvalidOperationException($"Refusing to replace '{workspace}': it is not an HCG workspace.");
+        newSource = Path.GetFullPath(newSource);
+        if (PathGuard.IsWithin(workspace, newSource)) throw new InvalidOperationException("The new source must not be inside the workspace it replaces.");
+        var current = Path.GetFullPath(project.SourceDirectory);
+        var next = Path.Combine(workspace, "source.next");
+        var old = Path.Combine(workspace, "source.old");
+        foreach (var d in new[] { next, old }) if (Directory.Exists(d)) Directory.Delete(d, recursive: true);
+        CopyTree(newSource, next, cancellationToken);
+        Directory.Move(current, old);
+        try { Directory.Move(next, current); }
+        catch
+        {
+            Directory.Move(old, current);
+            throw;
+        }
+        try { Directory.Delete(old, recursive: true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { logger.LogWarning(ex, "Could not remove the previous source {Old}", old); }
+        logger.LogInformation("Replaced the source of project {ProjectId} from {Source}", project.Id, newSource);
+        return await InspectAsync(project, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void CopyTree(string from, string to, CancellationToken ct)
+    {
+        Directory.CreateDirectory(to);
+        foreach (var entry in new DirectoryInfo(from).EnumerateFileSystemInfos())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (entry.LinkTarget is not null) continue;
+            var target = Path.Combine(to, entry.Name);
+            if (entry is DirectoryInfo d) CopyTree(d.FullName, target, ct);
+            else File.Copy(entry.FullName, target);
+        }
+    }
+
+    /// <summary>
     /// Deletes the HCG-owned workspace and the project record (with its build history). The user's original
     /// source (ZIP or directory) is never touched; deletion is refused if the workspace is not inside HCG's
     /// workspace directory.
