@@ -45,8 +45,10 @@ public sealed class BuildService(
     PackagingRegistry packagers,
     IAppPaths paths,
     TimeProvider time,
-    ILogger<BuildService>? logger = null)
+    ILogger<BuildService>? logger = null,
+    IExecutableLocator? executables = null)
 {
+    private readonly IExecutableLocator _executables = executables ?? new ExecutableLocator();
     public const string OutputMarkerFile = ".hcg-build.json";
     private readonly ILogger _logger = logger ?? NullLogger<BuildService>.Instance;
 
@@ -188,6 +190,7 @@ public sealed class BuildService(
                 if (report.Find(ToolchainIds.MacOSVersion) is { IsAvailable: true, Version: { } macVersion }) build.ToolchainVersions["macos"] = macVersion;
                 if (report.Find(ToolchainIds.XcodeCommandLineTools) is { IsAvailable: true, ExecutablePath: { } devDir }) build.ToolchainVersions["developer-dir"] = devDir;
                 SwiftBuildPlanner.Validate(settings, host.Platform);
+                SwiftContractPlanner.Validate(settings);
             }
             else
             {
@@ -227,6 +230,42 @@ public sealed class BuildService(
             var swiftScratch = Path.Combine(PathGuard.GetRealPath(buildDir), "swiftpm");
             // electron-builder writes into HCG's per-build folder (never into the imported source's release/dist folder).
             var electronOut = Path.Combine(PathGuard.GetRealPath(buildDir), "electron-out");
+            // A Swift packaging contract (AppPackaging.json): re-read it (it must still be the confirmed file), locate
+            // the tools its prebuild steps need, and run those steps before swift build.
+            SwiftPackagingContract? contract = null;
+            var helpersDir = Path.Combine(PathGuard.GetRealPath(buildDir), "helpers");
+            var prebuild = new List<BuildStep>();
+            if (isSwift && settings.Swift!.PackagingContract is not null)
+            {
+                string? contractError;
+                (contract, contractError) = SwiftContractPlanner.Reload(sourceDir, settings.Swift);
+                if (contract is null)
+                {
+                    Fail(BuildStatus.Failed, contractError!);
+                    return build;
+                }
+                Log(BuildLogKind.Info, $"Packaging contract {contract.Path} (SHA-256 {contract.Sha256[..12]}…, unchanged since it was confirmed): " +
+                    $"{contract.Prebuild.Count} prebuild step(s), {contract.Helpers.Count} helper(s), {contract.Resources.Count} resource(s)");
+                var (tools, toolError) = await SwiftContractPlanner.ResolveToolsAsync(contract, _executables, async (spec, ct) =>
+                {
+                    var output = new StringBuilder();
+                    var r = await worker.RunAsync(spec, (_, line) => { lock (output) output.AppendLine(line); }, ct).ConfigureAwait(false);
+                    return (r.ExitCode, output.ToString());
+                }, scrub.Environment, overall.Token).ConfigureAwait(false);
+                if (toolError is not null)
+                {
+                    Fail(BuildStatus.Failed, toolError);
+                    return build;
+                }
+                foreach (var tool in tools)
+                {
+                    build.ToolchainVersions[tool.Name] = $"{tool.Version ?? "version not checked"} ({tool.Path})";
+                    Log(BuildLogKind.Info, $"{tool.Name}: {tool.Version ?? "found"} ({tool.Path})");
+                }
+                if (Directory.Exists(helpersDir)) Directory.Delete(helpersDir, recursive: true);
+                Directory.CreateDirectory(helpersDir);
+                prebuild.AddRange(SwiftContractPlanner.PlanPrebuild(contract, sourceDir, helpersDir, tools, scrub.Environment, _executables));
+            }
             var steps = isElectron
                 ? ElectronBuildPlanner.Plan(new ElectronBuildPlanner.PlanInput(settings, sourceDir, node!, electronOut, ElectronBuildPlanner.Environment(scrub.Environment, node!)))
                 : isSwift
@@ -234,6 +273,7 @@ public sealed class BuildService(
                 : DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
                     settings, sourceDir, sdk!.ExecutablePath!, publishDir, host.Platform,
                     icons?.IcoPath, scrub.Environment));
+            if (prebuild.Count > 0) steps = [.. prebuild, .. steps];
 
             // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
             IBuildOutputParser parser = isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
@@ -330,6 +370,9 @@ public sealed class BuildService(
                 var (stagedExe, bundles) = SwiftBuildPlanner.Stage(binPath, settings.Swift!.Product, publishDir);
                 exeName = stagedExe;
                 if (bundles.Count > 0) Log(BuildLogKind.Info, $"SwiftPM resource bundles: {string.Join(", ", bundles)}");
+                if (contract is not null)
+                    foreach (var note in SwiftContractPlanner.Stage(contract, sourceDir, helpersDir, publishDir))
+                        Log(BuildLogKind.Info, $"Packaging contract: {note}");
                 Log(BuildLogKind.Info, "Tests were not run: HCG builds the selected product only (test targets are neither compiled nor run).");
                 try { Directory.Delete(swiftScratch, recursive: true); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove SwiftPM scratch space {swiftScratch}: {ex.Message}"); }

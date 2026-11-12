@@ -58,6 +58,28 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
         File.Copy(sourceExe, exe);
         FileOps.MarkExecutable(exe);
 
+        // Packaging contract (AppPackaging.json): helpers, resources and the icon were staged at their bundle paths.
+        var contract = swift.PackagingContract;
+        var staged = Path.Combine(request.PublishDirectory, SwiftContractLayout.StagingFolder);
+        var helperPaths = new List<string>();
+        if (contract is not null)
+        {
+            if (!Directory.Exists(staged))
+                throw new InvalidOperationException($"The files described by {contract.Path} were not staged by the build, so the app would be incomplete.");
+            if (Directory.Exists(Path.Combine(staged, "Contents")))
+                FileOps.CopyDirectory(Path.Combine(staged, "Contents"), contents, cancellationToken);
+            foreach (var h in contract.Helpers)
+            {
+                var path = Path.Combine(bundle, h.Destination.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(path)) continue; // an optional helper that was not produced (the build logged it)
+                FileOps.MarkExecutable(path);
+                helperPaths.Add(path);
+                log.Info($"Helper {h.Name} → {bundleName}/{h.Destination}");
+            }
+            foreach (var r in contract.Resources.Where(r => File.Exists(Path.Combine(bundle, r.Destination.Replace('/', Path.DirectorySeparatorChar)))))
+                log.Info($"Resource {r.Source} → {bundleName}/{r.Destination}");
+        }
+
         // SwiftPM resource bundles are placed after signing (below): SwiftPM's generated Bundle.module accessor looks for
         // them at Bundle.main.bundleURL/<name>.bundle — the .app's root — and nowhere inside Contents.
         var resourceBundles = Directory.EnumerateDirectories(request.PublishDirectory, "*.bundle").Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal).ToList();
@@ -66,7 +88,13 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
         if (request.Icons?.IcnsPath is { } icns)
         {
             iconFile = "AppIcon.icns";
-            File.Copy(icns, Path.Combine(resources, iconFile));
+            if (contract?.Bundle.Icon is not null) log.Info($"The icon chosen in HCG replaces {contract.Bundle.Icon} from {contract.Path}.");
+            File.Copy(icns, Path.Combine(resources, iconFile), overwrite: true);
+        }
+        else if (contract?.Bundle.Icon is { } contractIcon && File.Exists(Path.Combine(resources, "AppIcon.icns")))
+        {
+            iconFile = "AppIcon.icns";
+            log.Info($"Icon {contractIcon} from {contract.Path}");
         }
         else
         {
@@ -100,7 +128,16 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
         if (!string.IsNullOrWhiteSpace(identity.Publisher)) entries.Add(("NSHumanReadableCopyright", $"© {identity.Publisher}"));
         foreach (var (key, text) in swift.UsageDescriptions.OrderBy(k => k.Key, StringComparer.Ordinal))
             entries.Add((key, text));
-        File.WriteAllText(Path.Combine(contents, "Info.plist"), InfoPlist.Create(entries));
+        var template = Path.Combine(staged, SwiftContractLayout.InfoPlistTemplateFile);
+        if (contract is not null && File.Exists(template))
+        {
+            log.Info($"Info.plist from the template {contract.Bundle.InfoPlist} ({contract.Path}); identity, versions and the keys set in HCG replace the template's values.");
+            File.WriteAllText(Path.Combine(contents, "Info.plist"), InfoPlist.Merge(template, entries));
+        }
+        else
+        {
+            File.WriteAllText(Path.Combine(contents, "Info.plist"), InfoPlist.Create(entries));
+        }
         File.WriteAllText(Path.Combine(contents, "PkgInfo"), "APPL????");
 
         if (distribution.SigningMode == MacSigningMode.DeveloperId)
@@ -109,8 +146,14 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
             var signer = new MacCodeSigner(runner, codesign);
             log.Info($"Signing for direct distribution with Developer ID ({distribution.DeveloperIdApplicationSha1}), hardened runtime, secure timestamp, " +
                      $"entitlements: {(distribution.DeveloperIdEntitlements.Count == 0 ? "none" : string.Join(", ", distribution.DeveloperIdEntitlements))}");
+            foreach (var helper in helperPaths)
+            {
+                log.Info($"Signing helper {Path.GetFileName(helper)} first (Developer ID, hardened runtime, secure timestamp, no entitlements)");
+                await signer.SignDeveloperIdAsync(helper, distribution.DeveloperIdApplicationSha1!, [], log, cancellationToken).ConfigureAwait(false);
+            }
             await signer.SignDeveloperIdAsync(bundle, distribution.DeveloperIdApplicationSha1!, distribution.DeveloperIdEntitlements, log, cancellationToken).ConfigureAwait(false);
             var devChecks = new List<VerificationCheck>(SwiftBundleVerifier.VerifyStructure(bundle, settings, []));
+            devChecks.AddRange(await SwiftBundleVerifier.VerifyHelpersAsync(runner, codesign, bundle, settings, cancellationToken).ConfigureAwait(false));
             devChecks.AddRange(await signer.VerifyDeveloperIdAsync(bundle,
                 new SigningIdentity(distribution.DeveloperIdApplicationSha1!, "", AppleCertificateKind.DeveloperIdApplication, null),
                 distribution.DeveloperIdEntitlements, cancellationToken).ConfigureAwait(false));
@@ -118,6 +161,18 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
             devChecks.Add(new VerificationCheck("Notarization", VerificationStatus.NotVerifiable, "Not notarized yet. Notarization is a separate, explicit step (Build results › Notarize)."));
             devChecks.Add(Checks.LaunchNotPerformed());
             return [new PackagedOutput(Format, ArtifactKind.Directory, bundle, devChecks)];
+        }
+
+        // Helpers are signed before the app, so the app's seal covers their signatures.
+        foreach (var helper in helperPaths)
+        {
+            log.Info($"Signing helper ad hoc: codesign --force --sign - {Path.GetRelativePath(request.OutputRoot, helper)}");
+            var signHelper = await runner.RunAsync(new ProcessSpec
+            {
+                Executable = codesign, Arguments = ["--force", "--sign", "-", "--timestamp=none", helper], Timeout = TimeSpan.FromMinutes(5),
+            }, (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!signHelper.Succeeded) throw new InvalidOperationException($"codesign could not sign the helper {Path.GetFileName(helper)} (exit code {signHelper.ExitCode}).");
         }
 
         // Ad-hoc signature over the whole bundle (seals Info.plist and resources). Not a Developer ID; not notarized.
@@ -166,6 +221,7 @@ public static class SwiftBundleVerifier
         IReadOnlyList<string> expectedResourceBundles, CancellationToken cancellationToken)
     {
         var checks = new List<VerificationCheck>(VerifyStructure(bundle, settings, expectedResourceBundles));
+        checks.AddRange(await VerifyHelpersAsync(runner, codesign, bundle, settings, cancellationToken).ConfigureAwait(false));
         // With root-level resource bundles the whole-bundle check necessarily reports "unsealed contents present in the
         // bundle root"; the signature itself is verified on a copy without them so a real signing problem still fails.
         var target = bundle;
@@ -273,8 +329,104 @@ public static class SwiftBundleVerifier
                     $"{string.Join(", ", expectedResourceBundles)} at the app root, where SwiftPM's generated Bundle.module accessor looks (Bundle.main.bundleURL).")
                 : new VerificationCheck("Resource bundles", VerificationStatus.Failed, "Missing or empty: " + string.Join(", ", absent)));
         }
+        if (swift.PackagingContract is { } contract)
+            checks.AddRange(VerifyContractStructure(bundle, contract, settings.Architecture));
         return checks;
     }
+
+    /// <summary>The contract's helpers (present, executable, promised slices) and resources, checked without tools.</summary>
+    public static IReadOnlyList<VerificationCheck> VerifyContractStructure(string bundle, SwiftPackagingContract contract, TargetArchitecture arch)
+    {
+        var checks = new List<VerificationCheck>();
+        foreach (var h in contract.Helpers)
+        {
+            var path = Path.Combine(bundle, h.Destination.Replace('/', Path.DirectorySeparatorChar));
+            var name = $"Helper {h.Name}";
+            if (!File.Exists(path))
+            {
+                checks.Add(h.Required
+                    ? new VerificationCheck(name, VerificationStatus.Failed, $"{h.Destination} is missing ({contract.Path} requires it): the app cannot start it.")
+                    : new VerificationCheck(name, VerificationStatus.PassedWithWarnings, $"Optional helper {h.Destination} was not produced."));
+                continue;
+            }
+            var problems = new List<string>();
+            if (!OperatingSystem.IsWindows() && (File.GetUnixFileMode(path) & UnixFileMode.UserExecute) == 0) problems.Add("it is not executable");
+            var slices = MachO.ReadSlices(path).Select(sl => sl.Architecture).ToList();
+            if (slices.Count == 0) problems.Add("it is not a Mach-O executable");
+            var promised = h.Architectures.Count > 0 ? h.Architectures : MachO.ExpectedSlices(arch);
+            var missing = slices.Count == 0 ? [] : promised.Except(slices).ToList();
+            if (missing.Count > 0) problems.Add($"it has no {string.Join(", ", missing)} slice (contains {string.Join(", ", slices)})");
+            checks.Add(problems.Count == 0
+                ? new VerificationCheck(name, VerificationStatus.Passed, $"{h.Destination}, executable, {string.Join(" + ", slices)}")
+                : new VerificationCheck(name, VerificationStatus.Failed, $"{h.Destination}: {string.Join("; ", problems)}."));
+        }
+        var absentResources = contract.Resources.Where(r => r.Required && !File.Exists(Path.Combine(bundle, r.Destination.Replace('/', Path.DirectorySeparatorChar)))).Select(r => r.Destination).ToList();
+        if (contract.Resources.Count > 0)
+            checks.Add(absentResources.Count == 0
+                ? new VerificationCheck("Contract resources", VerificationStatus.Passed, string.Join(", ", contract.Resources.Select(r => r.Destination)))
+                : new VerificationCheck("Contract resources", VerificationStatus.Failed, "Missing: " + string.Join(", ", absentResources)));
+        if (contract.Helpers.Count > 0)
+        {
+            var macOs = Path.Combine(bundle, "Contents", "MacOS");
+            var strays = Directory.Exists(macOs) ? Directory.EnumerateFileSystemEntries(macOs).Select(Path.GetFileName).Where(n => contract.Helpers.Any(h => h.Name == n)).ToList() : [];
+            if (strays.Count > 0)
+                checks.Add(new VerificationCheck("Helper location", VerificationStatus.Failed, $"{string.Join(", ", strays)} must be in Contents/Helpers, not Contents/MacOS."));
+        }
+        return checks;
+    }
+
+    /// <summary>
+    /// Runs on a Mac after signing: each helper's own signature verifies, and helpers with the "version" check run
+    /// <c>&lt;helper&gt; version</c> and report the app's version.
+    /// </summary>
+    public static async Task<IReadOnlyList<VerificationCheck>> VerifyHelpersAsync(IProcessRunner runner, string codesign, string bundle, BuildSettings settings, CancellationToken ct)
+    {
+        var checks = new List<VerificationCheck>();
+        if (settings.Swift?.PackagingContract is not { } contract) return checks;
+        string? appVersion = null;
+        try { appVersion = InfoPlist.Read(Path.Combine(bundle, "Contents", "Info.plist")).GetValueOrDefault("CFBundleShortVersionString"); }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or System.Xml.XmlException) { appVersion = null; }
+        foreach (var h in contract.Helpers)
+        {
+            var path = Path.Combine(bundle, h.Destination.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path)) continue;
+            var (sig, sigOut, sigErr) = await runner.CaptureAsync(new ProcessSpec { Executable = codesign, Arguments = ["--verify", "--strict", "--verbose=2", path], Timeout = TimeSpan.FromMinutes(2) }, ct).ConfigureAwait(false);
+            checks.Add(sig.Succeeded
+                ? new VerificationCheck($"Helper {h.Name} signature", VerificationStatus.Passed, "codesign --verify --strict passed for the helper.")
+                : new VerificationCheck($"Helper {h.Name} signature", VerificationStatus.Failed, $"codesign --verify --strict failed for {h.Destination} (exit code {sig.ExitCode}): {LastLine(sigErr + sigOut)}"));
+            if (!h.Verify.Contains("version")) continue;
+            var (run, stdout, stderr) = await runner.CaptureAsync(new ProcessSpec
+            {
+                Executable = path, Arguments = ["version"], Timeout = TimeSpan.FromSeconds(30),
+                Environment = new Dictionary<string, string> { ["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin", ["HOME"] = Path.GetTempPath() },
+            }, ct).ConfigureAwait(false);
+            var first = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "";
+            var words = first.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var name = $"Helper {h.Name} version";
+            if (!run.Succeeded)
+                checks.Add(new VerificationCheck(name, VerificationStatus.Failed,
+                    $"{h.Destination} version did not run on this Mac (exit code {run.ExitCode}{(run.TimedOut ? ", timed out" : "")}): {LastLine(stderr + stdout)}"));
+            else if (words.Length < 2 || words[0] != h.Name)
+                checks.Add(new VerificationCheck(name, VerificationStatus.Failed, $"{h.Destination} version printed “{first}”, expected “{h.Name} <version> …”."));
+            else if (appVersion is not null && words[1] != appVersion)
+                checks.Add(new VerificationCheck(name, VerificationStatus.Failed,
+                    $"{h.Name} reports version {words[1]}, but the app's version (CFBundleShortVersionString) is {appVersion}. Set the app version to {words[1]} in Configure, or rebuild the helper."));
+            else
+                checks.Add(new VerificationCheck(name, VerificationStatus.Passed, first));
+        }
+        return checks;
+    }
+
+    private static string LastLine(string text) =>
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "no output";
+}
+
+/// <summary>Where the build stages a packaging contract's files for <see cref="SwiftAppBundlePackager"/>.</summary>
+public static class SwiftContractLayout
+{
+    /// <summary>Inside the publish folder; mirrors the bundle's Contents (Contents/Helpers/…, Contents/Resources/…).</summary>
+    public const string StagingFolder = ".hcg-contract";
+    public const string InfoPlistTemplateFile = "Info.plist.template";
 }
 
 /// <summary>

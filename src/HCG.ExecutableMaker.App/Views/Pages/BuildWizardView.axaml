@@ -759,6 +759,47 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
+              <Border Classes="card" IsVisible="{Binding HasSwiftContract}">
+                <StackPanel Spacing="10">
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h2" Text="Packaging contract" />
+                    <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding SwiftContractSummary}" />
+                  </StackPanel>
+                  <Border Classes="callout error" Padding="10" IsVisible="{Binding SwiftContractError, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="{Binding SwiftContractError}" />
+                  </Border>
+                  <StackPanel Spacing="6" IsVisible="{Binding HasSwiftContractCommands}">
+                    <TextBlock Classes="formlabel" Text="COMMANDS RUN BEFORE SWIFT BUILD" Margin="0" />
+                    <ItemsControl ItemsSource="{Binding SwiftContractCommands}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SwiftContractLine">
+                          <StackPanel Spacing="2" Margin="0,0,0,8">
+                            <TextBlock Text="{Binding Description}" FontWeight="Medium" FontSize="12.5" TextWrapping="Wrap" />
+                            <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding Command}" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted" FontSize="11" Text="{Binding Detail}" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                  <StackPanel Spacing="4" IsVisible="{Binding HasSwiftContractContents}">
+                    <TextBlock Classes="formlabel" Text="ADDED TO THE APP" Margin="0" />
+                    <ItemsControl ItemsSource="{Binding SwiftContractContents}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                  <CheckBox IsChecked="{Binding SwiftContractConfirmed}" IsVisible="{Binding HasSwiftContractCommands}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="Run these commands while building" FontWeight="Medium" />
+                      <TextBlock Classes="muted" TextWrapping="Wrap" Text="They come from the project and run on this computer with your account's permissions, like the build itself (not sandboxed). HCG runs them exactly as shown, without a shell, and refuses to build if the file changes after you confirm." />
+                    </StackPanel>
+                  </CheckBox>
+                </StackPanel>
+              </Border>
               <Border Classes="card">
                 <StackPanel Spacing="10">
                   <TextBlock Classes="h2" Text="Output" />

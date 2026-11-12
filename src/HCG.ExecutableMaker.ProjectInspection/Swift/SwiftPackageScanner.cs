@@ -36,8 +36,11 @@ public static partial class SwiftPackageScanner
         var text = Read(index, manifestPath, MaxManifestBytes);
         var code = StripComments(text);
         var executableTargets = ExecutableTargetRegex().Matches(code).Select(m => m.Groups["name"].Value).Distinct().ToList();
+        var (contract, contractError) = SwiftPackagingContractReader.Read(index.Root, dir);
         return new SwiftPackageInfo
         {
+            PackagingContract = contract,
+            PackagingContractError = contractError,
             Directory = dir,
             ManifestPath = manifestPath,
             ToolsVersion = ParseToolsVersion(text),
