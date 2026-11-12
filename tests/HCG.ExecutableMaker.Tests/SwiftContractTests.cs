@@ -385,7 +385,10 @@ public class SwiftContractTests(ITestOutputHelper output) : IDisposable
         // The same build with a different app version fails loudly at the version check.
         var mismatch = await build.RunAsync(new BuildRequest { Project = project, Settings = settings with { Identity = settings.Identity with { Version = "1.0.0" } }, TrustAcknowledged = true, AllowOverwriteOutput = true },
             new Observer(output), CancellationToken.None);
-        Assert.Contains(mismatch.Artifacts.SelectMany(a => a.Checks), c => c.Name == "Helper probe-helper version" && c.Status == VerificationStatus.Failed && c.Detail.Contains("Set the app version to 2.3.4"));
+        // A failed verification removes the output and records the failed checks as build errors.
+        Assert.Equal(BuildStatus.Failed, mismatch.Status);
+        Assert.Empty(mismatch.Artifacts);
+        Assert.Contains(mismatch.Messages, m => m.Severity == DiagnosticSeverity.Error && m.Text.Contains("Helper probe-helper version") && m.Text.Contains("Set the app version to 2.3.4"));
     }
 }
 
