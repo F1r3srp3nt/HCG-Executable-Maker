@@ -285,6 +285,63 @@ public sealed partial class BuildWizardViewModel
                                ?? ArchitectureOptions.FirstOrDefault(a => a.Value == HostInfo.CurrentArchitecture) ?? ArchitectureOptions[0];
     }
 
+    // ───────────── Packaging contract (AppPackaging.json) ─────────────
+
+    /// <summary>The selected package's contract, when it describes the selected product.</summary>
+    private SwiftPackagingContract? ActiveContract =>
+        SelectedSwiftPackage?.PackagingContract is { } c && SelectedSwiftProduct is { } p && c.Product == p.Name ? c : null;
+    [ObservableProperty] private bool _hasSwiftContract;
+    [ObservableProperty] private string _swiftContractSummary = "";
+    [ObservableProperty] private string? _swiftContractError;
+    [ObservableProperty] private bool _hasSwiftContractCommands;
+    [ObservableProperty] private bool _hasSwiftContractContents;
+    /// <summary>Each prebuild command exactly as it will run, for review before confirming.</summary>
+    public ObservableCollection<SwiftContractLine> SwiftContractCommands { get; } = [];
+    /// <summary>What the contract adds to the .app: helpers and resources with their destinations.</summary>
+    public ObservableCollection<string> SwiftContractContents { get; } = [];
+    [ObservableProperty] private bool _swiftContractConfirmed;
+
+    partial void OnSwiftContractConfirmedChanged(bool value) => Validate();
+
+    private void RefreshSwiftContract(bool keepConfirmation = false)
+    {
+        SwiftContractCommands.Clear();
+        SwiftContractContents.Clear();
+        var pkg = SelectedSwiftPackage;
+        SwiftContractError = pkg?.PackagingContractError;
+        var contract = ActiveContract;
+        HasSwiftContract = contract is not null || SwiftContractError is not null;
+        if (!keepConfirmation) SwiftContractConfirmed = false;
+        if (contract is null)
+        {
+            SwiftContractSummary = pkg?.PackagingContract is { } other && SelectedSwiftProduct is { } p
+                ? $"{other.Path} describes the product {other.Product}; it does not apply to {p.Name}." : "";
+            HasSwiftContract |= SwiftContractSummary.Length > 0;
+            HasSwiftContractCommands = false;
+            HasSwiftContractContents = false;
+            return;
+        }
+        foreach (var step in contract.Prebuild)
+        {
+            var wd = step.WorkingDirectory == "." ? SwiftPackagingContractReader.ContractDirectory(contract.Path) : $"{SwiftPackagingContractReader.ContractDirectory(contract.Path)}/{step.WorkingDirectory}";
+            SwiftContractCommands.Add(new SwiftContractLine(step.Description,
+                string.Join(' ', step.Command.Select(a => a.Any(char.IsWhiteSpace) ? $"\"{a}\"" : a)),
+                $"in {(wd.Length == 0 ? "(project root)" : wd)}" + (step.Requires.Count > 0 ? $" · requires {string.Join(", ", step.Requires)}" : "")));
+        }
+        foreach (var h in contract.Helpers)
+            SwiftContractContents.Add($"{h.Destination}  ←  {h.Source}" + (h.Architectures.Count > 0 ? $"  ({string.Join(" + ", h.Architectures)})" : "") +
+                (h.Verify.Contains("version") ? "  · checked with “version”" : "") + (h.Required ? "" : "  · optional"));
+        foreach (var r in contract.Resources)
+            SwiftContractContents.Add($"{r.Destination}  ←  {r.Source}" + (r.Required ? "" : "  · optional"));
+        if (contract.Bundle.InfoPlist is { } plist) SwiftContractContents.Add($"Contents/Info.plist  ←  template {plist}");
+        if (contract.Bundle.Icon is { } icon) SwiftContractContents.Add($"Contents/Resources/AppIcon.icns  ←  {icon}");
+        HasSwiftContractCommands = SwiftContractCommands.Count > 0;
+        HasSwiftContractContents = SwiftContractContents.Count > 0;
+        SwiftContractSummary = $"{contract.Path} lists what a complete {contract.Product}.app contains. HCG follows it: " +
+            (contract.Prebuild.Count > 0 ? $"{contract.Prebuild.Count} command(s) run before swift build, then " : "") +
+            "the files below are placed in the app, signed (helpers before the app) and verified.";
+    }
+
     /// <summary>Prefills the macOS app options for the chosen product (only when the product changes).</summary>
     /// <summary>Where the prefilled identity came from (e.g. the package's own packaging script).</summary>
     [ObservableProperty] private string _swiftPrefillNote = "";
@@ -298,22 +355,51 @@ public sealed partial class BuildWizardViewModel
             try { hints = PackagingScriptHints.Read(SourceIndex.Build(Project.SourceDirectory), pkg.Directory, product.Name); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { hints = null; }
         }
-        AppName = hints?.DisplayName ?? product.Name;
-        Version = hints?.Version is { } v && Regex.IsMatch(v, @"^\d+(\.\d+){0,2}$") ? v : "1.0.0";
+        // A packaging contract (AppPackaging.json) is the project's declared identity; its Info.plist template too.
+        var contract = pkg.PackagingContract is { } pc && pc.Product == product.Name ? pc : null;
+        Dictionary<string, string> template = [];
+        if (contract?.Bundle.InfoPlist is { } plistPath && Project is not null)
+        {
+            try
+            {
+                var full = SwiftPackagingContractReader.Resolve(Project.SourceDirectory, SwiftPackagingContractReader.ContractDirectory(contract.Path), plistPath, "bundle.infoPlist");
+                if (File.Exists(full)) template = HCG.ExecutableMaker.Packaging.Packagers.InfoPlist.Read(full);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Xml.XmlException or SwiftPackagingContractReader.ContractException) { template = []; }
+        }
+        static string? Real(string? v, string placeholder) => v is not null && v != placeholder && Regex.IsMatch(v, @"^\d+(\.\d+){0,2}$") ? v : null;
+        var templateVersion = Real(template.GetValueOrDefault("CFBundleShortVersionString"), "0.0.0");
+        var templateBuild = Real(template.GetValueOrDefault("CFBundleVersion"), "0");
+        AppName = contract?.Bundle.DisplayName ?? template.GetValueOrDefault("CFBundleDisplayName") ?? hints?.DisplayName ?? product.Name;
+        Version = templateVersion ?? (hints?.Version is { } v && Regex.IsMatch(v, @"^\d+(\.\d+){0,2}$") ? v : "1.0.0");
         Description = "";
-        AppId = hints?.BundleId ?? SuggestAppId(Publisher, product.Name);
-        SwiftBuildNumber = hints?.BuildNumber is { } bn && Regex.IsMatch(bn, @"^\d+(\.\d+){0,2}$") ? bn : "1";
-        SwiftMinimumMacOS = hints?.MinimumMacOS ?? pkg.Evaluated?.MinimumMacOS ?? "";
-        SelectedSwiftCategory = SwiftCategoryOptions.FirstOrDefault(c => c.Value == (hints?.Category ?? "")) ?? SwiftCategoryOptions[0];
+        AppId = contract?.Bundle.Identifier ?? template.GetValueOrDefault("CFBundleIdentifier") ?? hints?.BundleId ?? SuggestAppId(Publisher, product.Name);
+        SwiftBuildNumber = templateBuild ?? (hints?.BuildNumber is { } bn && Regex.IsMatch(bn, @"^\d+(\.\d+){0,2}$") ? bn : "1");
+        SwiftMinimumMacOS = contract?.Bundle.MinimumMacOS ?? template.GetValueOrDefault("LSMinimumSystemVersion") ?? hints?.MinimumMacOS ?? pkg.Evaluated?.MinimumMacOS ?? "";
+        var category = template.GetValueOrDefault("LSApplicationCategoryType") ?? hints?.Category ?? "";
+        SelectedSwiftCategory = SwiftCategoryOptions.FirstOrDefault(c => c.Value == category) ?? SwiftCategoryOptions[0];
         SelectedSwiftKind = SwiftKindOptions.First(k => k.Value == product.SuggestedKind);
         foreach (var old in SwiftUsageDescriptions) old.PropertyChanged -= OnUsageChanged;
         SwiftUsageDescriptions.Clear();
         foreach (var u in product.Facts?.PrivacyUsages ?? [])
             AddUsage(new SwiftUsageItem(u.InfoPlistKey, u.Purpose, u.Evidence, hints?.UsageDescriptions.GetValueOrDefault(u.InfoPlistKey) ?? ""));
+        foreach (var (key, text) in template.Where(k => k.Key.StartsWith("NS", StringComparison.Ordinal) && k.Key.EndsWith("UsageDescription", StringComparison.Ordinal)))
+        {
+            if (SwiftUsageDescriptions.FirstOrDefault(x => x.Key == key) is { } existing) { if (existing.Text.Length == 0) existing.Text = text; }
+            else AddUsage(new SwiftUsageItem(key, key, "declared in " + contract!.Bundle.InfoPlist, text));
+        }
         // Usage keys the script declares that the source scan did not detect are kept too (the script knows best).
         foreach (var (key, text) in hints?.UsageDescriptions ?? new Dictionary<string, string>())
             if (SwiftUsageDescriptions.All(x => x.Key != key)) AddUsage(new SwiftUsageItem(key, key, "declared in " + hints!.Script, text));
         HasSwiftUsageDescriptions = SwiftUsageDescriptions.Count > 0;
+        RefreshSwiftContract();
+        if (contract is not null)
+        {
+            SwiftPrefillNote = $"Prefilled from the project's packaging contract {contract.Path}" +
+                (contract.Bundle.InfoPlist is { } tp ? $" and its Info.plist template {tp}" : "") + " (read, not run)." +
+                (templateVersion is null ? " The template has no real version, so check the version above: helpers checked with “version” must report the same one." : "");
+            return;
+        }
         SwiftPrefillNote = hints is null
             ? "No packaging script with an app identity was found; the identity below is a suggestion."
             : $"Prefilled from the project's own packaging script {hints.Script} (read, not run): bundle id {hints.BundleId}" +
@@ -341,6 +427,8 @@ public sealed partial class BuildWizardViewModel
             MinimumMacOS = string.IsNullOrWhiteSpace(SwiftMinimumMacOS) ? null : SwiftMinimumMacOS.Trim(),
             Category = string.IsNullOrEmpty(SelectedSwiftCategory?.Value) ? null : SelectedSwiftCategory!.Value,
             UsageDescriptions = SwiftUsageDescriptions.ToDictionary(u => u.Key, u => u.Text.Trim()),
+            PackagingContract = ActiveContract,
+            PackagingContractConfirmed = ActiveContract is not null && SwiftContractConfirmed,
         };
     }
 
@@ -348,6 +436,10 @@ public sealed partial class BuildWizardViewModel
     private void ValidateSwift(BuildSettings settings)
     {
         try { SwiftBuildPlanner.Validate(settings, HostInfo.CurrentPlatform); }
+        catch (BuildValidationException ex) { ConfigErrors.Add(ex.Message); }
+        if (SelectedSwiftPackage?.PackagingContractError is { } contractError)
+            ConfigErrors.Add($"The packaging contract cannot be used: {contractError} Fix the file, then press Re-inspect.");
+        try { SwiftContractPlanner.Validate(settings); }
         catch (BuildValidationException ex) { ConfigErrors.Add(ex.Message); }
         if (string.IsNullOrWhiteSpace(settings.Identity.ApplicationName)) ConfigErrors.Add("Enter the app's display name.");
         var packageMin = SelectedSwiftPackage?.Evaluated?.MinimumMacOS;
@@ -374,6 +466,9 @@ public sealed partial class BuildWizardViewModel
         SwiftUsageDescriptions.Clear();
         foreach (var (key, text) in s.UsageDescriptions) AddUsage(new SwiftUsageItem(key, key, "from the previous build", text));
         HasSwiftUsageDescriptions = SwiftUsageDescriptions.Count > 0;
+        // A repeated build keeps its confirmation only while the contract file is byte-for-byte the one confirmed.
+        RefreshSwiftContract();
+        SwiftContractConfirmed = s.PackagingContractConfirmed && ActiveContract is { } c && c.Sha256 == s.PackagingContract?.Sha256;
     }
 
     private static string TargetLabel(BuildSettings s) =>
@@ -408,3 +503,6 @@ public sealed partial class SwiftUsageItem(string key, string purpose, string ev
     public string Heading => $"{Key} — {Purpose}";
     [ObservableProperty] private string _text = text;
 }
+
+/// <summary>One prebuild command of a packaging contract, shown verbatim for review.</summary>
+public sealed record SwiftContractLine(string Description, string Command, string Detail);

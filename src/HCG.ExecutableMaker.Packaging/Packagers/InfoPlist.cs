@@ -30,6 +30,52 @@ public static partial class InfoPlist
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Starts from a template XML plist (e.g. a packaging contract's Info.plist) and sets <paramref name="entries"/> on
+    /// it: those keys take HCG's values, every other template key (arrays and dictionaries included) is kept as written,
+    /// and keys the template lacks are appended. Comments are dropped; DTD processing is disabled.
+    /// </summary>
+    public static string Merge(string templatePath, IReadOnlyList<(string Key, object Value)> entries)
+    {
+        var settings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore, XmlResolver = null, IgnoreComments = true };
+        XDocument doc;
+        using (var reader = System.Xml.XmlReader.Create(templatePath, settings)) doc = XDocument.Load(reader);
+        var dict = doc.Root?.Element("dict") ?? throw new InvalidDataException("The Info.plist template has no top-level dict.");
+        var children = dict.Elements().ToList();
+        var pairs = new List<(string Key, XElement Value)>();
+        for (var i = 0; i + 1 < children.Count; i += 2)
+        {
+            if (children[i].Name != "key") throw new InvalidDataException($"The Info.plist template has a value without a key near <{children[i].Name}>.");
+            pairs.Add((children[i].Value, children[i + 1]));
+        }
+        var set = entries.ToDictionary(e => e.Key, e => e.Value, StringComparer.Ordinal);
+        static XElement Value(object v) => v switch
+        {
+            bool b => new XElement(b ? "true" : "false"),
+            _ => new XElement("string", v.ToString()),
+        };
+        var sb = new StringBuilder();
+        sb.Append("""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+
+            """);
+        void Write(string key, XElement value)
+        {
+            sb.Append("    <key>").Append(SecurityElement.Escape(key)).Append("</key>\n");
+            foreach (var line in value.ToString(SaveOptions.None).Split('\n'))
+                sb.Append("    ").Append(line.TrimEnd('\r')).Append('\n');
+        }
+        foreach (var (key, value) in pairs)
+            Write(key, set.TryGetValue(key, out var hcg) ? Value(hcg) : value);
+        foreach (var (key, value) in entries)
+            if (pairs.All(p => p.Key != key)) Write(key, Value(value));
+        sb.Append("</dict>\n</plist>\n");
+        return sb.ToString();
+    }
+
     /// <summary>Reads the top-level string/bool values of an XML plist (DTD processing disabled).</summary>
     public static Dictionary<string, string> Read(string path)
     {
