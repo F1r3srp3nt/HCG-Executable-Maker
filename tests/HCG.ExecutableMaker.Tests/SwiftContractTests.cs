@@ -25,10 +25,13 @@ public class SwiftContractTests(ITestOutputHelper output) : IDisposable
     private readonly TempDir _t = new();
     public void Dispose() => _t.Dispose();
 
-    // The contract HCG Server ships (macos/HCGServerApp/AppPackaging.json), with its package two levels down.
+    // The contract HCG Server ships (macos/HCGServerApp/AppPackaging.json), kept identical to that file, with its
+    // package two levels down. The real file has a top-level "description"; a test copy without it once hid that
+    // HCG rejected it.
     private const string HcgServerContract = """
         {
           "schema": "hcg-app-packaging/1",
+          "description": "Everything HCG Server.app needs beyond the SwiftPM product. scripts/build-macos-app.sh reads this file and is the reference implementation; see docs/MACOS-APP.md#packaging-contract.",
           "product": "HCGServer",
           "bundle": { "displayName": "HCG Server", "identifier": "com.hcg.server.app", "infoPlist": "Resources/Info.plist", "icon": "Resources/AppIcon.icns", "minimumMacOS": "13.0" },
           "prebuild": [ { "description": "Build the host agent (Go) as a universal helper", "requires": ["go >= 1.25"], "workingDirectory": "../..",
@@ -111,6 +114,15 @@ public class SwiftContractTests(ITestOutputHelper output) : IDisposable
         Assert.Contains(from, HcgServerContract);
         var ex = Assert.Throws<SwiftPackagingContractReader.ContractException>(() => Parse(HcgServerContract.Replace(from, to), root));
         Assert.Contains(reason, ex.Message);
+    }
+
+    [Fact]
+    public void A_top_level_description_is_accepted_as_text_only()
+    {
+        var root = Workspace();
+        Assert.Equal("HCGServer", Parse(HcgServerContract, root).Product); // the real file has one
+        var json = "{ \"schema\": \"hcg-app-packaging/1\", \"product\": \"HCGServer\", \"description\": 7 }";
+        Assert.Contains("description must be a string", Assert.Throws<SwiftPackagingContractReader.ContractException>(() => Parse(json, root)).Message);
     }
 
     [Fact]
