@@ -24,6 +24,12 @@ public sealed class NativeToolsFactAttribute : FactAttribute
 }
 
 /// <summary>C/C++ detection (static) and real CMake / make / source builds through BuildService.</summary>
+/// <remarks>
+/// In the "DeveloperDir" collection: on macOS, compiler and make detection asks xcode-select, which follows the
+/// process-wide DEVELOPER_DIR that XcodeDiscoveryTests temporarily points at fake Xcodes. Running alongside them would
+/// make the Command Line Tools look missing.
+/// </remarks>
+[Collection("DeveloperDir")]
 public class NativeTests : IDisposable
 {
     private readonly TempDir _t = new();
