@@ -115,9 +115,12 @@ jobs:
                 i=$((i+1))
                 procs=$(ps -A | wc -l | tr -d ' ')
                 rss=$(ps -A -o rss= | awk '{s+=$1} END {print int(s/1024)}')
-                [ $((i % 6)) -eq 0 ] && echo "watchdog: ${procs} processes, ${rss} MB resident"
-                if [ "$procs" -gt 700 ] || [ "$rss" -gt 9000 ]; then
-                  echo "::error::Watchdog: ${procs} processes, ${rss} MB resident — stopping the test run"
+                free=$(df -m "$RUNNER_TEMP" | awk 'NR==2 {print $4}')
+                [ $((i % 6)) -eq 0 ] && echo "watchdog: ${procs} processes, ${rss} MB resident, ${free} MB free disk"
+                if [ "$procs" -gt 700 ] || [ "$rss" -gt 9000 ] || [ "$free" -lt 4000 ]; then
+                  echo "::error::Watchdog: ${procs} processes, ${rss} MB resident, ${free} MB free disk — stopping the test run"
+                  echo "== largest folders in the temporary directories"
+                  du -xm -d 3 "${TMPDIR:-/tmp}" "$RUNNER_TEMP" /tmp 2>/dev/null | sort -rn | head -15
                   echo "== most frequent commands"; ps -A -o comm= | sort | uniq -c | sort -rn | head -15
                   echo "== largest processes";     ps -A -o rss=,pid=,ppid=,etime=,command= | sort -rn | head -15
                   echo "== process tree (newest)"; ps -A -o pid=,ppid=,etime=,command= | tail -40
