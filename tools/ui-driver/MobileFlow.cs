@@ -29,6 +29,16 @@ internal static partial class Program
         var item = studio.Outputs.FirstOrDefault(o => o.Option.Output == wanted);
         Check(item is not null, $"Output {wanted} offered");
         if (item is null) return 1;
+        if (_args.ContainsKey("expect-no-unsigned"))
+        {
+            // .NET for iOS archives only with code signing: the archive is listed but unavailable, with that reason,
+            // and cannot be selected or started; no unsigned signing mode exists for it.
+            Check(!item.IsEnabled, $"Output {wanted} is unavailable without code signing");
+            Check(item.Reason?.Contains("only with code signing", StringComparison.Ordinal) == true, $"Reason names the SDK requirement: {item.Reason}");
+            studio.SelectOutputCommand.Execute(item);
+            Check(studio.SelectedOutput?.Option.Output != wanted, "The unavailable archive cannot be selected");
+            return Failures.Count == 0 ? 0 : 1;
+        }
         studio.SelectOutputCommand.Execute(item);
         if (Arg("scheme") is { } scheme)
         {
@@ -39,16 +49,6 @@ internal static partial class Program
         {
             var mode = signing == "unsigned" ? MobileSigningMode.Unsigned : MobileSigningMode.ProjectDefault;
             var choice = studio.SigningModes.FirstOrDefault(m => m.Value == mode);
-            if (_args.ContainsKey("expect-no-unsigned"))
-            {
-                // .NET for iOS archives only with code signing: Maker must not offer an unsigned archive at all.
-                Check(choice is null, $"Signing {mode} is not offered ({string.Join(", ", studio.SigningModes.Select(m => m.Name))})");
-                foreach (var r in studio.ReadinessRequired) Log($"Readiness [{r.Status.Text}] {r.Tool}: {r.Detail}{(r.HasFix ? " → " + r.Fix : "")}");
-                Log($"State: [{studio.BuildStateTag.Text}] {studio.BuildStateDetail}");
-                studio.TrustAcknowledged = true;
-                Check(!studio.StartBuildCommand.CanExecute(null), "Archive cannot start without a signing identity (none in this keychain)");
-                return Failures.Count == 0 ? 0 : 1;
-            }
             Check(choice is not null, $"Signing {mode} offered");
             if (choice is null) return 1;
             studio.SelectedSigning = choice;

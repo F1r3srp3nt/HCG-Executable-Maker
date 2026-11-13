@@ -976,7 +976,7 @@ jobs:
       # CI run 78: the .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode
       # archive"). Maker therefore offers no unsigned .NET iOS archive and, without a certificate in the keychain (none on
       # hosted runners), blocks the archive before building. A signed archive/IPA needs the owner's certificate+profile.
-      - name: Device archive — not offered unsigned; blocked before building without a signing identity
+      - name: Device archive — unavailable without code signing (the .NET iOS SDK archives only signed)
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
           --mobile-output archive --signing unsigned --expect-no-unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
