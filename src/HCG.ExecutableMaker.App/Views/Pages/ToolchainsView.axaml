@@ -29,12 +29,148 @@
       </Border>
       <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
 
+      <Border Classes="card" IsVisible="{Binding HasXcodePanel}">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="eyebrow" Text="XCODE" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="Command Line Tools are enough for macOS Swift package builds. iOS builds, the Simulator, installer and store validation need Xcode." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding XcodeState}" VerticalAlignment="Top" />
+          </Grid>
+          <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto,Auto" >
+            <TextBlock Classes="label" Text="ACTIVE DEVELOPER DIRECTORY" Margin="0,4" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding XcodeActivePath}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="1" Classes="label" Text="SOURCE" Margin="0,4" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding XcodeSource}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="2" Classes="label" Text="VERIFIED VERSION" Margin="0,4" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="{Binding XcodeVersion}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="3" Classes="label" Text="SDKS" Margin="0,4" />
+            <SelectableTextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding XcodeSdks}" TextWrapping="Wrap" Margin="0,4" />
+          </Grid>
+          <TextBlock Text="{Binding XcodeDiagnosis}" TextWrapping="Wrap" />
+          <Border Classes="callout warning" Padding="12" IsVisible="{Binding HasXcodeAction}">
+            <SelectableTextBlock Text="{Binding XcodeAction}" TextWrapping="Wrap" />
+          </Border>
+          <SelectableTextBlock Classes="mono muted" FontSize="12" Text="{Binding XcodeRawError}" IsVisible="{Binding HasXcodeRawError}" TextWrapping="Wrap" />
+
+          <TextBlock Classes="label" Text="INSTALLED XCODE APPLICATIONS" Margin="0,6,0,0" />
+          <TextBlock Classes="muted" Text="None found in /Applications, ~/Applications or by Spotlight. Use Browse… if Xcode is elsewhere."
+                     IsVisible="{Binding !XcodeInstallations.Count}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding XcodeInstallations}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:XcodeInstallItem">
+                <Grid ColumnDefinitions="200,*,Auto" Margin="0,4">
+                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                  <SelectableTextBlock Grid.Column="1" Classes="mono muted" Text="{Binding Path}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                  <Panel Grid.Column="2" Margin="12,0,0,0">
+                    <TextBlock Classes="muted" Text="Active" IsVisible="{Binding IsActive}" VerticalAlignment="Center" />
+                    <Button Content="Select Xcode" IsVisible="{Binding CanSelect}"
+                            Command="{Binding $parent[ItemsControl].((vm:ToolchainsViewModel)DataContext).SelectXcodeCommand}"
+                            CommandParameter="{Binding}" />
+                  </Panel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <WrapPanel Orientation="Horizontal">
+            <Button Content="Browse…" Command="{Binding BrowseXcodeCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,8,8" />
+            <Button Content="Open Xcode" Command="{Binding OpenXcodeCommand}" Margin="0,0,8,8" />
+            <Button Classes="primary" Content="Recheck" Command="{Binding RefreshCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,0,8,8" />
+            <Button Content="Use system setting" Command="{Binding UseSystemSettingCommand}" IsVisible="{Binding HcgSelectionActive}" Margin="0,0,8,8" />
+          </WrapPanel>
+          <TextBlock Classes="muted" Text="{Binding XcodeMessage}" IsVisible="{Binding HasXcodeMessage}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="Selecting an Xcode here sets DEVELOPER_DIR for HCG's own processes (inspection, SDK discovery, builds, signing and tests). HCG never runs xcode-select --switch." />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="eyebrow" Text="JAVA (JDK)" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="Used for Android builds (Gradle, bundletool, keytool). HCG finds JDKs without your shell profile, so it also works when opened from Finder." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding JavaState}" VerticalAlignment="Top" />
+          </Grid>
+          <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto">
+            <TextBlock Classes="label" Text="JAVA_HOME USED" Margin="0,4" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding JavaPath}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="1" Classes="label" Text="VERSION" Margin="0,4" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="{Binding JavaVersion}" Margin="0,4" />
+            <TextBlock Grid.Row="2" Classes="label" Text="FOUND VIA" Margin="0,4" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding JavaSource}" Margin="0,4" />
+          </Grid>
+          <TextBlock Text="{Binding JavaDetail}" TextWrapping="Wrap" FontSize="12.5" />
+          <Expander Header="Every JDK HCG examined" HorizontalAlignment="Stretch">
+            <ItemsControl ItemsSource="{Binding JavaCandidates}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Expander>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBox Text="{Binding JavaPathInput}" PlaceholderText="JDK folder, e.g. /Applications/Android Studio.app/Contents/jbr/Contents/Home" />
+            <Button Grid.Column="1" Content="Browse…" Command="{Binding BrowseJavaCommand}" Margin="8,0,0,0" />
+            <Button Grid.Column="2" Classes="primary" Content="Verify" Command="{Binding VerifyJavaCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <WrapPanel>
+            <Button Classes="small" Content="Use automatic detection" Command="{Binding UseAutomaticJavaCommand}" IsVisible="{Binding JavaSaved}" Margin="0,0,8,0" />
+            <Button Classes="small ghost" Content="Official JDK setup guide" Command="{Binding OpenJavaGuideCommand}" />
+          </WrapPanel>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding JavaMessage}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="eyebrow" Text="ANDROID SDK" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="Needed only for Android projects. Platforms and build-tools are separate components of the SDK; HCG never installs them or accepts licences." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding SdkState}" VerticalAlignment="Top" />
+          </Grid>
+          <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+            <TextBlock Classes="label" Text="SDK FOLDER" Margin="0,4" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" Text="{Binding SdkPath}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="1" Classes="label" Text="FOUND VIA" Margin="0,4" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SdkSource}" Margin="0,4" />
+            <TextBlock Grid.Row="2" Classes="label" Text="PLATFORMS" Margin="0,4" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="{Binding SdkPlatforms}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="3" Classes="label" Text="BUILD-TOOLS" Margin="0,4" />
+            <TextBlock Grid.Row="3" Grid.Column="1" Classes="mono" Text="{Binding SdkBuildTools}" TextWrapping="Wrap" Margin="0,4" />
+            <TextBlock Grid.Row="4" Classes="label" Text="TOOLS USED" Margin="0,4" />
+            <SelectableTextBlock Grid.Row="4" Grid.Column="1" Classes="mono" FontSize="11.5" Text="{Binding SdkTools}" TextWrapping="Wrap" Margin="0,4" />
+          </Grid>
+          <TextBlock Text="{Binding SdkDetail}" TextWrapping="Wrap" FontSize="12.5" />
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding SdkLicences}" TextWrapping="Wrap" />
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBox Text="{Binding SdkPathInput}" PlaceholderText="Android SDK folder, e.g. ~/Library/Android/sdk" />
+            <Button Grid.Column="1" Content="Browse…" Command="{Binding BrowseSdkCommand}" Margin="8,0,0,0" />
+            <Button Grid.Column="2" Classes="primary" Content="Verify" Command="{Binding VerifySdkCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <WrapPanel>
+            <Button Classes="small" Content="Use automatic detection" Command="{Binding UseAutomaticSdkCommand}" IsVisible="{Binding SdkSaved}" Margin="0,0,8,0" />
+            <Button Classes="small ghost" Content="Official SDK Manager guide" Command="{Binding OpenSdkGuideCommand}" />
+          </WrapPanel>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding SdkMessage}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
       <ItemsControl ItemsSource="{Binding Groups}">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ToolchainGroup">
             <Border Classes="card" Margin="0,0,0,16">
               <StackPanel Spacing="4">
-                <TextBlock Classes="eyebrow" Text="{Binding Category}" Margin="0,0,0,8" />
+                <TextBlock Classes="eyebrow" Text="{Binding Category}" />
+                <TextBlock Classes="muted" FontSize="12" Text="{Binding Note}" IsVisible="{Binding HasNote}" TextWrapping="Wrap" Margin="0,0,0,8" />
                 <ItemsControl ItemsSource="{Binding Items}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:ToolchainItem">
@@ -46,7 +182,10 @@
                             <SelectableTextBlock Classes="mono muted" Text="{Binding Location}" TextWrapping="Wrap" />
                             <TextBlock Classes="muted" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" TextWrapping="Wrap" />
                             <TextBlock Classes="muted" Text="{Binding Others}" IsVisible="{Binding HasOthers}" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted" FontSize="12" Text="{Binding Source}" IsVisible="{Binding HasSource}" />
                             <TextBlock Classes="warning" FontSize="12" Text="{Binding Hint}" IsVisible="{Binding HasHint}" TextWrapping="Wrap" />
+                            <Button Classes="small ghost" Content="Official setup guide" IsVisible="{Binding HasSetupUrl}" HorizontalAlignment="Left"
+                                    Command="{Binding $parent[UserControl].((vm:ToolchainsViewModel)DataContext).OpenToolUrlCommand}" CommandParameter="{Binding}" />
                           </StackPanel>
                           <c:StatusChip Grid.Column="3" Status="{Binding Status}" Margin="12,0,0,0" />
                         </Grid>
@@ -61,7 +200,7 @@
         </ItemsControl.ItemTemplate>
       </ItemsControl>
       <TextBlock Classes="muted" TextWrapping="Wrap"
-                 Text="HCG Executable Maker never installs SDKs or system tools on its own. Follow the hints above to install a missing tool, then press Refresh." />
+                 Text="HCG Executable Maker never installs SDKs, accepts licences or changes system settings (xcode-select, JAVA_HOME, ANDROID_HOME). Choices made here apply to HCG only. Follow the hints above, then press Refresh." />
     </StackPanel>
   </ScrollViewer>
 </UserControl>

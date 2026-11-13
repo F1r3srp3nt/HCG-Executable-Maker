@@ -22,14 +22,41 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
         markers.AddRange(FlutterAnalyzer.FindPubspecs(index).Select(p => (p, 110)));
         markers.AddRange(mauiProjects.Select(m => (m.ProjectPath, 110)));
         markers.AddRange(AndroidGradleAnalyzer.FindRoots(index).Select(r => (AndroidGradleAnalyzer.Join(r, "build.gradle"), 105)));
-        markers.AddRange(XcodeProjectAnalyzer.FindProjects(index).Select(p => (p, 105)));
+        markers.AddRange(XcodeProjectAnalyzer.FindMobileProjects(index).Select(p => (p, 105)));
         markers.AddRange(XcodeProjectAnalyzer.FindAppPackages(index).Select(p => (p, 105)));
+        var dotnetIos = DotNetIosAnalyzer.Find(index);
+        if (markers.Count == 0 && dotnetIos.Count > 0)
+            // A .NET iOS head next to a desktop app (HCG Mail's repository root): the .NET inspector leads and the iOS app
+            // is attached for Mobile Build Studio. On its own (the iOS folder, or an iOS-only repository) it leads.
+            return HasDesktopApp(index, dotnetIos) ? 90 : 110;
         if (markers.Count == 0) return 0;
         var mobileDepth = markers.Min(m => SourceIndex.Depth(m.Path));
         var mauiPaths = mauiProjects.Select(m => m.ProjectPath).ToHashSet(StringComparer.Ordinal);
         var desktopDepth = index.WithExtension(".csproj", ".fsproj", ".vbproj").Where(p => !mauiPaths.Contains(p)).Select(SourceIndex.Depth).DefaultIfEmpty(int.MaxValue).Min();
         return desktopDepth < mobileDepth ? 90 : markers.Max(m => m.Score);
     }
+
+    /// <summary>A desktop Exe/WinExe project (not iOS, not a test) anywhere in the workspace.</summary>
+    private static bool HasDesktopApp(SourceIndex index, IReadOnlyList<DotNetIosProjectInfo> ios)
+    {
+        var iosPaths = ios.Select(i => i.ProjectPath).ToHashSet(StringComparer.Ordinal);
+        foreach (var rel in index.WithExtension(".csproj", ".fsproj", ".vbproj").Where(p => !iosPaths.Contains(p)))
+        {
+            HCG.ExecutableMaker.ProjectInspection.DotNet.MsBuildProjectFile f;
+            try { f = HCG.ExecutableMaker.ProjectInspection.DotNet.MsBuildProjectFile.Parse(index.FullPath(rel)); }
+            catch (Exception ex) when (ex is System.Xml.XmlException or IOException) { continue; }
+            var output = f.Get("OutputType") ?? "";
+            if ((output.Equals("Exe", StringComparison.OrdinalIgnoreCase) || output.Equals("WinExe", StringComparison.OrdinalIgnoreCase))
+                && !f.IsTrue("IsTestProject") && !f.IsTrue("UseMaui") && !(f.Get("TargetFramework") ?? f.Get("TargetFrameworks") ?? "").Contains("-ios", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>The .NET iOS app analysis, for attaching to another inspector's result (a repository with desktop and iOS heads).</summary>
+    public static MobileAnalysis? AnalyzeDotNetIos(SourceIndex index) => DotNetIosAnalyzer.Find(index).FirstOrDefault() is { } ios
+        ? new MobileAnalysis { Framework = MobileFramework.DotNetIos, Platforms = [TargetPlatform.IOS], DotNetIos = ios, ApplicationIds = ios.ApplicationId is { } id ? [id] : [] }
+        : null;
 
     public Task<ProjectAnalysis> InspectAsync(SourceIndex index, ToolchainReport? toolchains, CancellationToken cancellationToken) =>
         Task.Run(() => Inspect(index, toolchains), cancellationToken);
@@ -48,20 +75,25 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             MobileFramework.NativeIos => mobile.Ios?.AppTargets.Any() == true,
             _ => mobile.Platforms.Count > 0,
         };
+        var incomplete = mobile.DotNetIos is { } dn && (dn.OutsideWorkspace.Count > 0 || dn.MissingReferences.Count > 0);
         var (support, summary) =
-            !hasBuildable ? (SupportLevel.RequiresConfiguration, "A mobile project structure was found, but no buildable application target or module.")
+            incomplete ? (SupportLevel.RequiresConfiguration, mobile.DotNetIos!.OutsideWorkspace.Count > 0
+                ? $"{mobile.DotNetIos.ProjectPath} uses projects outside the imported folder ({string.Join(", ", mobile.DotNetIos.OutsideWorkspace.Take(2).Select(Path.GetFileName))}…). Import the repository root that contains them."
+                : $"{mobile.DotNetIos.ProjectPath} references projects that are missing: {string.Join("; ", mobile.DotNetIos.MissingReferences.Take(3))}.")
+            : !hasBuildable ? (SupportLevel.RequiresConfiguration, "A mobile project structure was found, but no buildable application target or module.")
             : available.Count > 0 ? (SupportLevel.Supported, $"Buildable here: {string.Join(", ", available.Select(o => o.DisplayName))}.")
             : hostBlocked.Count == options.Count ? (SupportLevel.RequiresDifferentHost, "iOS builds require a Mac with Xcode.")
             : (SupportLevel.MissingToolchain, "Mobile project recognized, but required toolchains are missing on this computer.");
 
-        var name = mobile.Flutter?.Name ?? mobile.Maui?.ApplicationTitle ?? Path.GetFileNameWithoutExtension(mobile.Maui?.ProjectPath)
+        var name = mobile.Capacitor?.AppName ?? mobile.Flutter?.Name ?? mobile.Maui?.ApplicationTitle ?? mobile.DotNetIos?.ApplicationTitle ?? Path.GetFileNameWithoutExtension(mobile.Maui?.ProjectPath)
                    ?? mobile.Android?.AppModules.FirstOrDefault()?.ApplicationId?.Split('.').Last()
                    ?? mobile.Ios?.AppTargets.FirstOrDefault()?.Name
                    ?? new DirectoryInfo(index.Root).Name;
         var language = mobile.Framework switch
         {
             MobileFramework.Flutter => "Dart",
-            MobileFramework.DotNetMaui => "C#",
+            MobileFramework.DotNetMaui or MobileFramework.DotNetIos => "C#",
+            MobileFramework.Capacitor => "TypeScript / JavaScript",
             MobileFramework.NativeIos => "Swift / Objective-C",
             _ => mobile.Android?.UsesKotlin == true ? "Kotlin" : "Java",
         };
@@ -70,6 +102,8 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             MobileFramework.NativeAndroid => "Android Gradle" + (mobile.Android?.AgpVersion is { } agp ? $" · AGP {agp}" : ""),
             MobileFramework.NativeIos => "Xcode" + (mobile.Ios?.UsesSwiftPackages == true ? " · Swift packages" : "") + (mobile.Ios?.UsesCocoaPods == true ? " · CocoaPods" : ""),
             MobileFramework.Flutter => "Flutter" + (mobile.Flutter?.SdkConstraint is { } c ? $" (Dart SDK {c})" : ""),
+            MobileFramework.Capacitor => "Capacitor" + (mobile.Capacitor?.CapacitorVersion is { } cv ? $" {cv}" : "") + " · web app",
+            MobileFramework.DotNetIos => $".NET for iOS · {mobile.DotNetIos!.TargetFramework}" + (mobile.DotNetIos.UiFramework is { } ui ? $" · {ui} {mobile.DotNetIos.UiFrameworkVersion}" : ""),
             _ => ".NET MAUI · " + string.Join(", ", mobile.Maui?.TargetFrameworks ?? []),
         };
         var recommended = new List<PackagingFormat>();
@@ -81,7 +115,9 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
         if (mobile.Platforms.Contains(TargetPlatform.Android)) { Req(ToolchainIds.Jdk, "JDK 17+"); Req(ToolchainIds.AndroidSdk, "Android SDK"); }
         if (mobile.Platforms.Contains(TargetPlatform.IOS)) { Req(ToolchainIds.Xcode, "Xcode (macOS)"); Req(ToolchainIds.IosSdk, "iOS SDK"); }
         if (mobile.Framework == MobileFramework.Flutter) Req(ToolchainIds.Flutter, "Flutter SDK");
+        if (mobile.Framework == MobileFramework.Capacitor) Req(ToolchainIds.Node, "Node.js 22+ and npm");
         if (mobile.Framework == MobileFramework.DotNetMaui) { Req(ToolchainIds.DotNetSdk, ".NET SDK"); Req(ToolchainIds.MauiWorkloads, ".NET MAUI workloads"); }
+        if (mobile.Framework == MobileFramework.DotNetIos) { Req(ToolchainIds.DotNetSdk, ".NET SDK"); Req(ToolchainIds.DotNetIosWorkload, ".NET iOS workload" + (mobile.DotNetIos?.WorkloadPin is { } pin ? $" ({pin})" : "")); }
 
         if (mobile.Android is { } and && and.AgpVersion is not null)
         {
@@ -101,6 +137,8 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             {
                 MobileFramework.Flutter => "Flutter application",
                 MobileFramework.DotNetMaui => ".NET MAUI application",
+                MobileFramework.Capacitor => "Capacitor application (web app in a native shell)",
+                MobileFramework.DotNetIos => mobile.DotNetIos?.UiFramework is { } uiFw ? $".NET for iOS application ({uiFw})" : ".NET for iOS application",
                 MobileFramework.NativeIos => "iOS application",
                 _ => mobile.Platforms.Contains(TargetPlatform.IOS) ? "Android + iOS applications" : "Android application",
             },
@@ -117,6 +155,28 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
 
     public static MobileAnalysis Analyze(SourceIndex index, List<AnalysisDiagnostic> diagnostics)
     {
+        // Capacitor first: its android/ and ios/ folders are native projects that only build after npm installs @capacitor/*.
+        if (CapacitorAnalyzer.FindRoots(index).FirstOrDefault() is { } capRoot)
+        {
+            var cap = CapacitorAnalyzer.Analyze(index, capRoot);
+            var platforms = new List<TargetPlatform>();
+            AndroidProjectInfo? capAndroid = null;
+            IosProjectInfo? capIos = null;
+            if (cap.HasAndroid) { platforms.Add(TargetPlatform.Android); capAndroid = AndroidGradleAnalyzer.Analyze(index, CapacitorAnalyzer.Join(capRoot, "android"), out _); }
+            if (cap.HasIos && XcodeProjectAnalyzer.FindMobileProjects(index).FirstOrDefault(p => p.StartsWith(CapacitorAnalyzer.Join(capRoot, "ios/"), StringComparison.Ordinal)) is { } xp)
+            {
+                platforms.Add(TargetPlatform.IOS);
+                capIos = XcodeProjectAnalyzer.Analyze(index, xp, out _);
+            }
+            if (platforms.Count == 0) diagnostics.Add(new(DiagnosticSeverity.Warning, "Capacitor app without android/ or ios/ projects (add one with npx cap add android|ios).", cap.ConfigFile));
+            if (cap.BuildScript is null) diagnostics.Add(new(DiagnosticSeverity.Warning, "package.json has no build script, so the web app cannot be built before syncing.", CapacitorAnalyzer.Join(capRoot, "package.json")));
+            return new MobileAnalysis
+            {
+                Framework = MobileFramework.Capacitor, Platforms = platforms, Capacitor = cap, Android = capAndroid, Ios = capIos,
+                ApplicationIds = cap.AppId is { } id ? [id] : [],
+            };
+        }
+
         var pubspec = FlutterAnalyzer.FindPubspecs(index).FirstOrDefault();
         if (pubspec is not null)
         {
@@ -147,6 +207,17 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             };
         }
 
+        if (AnalyzeDotNetIos(index) is { } dotnetIos && !AndroidGradleAnalyzer.FindRoots(index).Any() && XcodeProjectAnalyzer.FindMobileProjects(index).Count == 0)
+        {
+            var dn = dotnetIos.DotNetIos!;
+            foreach (var o in dn.OutsideWorkspace.Take(6))
+                diagnostics.Add(new(DiagnosticSeverity.Error, $"{dn.ProjectPath} needs {o}, which is outside the imported folder. Import the repository root that contains both: HCG does not build a partial copy of a repository.", dn.ProjectPath));
+            foreach (var m in dn.MissingReferences.Take(6))
+                diagnostics.Add(new(DiagnosticSeverity.Error, $"Project reference not found: {m}.", dn.ProjectPath));
+            diagnostics.Add(new(DiagnosticSeverity.Info, $"{dn.ProjectPath}: .NET for iOS app ({dn.TargetFramework}{(dn.UiFramework is { } ui ? $", {ui} {dn.UiFrameworkVersion}" : "")}). No .xcodeproj is needed: the .NET iOS workload drives Xcode's SDK, actool, ibtool and codesign.", dn.ProjectPath));
+            return dotnetIos;
+        }
+
         AndroidProjectInfo? android = null;
         if (AndroidGradleAnalyzer.FindRoots(index).FirstOrDefault() is { } root)
         {
@@ -154,7 +225,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             diagnostics.AddRange(d);
         }
         IosProjectInfo? ios = null;
-        var xcodeProjects = XcodeProjectAnalyzer.FindProjects(index);
+        var xcodeProjects = XcodeProjectAnalyzer.FindMobileProjects(index);
         if (xcodeProjects.Count > 0)
         {
             // Prefer the project with an app target.

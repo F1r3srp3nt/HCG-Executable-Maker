@@ -50,6 +50,8 @@ public sealed record DetectedProject
     public required string ApplicationType { get; init; }
     public bool IsAvalonia { get; init; }
     public bool IsRunnableApplication { get; init; }
+    /// <summary>Not an app yet, but "Create desktop application" can generate one from it (a Vite + React browser app).</summary>
+    public bool IsDesktopConversionCandidate { get; init; }
     /// <summary>Platforms this project can produce output for, per its target frameworks and UI stack.</summary>
     public IReadOnlyList<TargetPlatform> CompatiblePlatforms { get; init; } = [];
     public IReadOnlyList<AnalysisDiagnostic> Diagnostics { get; init; } = [];
@@ -80,6 +82,12 @@ public sealed record ProjectAnalysis
     public IReadOnlyList<string> DetectedIcons { get; init; } = [];
     /// <summary>Mobile-specific facts when the project is an Android/iOS/Flutter/MAUI app (null for desktop projects).</summary>
     public MobileAnalysis? Mobile { get; init; }
+    /// <summary>Swift package / macOS Xcode facts when the workspace is a Swift desktop project.</summary>
+    public SwiftAnalysis? Swift { get; init; }
+    /// <summary>Node.js / Electron projects in the workspace (also attached when another ecosystem leads the analysis).</summary>
+    public NodeAnalysis? Node { get; init; }
+    /// <summary>C/C++ projects (CMake, Make, sources, Theos) found in the workspace.</summary>
+    public NativeAnalysis? Native { get; init; }
     public IReadOnlyList<AnalysisDiagnostic> Diagnostics { get; init; } = [];
     public required DateTimeOffset AnalyzedAt { get; init; }
 }

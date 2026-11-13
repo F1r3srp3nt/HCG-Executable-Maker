@@ -106,11 +106,74 @@
       </Border>
 
       <Border Classes="card">
+        <StackPanel Spacing="10">
+          <StackPanel Spacing="2">
+            <TextBlock Classes="h2" Text="Apple credentials" />
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="Used only by the explicit Notarize and Validate steps. HCG stores names and IDs; passwords stay in your login keychain and API keys in their key file. Nothing is uploaded or submitted automatically." />
+          </StackPanel>
+          <TextBlock Classes="h3" Text="Notarization (notarytool keychain profile)" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="1. Create an app-specific password at account.apple.com. 2. Run the command below in Terminal; notarytool asks for the password and stores it in your login keychain. 3. Enter the profile name here and press Check." />
+          <Grid ColumnDefinitions="*,*,*" >
+            <StackPanel Margin="0,0,8,0">
+              <TextBlock Classes="formlabel" Text="PROFILE NAME" />
+              <TextBox Text="{Binding NotaryProfile}" PlaceholderText="HCG-Notary" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Margin="0,0,8,0">
+              <TextBlock Classes="formlabel" Text="APPLE ID (FOR THE COMMAND ONLY)" />
+              <TextBox Text="{Binding NotaryAppleId}" PlaceholderText="you@example.com" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <TextBlock Classes="formlabel" Text="TEAM ID (FOR THE COMMAND ONLY)" />
+              <TextBox Text="{Binding NotaryTeamId}" PlaceholderText="ABCDE12345" />
+            </StackPanel>
+          </Grid>
+          <Border Classes="inset" Padding="12,10">
+            <SelectableTextBlock Classes="mono" Text="{Binding StoreCredentialsCommand}" TextWrapping="Wrap" />
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="small" Content="Copy command" Command="{Binding CopyStoreCredentialsCommandCommand}" />
+            <Button Classes="small" Content="Check profile" Command="{Binding CheckNotaryProfileCommand}" />
+          </StackPanel>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding NotaryStatus}" TextWrapping="Wrap" />
+
+          <TextBlock Classes="h3" Text="App Store Connect validation (API key)" Margin="0,8,0,0" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="Create a key in App Store Connect › Users and Access › Integrations › App Store Connect API, save the downloaded .p8 as ~/.appstoreconnect/private_keys/AuthKey_&lt;KeyID&gt;.p8, and enter the IDs here." />
+          <Grid ColumnDefinitions="*,*">
+            <StackPanel Margin="0,0,8,0">
+              <TextBlock Classes="formlabel" Text="KEY ID" />
+              <TextBox Text="{Binding AscKeyId}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+              <TextBlock Classes="formlabel" Text="ISSUER ID" />
+              <TextBox Text="{Binding AscIssuerId}" />
+            </StackPanel>
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding AscStatus}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" Text="Press Save settings (above) to keep these names and IDs." TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
         <StackPanel Spacing="4">
           <TextBlock Classes="h2" Text="About" />
           <Image Source="/Assets/Branding/hcg-logo.png" Height="64" HorizontalAlignment="Left" Margin="-4,6,0,4" Stretch="Uniform" />
-          <TextBlock Text="{Binding Version, StringFormat='HCG Executable Maker {0} — Milestone 0.1'}" />
-          <TextBlock Classes="muted" Text="© Hakmi Capital Group. Built with .NET 10 and Avalonia UI." />
+          <TextBlock Text="{Binding Version, StringFormat='HCG Executable Maker {0}'}" />
+          <TextBlock Classes="formlabel" Text="ABOUT THIS BUILD" Margin="0,10,0,4" />
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto">
+            <TextBlock Classes="muted" Text="Commit" />
+            <SelectableTextBlock Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding Commit}" />
+            <TextBlock Grid.Row="1" Classes="muted" Text="Built (UTC)" />
+            <SelectableTextBlock Grid.Row="1" Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding BuildDate}" />
+            <TextBlock Grid.Row="2" Classes="muted" Text="Executable" />
+            <SelectableTextBlock Grid.Row="2" Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding ExecutablePath}" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="3" Classes="muted" Text="App bundle" />
+            <SelectableTextBlock Grid.Row="3" Grid.Column="1" FontFamily="{DynamicResource Hcg.Font.Mono}" FontSize="12" Text="{Binding AppBundlePath}" TextWrapping="Wrap" />
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" Text="From a terminal: &lt;executable&gt; --version prints the same identity without opening the window." />
+          <TextBlock Classes="muted" Text="© Hakmi Capital Group. Built with .NET 10 and Avalonia UI." Margin="0,6,0,0" />
         </StackPanel>
       </Border>
     </StackPanel>

@@ -26,10 +26,12 @@ public static class GradlePlanner
         var module = o.Module is null ? android.AppModules.FirstOrDefault() : android.AppModules.FirstOrDefault(m => m.GradlePath == o.Module);
         if (module is null) throw new BuildValidationException(o.Module is null ? "No Android application module was found." : $"Module '{o.Module}' is not an Android application module of this project.");
 
-        var java = input.Toolchains.Find(ToolchainIds.Jdk);
-        if (java is not { IsAvailable: true, ExecutablePath: { } javaPath }) throw new BuildValidationException("A JDK 17+ is required for Android builds.");
+        // The JDK and SDK that passed inspection (project readiness has already checked Gradle/AGP compatibility).
+        var jdk = MobileArgs.InspectedJdk(input.Toolchains)
+                  ?? throw new BuildValidationException("No working JDK was found. Choose one in Toolchains › Java (Android Studio's bundled JDK works).");
+        var javaPath = jdk.JavaExecutable;
         var sdk = input.Toolchains.Find(ToolchainIds.AndroidSdk);
-        if (sdk is not { IsAvailable: true, ExecutablePath: { } sdkPath }) throw new BuildValidationException("The Android SDK was not found (set ANDROID_HOME).");
+        if (sdk is not { IsAvailable: true, ExecutablePath: { } sdkPath }) throw new BuildValidationException("The Android SDK was not found. Choose it in Toolchains › Android SDK.");
 
         var (task, kind) = o.Output switch
         {
@@ -86,11 +88,8 @@ public static class GradlePlanner
         Directory.CreateDirectory(gradleHome);
         Directory.CreateDirectory(androidHome);
         WriteProxyProperties(gradleHome, input.Environment);
-        var env = MobileArgs.With(input.Environment,
-            ("JAVA_HOME", MobileArgs.JavaHome(javaPath)),
-            ("ANDROID_HOME", sdkPath), ("ANDROID_SDK_ROOT", sdkPath),
-            ("GRADLE_USER_HOME", gradleHome), ("ANDROID_USER_HOME", androidHome),
-            ("GRADLE_OPTS", null));
+        var env = MobileArgs.ToolchainEnvironment(input.Environment, input.Toolchains,
+            ("GRADLE_USER_HOME", gradleHome), ("ANDROID_USER_HOME", androidHome));
 
         var moduleDir = module.Directory.Length == 0 ? root : MobileArgs.Inside(root, module.Directory);
         var outputs = task == "assemble"

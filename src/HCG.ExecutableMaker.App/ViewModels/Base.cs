@@ -65,8 +65,8 @@ public static class Format
     public static string Tone(ToolchainStatus s) => s switch
     {
         ToolchainStatus.Installed => "success",
-        ToolchainStatus.Missing => "warning",
-        ToolchainStatus.ValidationFailed => "error",
+        ToolchainStatus.Missing or ToolchainStatus.SetupRequired or ToolchainStatus.IncompatibleVersion => "warning",
+        ToolchainStatus.ValidationFailed or ToolchainStatus.InvalidPath => "error",
         _ => "neutral",
     };
 
@@ -89,8 +89,13 @@ public static class Format
 
     public static string Label(ToolchainStatus s) => s switch
     {
-        ToolchainStatus.UnsupportedOnHost => "Not on this host",
+        ToolchainStatus.Installed => "Ready",
+        ToolchainStatus.Missing => "Not found",
+        ToolchainStatus.UnsupportedOnHost => "Other host",
         ToolchainStatus.ValidationFailed => "Validation failed",
+        ToolchainStatus.InvalidPath => "Invalid path",
+        ToolchainStatus.IncompatibleVersion => "Incompatible version",
+        ToolchainStatus.SetupRequired => "Setup required",
         _ => s.ToString(),
     };
 
@@ -126,13 +131,37 @@ public static class Format
         _ => "Development (debugging)",
     };
 
+    public static string Label(ReadinessState s) => s switch
+    {
+        ReadinessState.Ready => "Ready",
+        ReadinessState.NotFound => "Not found",
+        ReadinessState.InvalidPath => "Invalid path",
+        ReadinessState.IncompatibleVersion => "Incompatible version",
+        ReadinessState.SetupRequired => "Setup required",
+        ReadinessState.NotVerifiable => "Not verifiable",
+        ReadinessState.NotNeeded => "Not needed for this build",
+        _ => "Other host",
+    };
+
+    public static string Tone(ReadinessState s, bool required) => s switch
+    {
+        ReadinessState.Ready => "success",
+        ReadinessState.NotNeeded or ReadinessState.OtherHost when !required => "neutral",
+        ReadinessState.NotVerifiable => "info",
+        _ when !required => "neutral",
+        ReadinessState.InvalidPath or ReadinessState.IncompatibleVersion => "error",
+        _ => "warning",
+    };
+
     public static string Label(PackagingAvailability a) => a switch
     {
-        PackagingAvailability.Available => "Available",
-        PackagingAvailability.MissingTool => "Tool missing",
+        PackagingAvailability.Available => "Ready",
+        PackagingAvailability.MissingTool => "Setup required",
+        PackagingAvailability.SetupRequired => "Setup required",
         PackagingAvailability.RequiresDifferentHost => "Needs another host",
         PackagingAvailability.NotImplemented => "Planned",
-        _ => "Not applicable",
+        PackagingAvailability.Failed => "Failed",
+        _ => "Incompatible with this project",
     };
 }
 

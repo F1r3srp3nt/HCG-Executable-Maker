@@ -112,6 +112,8 @@ public sealed class MobileBuildService(
                 overall.Token.ThrowIfCancellationRequested();
                 observer.OnStage(step.Stage, step.Title);
                 Log(BuildLogKind.Command, step.DisplayCommand);
+                int errorsBefore;
+                lock (build.Messages) errorsBefore = build.Messages.Count;
                 var result = await worker.RunAsync(step.Process, (stream, text) =>
                 {
                     var message = parser.Parse(text);
@@ -125,7 +127,17 @@ public sealed class MobileBuildService(
                 }, overall.Token).ConfigureAwait(false);
                 build.ExitCode = result.ExitCode;
                 if (result.Cancelled || result.TimedOut || overall.IsCancellationRequested) overall.Token.ThrowIfCancellationRequested();
-                if (result.ExitCode != 0) throw new StepFailedException($"{step.Title} failed with exit code {result.ExitCode}.");
+                if (result.ExitCode != 0)
+                {
+                    // The first actionable error of this step, in full (xcodebuild's exit code 65 alone says only "failed").
+                    BuildMessage? first;
+                    lock (build.Messages) first = build.Messages.Skip(errorsBefore).FirstOrDefault(m => m.Severity == DiagnosticSeverity.Error && !m.Text.Contains("** ", StringComparison.Ordinal) && !m.Text.StartsWith("FAILURE:", StringComparison.Ordinal))
+                                                  ?? build.Messages.Skip(errorsBefore).FirstOrDefault(m => m.Severity == DiagnosticSeverity.Error);
+                    var bundle = step.Process.Arguments.SkipWhile(a => a != "-resultBundlePath").Skip(1).FirstOrDefault();
+                    throw new StepFailedException($"{step.Title} failed with exit code {result.ExitCode}." +
+                        (first is null ? " No error line was recognized; see the complete log." : $"\nFirst error: {(first.File is null ? "" : first.File + (first.Line is { } ln ? $":{ln}" : "") + ": ")}{parser.Describe(first)}") +
+                        $"\nComplete log: {build.LogPath}" + (bundle is not null && Directory.Exists(bundle) ? $"\nResult bundle: {bundle}" : ""));
+                }
                 Log(BuildLogKind.Success, $"{step.Title} completed in {result.Duration.TotalSeconds:F1}s");
             }
         }
@@ -188,7 +200,7 @@ public sealed class MobileBuildService(
             }
             else
             {
-                if (options.Framework == MobileFramework.NativeAndroid && analysis!.Android is { } android &&
+                if (options.Framework is MobileFramework.NativeAndroid or MobileFramework.Capacitor && analysis!.Android is { } android &&
                     GradlePlanner.ReadWrapper(MobileArgs.Inside(sourceDir, android.Root)) is { } wrapper)
                 {
                     Log(BuildLogKind.Info, $"Gradle wrapper: {wrapper.DistributionUrl ?? "(no distributionUrl)"} · wrapper jar SHA-256 {wrapper.JarSha256}");
@@ -199,14 +211,21 @@ public sealed class MobileBuildService(
                     MobileFramework.NativeAndroid => GradlePlanner.Plan(input),
                     MobileFramework.NativeIos => XcodePlanner.Plan(input),
                     MobileFramework.Flutter => FlutterPlanner.Plan(input),
+                    MobileFramework.Capacitor => CapacitorPlanner.Plan(input),
+                    MobileFramework.DotNetIos => DotNetIosPlanner.Plan(input),
                     _ => MauiPlanner.Plan(input),
                 };
                 await RunStepsAsync(plan).ConfigureAwait(false);
 
-                if (options.Framework == MobileFramework.NativeIos && options.Output == MobileOutput.IosIpa)
+                if (options.Framework is MobileFramework.NativeIos or MobileFramework.DotNetIos && options.Output == MobileOutput.IosIpa)
                 {
-                    var scheme = XcodePlanner.ResolveContainer(input).Scheme;
-                    var archive = XcodePlanner.ArchivePath(input, scheme);
+                    var archive = options.Framework == MobileFramework.NativeIos
+                        ? XcodePlanner.ArchivePath(input, XcodePlanner.ResolveContainer(input).Scheme)
+                        : Directory.Exists(DotNetIosPlanner.ArchiveDirectory(input))
+                            ? Directory.EnumerateDirectories(DotNetIosPlanner.ArchiveDirectory(input), "*.xcarchive", SearchOption.AllDirectories).FirstOrDefault()
+                              ?? throw new StepFailedException("dotnet publish succeeded but created no .xcarchive, so there is nothing to export.")
+                            : throw new StepFailedException("dotnet publish succeeded but created no archive folder, so there is nothing to export.");
+                    Log(BuildLogKind.Info, $"Archive: {archive}");
                     observer.OnStage(BuildStage.VerifyingOutput, "Inspecting the archive's signature");
                     var archiveReport = MobileArtifactInspector.Inspect(archive);
                     if (archiveReport.Status == VerificationStatus.Failed)
@@ -334,6 +353,14 @@ public sealed class MobileBuildService(
         }
     }
 
+    /// <summary>The "First error: …" line of a failure reason (or its first line), shown in full above the log.</summary>
+    public static string? FirstErrorOf(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return null;
+        var line = reason.Split('\n').FirstOrDefault(l => l.StartsWith("First error: ", StringComparison.Ordinal));
+        return line is null ? reason.Split('\n')[0] : line["First error: ".Length..];
+    }
+
     private static IEnumerable<string> RelevantToolchains(MobileBuildOptions o) => o.Output.Platform() == TargetPlatform.Android
         ? [ToolchainIds.Jdk, ToolchainIds.AndroidSdk, ToolchainIds.AndroidBuildTools, ToolchainIds.Bundletool, ToolchainIds.Flutter, ToolchainIds.MauiWorkloads, ToolchainIds.DotNetSdk]
         : [ToolchainIds.Xcode, ToolchainIds.IosSdk, ToolchainIds.Flutter, ToolchainIds.MauiWorkloads, ToolchainIds.DotNetSdk];
@@ -371,7 +398,7 @@ public sealed class MobileBuildService(
     }
 
     /// <summary>Copies a bundle directory, recreating symbolic links instead of following them.</summary>
-    internal static void CopyDirectory(string source, string destination)
+    public static void CopyDirectory(string source, string destination)
     {
         if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
         Directory.CreateDirectory(destination);
@@ -400,7 +427,7 @@ public sealed class MobileBuildService(
         var dir = Path.Combine(paths.Root, "signing");
         var path = Path.Combine(dir, "hcg-debug.keystore");
         if (File.Exists(path)) return new DebugKeystore(path);
-        var java = report.Find(ToolchainIds.Jdk)?.ExecutablePath ?? throw new BuildValidationException("A JDK is required to create the debug keystore.");
+        var java = MobileArgs.InspectedJdk(report)?.JavaExecutable ?? throw new BuildValidationException("A JDK is required to create the debug keystore. Choose one in Toolchains › Java.");
         var keytool = Path.Combine(Path.GetDirectoryName(PathGuard.GetRealPath(java))!, OperatingSystem.IsWindows() ? "keytool.exe" : "keytool");
         if (!File.Exists(keytool)) throw new BuildValidationException("keytool was not found next to java; a full JDK is required.");
         Directory.CreateDirectory(dir);

@@ -4,11 +4,21 @@ using HCG.ExecutableMaker.Domain;
 namespace HCG.ExecutableMaker.BuildEngine;
 
 /// <summary>Extracts warnings and errors from MSBuild/dotnet console output, de-duplicating the end-of-build summary.</summary>
-public sealed partial class MsBuildOutputParser
+/// <summary>Turns build tool output lines into structured diagnostics (de-duplicated).</summary>
+public interface IBuildOutputParser
+{
+    BuildMessage? Parse(string line);
+    /// <summary>Copy of the de-duplication state, used to roll back a discarded (retried) attempt.</summary>
+    IBuildOutputParser Clone();
+}
+
+public sealed partial class MsBuildOutputParser : IBuildOutputParser
 {
     private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
 
     /// <summary>Copy of the de-duplication state, used to roll back a discarded (retried) attempt.</summary>
+    IBuildOutputParser IBuildOutputParser.Clone() => Clone();
+
     public MsBuildOutputParser Clone()
     {
         var copy = new MsBuildOutputParser();

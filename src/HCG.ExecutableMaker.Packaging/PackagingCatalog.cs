@@ -1,4 +1,5 @@
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging.MacDistribution;
 
 namespace HCG.ExecutableMaker.Packaging;
 
@@ -13,6 +14,31 @@ public static class PackagingCatalog
         var list = new List<PackagingOption>();
         void Add(PackagingFormat f, string desc, PackagingAvailability a, string? reason = null, string? milestone = null) =>
             list.Add(new PackagingOption(f, f.DisplayName(), desc, a, reason, milestone));
+
+        if (ctx.IsElectron)
+        {
+            EvaluateElectron(ctx, Add);
+            return list;
+        }
+        if (ctx.IsTheos)
+        {
+            Add(PackagingFormat.JailbreakDeb, "The Debian package Theos builds (make package FINALPACKAGE=1), checked: metadata, install prefix, payload, binaries and their architectures. " +
+                "For jailbroken devices only; installed by you with Sileo, Zebra, Filza or dpkg.", ctx.Host.Platform is TargetPlatform.MacOS or TargetPlatform.Linux
+                    ? PackagingAvailability.Available : PackagingAvailability.RequiresDifferentHost, ctx.Host.Platform is TargetPlatform.MacOS or TargetPlatform.Linux ? null : "Theos builds on macOS or Linux.");
+            Add(PackagingFormat.IosIpa, "IPA.", PackagingAvailability.NotApplicable, "A Theos package is not an iOS app package: tweaks and preference bundles are injected or loaded by the jailbreak, and HCG never relabels a .deb as an IPA.");
+            Add(PackagingFormat.IosArchive, "Xcode archive.", PackagingAvailability.NotApplicable, "Theos projects are built by Theos' makefiles, not archived with Xcode.");
+            return list;
+        }
+        if (ctx.IsNative)
+        {
+            EvaluateNative(ctx, Add);
+            return list;
+        }
+        if (ctx.SwiftKind is { } swiftKind)
+        {
+            EvaluateSwift(ctx, swiftKind, Add);
+            return list;
+        }
 
         switch (ctx.Target)
         {
@@ -50,8 +76,12 @@ public static class PackagingCatalog
                     Add(PackagingFormat.MacDmg, "Compressed disk image.", PackagingAvailability.MissingTool, "hdiutil was not detected on this Mac.");
                 else
                     Add(PackagingFormat.MacDmg, "Compressed disk image containing the .app and an Applications shortcut.", PackagingAvailability.Available);
-                Add(PackagingFormat.MacPkg, "macOS installer package.", PackagingAvailability.NotImplemented, "PKG packaging is planned for M0.3.", "M0.3");
-                Add(PackagingFormat.MacAppStore, "Sandboxed, signed package for App Store Connect.", PackagingAvailability.NotImplemented, "Mac App Store packaging requires signing (M0.4).", "M0.4");
+                {
+                    var (pa, pr) = MacDistributionCatalog.Pkg(ctx, dotNet: true);
+                    Add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, pa, pr);
+                    Add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, PackagingAvailability.NotApplicable,
+                        ".NET apps are incompatible with Mac App Store preparation in this version: they need JIT/unsigned-memory exceptions and a sandbox review that HCG does not perform. Use the .pkg or DMG for direct distribution.");
+                }
                 break;
 
             case TargetPlatform.Linux:
@@ -70,13 +100,157 @@ public static class PackagingCatalog
         return list;
     }
 
+    /// <summary>
+    /// Swift packages (SwiftPM) on macOS. A GUI product becomes a .app (and optionally the .app as ZIP or DMG); a
+    /// command-line product becomes a portable folder/ZIP. Never offered for local builds on Windows/Linux.
+    /// </summary>
+    /// <summary>
+    /// C/C++ builds for this host: the executable in a portable folder or ZIP (with the project's own shared libraries
+    /// and the runtime files the user listed), or — when the project builds a macOS app bundle — that .app and its ZIP.
+    /// Installers are not offered: HCG does not know what a native program needs installed.
+    /// </summary>
+    private static void EvaluateNative(PackagingContext ctx, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
+    {
+        const string notNative = "Not implemented for C/C++ builds in this version.";
+        if (ctx.Target != ctx.Host.Platform)
+        {
+            add(PackagingFormat.PortableFolder, "C/C++ projects are built for this computer's platform.", PackagingAvailability.RequiresDifferentHost,
+                $"Building {ctx.Target.DisplayName()} binaries needs a {ctx.Target.DisplayName()} toolchain; HCG builds C/C++ for {ctx.Host.Platform.DisplayName()} on this computer.", null);
+            return;
+        }
+        if (ctx.IsNativeMacBundle)
+        {
+            add(PackagingFormat.MacAppBundle, "The .app the project builds (MACOSX_BUNDLE), kept as built, verified and signed as the distribution setting says.", PackagingAvailability.Available, null, null);
+            add(PackagingFormat.PortableZip, "The .app compressed with ditto (keeps permissions, links and the signature).", PackagingAvailability.Available, null, null);
+            add(PackagingFormat.PortableFolder, "Loose executable.", PackagingAvailability.NotApplicable, "The project builds an app bundle; its executable runs from inside the .app.", null);
+        }
+        else
+        {
+            add(PackagingFormat.PortableFolder, "The executable, the project's own shared libraries it uses, the runtime files you listed and RUNTIME-DEPENDENCIES.txt.", PackagingAvailability.Available, null, null);
+            add(PackagingFormat.PortableZip, "The same folder as a ZIP with the executable bit recorded.", PackagingAvailability.Available, null, null);
+            if (ctx.Target == TargetPlatform.MacOS)
+                add(PackagingFormat.MacAppBundle, "App bundle.", PackagingAvailability.NotApplicable, "This target is a command-line executable. HCG does not wrap command-line programs in an .app; projects that build a GUI app bundle (MACOSX_BUNDLE) keep their own.", null);
+        }
+        foreach (var f in new[] { PackagingFormat.MacDmg, PackagingFormat.MacPkg, PackagingFormat.WindowsInstallerExe, PackagingFormat.LinuxAppImage, PackagingFormat.LinuxDeb })
+            add(f, f.DisplayName() + ".", PackagingAvailability.NotImplemented, notNative, null);
+    }
+
+    private static void EvaluateSwift(PackagingContext ctx, SwiftAppKind kind, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
+    {
+        var offMac = ctx.Host.Platform != TargetPlatform.MacOS;
+        const string hostReason = "Swift macOS apps are compiled with Xcode's toolchain and can only be built on a Mac.";
+        PackagingAvailability Mac() => offMac ? PackagingAvailability.RequiresDifferentHost : PackagingAvailability.Available;
+        string? MacReason() => offMac ? hostReason : null;
+        if (ctx.Target != TargetPlatform.MacOS)
+        {
+            add(PackagingFormat.MacAppBundle, "Swift packages are built for macOS.", PackagingAvailability.NotApplicable, "Select macOS as the target platform.", null);
+            return;
+        }
+        if (kind == SwiftAppKind.GuiApp)
+        {
+            add(PackagingFormat.MacAppBundle, "Name.app with Info.plist, the Swift executable, icon, SwiftPM resource bundles and an ad-hoc signature.", Mac(), MacReason(), null);
+            add(PackagingFormat.PortableZip, "The .app compressed with ditto (keeps permissions and the code signature) for sharing.", Mac(), MacReason(), null);
+            add(PackagingFormat.PortableFolder, "Loose executable folder.", PackagingAvailability.NotApplicable,
+                "SwiftUI/AppKit apps must run from an .app bundle (Info.plist, privacy keys, signature). Use the .app or its ZIP.", null);
+            if (offMac)
+                add(PackagingFormat.MacDmg, "Compressed disk image containing the .app and an Applications shortcut.", PackagingAvailability.RequiresDifferentHost, hostReason, null);
+            else if (ctx.Toolchains?.IsAvailable(ToolchainIds.Hdiutil) != true)
+                add(PackagingFormat.MacDmg, "Compressed disk image.", PackagingAvailability.MissingTool, "hdiutil was not detected on this Mac (it ships with macOS in /usr/bin).", null);
+            else
+                add(PackagingFormat.MacDmg, "Compressed disk image containing the .app and an Applications shortcut.", PackagingAvailability.Available, null, null);
+        }
+        else
+        {
+            add(PackagingFormat.PortableFolder, "Folder with the command-line executable and any SwiftPM resource bundles.", Mac(), MacReason(), null);
+            add(PackagingFormat.PortableZip, "The executable folder as ZIP with the executable bit recorded.", Mac(), MacReason(), null);
+            add(PackagingFormat.MacAppBundle, "Standard .app bundle.", PackagingAvailability.NotApplicable,
+                "This product is a command-line tool (no SwiftUI/AppKit entry point). Command-line tools are distributed as an executable, not an .app.", null);
+            add(PackagingFormat.MacDmg, "Disk image.", PackagingAvailability.NotApplicable, "DMG packaging requires an .app bundle.", null);
+        }
+        if (kind == SwiftAppKind.GuiApp)
+        {
+            var (pa, pr) = MacDistributionCatalog.Pkg(ctx, dotNet: false);
+            add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, pa, pr, null);
+            var (sa, sr) = MacDistributionCatalog.AppStore(ctx);
+            add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, sa, sr, null);
+        }
+        else
+        {
+            add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, PackagingAvailability.NotApplicable,
+                "This product is a command-line tool; the installer package in this version installs .app bundles into Applications.", null);
+            add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, PackagingAvailability.NotApplicable,
+                "The Mac App Store accepts applications, not command-line tools.", null);
+        }
+    }
+
+    /// <summary>
+    /// Electron apps: electron-builder produces the app; HCG runs its dir/zip/dmg targets and verifies them. Only the
+    /// combinations HCG implements (and has verified) are Available; electron-builder's other targets are listed with why.
+    /// </summary>
+    private static void EvaluateElectron(PackagingContext ctx, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
+    {
+        const string otherTargets = "electron-builder can produce this, but HCG does not run or verify that target in this version.";
+        switch (ctx.Target)
+        {
+            case TargetPlatform.MacOS when ctx.Host.Platform != TargetPlatform.MacOS:
+                foreach (var f in new[] { PackagingFormat.MacAppBundle, PackagingFormat.PortableZip, PackagingFormat.MacDmg })
+                    add(f, "macOS Electron app.", PackagingAvailability.RequiresDifferentHost,
+                        "HCG packages Electron apps for macOS on a Mac (electron-builder signs the app and builds the dmg with macOS tools).", null);
+                break;
+            case TargetPlatform.MacOS:
+                add(PackagingFormat.MacAppBundle, "The .app electron-builder builds (target dir), signed as the electron-builder configuration says (mac.identity).", PackagingAvailability.Available, null, null);
+                add(PackagingFormat.PortableZip, "electron-builder's zip target: the .app as a ZIP for sharing.", PackagingAvailability.Available, null, null);
+                if (ctx.Toolchains?.IsAvailable(ToolchainIds.Hdiutil) != true)
+                    add(PackagingFormat.MacDmg, "electron-builder's dmg target.", PackagingAvailability.MissingTool, "hdiutil was not detected on this Mac (it ships with macOS in /usr/bin).", null);
+                else
+                    add(PackagingFormat.MacDmg, "electron-builder's dmg target: a disk image with the app and an Applications shortcut.", PackagingAvailability.Available, null, null);
+                add(PackagingFormat.PortableFolder, "Loose folder.", PackagingAvailability.NotApplicable, "A macOS Electron app runs from its .app bundle. Use the .app or its ZIP.", null);
+                add(PackagingFormat.MacPkg, MacDistributionCatalog.PkgDescription, PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.MacAppStore, MacDistributionCatalog.AppStoreDescription, PackagingAvailability.NotImplemented, otherTargets + " (electron-builder's mas target needs a sandboxed build and App Store provisioning.)", null);
+                break;
+            case TargetPlatform.Linux when ctx.Host.Platform != TargetPlatform.Linux:
+                add(PackagingFormat.PortableFolder, "Linux Electron app.", PackagingAvailability.RequiresDifferentHost, "HCG packages Linux Electron apps on a Linux host.", null);
+                break;
+            case TargetPlatform.Linux:
+                add(PackagingFormat.PortableFolder, "electron-builder's unpacked app folder (target dir) with the app executable.", PackagingAvailability.Available, null, null);
+                add(PackagingFormat.PortableZip, "ZIP archive.", PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.LinuxAppImage, "AppImage.", PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.LinuxDeb, "Debian/Ubuntu package.", PackagingAvailability.NotImplemented, otherTargets, null);
+                add(PackagingFormat.LinuxRpm, "Fedora/RHEL package.", PackagingAvailability.NotImplemented, otherTargets, null);
+                break;
+            default:
+                add(PackagingFormat.WindowsInstallerExe, "Windows installer.", PackagingAvailability.NotImplemented, "Electron packaging for Windows is not implemented in HCG in this version.", null);
+                break;
+        }
+    }
+
     /// <summary>Formats that must also be produced because a selected format depends on them.</summary>
-    public static IReadOnlyList<PackagingFormat> WithDependencies(IEnumerable<PackagingFormat> selected)
+    public static IReadOnlyList<PackagingFormat> WithDependencies(IEnumerable<PackagingFormat> selected) => WithDependencies(selected, null);
+
+    /// <summary>
+    /// Formats that must also be produced because a selected format depends on them, in production order. For a
+    /// Swift GUI app the ZIP wraps the .app, so the bundle is produced first.
+    /// </summary>
+    public static IReadOnlyList<PackagingFormat> WithDependencies(IEnumerable<PackagingFormat> selected, BuildSettings? settings)
     {
         var set = selected.ToList();
-        if (set.Contains(PackagingFormat.MacDmg) && !set.Contains(PackagingFormat.MacAppBundle))
+        // Electron (macOS): the .app is always produced and verified; electron-builder builds the zip/dmg from it.
+        if (settings?.Electron is not null && settings.Platform == TargetPlatform.MacOS && !set.Contains(PackagingFormat.MacAppBundle))
             set.Insert(0, PackagingFormat.MacAppBundle);
-        // Bundles must exist before the DMG that wraps them.
-        return [.. set.Distinct().OrderBy(f => f == PackagingFormat.MacDmg ? 1 : 0)];
+        var swiftGui = settings?.Swift?.Kind == SwiftAppKind.GuiApp;
+        var needsBundle = set.Contains(PackagingFormat.MacDmg) || set.Contains(PackagingFormat.MacPkg) || set.Contains(PackagingFormat.MacAppStore)
+                          || (swiftGui && set.Contains(PackagingFormat.PortableZip))
+                          || (settings?.Native is { IsMacBundle: true } && set.Contains(PackagingFormat.PortableZip));
+        if (needsBundle && !set.Contains(PackagingFormat.MacAppBundle))
+            set.Insert(0, PackagingFormat.MacAppBundle);
+        // Bundles must exist before the DMG / ZIP that wraps them.
+        return [.. set.Distinct().OrderBy(f => f switch
+        {
+            PackagingFormat.MacAppBundle => 0,
+            PackagingFormat.MacDmg => 2,
+            PackagingFormat.MacPkg => 3,
+            PackagingFormat.MacAppStore => 4,
+            _ => 1,
+        })];
     }
 }

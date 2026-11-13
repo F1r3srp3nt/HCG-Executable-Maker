@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    Build identity: the git commit (and whether the working tree had uncommitted changes) is embedded in
+    HCG.ExecutableMaker.Core so the running app can show exactly which build it is (footer, Settings › About this build,
+    and `HCGExecutableMaker - -version`). HCG_SOURCE_REVISION overrides git (e.g. for builds from a source archive).
+  -->
+  <Target Name="HcgEmbedBuildIdentity" BeforeTargets="GetAssemblyAttributes" Condition="'$(MSBuildProjectName)' == 'HCG.ExecutableMaker.Core'">
+    <Exec Command="git rev-parse --short=12 HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low"
+          WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HCG_SOURCE_REVISION)' == ''">
+      <Output TaskParameter="ConsoleOutput" PropertyName="HcgCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="HcgGitExit" />
+    </Exec>
+    <Exec Command="git status --porcelain --untracked-files=no" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low"
+          WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' == '0'">
+      <Output TaskParameter="ConsoleOutput" PropertyName="HcgGitStatus" />
+    </Exec>
+    <PropertyGroup>
+      <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' != ''">$(HCG_SOURCE_REVISION)</HcgCommit>
+      <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' != '0'">unknown</HcgCommit>
+      <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' == '0' and '$(HcgGitStatus)' != ''">$(HcgCommit)+uncommitted</HcgCommit>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyMetadata Include="HcgCommit" Value="$(HcgCommit)" />
+      <AssemblyMetadata Include="HcgBuildDate" Value="$([System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))" />
+    </ItemGroup>
+  </Target>
+</Project>

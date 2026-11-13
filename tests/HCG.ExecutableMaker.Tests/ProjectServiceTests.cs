@@ -53,6 +53,28 @@ public class ProjectServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Replacing_the_source_keeps_the_project_and_swaps_its_files_completely()
+    {
+        _t.Write("v1/App.csproj", """<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>""");
+        _t.Write("v1/Old.cs", "class Old {}");
+        var imported = (await _service.ImportDirectoryAsync(_t.Combine("v1"), null, CancellationToken.None)).Project;
+        _t.Write("v2/App.csproj", """<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>""");
+        _t.Write("v2/New.cs", "class New {}");
+
+        await _service.ReplaceSourceAsync(imported, _t.Combine("v2"), CancellationToken.None);
+        Assert.True(File.Exists(Path.Combine(imported.SourceDirectory, "New.cs")));
+        Assert.False(File.Exists(Path.Combine(imported.SourceDirectory, "Old.cs"))); // nothing of the previous source remains
+        Assert.False(Directory.Exists(Path.Combine(imported.WorkspacePath, "source.old")));
+        Assert.False(Directory.Exists(Path.Combine(imported.WorkspacePath, "source.next")));
+        Assert.Single(await _projects.ListAsync());                                    // same project, not another one
+        Assert.NotNull((await _projects.GetAsync(imported.Id))!.Analysis);
+        Assert.True(File.Exists(_t.Combine("v2/New.cs")));                              // the new source folder is left alone
+
+        var rogue = new ProjectRecord { Id = Guid.NewGuid(), Name = "x", SourceKind = ProjectSourceKind.Directory, SourceLocation = "/x", WorkspacePath = _t.Combine("v2"), ImportedAt = DateTimeOffset.UtcNow };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.ReplaceSourceAsync(rogue, _t.Combine("v1"), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Refuses_to_delete_anything_outside_the_workspace_directory()
     {
         var precious = _t.Combine("precious");

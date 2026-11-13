@@ -10,8 +10,8 @@ is never modified by this process and was not accessed during M0.1.** This docum
 | Windows direct distribution — portable self-contained ZIP | ✅ yes (from any host) | — |
 | Windows direct distribution — installer (.exe/.msi) | ❌ | M0.2 (Inno Setup / WiX), Authenticode signing (M0.4) |
 | Microsoft Store (MSIX) | ❌ | M0.2 packaging + M0.4 signing, Partner Center account |
-| macOS direct distribution — `.app` (+ `.dmg` on a Mac) | ✅ unsigned | Developer ID signing + notarization (M0.4) for a no-warning launch |
-| Mac App Store | ❌ | App Sandbox entitlements, App Store signing, `.pkg` (M0.3/M0.4) |
+| macOS direct distribution — `.app` (+ `.dmg` on a Mac) | ✅ unsigned (.NET) | Developer ID signing + notarization are implemented for Swift apps only (docs/MACOS-DISTRIBUTION.md) |
+| Mac App Store | ❌ (.NET) | Incompatible for .NET apps in this version; Swift apps: see docs/MACOS-DISTRIBUTION.md |
 
 ## Procedure (M0.1)
 

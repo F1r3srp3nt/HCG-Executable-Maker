@@ -13,13 +13,19 @@ public partial class App : Application
 {
     public static IServiceProvider? Services { get; private set; }
 
+    /// <summary>
+    /// Service replacements for the headless UI driver (tools/ui-driver), which runs the real views and view models but
+    /// answers the OS file pickers and dialogs itself. Never set by the desktop app.
+    /// </summary>
+    public static Action<IServiceCollection>? ServiceOverrides { get; set; }
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
     {
         var paths = AppPaths.CreateDefault();
         paths.EnsureCreated();
-        var services = Composition.Build(paths);
+        var services = Composition.Build(paths, ServiceOverrides);
         Services = services;
         DataTemplates.Add(new ViewLocator());
 

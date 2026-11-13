@@ -35,6 +35,21 @@ if (args.Length < 2)
     return 2;
 }
 var repo = Path.GetFullPath(args[0]);
+// The build runs on an imported copy without .git: pass the commit so the app can show exactly which build it is.
+if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HCG_SOURCE_REVISION")))
+{
+    try
+    {
+        var git = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git") { ArgumentList = { "-C", repo, "rev-parse", "--short=12", "HEAD" }, RedirectStandardOutput = true, UseShellExecute = false })!;
+        var commit = git.StandardOutput.ReadToEnd().Trim();
+        git.WaitForExit();
+        var status = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git") { ArgumentList = { "-C", repo, "status", "--porcelain", "--untracked-files=no" }, RedirectStandardOutput = true, UseShellExecute = false })!;
+        var dirty = status.StandardOutput.ReadToEnd().Trim().Length > 0;
+        status.WaitForExit();
+        if (git.ExitCode == 0 && commit.Length > 0) Environment.SetEnvironmentVariable("HCG_SOURCE_REVISION", commit + (dirty ? "+uncommitted" : ""));
+    }
+    catch (System.ComponentModel.Win32Exception) { /* git not installed: the app reports commit "unknown" */ }
+}
 var output = Path.GetFullPath(args[1]);
 string? Option(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
 var targets = (Option("--targets") ?? "osx-arm64,osx-x64,win-x64").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

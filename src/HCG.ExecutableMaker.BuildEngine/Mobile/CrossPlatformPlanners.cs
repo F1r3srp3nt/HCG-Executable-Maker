@@ -13,7 +13,7 @@ public static class BundletoolPlanner
 
     public static MobileStep BuildApks(MobilePlanInput input, string aabPath, string apksPath)
     {
-        var java = input.Toolchains.Find(ToolchainIds.Jdk)?.ExecutablePath ?? throw new BuildValidationException("A JDK is required to run bundletool.");
+        var java = MobileArgs.InspectedJdk(input.Toolchains)?.JavaExecutable ?? throw new BuildValidationException("A JDK is required to run bundletool. Choose one in Toolchains › Java.");
         var jar = input.Toolchains.Find(ToolchainIds.Bundletool) is { IsAvailable: true, ExecutablePath: { } j } ? j
             : throw new BuildValidationException("bundletool was not found. Set BUNDLETOOL_JAR to a bundletool-all-*.jar downloaded from github.com/google/bundletool/releases.");
         var ks = input.Keystore ?? throw new BuildValidationException("The HCG debug keystore was not prepared.");
@@ -36,7 +36,7 @@ public static class BundletoolPlanner
         return new MobileStep(BuildStage.Packaging, "bundletool build-apks", new ProcessSpec
         {
             Executable = java, Arguments = args, WorkingDirectory = input.WorkDirectory,
-            Environment = MobileArgs.With(input.Environment, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
+            Environment = MobileArgs.ToolchainEnvironment(input.Environment, input.Toolchains, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
         });
     }
 }
@@ -98,10 +98,7 @@ public static class FlutterPlanner
                 throw new BuildValidationException($"{o.Output.DisplayName()} is not supported for Flutter.");
         }
         args.Add("--suppress-analytics");
-        var java = input.Toolchains.Find(ToolchainIds.Jdk)?.ExecutablePath;
-        var sdk = input.Toolchains.Find(ToolchainIds.AndroidSdk)?.ExecutablePath;
-        var env = MobileArgs.With(input.Environment,
-            ("JAVA_HOME", MobileArgs.JavaHome(java)), ("ANDROID_HOME", sdk), ("ANDROID_SDK_ROOT", sdk),
+        var env = MobileArgs.ToolchainEnvironment(input.Environment, input.Toolchains,
             ("GRADLE_USER_HOME", Path.Combine(input.ToolHomeDirectory, "gradle")), ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android")),
             ("FLUTTER_SUPPRESS_ANALYTICS", "true"), ("CI", "true"));
         Directory.CreateDirectory(Path.Combine(input.ToolHomeDirectory, "gradle"));
@@ -166,13 +163,61 @@ public static class MauiPlanner
         if (android)
         {
             if (input.Toolchains.Find(ToolchainIds.AndroidSdk)?.ExecutablePath is { } sdk) args.Add("-p:AndroidSdkDirectory=" + sdk);
-            if (MobileArgs.JavaHome(input.Toolchains.Find(ToolchainIds.Jdk)?.ExecutablePath) is { } jh) args.Add("-p:JavaSdkDirectory=" + jh);
+            if (MobileArgs.InspectedJdk(input.Toolchains)?.Home is { } jh) args.Add("-p:JavaSdkDirectory=" + jh);
         }
         args.AddRange(["-p:UseSharedCompilation=false", "-nodeReuse:false"]);
         return new MobilePlan([new MobileStep(BuildStage.Compiling, $"dotnet {args[0]} -f {tfm}", new ProcessSpec
         {
             Executable = dotnet, Arguments = args, WorkingDirectory = projectDir,
-            Environment = MobileArgs.With(input.Environment, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
+            Environment = MobileArgs.ToolchainEnvironment(input.Environment, input.Toolchains, ("ANDROID_USER_HOME", Path.Combine(input.ToolHomeDirectory, "android"))),
         })], outputs) { Notes = notes };
+    }
+}
+
+/// <summary>
+/// Capacitor apps: install the npm dependencies, build the web app with its own script, copy the build into the native
+/// project with Capacitor's CLI (cap sync), then build that native project with the Gradle or Xcode planner.
+/// </summary>
+public static class CapacitorPlanner
+{
+    public static MobilePlan Plan(MobilePlanInput input)
+    {
+        var o = input.Options;
+        var cap = input.Analysis.Capacitor ?? throw new BuildValidationException("This is not a Capacitor project.");
+        var android = o.Output.Platform() == TargetPlatform.Android;
+        var platform = android ? "android" : "ios";
+        if (android ? !cap.HasAndroid : !cap.HasIos)
+            throw new BuildValidationException($"The Capacitor app has no {platform}/ project. Add it with npx cap add {platform} (or with HCG's Validate step for a converted project).");
+        if (cap.BuildScript is null) throw new BuildValidationException("package.json has no build script, so the web app cannot be built before syncing.");
+        var node = input.Toolchains.NodeInstallations.FirstOrDefault(n => int.TryParse(n.Version.TrimStart('v').Split('.')[0], out var major) && major >= 22)
+                   ?? throw new BuildValidationException("Capacitor 8 needs Node.js 22 or newer, and none was found.");
+        if (node.NpmCli is null) throw new BuildValidationException($"npm was not found next to Node.js {node.Version} ({node.NodePath}).");
+        var root = MobileArgs.Inside(input.SourceDirectory, cap.Root);
+        var env = new Dictionary<string, string>(Electron.ElectronBuildPlanner.Environment(input.Environment, node)) { ["CI"] = "true", ["CAPACITOR_TELEMETRY"] = "false" };
+        ProcessSpec Npm(params string[] args) => new()
+        {
+            Executable = node.NodePath, Arguments = [node.NpmCli, .. args], WorkingDirectory = root, Environment = env, Timeout = TimeSpan.FromMinutes(20),
+        };
+        var steps = new List<MobileStep>
+        {
+            new(BuildStage.Restoring, cap.HasLockFile ? "Install dependencies (npm ci)" : "Install dependencies (npm install)",
+                Npm(cap.HasLockFile ? ["ci", "--no-audit", "--no-fund"] : ["install", "--no-audit", "--no-fund"])),
+            new(BuildStage.Compiling, $"Build the web app (npm run {cap.BuildScript})", Npm("run", cap.BuildScript)),
+            new(BuildStage.Compiling, $"Copy the web build into {platform}/ (cap sync {platform})", new ProcessSpec
+            {
+                Executable = node.NodePath, Arguments = [Path.Combine(root, "node_modules", "@capacitor", "cli", "bin", "capacitor"), "sync", platform],
+                WorkingDirectory = root, Environment = env, Timeout = TimeSpan.FromMinutes(10),
+            }),
+        };
+        var nativeInput = input with
+        {
+            Analysis = input.Analysis with { Framework = android ? MobileFramework.NativeAndroid : MobileFramework.NativeIos },
+            Options = o with { Framework = android ? MobileFramework.NativeAndroid : MobileFramework.NativeIos },
+        };
+        var native = android ? GradlePlanner.Plan(nativeInput) : XcodePlanner.Plan(nativeInput);
+        return new MobilePlan([.. steps, .. native.Steps], native.Outputs)
+        {
+            Notes = [$"Capacitor app: the web build ({cap.WebDir}/) is copied into the {platform}/ project before the native build.", .. native.Notes],
+        };
     }
 }

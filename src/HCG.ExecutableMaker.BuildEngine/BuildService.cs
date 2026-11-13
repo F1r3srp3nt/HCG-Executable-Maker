@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using HCG.ExecutableMaker.BuildEngine.Electron;
+using HCG.ExecutableMaker.BuildEngine.Swift;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
 using HCG.ExecutableMaker.Packaging;
@@ -43,8 +45,10 @@ public sealed class BuildService(
     PackagingRegistry packagers,
     IAppPaths paths,
     TimeProvider time,
-    ILogger<BuildService>? logger = null)
+    ILogger<BuildService>? logger = null,
+    IExecutableLocator? executables = null)
 {
+    private readonly IExecutableLocator _executables = executables ?? new ExecutableLocator();
     public const string OutputMarkerFile = ".hcg-build.json";
     private readonly ILogger _logger = logger ?? NullLogger<BuildService>.Instance;
 
@@ -75,12 +79,15 @@ public sealed class BuildService(
         var logGate = new object();
         void Log(BuildLogKind kind, string text)
         {
+            // Tools print what they are given (registry URLs with tokens, Authorization headers): credentials never reach the log.
+            text = Security.SecretRedactor.Redact(text);
             var line = new BuildLogLine(time.GetUtcNow(), kind, text);
             lock (logGate) logWriter.WriteLine($"[{line.Timestamp:HH:mm:ss}] {(kind is BuildLogKind.Output ? "  " : kind.ToString().ToUpperInvariant() + " ")}{text}");
             observer.OnLog(line);
         }
         void AddMessage(BuildMessage m)
         {
+            m = m with { Text = Security.SecretRedactor.Redact(m.Text) };
             lock (build.Messages)
             {
                 build.Messages.Add(m);
@@ -109,29 +116,157 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.Preparing, "Validating configuration and toolchains");
             Log(BuildLogKind.Info, $"HCG Executable Maker {HostInfo.ProductVersion} — build {build.Id}");
             Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
-            Log(BuildLogKind.Info, $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} ({settings.RuntimeIdentifier}), {settings.Configuration}, {(settings.SelfContained ? "self-contained" : "framework-dependent")}{(settings.SingleFile ? ", single-file" : "")}");
+            Log(BuildLogKind.Info, settings.Electron is { } el
+                ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · Electron app {(el.ProjectDirectory.Length == 0 ? "(root)" : el.ProjectDirectory)} · electron-builder --{el.Platform} {string.Join(' ', el.Targets)}{(el.PackagingScript is null ? "" : $" (following script \"{el.PackagingScript}\")")}"
+                : settings.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } ts } theosOpts
+                ? $"Target: jailbroken iOS · Theos package {(theosOpts.ProjectDirectory.Length == 0 ? "(root)" : theosOpts.ProjectDirectory)} · {ts.Label} · iOS {ts.DeploymentTarget ?? "(Theos default)"}+ · SDK {ts.SdkVersion ?? "latest"} · {string.Join(" ", ts.Architectures)} · output .deb (not an IPA)"
+                : settings.Native is { } natOpts
+                ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · C/C++ {natOpts.Kind} project {(natOpts.ProjectDirectory.Length == 0 ? "(root)" : natOpts.ProjectDirectory)} · target {natOpts.Target} ({natOpts.BuildType}){(natOpts.Preset is { } presetName ? $" · preset {presetName}" : "")}"
+                : settings.Swift is { } sw
+                ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()}, {settings.Configuration} · Swift package {(sw.PackageDirectory.Length == 0 ? "(root)" : sw.PackageDirectory)} · product {sw.Product} ({(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")})"
+                : $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} ({settings.RuntimeIdentifier}), {settings.Configuration}, {(settings.SelfContained ? "self-contained" : "framework-dependent")}{(settings.SingleFile ? ", single-file" : "")}");
             Log(BuildLogKind.Warning, $"Isolation: {worker.Description}");
 
             var report = await toolchains.GetAsync(cancellationToken: overall.Token).ConfigureAwait(false);
             var host = report.Host;
             build.ToolchainVersions["host"] = $"{host.DisplayName} ({host.OsDescription})";
-            var sdk = report.Find(ToolchainIds.DotNetSdk);
-            if (sdk is not { IsAvailable: true, ExecutablePath: not null })
+            if (host.Platform == TargetPlatform.MacOS)
             {
-                Fail(BuildStatus.Failed, "The .NET SDK was not found. Install the .NET SDK and refresh the Toolchains page.");
-                return build;
+                // Every tool this build starts inherits HCG's environment, so this is the Xcode/CLT the whole build uses.
+                var developerDir = Environment.GetEnvironmentVariable("DEVELOPER_DIR");
+                build.ToolchainVersions["developer-dir"] = developerDir ?? "xcode-select";
+                Log(BuildLogKind.Info, developerDir is { Length: > 0 }
+                    ? $"Developer directory: {developerDir} (DEVELOPER_DIR, applies to every tool this build runs; the system setting is unchanged)"
+                    : "Developer directory: the system setting (xcode-select -p)");
+                if (report.Xcode is { } x)
+                    Log(BuildLogKind.Info, $"Xcode: {x.Diagnosis}");
             }
-            build.ToolchainVersions["dotnet-sdk"] = sdk.Version ?? "unknown";
+            var isSwift = settings.Swift is not null;
+            var isElectron = settings.Electron is not null;
+            var isTheos = settings.Native?.Kind == NativeProjectKind.Theos;
+            var isNative = settings.Native is not null && !isTheos;
+            Native.NativeBuildPlanner.Tools? nativeTools = null;
+            Native.TheosBuildPlanner.Tools? theosTools = null;
+            NativeProjectInfo? theosProject = null;
+            ToolchainInfo? sdk = null, swiftTool = null;
+            NodeInstallation? node = null;
+            string? electronDir = null;
+            ElectronBuildPlanner.Manifest? nodeManifest = null;
+            if (isElectron)
+            {
+                var source = PathGuard.GetRealPath(request.Project.SourceDirectory);
+                ElectronBuildPlanner.Validate(settings, host, source);
+                electronDir = ElectronBuildPlanner.ProjectDirectory(settings, source);
+                nodeManifest = ElectronBuildPlanner.ReadManifest(electronDir);
+                string detail;
+                (node, detail) = HCG.ExecutableMaker.ProjectInspection.Node.NodeCapabilities.SelectNode(report, nodeManifest.EnginesNode);
+                if (node is null)
+                {
+                    Fail(BuildStatus.Failed, detail);
+                    return build;
+                }
+                if (node.NpmCli is null)
+                {
+                    Fail(BuildStatus.Failed, $"npm was not found next to Node.js {node.Version} ({node.NodePath}). Reinstall Node.js, which includes npm.");
+                    return build;
+                }
+                if (nodeManifest.EnginesNpm is { } wantNpm && node.NpmVersion is { } haveNpm
+                    && HCG.ExecutableMaker.ProjectInspection.Node.NodeVersionRange.Check(haveNpm, wantNpm) == HCG.ExecutableMaker.ProjectInspection.Node.NodeVersionRange.Result.NotSatisfied)
+                {
+                    Fail(BuildStatus.Failed, $"The project requires npm {wantNpm}; Node.js {node.Version} ships npm {haveNpm}.");
+                    return build;
+                }
+                build.ToolchainVersions["node"] = $"{node.Version} ({node.NodePath})";
+                build.ToolchainVersions["npm"] = node.NpmVersion ?? "unknown";
+                Log(BuildLogKind.Info, $"Node.js: {detail}{(nodeManifest.EnginesNode is null ? "" : $"; package.json requires {nodeManifest.EnginesNode}")}");
+                Log(BuildLogKind.Info, $"npm: {node.NpmVersion ?? "(version unknown)"} ({node.NpmCli})");
+            }
+            else if (isTheos)
+            {
+                Native.TheosBuildPlanner.Validate(settings, host, PathGuard.GetRealPath(request.Project.SourceDirectory));
+                theosProject = request.Project.Analysis?.Native?.Projects.FirstOrDefault(p => p.Kind == NativeProjectKind.Theos && p.Directory == settings.Native!.ProjectDirectory)
+                               ?? throw new BuildValidationException("This Theos project is not in the workspace's inspection. Re-inspect the project.");
+                var chosen = settings.Native!.TheosScheme!;
+                var scheme = theosProject.Theos?.Schemes.FirstOrDefault(x => x.SelectorVariable == chosen.SelectorVariable && x.SelectorValue == chosen.SelectorValue && x.PackageScheme == chosen.PackageScheme)
+                             ?? throw new BuildValidationException($"The project does not define the configuration {chosen.Label}.");
+                var assessment = HCG.ExecutableMaker.ProjectInspection.Native.NativeCapabilities.EvaluateTheos(theosProject, scheme, report);
+                foreach (var req in assessment.Requirements) Log(req.IsSatisfied ? BuildLogKind.Info : BuildLogKind.Error, $"{(req.IsSatisfied ? "✓" : "✗")} {req.DisplayName}: {req.Detail}");
+                if (assessment.Support != SupportLevel.Supported)
+                {
+                    Fail(BuildStatus.Failed, assessment.Summary + " " + string.Join(" ", assessment.Remediation));
+                    return build;
+                }
+                theosTools = Native.TheosBuildPlanner.Tools.From(report)!;
+                foreach (var id in new[] { ToolchainIds.Theos, ToolchainIds.TheosMake, ToolchainIds.Ldid, ToolchainIds.Perl, ToolchainIds.TheosIosToolchain })
+                    if (report.Find(id) is { IsAvailable: true } t) build.ToolchainVersions[id] = $"{t.Version ?? "?"} ({t.ExecutablePath})";
+                Log(BuildLogKind.Info, $"Theos package build: make package FINALPACKAGE=1{(chosen.SelectorVariable is { } sv ? $" {sv}={chosen.SelectorValue}" : "")}, in a copy of the project " +
+                                       "(the imported source is not written to). HCG never runs make install, never connects to a device and never resprings.");
+            }
+            else if (isNative)
+            {
+                var nat = settings.Native!;
+                Native.NativeBuildPlanner.Validate(settings, host, PathGuard.GetRealPath(request.Project.SourceDirectory));
+                nativeTools = Native.NativeBuildPlanner.Tools.From(report);
+                if (nat.Kind == NativeProjectKind.Make && nativeTools.Make is null)
+                {
+                    Fail(BuildStatus.Failed, "make was not found. " + (report.Find(ToolchainIds.Make)?.InstallHint ?? "Install make, then press Refresh on the Toolchains page."));
+                    return build;
+                }
+                if (nat.Kind != NativeProjectKind.Make && nativeTools.CMake is null)
+                {
+                    Fail(BuildStatus.Failed, "CMake 3.20 or later was not found. " + (report.Find(ToolchainIds.CMake)?.InstallHint ?? "Install CMake, then press Refresh on the Toolchains page."));
+                    return build;
+                }
+                foreach (var id in new[] { ToolchainIds.CMake, ToolchainIds.Ninja, ToolchainIds.Make, ToolchainIds.CCompiler, ToolchainIds.CxxCompiler, ToolchainIds.MsvcTools })
+                    if (report.Find(id) is { IsAvailable: true } t) build.ToolchainVersions[id] = $"{t.Version ?? "?"} ({t.ExecutablePath})";
+                Log(BuildLogKind.Info, nat.Kind == NativeProjectKind.Make
+                    ? $"make: {nativeTools.Make}. The project is copied into HCG's build folder and built there; the imported source is not written to."
+                    : $"CMake: {nativeTools.CMake}; generator: {(nat.Preset is { } pr ? $"from preset {pr}" : Native.NativeBuildPlanner.ChooseGenerator(nativeTools, null) ?? "CMake's default")}. Build folder: HCG's own (outside the imported source)." +
+                      (nat.AllowDownloads ? " Downloads by FetchContent are ALLOWED for this project." : " FetchContent downloads are blocked (FETCHCONTENT_FULLY_DISCONNECTED=ON)."));
+            }
+            else if (isSwift)
+            {
+                if (host.Platform != TargetPlatform.MacOS)
+                {
+                    Fail(BuildStatus.Failed, $"Swift macOS apps can only be built on a Mac. This computer runs {host.Platform.DisplayName()}.");
+                    return build;
+                }
+                swiftTool = report.Find(ToolchainIds.Swift);
+                if (swiftTool is not { IsAvailable: true, ExecutablePath: not null })
+                {
+                    Fail(BuildStatus.Failed, "The Swift compiler was not found. " + HCG.ExecutableMaker.ProjectInspection.Swift.SwiftCapabilities.DeveloperDirHint);
+                    return build;
+                }
+                build.ToolchainVersions["swift"] = swiftTool.Version ?? "unknown";
+                if (report.Find(ToolchainIds.MacOSSdk) is { IsAvailable: true, Version: { } sdkVersion }) build.ToolchainVersions["macos-sdk"] = sdkVersion;
+                if (report.Find(ToolchainIds.MacOSVersion) is { IsAvailable: true, Version: { } macVersion }) build.ToolchainVersions["macos"] = macVersion;
+                if (report.Find(ToolchainIds.XcodeCommandLineTools) is { IsAvailable: true, ExecutablePath: { } devDir }) build.ToolchainVersions["developer-dir"] = devDir;
+                SwiftBuildPlanner.Validate(settings, host.Platform);
+                SwiftContractPlanner.Validate(settings);
+            }
+            else
+            {
+                sdk = report.Find(ToolchainIds.DotNetSdk);
+                if (sdk is not { IsAvailable: true, ExecutablePath: not null })
+                {
+                    Fail(BuildStatus.Failed, "The .NET SDK was not found. Install the .NET SDK and refresh the Toolchains page.");
+                    return build;
+                }
+                build.ToolchainVersions["dotnet-sdk"] = sdk.Version ?? "unknown";
+                DotNetBuildPlanner.Validate(settings);
+            }
             if (report.Find(ToolchainIds.Git) is { IsAvailable: true, Version: { } gitVersion }) build.ToolchainVersions["git"] = gitVersion;
-
-            DotNetBuildPlanner.Validate(settings);
             var scrub = worker.CreateEnvironment();
             if (scrub.RemovedNames.Count > 0)
                 Log(BuildLogKind.Info, $"Removed {scrub.RemovedNames.Count} sensitive environment variable(s) from the build environment: {string.Join(", ", scrub.RemovedNames)}");
 
             // Icons are generated before compilation so the Windows icon can be embedded.
             GeneratedIcons? icons = null;
-            if (settings.Identity.IconSourcePath is { } iconSource)
+            if ((isNative || isTheos) && settings.Identity.IconSourcePath is not null)
+                Log(BuildLogKind.Warning, "The icon chosen in HCG is not used for C/C++ builds: the executable is packaged as the project built it (a project's own .app keeps its own icon).");
+            else if (isElectron && settings.Identity.IconSourcePath is not null)
+                Log(BuildLogKind.Warning, "The icon chosen in HCG is not used for Electron apps: electron-builder takes the icon from its configuration (mac.icon / buildResources).");
+            else if (settings.Identity.IconSourcePath is { } iconSource)
             {
                 Log(BuildLogKind.Info, $"Processing icon {Path.GetFileName(iconSource)}");
                 icons = IconGenerator.Generate(iconSource, Path.Combine(buildDir, "icons"), "AppIcon",
@@ -145,15 +280,91 @@ public sealed class BuildService(
             // Real (symlink-free) paths only: see PathGuard.GetRealPath.
             var publishDir = Path.Combine(PathGuard.GetRealPath(buildDir), "publish");
             var sourceDir = PathGuard.GetRealPath(request.Project.SourceDirectory);
-            var steps = DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
-                settings, sourceDir, sdk.ExecutablePath, publishDir, host.Platform,
-                icons?.IcoPath, scrub.Environment));
+            // SwiftPM scratch space lives in HCG's per-build folder, never inside the imported source.
+            var swiftScratch = Path.Combine(PathGuard.GetRealPath(buildDir), "swiftpm");
+            // electron-builder writes into HCG's per-build folder (never into the imported source's release/dist folder).
+            var electronOut = Path.Combine(PathGuard.GetRealPath(buildDir), "electron-out");
+            var nativeWork = Path.Combine(PathGuard.GetRealPath(buildDir), "native");
+            Native.NativeBuildPlanner.Prepared? nativePrepared = null;
+            Native.NativeBuildPlanner.PlanInput? nativeInput = null;
+            Native.TheosBuildPlanner.Prepared? theosPrepared = null;
+            if (isTheos)
+            {
+                observer.OnStage(BuildStage.Preparing, "Copying the project into the build folder for this configuration");
+                theosPrepared = Native.TheosBuildPlanner.Prepare(settings, sourceDir, nativeWork, theosProject!.Theos!.UsesParentDirectory, overall.Token);
+                Log(BuildLogKind.Info, $"Theos build folder ({settings.Native!.TheosScheme!.Label}): {theosPrepared.WorkRoot}" +
+                                       (theosProject.Theos.UsesParentDirectory ? " — the whole repository was copied, because the Makefiles use paths outside the project folder." : "") +
+                                       (theosPrepared.IsTemporary ? " — a private temporary folder, because HCG's build folder path contains a space, which Theos' makefiles cannot handle." : ""));
+            }
+            if (isNative)
+            {
+                nativeInput = new Native.NativeBuildPlanner.PlanInput(settings, sourceDir, nativeWork, nativeTools!, scrub.Environment);
+                nativePrepared = Native.NativeBuildPlanner.Prepare(nativeInput, overall.Token);
+                if (settings.Native!.Kind == NativeProjectKind.Sources)
+                    Log(BuildLogKind.Info, "Generated build configuration (in HCG's build folder):\n" + Native.NativeBuildPlanner.GeneratedCMakeLists(settings.Native, nativePrepared.ProjectDirectory));
+            }
+            // A Swift packaging contract (AppPackaging.json): re-read it (it must still be the confirmed file), locate
+            // the tools its prebuild steps need, and run those steps before swift build.
+            SwiftPackagingContract? contract = null;
+            var helpersDir = Path.Combine(PathGuard.GetRealPath(buildDir), "helpers");
+            var prebuild = new List<BuildStep>();
+            if (isSwift && settings.Swift!.PackagingContract is not null)
+            {
+                string? contractError;
+                (contract, contractError) = SwiftContractPlanner.Reload(sourceDir, settings.Swift);
+                if (contract is null)
+                {
+                    Fail(BuildStatus.Failed, contractError!);
+                    return build;
+                }
+                Log(BuildLogKind.Info, $"Packaging contract {contract.Path} (SHA-256 {contract.Sha256[..12]}…, unchanged since it was confirmed): " +
+                    $"{contract.Prebuild.Count} prebuild step(s), {contract.Helpers.Count} helper(s), {contract.Resources.Count} resource(s)");
+                var (tools, toolError) = await SwiftContractPlanner.ResolveToolsAsync(contract, _executables, async (spec, ct) =>
+                {
+                    var output = new StringBuilder();
+                    var r = await worker.RunAsync(spec, (_, line) => { lock (output) output.AppendLine(line); }, ct).ConfigureAwait(false);
+                    return (r.ExitCode, output.ToString());
+                }, scrub.Environment, overall.Token).ConfigureAwait(false);
+                if (toolError is not null)
+                {
+                    Fail(BuildStatus.Failed, toolError);
+                    return build;
+                }
+                foreach (var tool in tools)
+                {
+                    build.ToolchainVersions[tool.Name] = $"{tool.Version ?? "version not checked"} ({tool.Path})";
+                    Log(BuildLogKind.Info, $"{tool.Name}: {tool.Version ?? "found"} ({tool.Path})");
+                }
+                if (Directory.Exists(helpersDir)) Directory.Delete(helpersDir, recursive: true);
+                Directory.CreateDirectory(helpersDir);
+                prebuild.AddRange(SwiftContractPlanner.PlanPrebuild(contract, sourceDir, helpersDir, tools, scrub.Environment, _executables));
+            }
+            var steps = isTheos
+                ? [Native.TheosBuildPlanner.Plan(settings, theosPrepared!, theosTools!, scrub.Environment)]
+                : isNative
+                ? Native.NativeBuildPlanner.Plan(nativeInput!, nativePrepared!)
+                : isElectron
+                ? ElectronBuildPlanner.Plan(new ElectronBuildPlanner.PlanInput(settings, sourceDir, node!, electronOut, ElectronBuildPlanner.Environment(scrub.Environment, node!)))
+                : isSwift
+                ? SwiftBuildPlanner.Plan(new SwiftBuildPlanner.PlanInput(settings, sourceDir, swiftTool!.ExecutablePath!, swiftScratch, scrub.Environment))
+                : DotNetBuildPlanner.Plan(new DotNetBuildPlanner.PlanInput(
+                    settings, sourceDir, sdk!.ExecutablePath!, publishDir, host.Platform,
+                    icons?.IcoPath, scrub.Environment));
+            if (prebuild.Count > 0) steps = [.. prebuild, .. steps];
 
-            var parser = new MsBuildOutputParser(); // shared across steps: MSBuild repeats diagnostics in build and publish
+            // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
+            IBuildOutputParser parser = isNative || isTheos ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
+            var captured = new List<string>();
             foreach (var step in steps)
             {
                 overall.Token.ThrowIfCancellationRequested();
                 observer.OnStage(step.Stage, step.Title);
+                var missingInput = step.RequiredFiles.FirstOrDefault(r => !File.Exists(r.Path));
+                if (missingInput.Path is not null)
+                {
+                    Fail(BuildStatus.Failed, missingInput.Message);
+                    return build;
+                }
                 ProcessResult result = null!;
                 for (var attempt = 1; attempt <= 1 + MaxTransientRetries; attempt++)
                 {
@@ -164,13 +375,14 @@ public sealed class BuildService(
                     Log(BuildLogKind.Command, step.Process.DisplayCommand);
                     result = await worker.RunAsync(step.Process, (stream, text) =>
                     {
+                        if (step.CaptureStdout && stream == OutputStream.StdOut) lock (captured) captured.Add(text);
                         if (IsTransientFileLock(text)) transientLock = true;
                         var message = attemptParser.Parse(text);
                         Log(message?.Severity switch
                         {
                             DiagnosticSeverity.Error => BuildLogKind.Error,
                             DiagnosticSeverity.Warning => BuildLogKind.Warning,
-                            _ => stream == OutputStream.StdErr ? BuildLogKind.Error : BuildLogKind.Output,
+                            _ => stream == OutputStream.StdErr && !step.StdErrIsProgress ? BuildLogKind.Error : BuildLogKind.Output,
                         }, text);
                         if (message is not null) AddMessage(message);
                     }, overall.Token).ConfigureAwait(false);
@@ -202,8 +414,81 @@ public sealed class BuildService(
                 Log(BuildLogKind.Success, $"{step.Title} completed in {result.Duration.TotalSeconds:F1}s");
             }
 
-            observer.OnStage(BuildStage.VerifyingOutput, "Verifying publish output");
-            var exeName = LocateExecutable(publishDir, request.AssemblyName, settings.Platform);
+            observer.OnStage(BuildStage.VerifyingOutput, isElectron ? "Verify: locate the app electron-builder produced" : "Verifying publish output");
+            string? exeName;
+            var packagingInput = publishDir;
+            if (isTheos)
+            {
+                var deb = Native.TheosBuildPlanner.Locate(theosPrepared!);
+                Directory.CreateDirectory(publishDir);
+                var staged = Path.Combine(publishDir, Path.GetFileName(deb));
+                File.Copy(deb, staged, overwrite: true);
+                Log(BuildLogKind.Info, $"Theos package: {Path.GetFileName(deb)} ({new FileInfo(deb).Length:N0} bytes). It is checked in the packaging stage: metadata, install prefix, payload and binaries.");
+                exeName = Path.GetFileName(deb);
+            }
+            else if (isNative)
+            {
+                var located = Native.NativeBuildPlanner.Locate(settings, nativePrepared!);
+                Log(BuildLogKind.Info, "Build output: " + located.Description);
+                var outputChecks = Native.NativeBinaryVerifier.VerifyExecutable(located.Executable, settings.Platform, settings.Architecture);
+                foreach (var c in outputChecks) Log(c.Status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Success, $"  {c.Name}: {c.Detail}");
+                if (outputChecks.FirstOrDefault(c => c.Status == VerificationStatus.Failed) is { } bad)
+                {
+                    Fail(BuildStatus.Failed, $"{bad.Name}: {bad.Detail}");
+                    return build;
+                }
+                var (stagedExe, copied) = Native.NativeBuildPlanner.Stage(located, settings, nativePrepared!, publishDir, overall.Token);
+                Log(BuildLogKind.Info, "Packaged files: " + string.Join(", ", copied) + ". Object files and other build intermediates are not packaged.");
+                var runtime = await Native.NativeBinaryVerifier.InspectRuntimeAsync(new WorkerRunner(worker, scrub.Environment), Path.Combine(publishDir, stagedExe.Replace('/', Path.DirectorySeparatorChar)),
+                    host.Platform, located.ProjectSharedLibraries, overall.Token).ConfigureAwait(false);
+                foreach (var line in runtime.Text.TrimEnd().Split('\n')) Log(runtime.Check.Status == VerificationStatus.Passed ? BuildLogKind.Info : BuildLogKind.Warning, line);
+                if (runtime.Check.Status != VerificationStatus.Passed)
+                    AddMessage(new BuildMessage(DiagnosticSeverity.Warning, runtime.Check.Detail, "HCG-RUNTIME"));
+                if (located.Bundle is null)
+                    await File.WriteAllTextAsync(Path.Combine(publishDir, "RUNTIME-DEPENDENCIES.txt"), runtime.Text, overall.Token).ConfigureAwait(false);
+                exeName = stagedExe;
+            }
+            else if (isElectron)
+            {
+                var (relative, problem) = ElectronBuildPlanner.Discover(electronOut, settings, settings.Electron!.ProductName is { Length: > 0 } pn ? pn : nodeManifest!.ProductName ?? settings.Identity.ApplicationName);
+                if (relative is null)
+                {
+                    Fail(BuildStatus.Failed, problem!);
+                    return build;
+                }
+                exeName = relative;
+                packagingInput = electronOut;
+                foreach (var pkg in new[] { "electron", "electron-builder" })
+                    if (ElectronBuildPlanner.InstalledVersion(electronDir!, pkg) is { } v) build.ToolchainVersions[pkg] = v;
+                Log(BuildLogKind.Info, $"electron-builder output: {electronOut}");
+                if (settings.Platform == TargetPlatform.MacOS)
+                    Log(BuildLogKind.Warning, ElectronSigningLabel(electronDir!, settings.Electron!.ConfigPath));
+                foreach (var entry in Directory.EnumerateFileSystemEntries(electronOut).Order(StringComparer.Ordinal))
+                    Log(BuildLogKind.Info, $"  {Path.GetFileName(entry)}{(Directory.Exists(entry) ? "/" : "")}");
+            }
+            else if (isSwift)
+            {
+                var binPath = captured.Select(l => l.Trim()).LastOrDefault(l => l.StartsWith('/'));
+                if (binPath is null || !Directory.Exists(binPath))
+                {
+                    Fail(BuildStatus.Failed, "swift build reported success, but did not report an existing bin path (--show-bin-path).");
+                    return build;
+                }
+                Log(BuildLogKind.Info, $"SwiftPM products: {binPath}");
+                var (stagedExe, bundles) = SwiftBuildPlanner.Stage(binPath, settings.Swift!.Product, publishDir);
+                exeName = stagedExe;
+                if (bundles.Count > 0) Log(BuildLogKind.Info, $"SwiftPM resource bundles: {string.Join(", ", bundles)}");
+                if (contract is not null)
+                    foreach (var note in SwiftContractPlanner.Stage(contract, sourceDir, helpersDir, publishDir))
+                        Log(BuildLogKind.Info, $"Packaging contract: {note}");
+                Log(BuildLogKind.Info, "Tests were not run: HCG builds the selected product only (test targets are neither compiled nor run).");
+                try { Directory.Delete(swiftScratch, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove SwiftPM scratch space {swiftScratch}: {ex.Message}"); }
+            }
+            else
+            {
+                exeName = LocateExecutable(publishDir, request.AssemblyName, settings.Platform);
+            }
             if (exeName is null)
             {
                 Fail(BuildStatus.Failed, $"The build reported success, but no {settings.Platform.DisplayName()} executable was found in the publish output ({publishDir}).");
@@ -211,7 +496,8 @@ public sealed class BuildService(
             }
             Log(BuildLogKind.Success, $"Found application executable: {exeName}");
 
-            observer.OnStage(BuildStage.Packaging, "Packaging artifacts");
+            observer.OnStage(BuildStage.Packaging, isElectron ? "Verify the packaged app (structure, architecture, payload, signature) and copy it to the output folder"
+                : isTheos ? "Verify the Debian package (metadata, install prefix, payload, binaries) and copy it to the output folder" : "Packaging artifacts");
             var baseName = ArtifactBaseName(settings);
             var outputRoot = PrepareOutputRoot(settings.OutputDirectory, baseName, request.AllowOverwriteOutput);
             createdOutputRoot = outputRoot;
@@ -222,7 +508,7 @@ public sealed class BuildService(
             var packagingRequest = new PackagingRequest
             {
                 Settings = settings,
-                PublishDirectory = publishDir,
+                PublishDirectory = packagingInput,
                 ExecutableFileName = exeName,
                 OutputRoot = outputRoot,
                 ArtifactBaseName = baseName,
@@ -232,9 +518,9 @@ public sealed class BuildService(
             };
             var packagingLog = new PackagingLog(Log);
             var outputs = new List<PackagedOutput>();
-            foreach (var format in PackagingCatalog.WithDependencies(settings.PackagingFormats))
+            foreach (var format in PackagingCatalog.WithDependencies(settings.PackagingFormats, settings))
             {
-                var packager = packagers.Get(format) ?? throw new InvalidOperationException($"{format.DisplayName()} is not implemented in this version.");
+                var packager = packagers.Get(format, settings) ?? throw new InvalidOperationException($"{format.DisplayName()} is not implemented in this version.");
                 Log(BuildLogKind.Info, $"Packaging: {format.DisplayName()}");
                 outputs.AddRange(await packager.PackageAsync(packagingRequest, packagingLog, overall.Token).ConfigureAwait(false));
             }
@@ -276,6 +562,23 @@ public sealed class BuildService(
                 foreach (var check in output.Checks.Where(c => c.Status != VerificationStatus.Passed))
                     Log(check.Status == VerificationStatus.Failed ? BuildLogKind.Error : BuildLogKind.Warning, $"  {check.Name}: {check.Detail}");
             }
+            if (theosPrepared is { IsTemporary: true })
+            {
+                try { Directory.Delete(Path.GetDirectoryName(theosPrepared.WorkRoot)!, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {theosPrepared.WorkRoot}: {ex.Message}"); }
+            }
+            if (isNative || isTheos)
+            {
+                // The verified copies are in the output folder; the build tree (object files, CMake cache) is not kept.
+                try { Directory.Delete(nativeWork, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {nativeWork}: {ex.Message}"); }
+            }
+            if (isElectron)
+            {
+                // The verified copies are in the output folder; electron-builder's staging copy is not kept.
+                try { Directory.Delete(electronOut, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {electronOut}: {ex.Message}"); }
+            }
             if (sums.Length > 0)
                 await File.WriteAllTextAsync(Path.Combine(outputRoot, "SHA256SUMS.txt"), sums.ToString(), overall.Token).ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(outputRoot, OutputMarkerFile), HcgJson.Serialize(new
@@ -287,13 +590,19 @@ public sealed class BuildService(
                 runtimeIdentifier = settings.RuntimeIdentifier,
                 createdAt = time.GetUtcNow(),
                 complete = true,
-                signed = false,
+                signing = settings.Platform == TargetPlatform.MacOS ? settings.MacDistribution.SigningMode.ToString() : "none",
                 notarized = false,
             }), overall.Token).ConfigureAwait(false);
 
             if (build.Artifacts.Any(a => a.Verification == VerificationStatus.Failed))
             {
-                Fail(BuildStatus.Failed, "One or more artifacts failed verification.");
+                // Never present output that failed verification: the reasons are in the log above; the files are removed.
+                var failed = build.Artifacts.Where(a => a.Verification == VerificationStatus.Failed).Select(a => Path.GetFileName(a.Path)).ToList();
+                foreach (var a in build.Artifacts.Where(a => a.Verification == VerificationStatus.Failed))
+                    foreach (var c in a.Checks.Where(c => c.Status == VerificationStatus.Failed))
+                        AddMessage(new BuildMessage(DiagnosticSeverity.Error, $"{Path.GetFileName(a.Path)} — {c.Name}: {c.Detail}", "HCG-VERIFY"));
+                build.Artifacts.Clear();
+                Fail(BuildStatus.Failed, $"Verification failed for {string.Join(", ", failed)} (see the checks in the log). The output was removed so no unverified artifact is offered.");
                 return build;
             }
             build.Status = BuildStatus.Succeeded;
@@ -346,13 +655,26 @@ public sealed class BuildService(
         (line.Contains("error MSB4018", StringComparison.Ordinal) || line.Contains("IOException", StringComparison.Ordinal));
 
     /// <summary>Base name shared by the per-build output folder and its artifacts, e.g. <c>MyApp-1.2.0-osx-arm64</c>.</summary>
-    public static string ArtifactBaseName(BuildSettings s) =>
-        $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier}";
+    public static string ArtifactBaseName(BuildSettings s) => s.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } theos }
+        ? $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-ios-{PathGuard.SanitizeFileName(theos.PackageScheme, "theos")}"
+        : $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier ?? (s.Platform == TargetPlatform.MacOS ? "osx" : s.Platform.ToString().ToLowerInvariant()) + "-" + s.Architecture.ToString().ToLowerInvariant()}";
 
     /// <summary>The per-build folder created inside the chosen output directory.</summary>
     public static string OutputRootFor(BuildSettings s) => Path.Combine(Path.GetFullPath(s.OutputDirectory), ArtifactBaseName(s));
 
     /// <summary>Finds the native app host in publish output: assembly name first, then the runtimeconfig.json stem.</summary>
+    /// <summary>How electron-builder signed the macOS app, in words a user cannot misread (an ad-hoc signature is not a distribution signature).</summary>
+    internal static string ElectronSigningLabel(string projectDir, string? configPath)
+    {
+        var identity = HCG.ExecutableMaker.ProjectInspection.Node.ElectronBuilderConfigReader.Read(projectDir, configPath, null).Config?.MacIdentity;
+        return identity switch
+        {
+            "-" => "Signing: ad-hoc signature only (electron-builder identity \"-\"). UNSIGNED for distribution and NOT notarized: it runs on this Mac; other Macs show a Gatekeeper warning. Developer ID signing and notarization are separate steps.",
+            null => "Signing: electron-builder chose the identity automatically (no mac.identity in the configuration). The code signature check below shows what was used. The app is NOT notarized.",
+            _ => $"Signing: electron-builder signed with the identity \"{identity}\" from the configuration. The app is NOT notarized; notarization is a separate step.",
+        };
+    }
+
     internal static string? LocateExecutable(string publishDir, string? assemblyName, TargetPlatform platform)
     {
         if (!Directory.Exists(publishDir)) return null;
@@ -406,4 +728,11 @@ public sealed class BuildService(
         public void Info(string message) => log(BuildLogKind.Info, message);
         public void Warning(string message) => log(BuildLogKind.Warning, message);
     }
+}
+
+/// <summary>Runs read-only inspection tools (readelf, otool) through the build worker with the scrubbed environment.</summary>
+internal sealed class WorkerRunner(IBuildWorker worker, IReadOnlyDictionary<string, string> environment) : IProcessRunner
+{
+    public Task<ProcessResult> RunAsync(ProcessSpec spec, Action<OutputStream, string>? onOutput, CancellationToken cancellationToken) =>
+        worker.RunAsync(spec.Environment is null ? spec with { Environment = environment } : spec, onOutput ?? ((_, _) => { }), cancellationToken);
 }

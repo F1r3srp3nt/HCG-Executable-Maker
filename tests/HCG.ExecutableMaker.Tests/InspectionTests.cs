@@ -194,12 +194,9 @@ public class InspectionTests : IDisposable
 
     [Theory]
     [InlineData("Cargo.toml", "[package]", "rust")]
-    [InlineData("package.json", "{\"devDependencies\":{\"electron\":\"30\"}}", "electron")]
-    [InlineData("package.json", "{\"name\":\"x\"}", "node")]
     [InlineData("package.json", "{\"dependencies\":{\"react-native\":\"0.80\"}}", "react-native")]
     [InlineData("ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 6000.0", "unity")]
     [InlineData("pyproject.toml", "[project]", "python")]
-    [InlineData("CMakeLists.txt", "project(x)", "cpp")]
     public async Task Other_ecosystems_are_recognized_but_unsupported(string file, string content, string inspector)
     {
         _t.Write(file, content);
@@ -207,6 +204,19 @@ public class InspectionTests : IDisposable
         Assert.Equal(inspector, a.InspectorId);
         Assert.Equal(SupportLevel.Unsupported, a.Support);
         Assert.Contains("does not build", a.SupportSummary);
+    }
+
+    [Fact]
+    public async Task CMake_project_is_handled_by_the_native_inspector_not_a_placeholder()
+    {
+        _t.Write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\nproject(x C)\nadd_executable(x main.c)\n");
+        _t.Write("main.c", "int main(void){return 0;}\n");
+        var a = await Service().InspectAsync(_t.Path, Fixtures.Toolchains("10.0.114"), CancellationToken.None);
+        Assert.Equal("native", a.InspectorId);
+        Assert.NotNull(a.Native);
+        Assert.Equal(NativeProjectKind.CMake, Assert.Single(a.Native!.Projects).Kind);
+        Assert.DoesNotContain("planned", a.SupportSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("M0.5", a.SupportSummary, StringComparison.Ordinal);
     }
 
     [Fact]

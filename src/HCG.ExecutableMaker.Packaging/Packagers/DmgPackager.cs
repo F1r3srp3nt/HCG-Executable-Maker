@@ -1,5 +1,7 @@
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging.MacDistribution;
+using HCG.ExecutableMaker.Packaging.Verification;
 
 namespace HCG.ExecutableMaker.Packaging.Packagers;
 
@@ -10,6 +12,7 @@ namespace HCG.ExecutableMaker.Packaging.Packagers;
 public sealed class DmgPackager(IProcessRunner runner) : IPackager
 {
     public PackagingFormat Format => PackagingFormat.MacDmg;
+    public bool Handles(BuildSettings settings) => settings.Electron is null && settings.Native is null; // Electron: electron-builder's dmg (ElectronDmgPackager)
 
     public async Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken)
     {
@@ -52,20 +55,67 @@ public sealed class DmgPackager(IProcessRunner runner) : IPackager
             if (create is not { Succeeded: true } || !File.Exists(dmg))
                 throw new InvalidOperationException($"hdiutil create failed with exit code {create?.ExitCode}.");
 
+            var distribution = request.Settings.MacDistribution;
+            var signer = new MacCodeSigner(runner, request.Toolchains.Find(ToolchainIds.Codesign)?.ExecutablePath ?? "/usr/bin/codesign");
+            if (distribution.SigningMode == MacSigningMode.DeveloperId && distribution.DeveloperIdApplicationSha1 is { } sha1)
+                await signer.SignFileAsync(dmg, sha1, log, cancellationToken).ConfigureAwait(false);
+
             var verify = await runner.RunAsync(new ProcessSpec { Executable = hdiutil, Arguments = ["verify", dmg], Timeout = TimeSpan.FromMinutes(5) },
                 (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
-            IReadOnlyList<VerificationCheck> checks =
-            [
+            var checks = new List<VerificationCheck>
+            {
                 verify.Succeeded
                     ? new VerificationCheck("hdiutil verify", VerificationStatus.Passed, "Checksum verified by hdiutil.")
                     : new VerificationCheck("hdiutil verify", VerificationStatus.Failed, $"hdiutil verify exited with {verify.ExitCode}."),
-                new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings, "Disk image is not signed or notarized."),
-            ];
+            };
+            checks.Add(await MountCheckAsync(hdiutil, dmg, bundle, bundleName, cancellationToken).ConfigureAwait(false));
+            if (distribution.SigningMode == MacSigningMode.DeveloperId)
+            {
+                var (ok, detail) = await signer.VerifyStrictAsync(dmg, cancellationToken).ConfigureAwait(false);
+                checks.Add(ok
+                    ? new VerificationCheck("Disk image signature", VerificationStatus.Passed, "Signed with the Developer ID Application certificate and a secure timestamp; codesign --verify passed.")
+                    : new VerificationCheck("Disk image signature", VerificationStatus.Failed, "codesign --verify failed: " + detail));
+                checks.Add(await signer.GatekeeperAsync(dmg, "open", cancellationToken).ConfigureAwait(false));
+                checks.Add(new VerificationCheck("Notarization", VerificationStatus.NotVerifiable, "Not notarized yet. Notarization is a separate, explicit step (Build results › Notarize)."));
+            }
+            else
+            {
+                checks.Add(new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings, "Disk image is not signed or notarized (ad-hoc build)."));
+            }
             return [new PackagedOutput(Format, ArtifactKind.File, dmg, checks)];
         }
         finally
         {
             try { Directory.Delete(staging, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>Mounts the image read-only and compares the .app inside with the built one; checks the Applications link.</summary>
+    private async Task<VerificationCheck> MountCheckAsync(string hdiutil, string dmg, string bundle, string bundleName, CancellationToken ct)
+    {
+        var mount = Path.Combine(Path.GetTempPath(), "hcg-dmg-" + Guid.NewGuid().ToString("N")[..10]);
+        Directory.CreateDirectory(mount);
+        var attached = false;
+        try
+        {
+            var attach = await runner.RunAsync(new ProcessSpec
+            {
+                Executable = hdiutil, Arguments = ["attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", mount, dmg], Timeout = TimeSpan.FromMinutes(5),
+            }, (_, _) => { }, ct).ConfigureAwait(false);
+            if (!attach.Succeeded) return new VerificationCheck("Disk image contents", VerificationStatus.Failed, $"hdiutil attach failed with exit code {attach.ExitCode}.");
+            attached = true;
+            var link = new FileInfo(Path.Combine(mount, "Applications"));
+            var compare = BundleComparison.Compare(bundle, Path.Combine(mount, bundleName), "Disk image contents", "the mounted disk image");
+            return compare.Status == VerificationStatus.Passed && link.LinkTarget != "/Applications"
+                ? compare with { Status = VerificationStatus.Failed, Detail = compare.Detail + " The Applications shortcut is missing." }
+                : compare;
+        }
+        finally
+        {
+            if (attached)
+                await runner.RunAsync(new ProcessSpec { Executable = hdiutil, Arguments = ["detach", mount, "-force"], Timeout = TimeSpan.FromMinutes(2) },
+                    (_, _) => { }, CancellationToken.None).ConfigureAwait(false);
+            try { Directory.Delete(mount); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
 }

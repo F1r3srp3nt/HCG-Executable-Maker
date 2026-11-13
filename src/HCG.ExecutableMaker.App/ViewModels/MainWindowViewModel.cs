@@ -27,17 +27,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             new("dashboard", "Dashboard", "Icon.Dashboard", typeof(DashboardViewModel)),
             new("new-build", "New Build", "Icon.NewBuild", typeof(BuildWizardViewModel)),
             new("mobile", "Mobile Build Studio", "Icon.Mobile", typeof(MobileBuildStudioViewModel)),
+            new("porting", "Porting Studio", "Icon.Repeat", typeof(PortingStudioViewModel)),
             new("projects", "Projects", "Icon.Projects", typeof(ProjectsViewModel)),
             new("history", "Build History", "Icon.History", typeof(BuildHistoryViewModel)),
             new("artifacts", "Artifacts", "Icon.Artifacts", typeof(ArtifactsViewModel)),
             new("toolchains", "Toolchains", "Icon.Toolchains", typeof(ToolchainsViewModel)),
             new("security", "Signing & Security", "Icon.Security", typeof(SigningViewModel)),
+            new("ai", "AI assistance", "Icon.Ai", typeof(AiAssistantViewModel)),
+            new("support", "Help & Support", "Icon.Support", typeof(SupportViewModel)),
+            new("requests", "My requests", "Icon.Requests", typeof(MyRequestsViewModel)),
+            new("account", "Account", "Icon.Account", typeof(AccountViewModel)),
             new("settings", "Settings", "Icon.Settings", typeof(SettingsViewModel)),
         ];
     }
 
     public ObservableCollection<NavItem> NavItems { get; }
-    public string AppVersion => $"Version {HostInfo.ProductVersion}";
+    public string AppVersion => $"Version {HostInfo.ProductVersion} · {HostInfo.ProductCommit}";
     public string MilestoneLabel => "Windows installer · Mobile Build Studio";
     public string DataDirectory { get; }
 
@@ -49,7 +54,25 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public async Task InitializeAsync()
     {
-        await NavigateAsync("dashboard", null);
+        // HCG's own Xcode choice (DEVELOPER_DIR for HCG's processes) must be in place before anything probes tools.
+        try { await _services.GetRequiredService<HCG.ExecutableMaker.Infrastructure.Toolchains.DeveloperDirectorySelection>().InitializeAsync(); }
+        catch (Exception ex) { EngineStatus = "Could not load the Xcode selection: " + ex.Message; EngineTone = "warning"; }
+        await NavigateAsync(NavItems.Any(n => n.Key == Program.StartPage) ? Program.StartPage : "dashboard", null);
+        // Restore a saved HCG session (account features only; local builds never wait for it).
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var account = _services.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>();
+                await account.InitializeAsync();
+                if (account.IsSignedIn)
+                {
+                    await _services.GetRequiredService<HCG.ExecutableMaker.Account.AccountPlanService>().RefreshAsync();
+                    await _services.GetRequiredService<HCG.ExecutableMaker.Account.AppAccessService>().RefreshAsync();
+                }
+            }
+            catch (Exception) { /* reported on the Account page */ }
+        });
         try { await _toolchains.GetAsync(); }
         catch (Exception ex) { EngineStatus = "Toolchain detection failed: " + ex.Message; EngineTone = "error"; }
     }
@@ -74,9 +97,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private void UpdateFooter(ToolchainReport report)
     {
         var sdk = report.Find(ToolchainIds.DotNetSdk);
-        (EngineStatus, EngineTone) = sdk?.IsAvailable == true
-            ? ($".NET SDK {sdk.Version} ready", "success")
-            : ("No .NET SDK — builds unavailable", "warning");
+        var swift = report.Host.Platform == TargetPlatform.MacOS ? report.Find(ToolchainIds.Swift) : null;
+        (EngineStatus, EngineTone) = (sdk?.IsAvailable == true, swift?.IsAvailable == true) switch
+        {
+            (true, true) => ($".NET SDK {sdk!.Version} · Swift {swift!.Version} ready", "success"),
+            (true, false) => ($".NET SDK {sdk!.Version} ready", "success"),
+            (false, true) => ($"Swift {swift!.Version} ready · no .NET SDK (.NET builds unavailable)", "warning"),
+            _ => ("No .NET SDK — builds unavailable", "warning"),
+        };
         EnvironmentStatus = $"{report.Host.DisplayName} · {Format.Bytes(report.AvailableDiskBytes)} free";
     }
 }

@@ -22,6 +22,8 @@ public static partial class BuildEnvironmentPolicy
     [
         "HCG_", "AWS_", "AZURE_", "ARM_", "GOOGLE_", "GCP_", "GH_", "GITHUB_", "GITLAB_", "NUGET_",
         "NPM_", "APPLE_", "ASC_", "APP_STORE_", "SSH_", "GPG_", "DOCKER_", "VAULT_", "OPENAI_", "ANTHROPIC_",
+        // electron-builder code-signing certificates and their passwords (CSC_LINK, WIN_CSC_LINK, CSC_NAME, …).
+        "CSC_", "WIN_CSC_",
     ];
 
     /// <summary>Exact names that are needed for tooling and are kept even if they match a pattern.</summary>

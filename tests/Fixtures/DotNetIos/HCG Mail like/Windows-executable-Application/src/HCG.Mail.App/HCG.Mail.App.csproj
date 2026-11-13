@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>HCG.Mail.App</RootNamespace>
+    <AssemblyName>HCGMail</AssemblyName>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Icons\hcg-mail.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.Mail.Core\HCG.Mail.Core.csproj" />
+    <ProjectReference Include="..\HCG.Mail.Email\HCG.Mail.Email.csproj" />
+    <ProjectReference Include="..\HCG.Mail.Infrastructure\HCG.Mail.Infrastructure.csproj" />
+    <ProjectReference Include="..\HCG.Mail.Presentation\HCG.Mail.Presentation.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.HtmlRenderer" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.Mail.App.Tests" />
+  </ItemGroup>
+  <!-- Microsoft application (client) ID for Outlook.com / Microsoft 365 sign-in. Public, not a secret.
+       Empty by default: pass -p:HcgMicrosoftClientId=<GUID> when building (see docs/MICROSOFT_ACCOUNTS.md). -->
+  <ItemGroup>
+    <AssemblyMetadata Include="HcgMicrosoftClientId" Value="$(HcgMicrosoftClientId)" />
+  </ItemGroup>
+</Project>

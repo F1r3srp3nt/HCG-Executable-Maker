@@ -26,6 +26,8 @@ public enum PackagingFormat
     IosArchive,
     /// <summary>iOS App Store Package (.ipa) exported from an archive.</summary>
     IosIpa,
+    /// <summary>Debian package for jailbroken iOS devices, built by Theos (a tweak, preference bundle, tool or app). Not an IPA.</summary>
+    JailbreakDeb,
 }
 
 public enum PackagingAvailability
@@ -34,7 +36,12 @@ public enum PackagingAvailability
     MissingTool,
     RequiresDifferentHost,
     NotImplemented,
+    /// <summary>Incompatible with this project (the reason says why).</summary>
     NotApplicable,
+    /// <summary>The pipeline exists, but this Mac lacks a certificate, profile or credential; the reason is the guided setup.</summary>
+    SetupRequired,
+    /// <summary>Evaluating the format failed (e.g. the keychain could not be read); the reason is the actual error.</summary>
+    Failed,
 }
 
 public sealed record PackagingOption(
@@ -70,6 +77,7 @@ public static class PackagingFormatNames
         PackagingFormat.IosSimulatorApp => "iOS Simulator app (.app)",
         PackagingFormat.IosArchive => "Xcode archive (.xcarchive)",
         PackagingFormat.IosIpa => "iOS app package (.ipa)",
+        PackagingFormat.JailbreakDeb => "Jailbreak package (.deb, Theos)",
         _ => format.ToString(),
     };
 }

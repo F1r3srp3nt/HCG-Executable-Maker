@@ -19,7 +19,8 @@ namespace HCG.ExecutableMaker.App;
 
 public static class Composition
 {
-    public static ServiceProvider Build(IAppPaths paths)
+    /// <param name="overrides">Optional replacements applied last (used by the headless UI driver to script file pickers and dialogs).</param>
+    public static ServiceProvider Build(IAppPaths paths, Action<IServiceCollection>? overrides = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(paths);
@@ -35,6 +36,8 @@ public static class Composition
         // Environment & toolchains
         services.AddSingleton<IProcessRunner, ProcessRunner>();
         services.AddSingleton<IExecutableLocator, ExecutableLocator>();
+        services.AddSingleton<DeveloperDirectorySelection>();
+        services.AddSingleton<ToolPathSelection>();
         services.AddSingleton<IToolchainDetector, ToolchainDetector>();
         services.AddSingleton<IToolchainService, ToolchainService>();
 
@@ -43,6 +46,7 @@ public static class Composition
         services.AddSingleton<IProjectInspector, DotNetProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileArtifactProjectInspector>();
+        services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Swift.SwiftProjectInspector>();
         foreach (var inspector in EcosystemSignatureInspector.CreateDefaults(TimeProvider.System))
             services.AddSingleton(inspector);
         services.AddSingleton<IProjectInspectionService, ProjectInspectionService>();
@@ -50,15 +54,37 @@ public static class Composition
 
         // Build & packaging
         services.AddSingleton<IBuildWorker, LocalProcessBuildWorker>();
+        // Electron packagers first: they handle only builds with Electron options (electron-builder output).
+        services.AddSingleton<IPackager, ElectronAppBundlePackager>();
+        services.AddSingleton<IPackager, ElectronZipPackager>();
+        services.AddSingleton<IPackager, ElectronDmgPackager>();
+        services.AddSingleton<IPackager, ElectronFolderPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.Packagers.JailbreakDebPackager>();
+        // C/C++ app bundles (a project's own .app) before the generic packagers.
+        services.AddSingleton<IPackager, NativeAppBundlePackager>();
+        services.AddSingleton<IPackager, NativeAppZipPackager>();
         services.AddSingleton<IPackager, PortableFolderPackager>();
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();
         services.AddSingleton<IPackager, DmgPackager>();
+        services.AddSingleton<IPackager, SwiftAppBundlePackager>();
+        services.AddSingleton<IPackager, SwiftAppZipPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacPkgPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacAppStorePackager>();
+        services.AddSingleton<HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningInventoryReader>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppleCredentialsService>();
         services.AddSingleton<IPackager, InnoSetupPackager>();
         services.AddSingleton<PackagingRegistry>();
         services.AddSingleton<BuildService>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileArtifactVerifier>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileBuildService>();
+        services.AddSingleton<HCG.ExecutableMaker.Porting.DeviceLauncher>();
+        services.AddSingleton<HCG.ExecutableMaker.Porting.PortingService>();
 
         // UI services
         services.AddSingleton<MainWindowProvider>();
@@ -69,16 +95,45 @@ public static class Composition
         services.AddSingleton<ArtifactExporter>();
 
         // View models (pages are singletons so a running build survives navigation)
+        // HCG account (sign-in, ERP App Access, support requests, HCG AI). Public client: no secret exists anywhere.
+        var (hcgConfig, hcgConfigProblem) = HCG.ExecutableMaker.Account.HcgConnectConfiguration.Load(paths.Root);
+        var (credentialStore, storeProblem) = HCG.ExecutableMaker.Account.SecureCredentialStores.ForCurrentPlatform();
+        var hcgHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        hcgHttp.DefaultRequestHeaders.UserAgent.ParseAdd($"HCGExecutableMaker/{HostInfo.ProductVersion}");
+        var uploadHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+        services.AddSingleton(hcgConfig);
+        services.AddSingleton(credentialStore);
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAuthClient(hcgHttp, hcgConfig, TimeProvider.System));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAccountService(hcgConfig, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAuthClient>(),
+            credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>(),
+            sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgConnectionCheck>()));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgApiClient(hcgHttp, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>()));
+        // Connection check: never follows redirects (the authorization request is probed, not opened), 15 s per step.
+        services.AddSingleton(_ => new HCG.ExecutableMaker.Account.HcgConnectionCheck(new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) }));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AppAccessService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), TimeProvider.System));
+        // Plan, licence, organisation and feature access from HCG's central Ecosystem API.
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgEcosystemClient(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>()));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AccountPlanService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgEcosystemClient>(), TimeProvider.System));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Support.SupportService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), uploadHttp));
+        // HCG AI: no verified gateway contract exists yet, so the "Not connected" adapter is used (never simulated answers).
+        services.AddSingleton<HCG.ExecutableMaker.Account.Ai.IHcgAiGateway, HCG.ExecutableMaker.Account.Ai.NotConnectedAiGateway>();
+        services.AddSingleton<HCG.ExecutableMaker.Account.Ai.AiAssistant>();
+        services.AddSingleton<AccountViewModel>();
+        services.AddSingleton<SupportViewModel>();
+        services.AddSingleton<MyRequestsViewModel>();
+        services.AddSingleton<AiAssistantViewModel>();
         services.AddSingleton<MainWindowViewModel>();
         services.AddSingleton<DashboardViewModel>();
         services.AddSingleton<BuildWizardViewModel>();
         services.AddSingleton<MobileBuildStudioViewModel>();
+        services.AddSingleton<PortingStudioViewModel>();
         services.AddSingleton<ProjectsViewModel>();
         services.AddSingleton<BuildHistoryViewModel>();
         services.AddSingleton<ArtifactsViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<SigningViewModel>();
         services.AddSingleton<SettingsViewModel>();
+        overrides?.Invoke(services);
         return services.BuildServiceProvider();
     }
 }

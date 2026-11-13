@@ -1,5 +1,7 @@
 # HCG Executable Maker
 
+![HCG Executable Maker — One project in. A distributable application out.](docs/branding/hcg-executable-maker-banner.webp)
+
 [![Build & Release](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml/badge.svg)](https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/workflows/build.yml)
 
 **Hakmi Capital Group · Software Engineering & Distribution Infrastructure**
@@ -9,7 +11,11 @@
 HCG Executable Maker imports a project (ZIP archive or folder), inspects it **without executing any of its code**,
 builds it with the real toolchain, packages it for distribution, and verifies every artifact with SHA-256 checksums.
 
-**Status: 0.2.0 pre-release — M0.1 Functional Foundation, M0.2 Windows installer, M0.5 Mobile Build Studio.**
+**Status: 0.3.0 pre-release — M0.1 Functional Foundation, M0.2 Windows installer, M0.5 Mobile Build Studio, native
+Swift/macOS apps (SwiftPM → `.app`), and macOS distribution (Xcode selection, `.pkg`, Developer ID, notarization, Mac
+App Store preparation; see docs/MACOS-DISTRIBUTION.md), Electron desktop apps (docs/ELECTRON.md), guided toolchain setup
+(docs/TOOLCHAINS.md), and HCG account features that stay switched off until HCG's external setup is done
+(docs/HCG-ACCOUNT.md).**
 .NET projects (including Avalonia desktop apps) can be built and packaged for **Windows** (portable or **Setup.exe
 installer**), **macOS** and **Linux (portable preview)**; Android and iOS projects are built in **Mobile Build Studio**
 (see below). See [`docs/STATUS.md`](docs/STATUS.md) for exactly what is and isn't implemented
@@ -23,7 +29,9 @@ and verified.
 |---|---|
 | Import | ZIP archives and folders into isolated workspaces; rejects corrupt archives, path traversal, symlinks, duplicate entries, decompression bombs and oversize/over-count archives; preserves the original archive; never modifies your source |
 | Inspection | Static .NET analysis: `.sln`, `.slnx`, `.csproj/.fsproj/.vbproj`, `Directory.Build.props`, central package versions, `global.json` roll-forward, target frameworks, output types, RIDs, package/project references, entry points, icons, Avalonia/WPF/WinForms/MAUI/web detection, platform compatibility |
-| Other ecosystems | Rust, Node/Electron, Python, Java, C/C++, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
+| Node.js / Electron | Every `package.json` is classified (Electron desktop app, browser app, service, library). **Electron apps packaged with electron-builder are built** with the project's own workflow (see below); web-only projects get the exact list of what is missing |
+| C/C++ | **CMake** (executable targets from the CMake File API after a trusted configure; presets), **Make** (explicit target and output), **sources without a build system** (explicit file selection). Builds for this computer; verified executable, runtime-library report, portable folder/ZIP, macOS `.app` for bundle targets. Theos jailbreak packages are built as `.deb` (never an IPA) — see [`docs/HCG-PROJECTS.md`](docs/HCG-PROJECTS.md) |
+| Other ecosystems | Rust, Python, Java, React Native, Unity are **recognized and reported as unsupported** — never faked (Android/iOS/Flutter/MAUI: see Mobile Build Studio) |
 | Build | `dotnet restore` → `build` → `publish` with structured arguments (no shell), Release/Debug, runtime selection (win/osx/linux × x64/arm64), self-contained, single-file, live log, warning/error parsing, cancellation, timeouts |
 | Packaging | Portable folder · portable ZIP (Unix permissions preserved) · **Windows Setup.exe installer** (Inno Setup, Windows hosts — M0.2, see below) · macOS `.app` bundle (Info.plist, `.icns`, exec bits) · `.dmg` on macOS hosts with `hdiutil` |
 | Verification | Executable present, PE/Mach-O/ELF format and CPU architecture, executable bit, bundle structure, code-signature presence, archive integrity, SHA-256 (+ per-file manifests for folders) |
@@ -38,6 +46,72 @@ A standard **Setup.exe** built with Inno Setup 6: Start-menu shortcut, optional 
 all-users install, uninstaller in Settings → Apps, in-place upgrades. Requires a Windows build host with Inno Setup 6
 and a self-contained build; from macOS/Linux use the Windows CI runner. Verified by really installing, launching and
 uninstalling on Windows. Details: [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md).
+
+## Swift macOS apps (unreleased, `feature/swift-macos`)
+
+Swift Package Manager packages are built into macOS apps on a Mac, through the normal New Build wizard:
+
+1. Import a folder or ZIP.
+2. Choose the package (e.g. `distil/` or `relay/`; never auto-selected).
+3. Evaluate `Package.swift` on this Mac. This happens only after you confirm trust, through the build worker.
+4. Pick the executable product (libraries and tests are listed separately).
+5. Configure: display name, bundle id, build number, minimum macOS, privacy texts, arm64/x86_64/universal.
+6. Build.
+
+Outputs:
+- **SwiftUI/AppKit** products become an ad-hoc-signed `.app`, optionally also as ZIP and DMG.
+- **Command-line** products become a folder or ZIP.
+
+Not offered on Windows/Linux. macOS Xcode projects are recognized but not built yet. Verified in CI by building and
+launching Distil.app and Relay.app from the pinned Oslo-Sprint repository. Details:
+[`docs/SWIFT-MACOS.md`](docs/SWIFT-MACOS.md).
+
+![Swift package in the wizard](docs/screenshots/11-swift-inspect-relay.jpg)
+
+## Electron desktop apps (unreleased, `feature/electron`)
+
+Electron apps packaged with **electron-builder** are built through the New Build wizard:
+
+1. Import a folder or ZIP, then choose the Electron app (nested projects included).
+2. Inspection reads `package.json`, the lockfile and the electron-builder configuration without running anything. It
+   shows what the project is and what is missing.
+3. Build runs three stages:
+   - `npm ci`;
+   - the project's compile script (e.g. `npm run desktop:build`);
+   - electron-builder with the project's configuration (`--publish never`).
+4. The `.app` (and zip/dmg) or the Linux app folder are found and verified (signature, architecture, app.asar contents).
+
+Offered on macOS (arm64/x64 `.app`, zip, dmg) and Linux (unpacked app). Details: [`docs/ELECTRON.md`](docs/ELECTRON.md).
+
+## C/C++ projects (unreleased, `feature/native-cpp`)
+
+CMake, Make and source-only C/C++ projects are built through the New Build wizard, for this computer with its own
+compilers:
+
+1. Inspection reads `CMakeLists.txt`, presets, Makefiles and sources without running anything, and finds project roots
+   inside repositories without treating `build/`, `_deps/`, `third_party/` and similar folders as apps.
+2. **CMake:** after you confirm that you trust the project, *Configure with CMake* runs CMake in HCG's own folder and
+   reads the real targets through the CMake File API. Each executable target becomes an entry under *Project to
+   build*; libraries are listed separately and never offered as runnable. **Make:** you name the target and the file it
+   produces. **Sources:** you select the files; HCG generates the CMakeLists.txt in its build folder.
+3. The build streams the compiler output, parses errors with file and line, supports cancel and time limits, and never
+   writes into the imported source.
+4. The output is checked (real executable, format, architecture), its runtime libraries are listed in
+   `RUNTIME-DEPENDENCIES.txt` with a warning when it is not portable, and it is packaged as a folder/ZIP, or kept as the
+   project's own `.app` on a Mac (signed in a separate stage).
+
+States: toolchain missing · configuration required · ready · building · failed · verified. Theos projects are
+built as jailbreak `.deb` packages ([`docs/HCG-PROJECTS.md`](docs/HCG-PROJECTS.md)), never as a desktop app or IPA. Details: [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md).
+
+## HCG account (unreleased, `feature/hcg-account`)
+
+Optional. Local builds never need it.
+- **Sign in with HCG** uses your existing HCG account. It runs in the system browser with PKCE, and access is governed by HCG ERP App Access.
+- **Request project support** for anything Executable Maker cannot build yet. You choose and review exactly what is sent, and credentials are never sent.
+- **My requests** shows HCG's responses.
+- **AI assistance** is prepared for HCG AI and shows **Not connected** until HCG publishes its gateway contract.
+
+The website/ERP side is a reviewable drop-in package (`integration/hcg-website`). Nothing is deployed or registered yet. Details and the exact remaining configuration: [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md).
 
 ## Mobile Build Studio (M0.5)
 
@@ -55,7 +129,7 @@ Details: [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md).
 ![Mobile Build Studio](docs/screenshots/10-mobile-build-studio.png)
 
 **Not yet implemented** (shown in the UI as *Planned*, never as working): Windows MSI (WiX — M0.2b) and MSIX,
-macOS `.pkg`/App Store packaging (M0.3/M0.4), desktop code signing and notarization (M0.4), Linux AppImage/DEB/RPM,
+Windows code signing (Authenticode), Linux AppImage/DEB/RPM,
 store uploads of any kind, sandboxed build workers.
 
 ## Requirements
@@ -106,6 +180,11 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 - [`docs/ANDROID-BUILDING.md`](docs/ANDROID-BUILDING.md) · [`docs/IOS-BUILDING.md`](docs/IOS-BUILDING.md) ·
   [`docs/MOBILE-ARTIFACT-VERIFICATION.md`](docs/MOBILE-ARTIFACT-VERIFICATION.md)
 - [`docs/WINDOWS-INSTALLER.md`](docs/WINDOWS-INSTALLER.md) — Windows Setup.exe: features, requirements, CI route, tests
+- [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md) — HCG sign-in, ERP App Access, support requests, HCG AI: contract, configuration, verification
+- [`docs/ELECTRON.md`](docs/ELECTRON.md) — Electron apps: inspection, electron-builder stages, verification, offered targets
+- [`docs/HCG-PROJECTS.md`](docs/HCG-PROJECTS.md) — HCG Nexus (Theos .deb), HCG Mail iOS (.NET for iOS), HCG Sentinel (deployment-range preflight): routes, states, verification
+- [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md) — C/C++: supported project types, trusted CMake configure, Make/sources, verification, limits
+- [`docs/TOOLCHAINS.md`](docs/TOOLCHAINS.md) — toolchain discovery (Xcode, Java, Android SDK, Node.js, C/C++) and readiness
 - [`docs/TESTING.md`](docs/TESTING.md) — get a ready-to-run build (self-packaged) and test it on macOS/Windows
 - [`docs/STATUS.md`](docs/STATUS.md) — what is complete, what is not, verification evidence, continuation instructions
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — solution structure, data flow, extension points

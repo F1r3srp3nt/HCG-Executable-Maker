@@ -1,0 +1,207 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:a="using:HCG.ExecutableMaker.Account"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.AccountView"
+             x:DataType="vm:AccountViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18" MaxWidth="1000" HorizontalAlignment="Left">
+      <!-- HCG sign-in -->
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Border Width="64" Height="64" CornerRadius="32" Classes="inset" VerticalAlignment="Top">
+            <PathIcon Data="{StaticResource Icon.Account}" Width="28" Height="28" Foreground="{DynamicResource Hcg.Brush.Accent}" />
+          </Border>
+          <StackPanel Grid.Column="1" Margin="18,0,18,0" Spacing="6">
+            <TextBlock Classes="label" Text="HAKMI CAPITAL GROUP · HCG ACCOUNT" />
+            <TextBlock Classes="h2" Text="{Binding AccountHeadline}" />
+            <TextBlock Classes="body secondary" Text="{Binding AccountMessage}" TextWrapping="Wrap" />
+            <StackPanel Spacing="2" IsVisible="{Binding IsSignedIn}" Margin="0,6,0,0">
+              <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+              <TextBlock Classes="secondary" Text="{Binding Email}" />
+              <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding AccountId, StringFormat='Account ID (from HCG): {0}'}" />
+              <TextBlock Classes="muted" FontSize="12" Text="{Binding SessionDetail}" TextWrapping="Wrap" />
+              <TextBlock FontSize="12.5" Text="{Binding OrganisationSummary}" TextWrapping="Wrap" Margin="0,4,0,0" />
+            </StackPanel>
+            <TextBlock Classes="muted" FontSize="12" Text="{Binding SessionDetail}" TextWrapping="Wrap" IsVisible="{Binding !IsSignedIn}" />
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+              <Button Classes="primary" Command="{Binding SignInCommand}" IsVisible="{Binding CanSignIn}">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Account}" /><TextBlock Text="Sign in with HCG" /></StackPanel>
+              </Button>
+              <Button Classes="ghost" Content="Cancel sign-in" Command="{Binding CancelSignInCommand}" IsVisible="{Binding IsSigningIn}" />
+              <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsSigningIn}" />
+              <Button Classes="ghost" Content="Try again" Command="{Binding RetryCommand}" IsVisible="{Binding CanRetry}" />
+              <Button Classes="ghost" Content="Sign out" Command="{Binding SignOutCommand}" IsVisible="{Binding IsSignedIn}" />
+            </StackPanel>
+          </StackPanel>
+          <c:StatusChip Grid.Column="2" Status="{Binding AccountTag}" VerticalAlignment="Top" />
+        </Grid>
+      </Border>
+
+      <Border Classes="callout" IsVisible="{Binding UsesLocalIdentityServer}">
+        <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="Local test identity server: hcg-connect.json points sign-in at a server on this computer, not at HCG. Use it only for testing." />
+      </Border>
+
+      <!-- HCG Connect: the configuration in use, importing the issued file, checking it against HCG -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="h2" Text="HCG Connect" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="How this app signs in with HCG: a public desktop client using your browser and PKCE. It holds no secret." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding ConnectTag}" VerticalAlignment="Top" />
+          </Grid>
+          <TextBlock Text="{Binding ConfigurationHelp}" FontSize="12.5" TextWrapping="Wrap" IsVisible="{Binding ConfigurationHelp, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <Border Classes="callout warning" IsVisible="{Binding HasConfigIssues}">
+            <StackPanel Spacing="4">
+              <TextBlock Text="Missing or invalid on this computer" FontWeight="SemiBold" FontSize="12.5" />
+              <ItemsControl ItemsSource="{Binding ConfigIssues}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="a:ConfigurationIssue">
+                    <TextBlock FontSize="12.5" TextWrapping="Wrap" Margin="0,2"><Run Text="{Binding Field}" FontFamily="{DynamicResource Hcg.Font.Mono}" FontWeight="SemiBold" /><Run Text=" — " /><Run Text="{Binding Problem}" /></TextBlock>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+          <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding ConnectSummary}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="primary small" Content="Import HCG connection configuration…" Command="{Binding ImportConfigurationCommand}" />
+            <Button Classes="small" Content="Check configuration" Command="{Binding CheckConnectionCommand}" />
+            <Button Classes="small" Content="Retry connection" Command="{Binding RetryConnectionCommand}" />
+            <Button Classes="ghost small" Content="Export registration request…" Command="{Binding ExportRegistrationCommand}" />
+            <Button Classes="ghost small" Content="Open data folder" Command="{Binding OpenDataFolderCommand}" />
+            <ProgressBar IsIndeterminate="True" Width="100" VerticalAlignment="Center" IsVisible="{Binding IsCheckingConnection}" />
+          </StackPanel>
+          <Border Classes="callout success" IsVisible="{Binding ExportMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock FontSize="12.5" Text="{Binding ExportMessage}" TextWrapping="Wrap" />
+          </Border>
+          <Border Classes="callout error" IsVisible="{Binding ConnectImportError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock FontSize="12.5" Text="{Binding ConnectImportError}" TextWrapping="Wrap" />
+          </Border>
+          <Border Classes="callout success" IsVisible="{Binding ConnectImportMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock FontSize="12.5" Text="{Binding ConnectImportMessage}" TextWrapping="Wrap" />
+          </Border>
+          <ItemsControl ItemsSource="{Binding ConnectionSteps}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AccountPermissionRow">
+                <Grid ColumnDefinitions="170,*,Auto" Margin="0,4">
+                  <TextBlock Classes="label" Text="{Binding Title}" />
+                  <SelectableTextBlock Grid.Column="1" FontSize="12.5" Text="{Binding Detail}" TextWrapping="Wrap" Margin="0,0,12,0" />
+                  <c:StatusChip Grid.Column="2" Status="{Binding State}" VerticalAlignment="Top" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="{Binding ConnectionVerdict}" TextWrapping="Wrap"
+                     IsVisible="{Binding ConnectionVerdict, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <Expander Header="Registration HCG needs for this app" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Produced from this build's configuration (RFC 7591 client metadata). HCG registers it centrally (ERP › App integrations) and issues the configuration file with the client ID. Another app's client (for example HCG AI's web client) must not be reused." />
+              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding RegistrationJson}" TextWrapping="Wrap" />
+              <Button Classes="small" Content="Copy registration request" Command="{Binding CopyRegistrationCommand}" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Expander>
+        </StackPanel>
+      </Border>
+
+      <!-- Organisation -->
+      <Border Classes="card" IsVisible="{Binding HasOrganisations}">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Organisation" />
+          <TextBlock Classes="muted" TextWrapping="Wrap" Text="Your HCG account belongs to several organisations (from HCG). HCG Executable Maker uses the access HCG grants in the one you choose, and HCG checks your membership again on every request." />
+          <TextBlock Classes="body" Foreground="{DynamicResource Hcg.Brush.Warning}" IsVisible="{Binding NeedsOrganisation}" Text="Choose an organisation to see its plan and access." />
+          <ComboBox ItemsSource="{Binding Organisations}" SelectedItem="{Binding SelectedOrganisation}" MinWidth="320" PlaceholderText="Choose an organisation">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="a:EcosystemOrganisation">
+                <TextBlock Text="{Binding Name}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+      </Border>
+
+      <!-- Plan and access, from HCG's central API -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="h2" Text="Plan and access" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="As HCG reports them. HCG Executable Maker shows what HCG says and never assumes a plan or a purchase." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding PlanTag}" VerticalAlignment="Top" />
+          </Grid>
+          <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto" IsVisible="{Binding IsSignedIn}">
+            <TextBlock Classes="muted" Text="Current plan" />
+            <TextBlock Grid.Column="1" Text="{Binding PlanName}" FontWeight="SemiBold" />
+            <TextBlock Grid.Row="1" Classes="muted" Text="Valid until" Margin="0,4,0,0" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ValidUntil}" Margin="0,4,0,0" />
+          </Grid>
+          <TextBlock Classes="body secondary" Text="{Binding PlanMessage}" TextWrapping="Wrap" />
+          <Border Classes="callout" IsVisible="{Binding HasChange}">
+            <TextBlock Text="{Binding ChangeMessage}" FontSize="12.5" TextWrapping="Wrap" />
+          </Border>
+          <ItemsControl ItemsSource="{Binding Features}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AccountPermissionRow">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,6">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Title}" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <c:StatusChip Grid.Column="1" Status="{Binding State}" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding NoBillingNote}" TextWrapping="Wrap" IsVisible="{Binding IsSignedIn}" />
+          <WrapPanel IsVisible="{Binding IsSignedIn}">
+            <Button Classes="small" Content="Manage plan on HCG" Command="{Binding OpenManageCommand}" IsVisible="{Binding HasManageLink}" Margin="0,0,8,0" />
+            <Button Classes="small" Content="Choose a plan on HCG" Command="{Binding OpenCheckoutCommand}" IsVisible="{Binding HasCheckoutLink}" Margin="0,0,8,0" />
+            <Button Classes="small" Content="Open HCG account" Command="{Binding OpenHcgAccountCommand}" Margin="0,0,8,0" />
+            <Button Classes="small" Content="Check again" Command="{Binding CheckPlanCommand}" />
+          </WrapPanel>
+          <TextBlock Classes="muted" FontSize="11.5" Text="{Binding PlanChecked}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Executable Maker's own services on HCG (support requests, AI) -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="h2" Text="Support and AI services" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Decided by HCG (ERP ▸ App Access) and checked again by HCG on every request. HCG Executable Maker cannot grant itself anything." />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding AccessTag}" VerticalAlignment="Top" />
+          </Grid>
+          <TextBlock Classes="body secondary" Text="{Binding AccessMessage}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Permissions}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AccountPermissionRow">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,6">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Title}" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <c:StatusChip Grid.Column="1" Status="{Binding State}" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button Classes="small" Content="Check access again" Command="{Binding RefreshAccessCommand}" IsVisible="{Binding IsSignedIn}" HorizontalAlignment="Left" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="callout">
+        <StackPanel Spacing="6">
+          <TextBlock Text="{Binding LocalBuildsNote}" FontSize="12.5" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{Binding PrivacyNote}" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

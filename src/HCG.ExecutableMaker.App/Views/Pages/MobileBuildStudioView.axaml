@@ -191,6 +191,10 @@
                 <TextBox Text="{Binding ProvisioningProfile}" PlaceholderText="Installed profile name" />
               </StackPanel>
             </UniformGrid>
+            <StackPanel IsVisible="{Binding ShowSigningIdentity}">
+              <TextBlock Classes="formlabel" Text="CODE-SIGNING IDENTITY (CERTIFICATE NAME)" />
+              <TextBox Text="{Binding SigningIdentity}" PlaceholderText="Apple Distribution: Company (TEAMID)" />
+            </StackPanel>
             <CheckBox IsChecked="{Binding AllowProvisioningUpdates}" IsVisible="{Binding ShowProvisioningUpdates}">
               <StackPanel Spacing="1">
                 <TextBlock Text="Allow Xcode to update provisioning (-allowProvisioningUpdates)" FontWeight="Medium" />
@@ -246,6 +250,59 @@
               <c:StatusChip Status="{Binding ResultTag}" />
             </StackPanel>
           </Grid>
+          <Border Classes="inset" Padding="16,12" IsVisible="{Binding HasProject}">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="label" Text="STATE" />
+                <SelectableTextBlock FontSize="12.5" Text="{Binding BuildStateDetail}" TextWrapping="Wrap" />
+              </StackPanel>
+              <c:StatusChip Grid.Column="1" Status="{Binding BuildStateTag}" VerticalAlignment="Top" Margin="10,0,0,0" />
+            </Grid>
+          </Border>
+          <Border Classes="inset" Padding="16,14" IsVisible="{Binding HasReadiness}">
+            <StackPanel Spacing="8">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Classes="h3" Text="Readiness for this build" />
+                  <TextBlock Classes="muted" FontSize="12" Text="{Binding ReadinessSummary}" TextWrapping="Wrap" />
+                </StackPanel>
+                <c:StatusChip Grid.Column="1" Status="{Binding ReadinessTag}" VerticalAlignment="Top" />
+              </Grid>
+              <TextBlock Classes="formlabel" Text="REQUIRED" />
+              <ItemsControl ItemsSource="{Binding ReadinessRequired}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ReadinessRow">
+                    <Grid ColumnDefinitions="180,*,Auto" Margin="0,4">
+                      <TextBlock Text="{Binding Tool}" FontWeight="SemiBold" FontSize="12.5" />
+                      <StackPanel Grid.Column="1" Spacing="2" Margin="8,0">
+                        <TextBlock Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                        <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding Location}" IsVisible="{Binding HasLocation}" TextWrapping="Wrap" />
+                        <TextBlock Classes="warning" FontSize="12" Text="{Binding Fix}" IsVisible="{Binding HasFix}" TextWrapping="Wrap" />
+                        <Button Classes="small ghost" Content="Official setup guide" IsVisible="{Binding HasSetupUrl}" HorizontalAlignment="Left"
+                                Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).OpenSetupUrlCommand}" CommandParameter="{Binding}" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Classes="formlabel" Text="OPTIONAL OR NOT NEEDED FOR THIS BUILD" Margin="0,6,0,0" />
+              <ItemsControl ItemsSource="{Binding ReadinessOptional}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ReadinessRow">
+                    <Grid ColumnDefinitions="180,*,Auto" Margin="0,3">
+                      <TextBlock Text="{Binding Tool}" FontSize="12.5" Classes="secondary" />
+                      <StackPanel Grid.Column="1" Spacing="2" Margin="8,0">
+                        <TextBlock Classes="muted" Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Classes="muted" FontSize="12" Text="{Binding Fix}" IsVisible="{Binding HasFix}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
           <ItemsControl ItemsSource="{Binding Summary}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:SummaryRow">
@@ -274,15 +331,33 @@
               <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Stop}" /><TextBlock Text="Cancel" /></StackPanel>
             </Button>
           </StackPanel>
+          <Border Classes="callout error" Padding="14" IsVisible="{Binding HasFirstError}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="label" Text="FIRST ERROR" />
+              <SelectableTextBlock Classes="mono" FontSize="12.5" Text="{Binding FirstError}" TextWrapping="Wrap" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="small" Content="Copy error" Command="{Binding CopyFirstErrorCommand}" />
+                <Button Classes="small" Content="Copy full failure" Command="{Binding CopyFailureCommand}" />
+                <Button Classes="small" Content="Export full log…" Command="{Binding ExportFullLogCommand}" IsVisible="{Binding HasLog}" />
+                <Button Classes="small ghost" Content="Open log folder" Command="{Binding OpenLogFolderCommand}" IsVisible="{Binding HasLog}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
           <Border Classes="callout" Padding="12" IsVisible="{Binding ResultDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-            <TextBlock Text="{Binding ResultDetail}" TextWrapping="Wrap" />
+            <StackPanel Spacing="8">
+              <SelectableTextBlock Text="{Binding ResultDetail}" TextWrapping="Wrap" />
+              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding !HasFirstError}">
+                <Button Classes="small" Content="Export full log…" Command="{Binding ExportFullLogCommand}" IsVisible="{Binding HasLog}" />
+                <Button Classes="small ghost" Content="Open log folder" Command="{Binding OpenLogFolderCommand}" IsVisible="{Binding HasLog}" />
+              </StackPanel>
+            </StackPanel>
           </Border>
           <ListBox x:Name="LogList" Classes="log" ItemsSource="{Binding LogLines}" Height="300" IsVisible="{Binding HasBuildStarted}">
             <ListBox.ItemTemplate>
               <DataTemplate x:DataType="vm:LogLineItem">
                 <Grid ColumnDefinitions="70,*">
                   <TextBlock Classes="log" Text="{Binding Time}" Opacity="0.45" />
-                  <TextBlock Grid.Column="1" Classes="log" Text="{Binding Text}"
+                  <TextBlock Grid.Column="1" Classes="log" TextWrapping="Wrap" Text="{Binding Text}"
                              Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.success="{Binding IsSuccess}"
                              Classes.command="{Binding IsCommand}" Classes.info="{Binding IsInfo}" />
                 </Grid>

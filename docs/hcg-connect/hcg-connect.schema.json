@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/F1r3srp3nt/HCG-Executable-Maker/blob/main/docs/hcg-connect/hcg-connect.schema.json",
+  "title": "HCG Executable Maker — HCG Connect configuration (hcg-connect.json)",
+  "description": "Optional file in Executable Maker's app data folder that supplies the public OAuth client HCG issued for Executable Maker, over the built-in defaults. Every key except contractVersion and clientId is optional and defaults to the live-verified value shown. The file may never contain a secret: Executable Maker is a public client (token_endpoint_auth_method none, PKCE S256). Keys whose names contain secret, password, service_role, private or apikey make the app ignore the whole file, and so does any key not listed here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "clientId"],
+  "properties": {
+    "$schema": { "type": "string", "description": "Optional pointer to this schema (ignored by the app)." },
+    "contractVersion": {
+      "const": "hcg.executable-maker.connect/1",
+      "description": "Configuration contract. Files for another contract (e.g. hcg.lifeos.connect/1) are refused."
+    },
+    "clientId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "The public OAuth client ID HCG issued for HCG Executable Maker (UUID). Not a secret. Until a real issued ID is set (the placeholder, an empty value or the nil UUID), sign-in stays off and nothing is contacted."
+    },
+    "issuer": {
+      "type": "string", "format": "uri",
+      "default": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1",
+      "description": "OIDC issuer; must equal the ID token's iss. HTTPS (http only for a test server on 127.0.0.1/localhost)."
+    },
+    "authorizationEndpoint": { "type": "string", "format": "uri", "default": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/authorize" },
+    "tokenEndpoint": { "type": "string", "format": "uri", "default": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/token" },
+    "userinfoEndpoint": { "type": "string", "format": "uri", "default": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/userinfo" },
+    "jwksEndpoint": { "type": "string", "format": "uri", "default": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/.well-known/jwks.json" },
+    "redirectUris": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}/[^#]*$" },
+      "default": [
+        "http://127.0.0.1:47820/oauth/callback",
+        "http://127.0.0.1:47821/oauth/callback",
+        "http://127.0.0.1:47822/oauth/callback"
+      ],
+      "description": "RFC 8252 loopback redirect URIs, each registered on the client exactly (the provider compares exact strings, port included). The app listens on 127.0.0.1 only, on the first port that is free."
+    },
+    "scopes": {
+      "type": "array", "uniqueItems": true, "items": { "type": "string", "enum": ["openid", "email", "profile", "phone", "offline_access"] },
+      "default": ["openid", "email", "profile"],
+      "description": "Identity scopes only; they grant no Executable Maker permission. Must include openid."
+    },
+    "apiBaseUrl": { "type": "string", "format": "uri", "default": "https://beta.hakmicapitalgroup.com", "description": "HCG website origin for the central Ecosystem API and Executable Maker's support routes." },
+    "ecosystemApiPath": { "type": "string", "default": "/api/public/ecosystem/v1", "description": "Central HCG Ecosystem API: me (account, organisation memberships), features, check." },
+    "productId": { "type": "string", "default": "hcg.executable.maker", "description": "Executable Maker's key in HCG's product registry (Ecosystem API product / product_id)." },
+    "accountPortalUrl": { "type": "string", "format": "uri", "default": "https://beta.hakmicapitalgroup.com/client-portal", "description": "HCG account page opened by \"Open HCG account\"." },
+    "trustedLinkHosts": {
+      "type": "array", "items": { "type": "string" },
+      "default": ["beta.hakmicapitalgroup.com", "hakmicapitalgroup.com"],
+      "description": "Hosts whose HTTPS plan-management and checkout links (provided by HCG in API responses) the app opens. Other links are not offered."
+    },
+    "apiPath": { "type": "string", "default": "/api/public/executable-maker/v1", "description": "Executable Maker's own support routes (website package; not deployed yet)." },
+    "appIdentifier": { "type": "string", "default": "executable-maker", "description": "App Access directory entry used by the support routes." },
+    "aiGatewayBaseUrl": { "type": ["string", "null"], "format": "uri", "default": null, "description": "HCG AI gateway; unset until its contract is published (AI assistance shows Not connected)." },
+    "aiCapabilitiesPath": { "type": ["string", "null"], "default": null }
+  }
+}

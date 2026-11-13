@@ -32,6 +32,17 @@ public sealed record AppSettings
     public int BuildTimeoutMinutes { get; init; } = 30;
     public string? DefaultOutputDirectory { get; init; }
     public string? LastPublisher { get; init; }
+    /// <summary>HCG's own developer directory (…/Xcode.app/Contents/Developer), passed to HCG's processes as DEVELOPER_DIR. Null = system setting.</summary>
+    public string? DeveloperDirectory { get; init; }
+    /// <summary>JDK chosen in HCG (Toolchains › Java › Browse…): its JAVA_HOME. Null = automatic detection.</summary>
+    public string? JavaHome { get; init; }
+    /// <summary>Android SDK folder chosen in HCG. Null = automatic detection.</summary>
+    public string? AndroidSdkPath { get; init; }
+    /// <summary>Name of a notarytool keychain profile (created with xcrun notarytool store-credentials). Only the name is stored; the secret stays in the login keychain.</summary>
+    public string? NotaryKeychainProfile { get; init; }
+    /// <summary>App Store Connect API key ID (for altool --validate-app). The .p8 key stays in ~/.appstoreconnect/private_keys.</summary>
+    public string? AppStoreConnectKeyId { get; init; }
+    public string? AppStoreConnectIssuerId { get; init; }
 }
 
 public interface ISettingsStore

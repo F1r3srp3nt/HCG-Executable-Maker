@@ -1,0 +1,282 @@
+# Swift (macOS) apps
+
+HCG Executable Maker builds **Swift Package Manager** packages into macOS apps on a Mac:
+
+| Product | Output |
+|---|---|
+| SwiftUI / AppKit executable | `Name.app` (Info.plist, PkgInfo, executable, icon, SwiftPM resource bundles, ad-hoc signature); optionally the `.app` as ZIP (`ditto`) and DMG |
+| Command-line executable | Folder with the executable (+ resource bundles) and/or ZIP with the executable bit recorded |
+
+Reference projects: [Oslo-Sprint](https://github.com/F1r3srp3nt/Oslo-Sprint): `distil/` (product `TokenLab`, shipped as
+**Distil.app**) and `relay/` (products `Relay`, a SwiftUI app, and `relay-runner`, a command-line tool).
+
+## Which build am I running?
+
+Settings › About this build shows the version, the git commit (`+uncommitted` if the tree had changes), the build
+time, the executable and the `.app` path. The sidebar footer shows the version and commit. From a terminal,
+`HCGExecutableMaker --version` prints the same without opening a window.
+
+The message "Detected a Swift / Xcode project… support is planned for a later milestone (M0.5+)" comes from builds
+before Swift support. It exists up to commit `b1a9e43`, which includes the v0.1.0 release.
+
+To build this checkout as an app on your Mac, run `bash tools/build-local-mac.sh`. It prints the exact `.app` to
+open. Add `--verify <Oslo-Sprint path>` to also run the Distil/Relay checks below on your Mac.
+
+## Workflow in the New Build wizard
+
+1. **Import** the repository as a folder or ZIP. A ZIP whose content sits in a wrapping folder (GitHub's
+   `Repo-main/…`) is handled.
+2. **Inspect** (passive). Every `Package.swift` is listed, for example `distil/` and `relay/`. If there are several,
+   **none is pre-selected**; you choose one. These directories are skipped: `.build`, `.swiftpm`, `build`, `dist`,
+   `DerivedData`, `Pods`, `Carthage`, `checkouts`, `SourcePackages`, `node_modules` and `xcuserdata`.
+   `Package.swift` is read **as text only**. The scan collects:
+   - the tools version and the declared macOS platform;
+   - whether products are declared conditionally;
+   - per executable target: SwiftUI/AppKit entry points and privacy-sensitive APIs, such as `AVAudioRecorder` →
+     `NSMicrophoneUsageDescription`.
+3. **Evaluate package on this Mac** (requires the trust checkbox). `Package.swift` is Swift code, so HCG only runs it
+   after you confirm trust. It runs as `swift package --scratch-path <HCG data>/swiftpm/… dump-package`, through the same
+   build worker as builds:
+   - scrubbed environment;
+   - cancellable;
+   - 5-minute limit;
+   - scratch space outside the project.
+
+   SwiftPM's JSON is the authoritative product list. The packages declare their GUI products under `#if os(macOS)`, so
+   the list is the real one for this Mac. Executable products are listed separately from library products and test
+   targets. When a package has several executable products (Relay: `Relay` and `relay-runner`), none is pre-selected.
+   The evaluation result is stored with the project. **Re-inspect** discards it.
+4. **Configure**:
+   - Display name, e.g. *Distil*. The executable keeps the product name, *TokenLab*.
+   - Bundle identifier, version (`CFBundleShortVersionString`) and build number (`CFBundleVersion`).
+   - Minimum macOS: defaults to the package's `platforms:` value; a lower value is refused.
+   - App category.
+   - Architecture: Apple Silicon, Intel or Universal.
+   - A required text for every detected privacy key; the build is blocked while one is empty.
+   - App vs command-line delivery: detected from the sources; can be overridden, with a warning.
+
+   .NET-only options are hidden.
+5. **Package**:
+   - GUI: `.app`, the `.app` as ZIP, DMG.
+   - CLI: folder, ZIP.
+
+   Other combinations are shown disabled, with the reason.
+6. **Build**. Trust is confirmed again, then:
+   - `swift package resolve`
+   - `swift build -c release --product <P> --scratch-path <per-build> --arch …`
+   - `--show-bin-path`
+
+   Then HCG copies the executable and any `*.bundle` resource bundles, assembles and signs the bundle, verifies it,
+   writes checksums and records the build in history. Errors from `swift build` appear in the log and in the
+   warning/error counters.
+
+## What is different from .NET apps (`MacAppBundlePackager`)
+
+`SwiftAppBundlePackager` is used whenever the build is a Swift GUI app; `MacAppBundlePackager` (.NET) is never applied
+to Swift builds:
+
+- `Contents/MacOS` contains **only** the executable.
+- `LSMinimumSystemVersion` comes from the configured or package minimum. Without one, it comes from the deployment
+  target the linker recorded in the executable (`LC_BUILD_VERSION`). The .NET default of 11.0/10.15 is not used.
+- No `NSPrincipalClass`. Privacy usage descriptions and `LSApplicationCategoryType` are written.
+- `Contents` is signed ad hoc (`codesign --force --sign - --timestamp=none`).
+
+### SwiftPM resources
+
+SwiftPM's generated `Bundle.module` accessor looks for a resource bundle at
+`Bundle.main.bundleURL/<Package>_<Target>.bundle`, which is the **root of the .app**. If the bundle is not there, it
+falls back to an absolute path inside the build folder. It never looks inside `Contents/` (see SwiftPM's
+`SwiftModuleBuildDescription.generateResourceAccessor`). This holds for library and app targets alike.
+
+HCG therefore:
+1. signs `Contents` first;
+2. places each `*.bundle` at the app root, so `Bundle.module` finds it on any Mac;
+3. verifies the signature of `Contents` on a copy without those bundles.
+
+**Trade-off:** macOS code signing seals only `Contents`, so a whole-bundle `codesign --verify` reports "unsealed contents
+present in the bundle root". Gatekeeper rejects a *downloaded* copy of such an app. Local use works. For
+distribution, load resources from `Bundle.main` (`Contents/Resources`) or build with Xcode, which generates a
+different accessor.
+
+Packages without resources (Distil, Relay) are unaffected: their apps are fully sealed. Putting the bundles in
+`Contents/Resources`, as the Oslo-Sprint scripts would if a target declared resources, makes `Bundle.module` fail at
+launch.
+
+### Preserving the project's configured identity
+
+When a package has its own packaging script (e.g. `scripts/build-macos.sh` writing an Info.plist), HCG reads it as
+text, never running it, and prefills from it:
+- the display name, bundle id, version and build number;
+- the minimum macOS version and the category;
+- the privacy texts.
+
+It only uses a script that packages the selected product, and the Configure step says which script it read. Values
+the script computes at build time are not reproduced, and the wizard says so. Examples are `DistilGitCommit` and
+`RelayBuildDate`.
+
+### Packaging contracts (`AppPackaging.json`)
+
+Some apps need more than the SwiftPM product. HCG Server, for example, runs a separate Go agent from
+`Contents/Helpers/hcg-agent`. A package declares such parts in `AppPackaging.json`, next to `Package.swift`, using
+schema `hcg-app-packaging/1`. HCG reads that file as data during inspection, then follows it:
+
+1. **Configure** shows a *Packaging contract* card. It lists every prebuild command exactly as it will run (program,
+   arguments, working directory and required tools), and what the contract adds to the app.
+   - The commands run only after **Run these commands while building** is ticked. They run with your account's
+     permissions, like the build itself.
+   - Without that confirmation the build is refused: "This app needs its helper programs…".
+   - Identity is prefilled from the contract and its Info.plist template:
+     - display name and bundle id;
+     - minimum macOS;
+     - version and build number, unless they are placeholders such as `0.0.0` / `0`;
+     - category and privacy texts.
+2. **At build time:**
+   - **Unchanged since confirmation:** the file is re-read and must have the same SHA-256 as when it was confirmed.
+     If it changed or was removed, the build stops and asks for a new review.
+   - **Required tools:** each one (for example `go >= 1.25`) is located on PATH and in `/opt/homebrew/bin` and
+     `/usr/local/bin`, then version-checked. Its folder is put first on the command's PATH, because apps opened from
+     Finder do not inherit the shell PATH.
+   - **Prebuild commands** run before `swift build`, as argument vectors (never through a shell), with the scrubbed
+     build environment and a 30-minute limit. `${HELPERS_DIR}` is the only variable, a fresh per-build folder.
+3. **After `swift build`:**
+   - helpers, resources, the Info.plist template and the icon are staged at their bundle paths;
+   - a missing required file fails the build and names the prebuild step that should have written it.
+4. **The packager:**
+   - places helpers in `Contents/Helpers/…` (mode 0755) and resources in `Contents/Resources/…`, so `Contents/MacOS`
+     still holds only the product;
+   - builds Info.plist from the template: HCG's values replace the identity, version and other keys you set, and all
+     other template keys (arrays included) are kept;
+   - signs each helper **before** the app. With Developer ID, helpers get the hardened runtime and a secure timestamp,
+     and no entitlements.
+   - An icon chosen in HCG replaces the contract's icon.
+
+Rules HCG enforces (an invalid contract is reported in Configure, never half-applied):
+- unknown keys and other schema versions are rejected (an optional top-level `description` string, for people
+  reading the file, is accepted and ignored);
+- commands are argument lists; `${…}` other than `${HELPERS_DIR}`, `$(…)` and backticks are rejected;
+- every path is relative and resolves inside the workspace (`workingDirectory: "../.."` is fine when it stays inside);
+- helpers go only to `Contents/Helpers/<name>`, resources only under `Contents/Resources/`;
+- a helper from `${HELPERS_DIR}` must be written by some prebuild command;
+- `sign` is `before-app`; `verify` supports `version`;
+- the app's architecture must be covered by each helper's `architectures`;
+- Mac App Store packages of apps with helpers are refused (each helper would need sandbox entitlements);
+- the delivery kind must be *macOS app*.
+
+Example (HCG Server):
+
+```json
+{
+  "schema": "hcg-app-packaging/1",
+  "product": "HCGServer",
+  "bundle": { "displayName": "HCG Server", "identifier": "com.hcg.server.app",
+              "infoPlist": "Resources/Info.plist", "icon": "Resources/AppIcon.icns", "minimumMacOS": "13.0" },
+  "prebuild": [ { "description": "Build the host agent (Go) as a universal helper", "requires": ["go >= 1.25"],
+                  "workingDirectory": "../..",
+                  "command": ["scripts/build-agent-helper.sh", "--output", "${HELPERS_DIR}/hcg-agent"] } ],
+  "helpers": [ { "name": "hcg-agent", "source": "${HELPERS_DIR}/hcg-agent", "destination": "Contents/Helpers/hcg-agent",
+                 "required": true, "architectures": ["arm64", "x86_64"], "sign": "before-app", "verify": ["version"] } ],
+  "resources": [ { "source": "Resources/Artwork/hcg-server-artwork.jpg",
+                   "destination": "Contents/Resources/hcg-server-artwork.jpg", "required": true } ]
+}
+```
+
+### Tests
+
+HCG builds the selected product only. Test targets are neither compiled nor run, and every build log says so. XCTest
+is detected and reported separately as a *test* prerequisite. It is missing with only the Command Line Tools, in which
+case `swift test` fails with "no such module 'XCTest'". A missing XCTest never marks a package as unbuildable.
+
+### Working copies
+
+Generated folders are never imported: `.build`, `.swiftpm` and `DerivedData`, from folders and from ZIPs.
+Discovery ignores these too, along with `build`, `dist` and dependency checkouts. A working copy that has already been
+built with the project's own script (`.build/`, `dist/Distil.app`, Xcode's `.swiftpm/` workspace) is recognised as the
+Swift package it is.
+
+### Verification (per build)
+
+- Info.plist keys; `CFBundleExecutable` equals the product.
+- No stray files in `Contents/MacOS`.
+- Mach-O slices match the chosen architecture (both slices for Universal).
+- Executable bit is set.
+- `LSMinimumSystemVersion` ≥ the executable's deployment target.
+- Every configured privacy key is present.
+- Icon and resource bundles are present.
+- With a packaging contract, each helper is checked:
+  - it is present in `Contents/Helpers` (not `Contents/MacOS`), executable and Mach-O, with every slice the contract
+    promises;
+  - its own `codesign --verify --strict` passes;
+  - with `verify: ["version"]`, `<helper> version` runs and prints `<name> <app version> …`. A mismatch fails and
+    says which version to set.
+
+  Every contract resource must also be present.
+- `codesign --verify --strict --deep` passes.
+- App ZIP: extracted again with `ditto -x -k` and the signature re-verified.
+- DMG: `hdiutil verify`.
+- Launch test: **not** performed by the app (it would execute the project). CI launches the reference apps; see below.
+
+## Toolchain checks
+
+The Toolchains page and the Inspect step report:
+- the macOS version;
+- the selected developer directory (Xcode or Command Line Tools);
+- the Swift compiler version, compared with the package's tools version;
+- the macOS SDK version, compared with the package's minimum macOS;
+- `codesign` and `hdiutil`.
+
+Every missing item comes with the exact fix, e.g. `xcode-select --install`.
+
+**Xcode** (Toolchains › Xcode) lists installed Xcode apps from `/Applications`, `~/Applications`, Spotlight and
+*Browse…*. *Select Xcode* applies one to HCG only: `DEVELOPER_DIR` is set for HCG's own process, so inspection, SDK
+discovery, builds, signing and tests all use it. `xcode-select` is never changed. The page distinguishes:
+- not installed;
+- installed but not selected;
+- license not accepted;
+- first-launch setup needed;
+- no SDKs;
+- validation failed.
+
+It also has *Open Xcode*, *Recheck* and *Use system setting*. The Command Line Tools remain enough for Swift package
+builds. See [MACOS-DISTRIBUTION.md](MACOS-DISTRIBUTION.md#xcode-selection).
+
+The statuses are distinct:
+- *Supported* — buildable now.
+- *Missing toolchain* — a supported project on a Mac that lacks tools.
+- *Needs another host* — Windows/Linux. Nothing is offered: not evaluation, not configuration, not packaging.
+- *Unsupported* — e.g. a macOS Xcode project alone.
+
+HCG never installs tools.
+
+## Not implemented in this version
+
+- **macOS Xcode projects/workspaces** (`.xcodeproj` / `.xcworkspace` whose targets are macOS-only) are recognized,
+  and the wizard says they are not built (schemes, signing settings and asset catalogs are a separate capability). If
+  the repository also has a `Package.swift`, choose that. iOS Xcode projects belong to Mobile Build Studio, which does
+  not produce macOS apps.
+- Developer ID signing, hardened runtime, entitlements, notarization, `.pkg` and Mac App Store preparation are now
+  implemented: see [MACOS-DISTRIBUTION.md](MACOS-DISTRIBUTION.md). Ad hoc remains the default.
+- Building Swift macOS apps on Windows/Linux, and Swift on Linux/Windows targets.
+- Fully sealed apps that also use SwiftPM resources through `Bundle.module` (see "SwiftPM resources" above).
+
+## Verification in CI (`swift-macos` job)
+
+[`tools/ui-driver`](../tools/ui-driver) runs the **real** app on Avalonia's headless platform with Skia rendering:
+`App`, `MainWindow`, `BuildWizardView` and `BuildWizardViewModel`. It presses the same commands the buttons are bound
+to and saves rendered screenshots of every step. Only the OS file picker and modal dialogs are scripted. CI
+(macOS, Xcode) clones Oslo-Sprint at a pinned commit and:
+
+1. **Distil.app**: folder import, package `distil/`, product `TokenLab`, display name *Distil*,
+   `dev.tokenlab.prototype` 0.4.0 (4), developer-tools category, arm64. Produces app + ZIP + DMG.
+2. **Relay.app**: import from a ZIP with a wrapping folder, package `relay/`, product `Relay`, universal binary, the
+   required microphone text. Produces app + ZIP.
+3. **relay-runner**: the command-line product, as folder + ZIP.
+
+Then `tools/ui-driver/verify-macos-app.sh` re-checks each app independently:
+- `plutil`, `codesign --verify` / `-dv`, `lipo`, `vtool`;
+- launches it with `open`, confirms it is still running, and takes a screenshot;
+- repeats the launch for Relay extracted from its ZIP;
+- mounts the DMG and checks the app inside and the Applications link;
+- runs the CLI.
+
+Local Linux check: `dotnet run --project tools/ui-driver -- --source <Oslo-Sprint> --package relay --expect-blocked-host`
+shows the wizard refusing to evaluate or build, and why.

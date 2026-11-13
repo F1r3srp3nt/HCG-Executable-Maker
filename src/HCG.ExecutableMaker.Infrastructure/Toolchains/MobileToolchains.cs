@@ -16,48 +16,82 @@ public sealed partial class ToolchainDetector
     private const string FlutterCat = "Flutter";
     private const string MauiCat = ".NET MAUI";
 
-    private async Task<IReadOnlyList<ToolchainInfo>> DetectMobileAsync(CancellationToken ct)
+    /// <summary>Mobile detection result: the rows plus the structured JDK / SDK / signing details behind them.</summary>
+    private sealed record MobileDetection(IReadOnlyList<ToolchainInfo> Rows, JavaDiscoveryResult Java, AndroidSdkDiscoveryResult Android,
+        IReadOnlyList<SigningIdentity> Identities, IReadOnlyList<IosProvisioningProfile> Profiles);
+
+    private async Task<MobileDetection> DetectMobileAsync(AppSettings settings, Task<XcodeStatus>? xcodeTask, CancellationToken ct)
     {
         var list = new List<ToolchainInfo>();
-        var jdk = await DetectJdkAsync(ct).ConfigureAwait(false);
-        list.Add(jdk);
-        list.AddRange(DetectAndroidSdk());
-        list.Add(await DetectBundletoolAsync(jdk, ct).ConfigureAwait(false));
-        list.AddRange(await DetectAppleMobileAsync(ct).ConfigureAwait(false));
+        var java = await DiscoverJavaAsync(settings.JavaHome, ct).ConfigureAwait(false);
+        var jdkRow = JdkRow(java);
+        list.Add(jdkRow);
+        var android = AndroidSdkDiscovery.Discover(new AndroidSdkDiscovery.Context { SavedRoot = settings.AndroidSdkPath, Platform = Host.Platform });
+        list.AddRange(AndroidSdkDiscovery.Rows(android));
+        list.AddRange(DetectNativeAndroidTools(android.Problem is null ? android.Root : null));
+        list.Add(await DetectBundletoolAsync(jdkRow, ct).ConfigureAwait(false));
+        var xcode = xcodeTask is null ? null : await xcodeTask.ConfigureAwait(false);
+        var (appleRows, identities, profiles) = await DetectAppleMobileAsync(xcode, ct).ConfigureAwait(false);
+        list.AddRange(appleRows);
         list.Add(DetectFlutter());
-        list.Add(await DetectMauiWorkloadsAsync(ct).ConfigureAwait(false));
-        return list;
+        var workloads = await DetectMauiWorkloadsAsync(ct).ConfigureAwait(false);
+        list.Add(workloads.Row);
+        list.Add(workloads.Ios);
+        return new MobileDetection(list, java, android, identities, profiles);
     }
 
     // ---------- JDK ----------
 
-    private async Task<ToolchainInfo> DetectJdkAsync(CancellationToken ct)
+    private const string JdkHint = "Install a JDK 17+ — Android Studio includes one — or choose an installed JDK with Browse… (Toolchains › Java). HCG never installs Java.";
+
+    /// <summary>Discovers JDKs without the login shell (works for Finder launches). See <see cref="JavaDiscovery"/>.</summary>
+    public async Task<JavaDiscoveryResult> DiscoverJavaAsync(string? savedHome, CancellationToken ct)
     {
-        const string hint = "Install a JDK 17+ (e.g. Eclipse Temurin or the JDK bundled with Android Studio) and set JAVA_HOME.";
-        var exe = Path.Combine("bin", OperatingSystem.IsWindows() ? "java.exe" : "java");
-        var javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
-        var candidates = new List<string>();
-        if (!string.IsNullOrEmpty(javaHome)) candidates.Add(Path.Combine(javaHome, exe));
-        if (OperatingSystem.IsMacOS()) candidates.Add("/Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java");
-        var java = locator.Find("java", candidates);
-        if (java is null) return Missing(ToolchainIds.Jdk, "JDK (Java)", AndroidCat, hint);
-        try
+        var discovery = new JavaDiscovery(runner);
+        var registered = Host.Platform == TargetPlatform.MacOS ? await discovery.RegisteredHomesAsync(ct).ConfigureAwait(false) : [];
+        return await discovery.DiscoverAsync(new JavaDiscovery.Context
         {
-            var (r, stdout, stderr) = await runner.CaptureAsync(new ProcessSpec { Executable = java, Arguments = ["-version"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
-            var version = ParseJavaVersion(stderr + "\n" + stdout);
-            if (!r.Succeeded || version is null) return Failed(ToolchainIds.Jdk, "JDK (Java)", AndroidCat, java, "java -version did not report a version.", hint);
-            var hasJavac = File.Exists(Path.Combine(Path.GetDirectoryName(java)!, OperatingSystem.IsWindows() ? "javac.exe" : "javac"));
-            var major = int.TryParse(version.Split('.')[0], out var m) ? m : 0;
+            SavedHome = savedHome, Platform = Host.Platform, RegisteredHomes = registered, PathJava = locator.Find("java"),
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The JDK row: only a JDK that ran and reported a version (with javac) is Installed.</summary>
+    public static ToolchainInfo JdkRow(JavaDiscoveryResult java)
+    {
+        const string name = "JDK (Java)";
+        var others = java.Candidates.Select(c => c.IsUsable
+            ? $"Java {c.Version} — {c.Home} ({c.Source})"
+            : $"Not usable: {c.Home} ({c.Source}) — {c.Problem}").ToList();
+        var sel = java.Selected;
+        if (sel is null)
+        {
+            var rejected = java.Candidates.Where(c => !c.IsUsable).ToList();
             return new ToolchainInfo
             {
-                Id = ToolchainIds.Jdk, DisplayName = "JDK (Java)", Category = AndroidCat,
-                Status = hasJavac && major >= 17 ? ToolchainStatus.Installed : ToolchainStatus.ValidationFailed,
-                Version = version, ExecutablePath = java,
-                Detail = !hasJavac ? "Java runtime found, but javac is missing (a full JDK is required)." : major < 17 ? $"Java {major} is too old for the Android Gradle Plugin 8 (needs 17+)." : "JDK",
-                InstallHint = hint,
+                Id = ToolchainIds.Jdk, DisplayName = name, Category = AndroidCat, Status = ToolchainStatus.Missing, AdditionalVersions = others,
+                Detail = rejected.Count == 0 ? "No JDK found (looked in JAVA_HOME, Android Studio, the system JVM folders, Homebrew, SDKMAN and PATH)."
+                    : "No working JDK found. " + string.Join(" ", rejected.Select(c => $"{c.Source}: {c.Problem}")),
+                InstallHint = JdkHint, SetupUrl = JavaDiscovery.SetupUrl,
             };
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return Failed(ToolchainIds.Jdk, "JDK (Java)", AndroidCat, java, ex.Message, hint); }
+        if (!sel.IsUsable)
+            return new ToolchainInfo
+            {
+                Id = ToolchainIds.Jdk, DisplayName = name, Category = AndroidCat, ExecutablePath = sel.JavaExecutable, Source = sel.Source, Version = sel.Version,
+                Status = File.Exists(sel.JavaExecutable) ? ToolchainStatus.ValidationFailed : ToolchainStatus.InvalidPath,
+                Detail = sel.Problem, AdditionalVersions = others,
+                InstallHint = "Choose another JDK with Browse…, or Use automatic detection.", SetupUrl = JavaDiscovery.SetupUrl,
+            };
+        var tooOld = sel.Major < JavaDiscovery.RecommendedMajor;
+        return new ToolchainInfo
+        {
+            Id = ToolchainIds.Jdk, DisplayName = name, Category = AndroidCat, ExecutablePath = sel.JavaExecutable, Source = sel.Source, Version = sel.Version,
+            Status = tooOld ? ToolchainStatus.IncompatibleVersion : ToolchainStatus.Installed,
+            Detail = tooOld
+                ? $"Java {sel.Major} works, but the Android Gradle plugin 8+ needs JDK 17 or newer. Each project's readiness checks its own Gradle/AGP versions."
+                : $"JDK {sel.Major} with javac ({sel.Source}). Compatibility with each project's Gradle/AGP is checked per project.",
+            AdditionalVersions = others, InstallHint = tooOld ? JdkHint : null, SetupUrl = JavaDiscovery.SetupUrl,
+        };
     }
 
     /// <summary>Parses <c>openjdk version "21.0.12"</c> / <c>java version "1.8.0_392"</c> (1.8 → "8").</summary>
@@ -72,57 +106,54 @@ public sealed partial class ToolchainDetector
     [GeneratedRegex(@"version\s+""([\d._]+)")]
     private static partial Regex JavaVersionRegex();
 
-    // ---------- Android SDK ----------
+    /// <summary>Kept for callers that list default SDK folders.</summary>
+    public static IEnumerable<string> AndroidSdkCandidates(Func<string, string?> getEnv) =>
+        AndroidSdkDiscovery.Candidates(new AndroidSdkDiscovery.Context { GetEnv = getEnv }).Select(c => c.Root);
 
-    public static IEnumerable<string> AndroidSdkCandidates(Func<string, string?> getEnv)
+    /// <summary>NDK, SDK CMake and adb: needed for native (C/C++) Android builds and for launching on emulators/devices.</summary>
+    private static IEnumerable<ToolchainInfo> DetectNativeAndroidTools(string? sdk)
     {
-        foreach (var v in new[] { "ANDROID_HOME", "ANDROID_SDK_ROOT" })
-            if (getEnv(v) is { Length: > 0 } p) yield return p;
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (OperatingSystem.IsMacOS()) yield return Path.Combine(home, "Library", "Android", "sdk");
-        else if (OperatingSystem.IsWindows()) yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Android", "Sdk");
-        else
-        {
-            yield return Path.Combine(home, "Android", "Sdk");
-            yield return "/usr/local/lib/android/sdk";
-            yield return "/opt/android-sdk";
-        }
+        const string ndkHint = "Install the NDK (Side by side) and CMake from Android Studio → SDK Manager → SDK Tools, or: sdkmanager \"ndk;27.2.12479018\" \"cmake;3.22.1\". HCG does not install them.";
+        var ndks = new List<(string Version, string Path)>();
+        if (sdk is not null)
+            foreach (var v in SortedVersionDirs(Path.Combine(sdk, "ndk"), ""))
+                ndks.Add((v, Path.Combine(sdk, "ndk", v)));
+        foreach (var env in new[] { "ANDROID_NDK_HOME", "ANDROID_NDK_ROOT", "ANDROID_NDK_LATEST_HOME" })
+            if (Environment.GetEnvironmentVariable(env) is { Length: > 0 } dir && NdkRevision(dir) is { } rev && ndks.All(n => n.Version != rev))
+                ndks.Add((rev, dir));
+        ndks = ndks.Where(n => File.Exists(Path.Combine(n.Path, "source.properties"))).Select(n => (NdkRevision(n.Path) ?? n.Version, n.Path)).ToList();
+        yield return ndks.Count > 0
+            ? new ToolchainInfo
+            {
+                Id = ToolchainIds.AndroidNdk, DisplayName = "Android NDK", Category = AndroidCat, Status = ToolchainStatus.Installed,
+                Version = ndks[0].Version, ExecutablePath = ndks[0].Path, AdditionalVersions = ndks.Select(n => n.Version).ToList(),
+                Detail = $"{ndks.Count} NDK version(s)",
+            }
+            : Missing(ToolchainIds.AndroidNdk, "Android NDK", AndroidCat, ndkHint);
+        var cmakes = sdk is null ? [] : SortedVersionDirs(Path.Combine(sdk, "cmake"), "")
+            .Where(v => File.Exists(Path.Combine(sdk, "cmake", v, "bin", OperatingSystem.IsWindows() ? "cmake.exe" : "cmake"))).ToList();
+        yield return cmakes.Count > 0
+            ? new ToolchainInfo
+            {
+                Id = ToolchainIds.AndroidCmake, DisplayName = "CMake (Android SDK)", Category = AndroidCat, Status = ToolchainStatus.Installed,
+                Version = cmakes[0], ExecutablePath = Path.Combine(sdk!, "cmake", cmakes[0], "bin"), AdditionalVersions = cmakes,
+            }
+            : Missing(ToolchainIds.AndroidCmake, "CMake (Android SDK)", AndroidCat, ndkHint);
+        var adb = sdk is null ? null : Path.Combine(sdk, "platform-tools", OperatingSystem.IsWindows() ? "adb.exe" : "adb");
+        yield return adb is not null && File.Exists(adb)
+            ? new ToolchainInfo { Id = ToolchainIds.Adb, DisplayName = "adb (platform-tools)", Category = AndroidCat, Status = ToolchainStatus.Installed, ExecutablePath = adb }
+            : Missing(ToolchainIds.Adb, "adb (platform-tools)", AndroidCat, "Install Android SDK Platform-Tools with the SDK Manager.");
     }
 
-    private IEnumerable<ToolchainInfo> DetectAndroidSdk()
+    /// <summary>Pkg.Revision from an NDK's source.properties, e.g. "27.2.12479018".</summary>
+    internal static string? NdkRevision(string ndkDir)
     {
-        const string hint = "Install the Android SDK (Android Studio → SDK Manager, or command-line tools) and set ANDROID_HOME.";
-        var sdk = AndroidSdkCandidates(Environment.GetEnvironmentVariable).FirstOrDefault(d => Directory.Exists(Path.Combine(d, "platforms")) || Directory.Exists(Path.Combine(d, "build-tools")));
-        if (sdk is null)
-        {
-            yield return Missing(ToolchainIds.AndroidSdk, "Android SDK", AndroidCat, hint);
-            foreach (var (id, name) in new[] { (ToolchainIds.AndroidBuildTools, "Android build-tools"), (ToolchainIds.AndroidPlatforms, "Android platforms"), (ToolchainIds.Apksigner, "apksigner"), (ToolchainIds.Zipalign, "zipalign"), (ToolchainIds.Aapt2, "aapt2") })
-                yield return Missing(id, name, AndroidCat, "Part of the Android SDK build-tools.");
-            yield break;
-        }
-        var platforms = SortedVersionDirs(Path.Combine(sdk, "platforms"), "android-");
-        var buildTools = SortedVersionDirs(Path.Combine(sdk, "build-tools"), "");
-        yield return new ToolchainInfo
-        {
-            Id = ToolchainIds.AndroidSdk, DisplayName = "Android SDK", Category = AndroidCat, Status = ToolchainStatus.Installed,
-            ExecutablePath = sdk, Version = platforms.Count > 0 ? "API " + platforms[0] : null,
-            Detail = $"{platforms.Count} platform(s), {buildTools.Count} build-tools version(s)",
-        };
-        yield return buildTools.Count > 0
-            ? new ToolchainInfo { Id = ToolchainIds.AndroidBuildTools, DisplayName = "Android build-tools", Category = AndroidCat, Status = ToolchainStatus.Installed, Version = buildTools[0], ExecutablePath = Path.Combine(sdk, "build-tools", buildTools[0]), AdditionalVersions = buildTools }
-            : Missing(ToolchainIds.AndroidBuildTools, "Android build-tools", AndroidCat, "Install build-tools with the SDK Manager.");
-        yield return platforms.Count > 0
-            ? new ToolchainInfo { Id = ToolchainIds.AndroidPlatforms, DisplayName = "Android platforms", Category = AndroidCat, Status = ToolchainStatus.Installed, Version = "API " + platforms[0], ExecutablePath = Path.Combine(sdk, "platforms"), AdditionalVersions = platforms.Select(p => "API " + p).ToList() }
-            : Missing(ToolchainIds.AndroidPlatforms, "Android platforms", AndroidCat, "Install an Android platform (API level) with the SDK Manager.");
-        var bt = buildTools.Count > 0 ? Path.Combine(sdk, "build-tools", buildTools[0]) : null;
-        string Tool(string n) => OperatingSystem.IsWindows() ? n + (n == "apksigner" ? ".bat" : ".exe") : n;
-        foreach (var (id, name) in new[] { (ToolchainIds.Apksigner, "apksigner"), (ToolchainIds.Zipalign, "zipalign"), (ToolchainIds.Aapt2, "aapt2") })
-        {
-            var path = bt is null ? null : Path.Combine(bt, Tool(name));
-            yield return path is not null && File.Exists(path)
-                ? new ToolchainInfo { Id = id, DisplayName = name, Category = AndroidCat, Status = ToolchainStatus.Installed, ExecutablePath = path, Version = buildTools[0] }
-                : Missing(id, name, AndroidCat, "Part of the Android SDK build-tools.");
-        }
+        var props = Path.Combine(ndkDir, "source.properties");
+        if (!File.Exists(props)) return null;
+        foreach (var line in File.ReadLines(props))
+            if (line.StartsWith("Pkg.Revision", StringComparison.Ordinal) && line.IndexOf('=') is var eq and > 0)
+                return line[(eq + 1)..].Trim();
+        return null;
     }
 
     private static List<string> SortedVersionDirs(string dir, string prefix)
@@ -161,54 +192,122 @@ public sealed partial class ToolchainDetector
 
     // ---------- Apple mobile ----------
 
-    private async Task<IReadOnlyList<ToolchainInfo>> DetectAppleMobileAsync(CancellationToken ct)
+    private async Task<(IReadOnlyList<ToolchainInfo> Rows, IReadOnlyList<SigningIdentity> Identities, IReadOnlyList<IosProvisioningProfile> Profiles)> DetectAppleMobileAsync(XcodeStatus? xcode, CancellationToken ct)
     {
         if (Host.Platform != TargetPlatform.MacOS)
-            return
-            [
-                Unsupported(ToolchainIds.IosSdk, "iOS SDK", AppleCat, "iOS builds require macOS with Xcode."),
-                Unsupported(ToolchainIds.AppleSigningIdentities, "Code-signing identities", AppleCat, "Only available on macOS hosts."),
-                Unsupported(ToolchainIds.ProvisioningProfiles, "Provisioning profiles", AppleCat, "Only available on macOS hosts."),
-            ];
-        var result = new List<ToolchainInfo>();
-        const string xcodebuild = "/usr/bin/xcodebuild";
-        try
-        {
-            var (r, stdout, _) = await runner.CaptureAsync(new ProcessSpec { Executable = xcodebuild, Arguments = ["-showsdks", "-json"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
-            var sdks = r.Succeeded ? ParseXcodeSdks(stdout) : [];
-            var device = sdks.Where(s => s.Platform == "iphoneos").Select(s => s.Version).ToList();
-            var sim = sdks.Where(s => s.Platform == "iphonesimulator").Select(s => s.Version).ToList();
-            result.Add(device.Count > 0
-                ? new ToolchainInfo { Id = ToolchainIds.IosSdk, DisplayName = "iOS SDK", Category = AppleCat, Status = ToolchainStatus.Installed, Version = device[0], ExecutablePath = xcodebuild, AdditionalVersions = [.. device.Select(v => "iphoneos " + v), .. sim.Select(v => "iphonesimulator " + v)], Detail = sim.Count > 0 ? "Device and Simulator SDKs" : "Device SDK only (no Simulator SDK)" }
-                : Missing(ToolchainIds.IosSdk, "iOS SDK", AppleCat, "Install the iOS platform in Xcode → Settings → Components."));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            result.Add(Failed(ToolchainIds.IosSdk, "iOS SDK", AppleCat, xcodebuild, ex.Message, "Install Xcode from the Mac App Store and run it once."));
-        }
+            return ([
+                Unsupported(ToolchainIds.IosSdk, "iOS SDK", AppleCat, "iOS apps are built on a Mac with Xcode. Nothing to set up on this computer."),
+                Unsupported(ToolchainIds.AppleSigningIdentities, "Code-signing identities", AppleCat, "Read from the keychain on a Mac."),
+                Unsupported(ToolchainIds.ProvisioningProfiles, "Provisioning profiles", AppleCat, "Read on a Mac."),
+            ], [], []);
+        var result = new List<ToolchainInfo> { IosSdkRow(xcode) };
 
         const string security = "/usr/bin/security";
+        IReadOnlyList<SigningIdentity> identities = [];
         try
         {
-            var (r, stdout, _) = await runner.CaptureAsync(new ProcessSpec { Executable = security, Arguments = ["find-identity", "-v", "-p", "codesigning"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
-            var identities = r.Succeeded ? ParseSigningIdentities(stdout) : [];
-            result.Add(identities.Count > 0
-                ? new ToolchainInfo { Id = ToolchainIds.AppleSigningIdentities, DisplayName = "Code-signing identities", Category = AppleCat, Status = ToolchainStatus.Installed, Version = $"{identities.Count} valid", ExecutablePath = security, AdditionalVersions = identities, Detail = string.Join("; ", identities.Take(3)) }
-                : Missing(ToolchainIds.AppleSigningIdentities, "Code-signing identities", AppleCat, "Sign in with your Apple Developer account in Xcode → Settings → Accounts to create signing certificates."));
+            var (r, stdout, stderr) = await runner.CaptureAsync(new ProcessSpec { Executable = security, Arguments = ["find-identity", "-v", "-p", "codesigning"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
+            identities = r.Succeeded ? ParseSigningIdentityRecords(stdout) : [];
+            var dev = identities.Count(i => i.Kind == AppleCertificateKind.Development);
+            var dist = identities.Count(i => i.Kind == AppleCertificateKind.AppleDistribution);
+            result.Add(!r.Succeeded
+                ? Failed(ToolchainIds.AppleSigningIdentities, "Code-signing identities", AppleCat, security, $"security find-identity failed: {FirstLine(stderr + stdout)}", null)
+                : identities.Count > 0
+                    ? new ToolchainInfo
+                    {
+                        Id = ToolchainIds.AppleSigningIdentities, DisplayName = "Code-signing identities", Category = AppleCat, Status = ToolchainStatus.Installed,
+                        Version = $"{dev} development, {dist} distribution", ExecutablePath = security, AdditionalVersions = identities.Select(i => i.Name).ToList(),
+                        Detail = dist == 0 ? "Development certificates only: enough for running on your own devices, NOT for App Store / Ad Hoc / Enterprise distribution." : string.Join("; ", identities.Take(3).Select(i => i.Name)),
+                    }
+                    : new ToolchainInfo
+                    {
+                        Id = ToolchainIds.AppleSigningIdentities, DisplayName = "Code-signing identities", Category = AppleCat, Status = ToolchainStatus.Missing,
+                        Detail = "None in the keychain. Not needed for Simulator builds or unsigned archives.",
+                        InstallHint = "Add your Apple Developer account in Xcode › Settings › Accounts and create certificates there.",
+                        SetupUrl = "https://developer.apple.com/help/account/certificates/create-developer-id-certificates",
+                    });
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             result.Add(Failed(ToolchainIds.AppleSigningIdentities, "Code-signing identities", AppleCat, security, ex.Message, null));
         }
 
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var profiles = new[] { Path.Combine(home, "Library", "MobileDevice", "Provisioning Profiles"), Path.Combine(home, "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles") }
-            .Where(Directory.Exists).SelectMany(d => Directory.GetFiles(d, "*.mobileprovision")).ToList();
-        result.Add(profiles.Count > 0
-            ? new ToolchainInfo { Id = ToolchainIds.ProvisioningProfiles, DisplayName = "Provisioning profiles", Category = AppleCat, Status = ToolchainStatus.Installed, Version = $"{profiles.Count} installed" }
-            : Missing(ToolchainIds.ProvisioningProfiles, "Provisioning profiles", AppleCat, "None installed. Xcode automatic signing creates them on demand; manual signing needs profiles from developer.apple.com."));
-        return result;
+        var profiles = IosProfiles.Read(IosProfiles.Folders());
+        var now = time.GetUtcNow();
+        var valid = profiles.Where(p => !p.IsExpired(now)).ToList();
+        result.Add(valid.Count > 0
+            ? new ToolchainInfo
+            {
+                Id = ToolchainIds.ProvisioningProfiles, DisplayName = "Provisioning profiles", Category = AppleCat, Status = ToolchainStatus.Installed,
+                Version = $"{valid.Count} valid", AdditionalVersions = valid.Select(p => $"{p.Name} — {p.Kind}, {p.ApplicationIdentifier}, expires {p.Expiration:yyyy-MM-dd}").ToList(),
+                Detail = string.Join(", ", valid.GroupBy(p => p.Kind).Select(g => $"{g.Count()} {g.Key}")) + (profiles.Count > valid.Count ? $"; {profiles.Count - valid.Count} expired" : ""),
+            }
+            : new ToolchainInfo
+            {
+                Id = ToolchainIds.ProvisioningProfiles, DisplayName = "Provisioning profiles", Category = AppleCat, Status = ToolchainStatus.Missing,
+                Detail = (profiles.Count > 0 ? $"{profiles.Count} expired profile(s) only. " : "None installed. ") +
+                         "Not needed for Simulator builds or unsigned archives; Xcode automatic signing can create development profiles.",
+                InstallHint = "For manual signing, download profiles at developer.apple.com › Profiles (Xcode › Settings › Accounts › Download Manual Profiles).",
+                SetupUrl = "https://developer.apple.com/help/account/provisioning-profiles/create-a-development-provisioning-profile",
+            });
+        return (result, identities, profiles);
     }
+
+    /// <summary>
+    /// xcodebuild of the selected developer directory. The iOS SDK row's ExecutablePath is what the Xcode planner runs,
+    /// so it must be the tool, never the directory.
+    /// </summary>
+    public static string XcodebuildFor(string? developerDirectory) =>
+        developerDirectory is { Length: > 0 } dev ? Path.Combine(dev, "usr", "bin", "xcodebuild") : "/usr/bin/xcodebuild";
+
+    /// <summary>The iOS SDK row follows the Xcode diagnosis: with the Command Line Tools selected it is "Setup required: select Xcode", not "Missing".</summary>
+    public static ToolchainInfo IosSdkRow(XcodeStatus? xcode)
+    {
+        const string name = "iOS SDK";
+        if (xcode is null)
+            return new ToolchainInfo { Id = ToolchainIds.IosSdk, DisplayName = name, Category = AppleCat, Status = ToolchainStatus.Missing, Detail = "Xcode was not examined." };
+        var device = xcode.Sdks.Where(s => s.StartsWith("iphoneos ", StringComparison.Ordinal)).ToList();
+        var sim = xcode.Sdks.Where(s => s.StartsWith("iphonesimulator ", StringComparison.Ordinal)).ToList();
+        if (xcode.State is XcodeState.NotInstalled)
+            return new ToolchainInfo
+            {
+                Id = ToolchainIds.IosSdk, DisplayName = name, Category = AppleCat, Status = ToolchainStatus.Missing,
+                Detail = "The iOS SDK comes with Xcode, which is not installed.", InstallHint = xcode.CorrectiveAction, SetupUrl = XcodeDiscovery.AppStoreUrl,
+            };
+        if (xcode.State is not (XcodeState.Ready or XcodeState.SdkMissing))
+            return new ToolchainInfo
+            {
+                Id = ToolchainIds.IosSdk, DisplayName = name, Category = AppleCat, Status = ToolchainStatus.SetupRequired,
+                Detail = $"Xcode must be ready first: {xcode.Diagnosis}", InstallHint = xcode.CorrectiveAction,
+            };
+        return device.Count > 0 || sim.Count > 0
+            ? new ToolchainInfo
+            {
+                Id = ToolchainIds.IosSdk, DisplayName = name, Category = AppleCat, Status = ToolchainStatus.Installed,
+                Version = (device.FirstOrDefault() ?? sim[0]).Split(' ')[1], ExecutablePath = XcodebuildFor(xcode.ActiveDeveloperDirectory), AdditionalVersions = [.. device, .. sim],
+                Detail = device.Count > 0 && sim.Count > 0 ? "Device and Simulator SDKs" : device.Count > 0 ? "Device SDK only (no Simulator SDK: install it in Xcode › Settings › Components)" : "Simulator SDK only",
+                Source = "Selected Xcode",
+            }
+            : new ToolchainInfo
+            {
+                Id = ToolchainIds.IosSdk, DisplayName = name, Category = AppleCat, Status = ToolchainStatus.SetupRequired,
+                Detail = "The selected Xcode has no iOS platform installed.", InstallHint = "Install it in Xcode › Settings › Components › iOS, then press Refresh.",
+                SetupUrl = "https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components",
+            };
+    }
+
+    /// <summary>Identities (SHA-1, name, certificate type, team) from <c>security find-identity -v -p codesigning</c>.</summary>
+    public static IReadOnlyList<SigningIdentity> ParseSigningIdentityRecords(string output) =>
+        SigningIdentityRecordRegex().Matches(output).Select(m => m.Groups["name"].Value is var n
+                ? new SigningIdentity(m.Groups["sha"].Value, n, AppleCertificateNames.Classify(n), TeamRegex().Match(n) is { Success: true } t ? t.Groups[1].Value : null)
+                : null!)
+            .DistinctBy(i => i.Sha1).ToList();
+
+    [GeneratedRegex(@"^\s*\d+\)\s+(?<sha>[0-9A-F]{40})\s+""(?<name>[^""]+)""", RegexOptions.Multiline)]
+    private static partial Regex SigningIdentityRecordRegex();
+
+    [GeneratedRegex(@"\(([A-Z0-9]{10})\)\s*$")]
+    private static partial Regex TeamRegex();
 
     public sealed record XcodeSdk(string Platform, string Version);
 
@@ -275,21 +374,52 @@ public sealed partial class ToolchainDetector
 
     // ---------- .NET MAUI ----------
 
-    private async Task<ToolchainInfo> DetectMauiWorkloadsAsync(CancellationToken ct)
+    private async Task<(ToolchainInfo Row, ToolchainInfo Ios)> DetectMauiWorkloadsAsync(CancellationToken ct)
     {
         const string hint = "Install with: dotnet workload install maui (or maui-android / maui-ios). HCG never installs workloads itself.";
+        const string iosName = ".NET iOS workload";
+        var iosHint = Host.Platform == TargetPlatform.MacOS
+            ? "Install it yourself: dotnet workload install ios (or the exact version a project pins, e.g. dotnet workload install ios --from-rollback-file <file>). The workload also requires a matching Xcode. HCG never installs workloads."
+            : ".NET for iOS apps are compiled on a Mac (Xcode provides the iOS SDK, the linker and codesign).";
         var dotnet = locator.Find("dotnet", ExecutableLocator.DotNetCandidates());
-        if (dotnet is null) return Missing(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, hint);
+        if (dotnet is null) return (Missing(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, hint), Missing(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, iosHint));
         try
         {
             var (r, stdout, _) = await runner.CaptureAsync(new ProcessSpec { Executable = dotnet, Arguments = ["workload", "list"], Timeout = TimeSpan.FromSeconds(60), Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
             var workloads = r.Succeeded ? ParseWorkloadList(stdout) : [];
             var mobile = workloads.Where(w => w is "maui" or "maui-android" or "maui-ios" or "android" or "ios" or "maui-mobile").ToList();
-            return mobile.Count > 0
+            var row = mobile.Count > 0
                 ? new ToolchainInfo { Id = ToolchainIds.MauiWorkloads, DisplayName = ".NET MAUI workloads", Category = MauiCat, Status = ToolchainStatus.Installed, ExecutablePath = dotnet, Version = string.Join(", ", mobile), AdditionalVersions = mobile }
                 : Missing(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, hint);
+            var iosVersion = WorkloadManifestVersion(stdout, "ios");
+            var hasIos = workloads.Any(w => w is "ios" or "maui-ios" or "maui" or "maui-mobile");
+            var ios = Host.Platform != TargetPlatform.MacOS
+                ? Unsupported(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, iosHint)
+                : hasIos
+                    ? new ToolchainInfo
+                    {
+                        Id = ToolchainIds.DotNetIosWorkload, DisplayName = iosName, Category = MauiCat, Status = ToolchainStatus.Installed, ExecutablePath = dotnet,
+                        Version = iosVersion, Detail = $"Installed via {string.Join(", ", workloads.Where(w => w is "ios" or "maui-ios" or "maui" or "maui-mobile"))}" + (iosVersion is null ? "" : $"; manifest {iosVersion}"),
+                        InstallHint = iosHint,
+                    }
+                    : Missing(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, iosHint);
+            return (row, ios);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return Failed(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, dotnet, ex.Message, hint); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (Failed(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, dotnet, ex.Message, hint), Failed(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, dotnet, ex.Message, iosHint));
+        }
+    }
+
+    /// <summary>The manifest version column of a workload in <c>dotnet workload list</c> (e.g. "26.2.10233/10.0.100").</summary>
+    public static string? WorkloadManifestVersion(string output, string id)
+    {
+        foreach (var raw in output.Split('\n'))
+        {
+            var parts = raw.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2 && parts[0] == id && Regex.IsMatch(parts[1], @"^\d+\.\d+")) return parts[1];
+        }
+        return null;
     }
 
     /// <summary>Workload ids from the <c>dotnet workload list</c> table.</summary>

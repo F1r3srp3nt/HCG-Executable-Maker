@@ -13,12 +13,17 @@ public sealed class ViewLocator : IDataTemplate
         [typeof(DashboardViewModel)] = () => new DashboardView(),
         [typeof(BuildWizardViewModel)] = () => new BuildWizardView(),
         [typeof(MobileBuildStudioViewModel)] = () => new MobileBuildStudioView(),
+        [typeof(PortingStudioViewModel)] = () => new PortingStudioView(),
         [typeof(ProjectsViewModel)] = () => new ProjectsView(),
         [typeof(BuildHistoryViewModel)] = () => new BuildHistoryView(),
         [typeof(ArtifactsViewModel)] = () => new ArtifactsView(),
         [typeof(ToolchainsViewModel)] = () => new ToolchainsView(),
         [typeof(SigningViewModel)] = () => new SigningView(),
         [typeof(SettingsViewModel)] = () => new SettingsView(),
+        [typeof(AccountViewModel)] = () => new AccountView(),
+        [typeof(SupportViewModel)] = () => new SupportView(),
+        [typeof(MyRequestsViewModel)] = () => new MyRequestsView(),
+        [typeof(AiAssistantViewModel)] = () => new AiAssistantView(),
     };
 
     public Control? Build(object? param)

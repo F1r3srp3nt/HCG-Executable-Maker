@@ -42,6 +42,14 @@ public sealed record BuildSettings
     public WindowsInstallerOptions WindowsInstaller { get; init; } = new();
     /// <summary>Set for Mobile Build Studio builds; null for desktop builds.</summary>
     public MobileBuildOptions? Mobile { get; init; }
+    /// <summary>Set for Swift package builds; null otherwise.</summary>
+    public SwiftBuildOptions? Swift { get; init; }
+    /// <summary>Set for Electron desktop builds; null otherwise.</summary>
+    public ElectronBuildOptions? Electron { get; init; }
+    /// <summary>Set for C/C++ builds (CMake, Make, sources); null otherwise.</summary>
+    public NativeBuildOptions? Native { get; init; }
+    /// <summary>macOS signing (ad hoc / Developer ID), installer and Mac App Store settings.</summary>
+    public MacDistributionOptions MacDistribution { get; init; } = new();
 
     public string? RuntimeIdentifier => PlatformNames.ToRuntimeIdentifier(Platform, Architecture);
 }

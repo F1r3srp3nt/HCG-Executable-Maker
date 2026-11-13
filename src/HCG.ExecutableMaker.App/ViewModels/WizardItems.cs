@@ -37,7 +37,9 @@ public sealed partial class PackagingOptionItem(PackagingOption option) : Observ
     public bool IsEnabled => Option.IsAvailable;
     public string? Reason => Option.Reason;
     public bool HasReason => !string.IsNullOrEmpty(Option.Reason);
-    public StatusTag Status => new(Format.Label(Option.Availability), Option.IsAvailable ? "success" : Option.Availability == PackagingAvailability.NotImplemented ? "neutral" : "warning");
+    public StatusTag Status => new(Format.Label(Option.Availability), Option.IsAvailable ? "success"
+        : Option.Availability == PackagingAvailability.NotImplemented ? "neutral"
+        : Option.Availability == PackagingAvailability.Failed ? "error" : "warning");
     [ObservableProperty] private bool _isSelected;
 }
 

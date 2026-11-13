@@ -211,8 +211,8 @@
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
                   <Border Classes="divider" />
-                  <TextBlock Classes="formlabel" Text="PROJECT TO BUILD" Margin="0" />
-                  <ComboBox ItemsSource="{Binding ProjectOptions}" SelectedItem="{Binding SelectedProject}" PlaceholderText="No runnable application project found">
+                  <TextBlock Classes="formlabel" Text="{Binding ProjectPickerLabel}" Margin="0" />
+                  <ComboBox ItemsSource="{Binding ProjectOptions}" SelectedItem="{Binding SelectedProject}" PlaceholderText="{Binding ProjectPickerPlaceholder}" HorizontalAlignment="Stretch">
                     <ComboBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:ProjectChoice">
                         <StackPanel Spacing="1">
@@ -222,6 +222,496 @@
                       </DataTemplate>
                     </ComboBox.ItemTemplate>
                   </ComboBox>
+                  <!-- Swift package: trusted evaluation and executable product choice -->
+                  <StackPanel Spacing="12" IsVisible="{Binding HasSelectedSwiftPackage}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="Swift package" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding SwiftPackageTag}" />
+                    </Grid>
+                    <TextBlock Classes="body secondary" Text="{Binding SwiftPackageStatus}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding SwiftPackageFacts}" TextWrapping="Wrap" />
+                    <Border Classes="callout warning" IsVisible="{Binding HasSwiftRemediation}">
+                      <ItemsControl ItemsSource="{Binding SwiftRemediation}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="x:String">
+                            <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Border>
+                    <Border Classes="inset" Padding="16,14" IsVisible="{Binding SwiftHostCanEvaluate}">
+                      <StackPanel Spacing="10">
+                        <TextBlock Text="Evaluate Package.swift on this Mac" FontWeight="SemiBold" />
+                        <TextBlock Classes="muted" TextWrapping="Wrap"
+                                   Text="Package.swift is Swift code. HCG has only read it as text so far. To list the products this Mac really builds (products declared under #if os(macOS) included), HCG runs 'swift package dump-package' through the same isolated build worker as a build: scrubbed environment, scratch space outside the project, cancellable, 5-minute limit." />
+                        <CheckBox IsChecked="{Binding SwiftEvaluationTrusted}" IsEnabled="{Binding !IsEvaluatingSwift}">
+                          <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
+                        </CheckBox>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button Classes="primary" Content="Evaluate package" Command="{Binding EvaluateSwiftPackageCommand}" />
+                          <Button Classes="ghost" Content="Cancel" Command="{Binding CancelSwiftEvaluationCommand}" IsVisible="{Binding IsEvaluatingSwift}" />
+                          <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsEvaluatingSwift}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="callout error" IsVisible="{Binding SwiftEvaluationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <SelectableTextBlock FontSize="12.5" Text="{Binding SwiftEvaluationError}" TextWrapping="Wrap" />
+                    </Border>
+                    <Expander Header="Evaluation output" IsVisible="{Binding HasSwiftEvaluationLog}" HorizontalAlignment="Stretch">
+                      <ScrollViewer MaxHeight="180">
+                        <ItemsControl ItemsSource="{Binding SwiftEvaluationLog}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Expander>
+                    <StackPanel Spacing="8" IsVisible="{Binding HasSwiftProducts}">
+                      <TextBlock Classes="formlabel" Text="EXECUTABLE PRODUCT TO BUILD" Margin="0" />
+                      <ComboBox ItemsSource="{Binding SwiftExecutableProducts}" SelectedItem="{Binding SelectedSwiftProduct}" PlaceholderText="Choose an executable product…" HorizontalAlignment="Stretch">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:SwiftProductChoice">
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="{Binding Display}" />
+                              <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
+                      <Grid ColumnDefinitions="170,*" Margin="0,4,0,0">
+                        <TextBlock Classes="label" Text="Library products" />
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding SwiftLibrariesText}" FontSize="13" TextWrapping="Wrap" />
+                      </Grid>
+                      <Grid ColumnDefinitions="170,*">
+                        <TextBlock Classes="label" Text="Test targets" />
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding SwiftTestsText}" FontSize="13" TextWrapping="Wrap" />
+                      </Grid>
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Libraries and tests are not built into an app; only executable products are offered." />
+                    </StackPanel>
+                  </StackPanel>
+                  <Border Classes="callout success" IsVisible="{Binding DesktopWorkspaceNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <SelectableTextBlock FontSize="12.5" Text="{Binding DesktopWorkspaceNotice}" TextWrapping="Wrap" />
+                  </Border>
+                  <!-- C/C++: CMake targets (after a trusted configure), Makefile targets, selected sources; Theos and others explained -->
+                  <StackPanel Spacing="12" IsVisible="{Binding ShowNativePanel}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="{Binding NativeKindLabel}" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding NativeTag}" />
+                    </Grid>
+                    <TextBlock Classes="body secondary" Text="{Binding NativeStatus}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding NativeFacts}" TextWrapping="Wrap" />
+                    <Border Classes="callout warning" IsVisible="{Binding HasNativeToolchainGaps}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Installed toolchains — missing on this computer" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding NativeToolchainGaps}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="Open Toolchains" Command="{Binding OpenToolchainsPageCommand}" />
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding NativeNotes}" IsVisible="{Binding HasNativeNotes}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <TextBlock Classes="muted" FontSize="12" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Theos: jailbreak package (.deb), the configuration the project defines -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeTheos}">
+                      <Border Classes="inset" Padding="16,12">
+                        <StackPanel Spacing="8">
+                          <TextBlock Text="What the package contains" FontWeight="SemiBold" />
+                          <SelectableTextBlock FontSize="12.5" Text="{Binding TheosProducts}" TextWrapping="Wrap" />
+                          <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding TheosPackage}" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Border>
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="PACKAGE CONFIGURATION (DEFINED BY THE PROJECT'S MAKEFILE)" Margin="0" />
+                        <ComboBox ItemsSource="{Binding TheosSchemes}" SelectedItem="{Binding SelectedTheosScheme}" HorizontalAlignment="Stretch" />
+                        <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding TheosSchemeDetail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="Each configuration builds in its own folder, so rootless and rootful packages never mix. HCG runs only 'make package' — never 'make install', never a respring, never a connection to a device — and checks the resulting .deb before showing it." />
+                    </StackPanel>
+
+                    <!-- CMake -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeCMake}">
+                      <Border Classes="inset" Padding="16,12">
+                        <SelectableTextBlock FontSize="12.5" Text="{Binding NativeConfiguredSummary}" TextWrapping="Wrap" />
+                      </Border>
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding NativeLibrariesText}" TextWrapping="Wrap"
+                                 IsVisible="{Binding NativeLibrariesText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                      <Border Classes="inset" Padding="16,14">
+                        <StackPanel Spacing="10">
+                          <TextBlock Text="Configure with CMake on this computer" FontWeight="SemiBold" />
+                          <TextBlock Classes="muted" TextWrapping="Wrap"
+                                     Text="Configuring runs the project's CMake code (and anything it executes). HCG runs it through the isolated build worker — scrubbed environment, its own build folder outside the project, cancellable, 10-minute limit — and reads the targets from the CMake File API. Downloads by FetchContent are blocked unless you allow them." />
+                          <Grid ColumnDefinitions="*,12,*">
+                            <StackPanel Spacing="4">
+                              <TextBlock Classes="formlabel" Text="CONFIGURE PRESET" Margin="0" />
+                              <ComboBox ItemsSource="{Binding NativePresets}" SelectedItem="{Binding SelectedNativePreset}" HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Spacing="4">
+                              <TextBlock Classes="formlabel" Text="BUILD TYPE" Margin="0" />
+                              <ComboBox ItemsSource="{Binding NativeBuildTypes}" SelectedItem="{Binding SelectedNativeBuildType}" HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                          </Grid>
+                          <StackPanel Spacing="4">
+                            <TextBlock Classes="formlabel" Text="CACHE ENTRIES (ONE NAME=VALUE PER LINE, OPTIONAL)" Margin="0" />
+                            <TextBox Text="{Binding NativeCacheEntriesText}" AcceptsReturn="True" MinHeight="54" FontFamily="{DynamicResource Hcg.Font.Mono}"
+                                     Watermark="e.g. MYAPP_ENABLE_GUI=OFF" TextWrapping="NoWrap" />
+                          </StackPanel>
+                          <CheckBox IsChecked="{Binding NativeAllowDownloads}" IsEnabled="{Binding !IsConfiguringNative}">
+                            <TextBlock TextWrapping="Wrap" Text="Allow the project to download dependencies while configuring (FetchContent / ExternalProject)" />
+                          </CheckBox>
+                          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding NativeHasDownloads}"
+                                     Text="This project's CMake files use FetchContent or ExternalProject. Without downloads, configuration fails unless the dependency is already available." />
+                          <CheckBox IsChecked="{Binding NativeConfigureTrusted}" IsEnabled="{Binding !IsConfiguringNative}">
+                            <TextBlock Text="{Binding TrustLabel}" TextWrapping="Wrap" />
+                          </CheckBox>
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Classes="primary" Content="Configure with CMake" Command="{Binding ConfigureNativeCommand}" />
+                            <Button Classes="ghost" Content="Cancel" Command="{Binding CancelNativeConfigureCommand}" IsVisible="{Binding IsConfiguringNative}" />
+                            <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsConfiguringNative}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="callout error" IsVisible="{Binding NativeConfigureError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <SelectableTextBlock FontSize="12.5" Text="{Binding NativeConfigureError}" TextWrapping="Wrap" />
+                      </Border>
+                      <Expander Header="Configuration output" IsVisible="{Binding HasNativeConfigureLog}" HorizontalAlignment="Stretch">
+                        <ScrollViewer MaxHeight="200">
+                          <ItemsControl ItemsSource="{Binding NativeConfigureLog}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="x:String">
+                                <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </ScrollViewer>
+                      </Expander>
+                    </StackPanel>
+
+                    <!-- Make -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeMake}">
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="HCG does not guess what a Makefile builds. Name the target and the file it produces; HCG copies the project into its own build folder, runs make there and packages exactly that file." />
+                      <Grid ColumnDefinitions="*,12,*">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="MAKE TARGET" Margin="0" />
+                          <TextBox Text="{Binding NativeMakeTarget}" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. all" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="EXPECTED OUTPUT (RELATIVE TO THE PROJECT FOLDER)" Margin="0" />
+                          <TextBox Text="{Binding NativeExpectedOutput}" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. bin/myapp" />
+                        </StackPanel>
+                      </Grid>
+                      <StackPanel Spacing="4" IsVisible="{Binding HasNativeMakeTargets}">
+                        <TextBlock Classes="formlabel" Text="TARGETS READ FROM THE MAKEFILE (CLICK TO USE)" Margin="0" />
+                        <ItemsControl ItemsSource="{Binding NativeMakeTargets}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <Button Classes="small ghost" Margin="0,0,6,6" Content="{Binding}" FontFamily="{DynamicResource Hcg.Font.Mono}"
+                                      Command="{Binding $parent[UserControl].((vm:BuildWizardViewModel)DataContext).UseNativeMakeTargetCommand}" CommandParameter="{Binding}" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="MAKE VARIABLES (ONE NAME=VALUE PER LINE, OPTIONAL)" Margin="0" />
+                        <TextBox Text="{Binding NativeMakeVariablesText}" AcceptsReturn="True" MinHeight="54" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. PREFIX=/opt/app" />
+                      </StackPanel>
+                    </StackPanel>
+
+                    <!-- Sources without a build system -->
+                    <StackPanel Spacing="10" IsVisible="{Binding ShowNativeSources}">
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="No build system was found. Choose exactly the files that make up one program (one main()). HCG writes a small CMakeLists.txt in its own build folder — never in the project — and compiles only the files you select." />
+                      <Border Classes="inset" Padding="12,8">
+                        <ScrollViewer MaxHeight="200">
+                          <ItemsControl ItemsSource="{Binding NativeSourceItems}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:NativeSourceItem">
+                                <CheckBox IsChecked="{Binding IsSelected}">
+                                  <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Classes="mono" Text="{Binding Path}" />
+                                    <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Detail}" />
+                                  </StackPanel>
+                                </CheckBox>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </ScrollViewer>
+                      </Border>
+                      <Grid ColumnDefinitions="*,12,*,12,*">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="LANGUAGE" Margin="0" />
+                          <ComboBox ItemsSource="{Binding NativeLanguages}" SelectedItem="{Binding SelectedNativeLanguage}" HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="STANDARD" Margin="0" />
+                          <ComboBox ItemsSource="{Binding NativeStandards}" SelectedItem="{Binding SelectedNativeStandard}" HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="EXECUTABLE NAME" Margin="0" />
+                          <TextBox Text="{Binding NativeOutputName}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                        </StackPanel>
+                      </Grid>
+                      <Expander Header="Generated build configuration (written to HCG's build folder)" HorizontalAlignment="Stretch">
+                        <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding NativeGeneratedPreview}" TextWrapping="Wrap" />
+                      </Expander>
+                    </StackPanel>
+
+                    <!-- Runtime files the app needs next to it -->
+                    <StackPanel Spacing="4" IsVisible="{Binding ShowNativeRuntimeFiles}">
+                      <TextBlock Classes="formlabel" Text="RUNTIME FILES TO SHIP NEXT TO THE EXECUTABLE (ONE PATH PER LINE, OPTIONAL)" Margin="0" />
+                      <TextBox Text="{Binding NativeRuntimeFilesText}" AcceptsReturn="True" MinHeight="54" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="e.g. assets/  or  data/config.ini (relative to the project folder)" />
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="HCG copies the executable, the project's own shared libraries and the files listed here. It lists every library the binary loads (RUNTIME-DEPENDENCIES.txt) and warns about ones that are not system libraries — a binary is not portable just because it compiled." />
+                    </StackPanel>
+
+                    <Border Classes="callout warning" IsVisible="{Binding NativeConfigurationProblem, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <SelectableTextBlock FontSize="12.5" Text="{Binding NativeConfigurationProblem}" TextWrapping="Wrap" />
+                    </Border>
+                  </StackPanel>
+                  <!-- Electron app: what it is, what it still needs, and the build stages HCG will run -->
+                  <StackPanel Spacing="12" IsVisible="{Binding IsElectronBuild}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="Electron desktop app" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding ElectronTag}" />
+                    </Grid>
+                    <TextBlock Classes="body secondary" Text="{Binding ElectronStatus}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding ElectronFacts}" TextWrapping="Wrap" />
+                    <Border Classes="callout warning" IsVisible="{Binding HasElectronRemediation}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Project configuration — change these in the project" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ElectronRemediation}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="callout warning" IsVisible="{Binding HasElectronToolchainRemediation}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Installed toolchains — missing on this computer" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ElectronToolchainRemediation}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="Open Toolchains" Command="{Binding OpenToolchainsPageCommand}" />
+                      </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding ElectronNotes}" IsVisible="{Binding HasElectronNotes}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <TextBlock Classes="muted" FontSize="12" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Border Classes="inset" Padding="16,12" IsVisible="{Binding ElectronWorkflow, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBlock FontSize="12.5" Text="{Binding ElectronWorkflow}" TextWrapping="Wrap" />
+                    </Border>
+                  </StackPanel>
+                  <!-- Browser app (Vite + React): Create desktop application — a separate desktop project, after showing exactly what changes -->
+                  <StackPanel Spacing="12" IsVisible="{Binding ShowDesktopConversion}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="Create desktop application" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding ConversionTag}" />
+                    </Grid>
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionCategory}" />
+                    <TextBlock Classes="body secondary" Text="{Binding ConversionSummary}" TextWrapping="Wrap" />
+                    <Border Classes="callout error" IsVisible="{Binding HasConversionBlockers}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Project configuration — not converted as it is" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ConversionBlockers}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ConversionFindingItem">
+                              <StackPanel Spacing="1" Margin="0,2">
+                                <SelectableTextBlock FontSize="12.5" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" Margin="10,0,0,0" />
+                              </StackPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="callout warning" IsVisible="{Binding HasConversionToolchainGaps}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Installed toolchains — missing on this computer" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ConversionToolchainGaps}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="Open Toolchains" Command="{Binding OpenToolchainsPageCommand}" />
+                      </StackPanel>
+                    </Border>
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionToolchainText}" TextWrapping="Wrap"
+                               IsVisible="{Binding ConversionToolchainText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <StackPanel Spacing="12" IsVisible="{Binding CanEditConversion}">
+                      <Grid ColumnDefinitions="*,12,*,12,Auto">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="PRODUCT NAME" Margin="0" />
+                          <TextBox Text="{Binding ConversionAppName}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="APPLICATION IDENTIFIER" Margin="0" />
+                          <TextBox Text="{Binding ConversionAppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="VERSION" Margin="0" />
+                          <TextBlock Text="{Binding ConversionVersion}" VerticalAlignment="Center" Margin="0,6,0,0" ToolTip.Tip="From package.json" />
+                        </StackPanel>
+                      </Grid>
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="ICON" Margin="0" />
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                          <StackPanel Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding ConversionIconName}" FontWeight="Medium" />
+                            <TextBlock Classes="muted" FontSize="11.5" Text="{Binding ConversionIconStatus}" TextWrapping="Wrap" IsVisible="{Binding !ConversionIconInvalid}" />
+                            <TextBlock Classes="error" FontSize="11.5" Text="{Binding ConversionIconStatus}" TextWrapping="Wrap" IsVisible="{Binding ConversionIconInvalid}" />
+                          </StackPanel>
+                          <Button Grid.Column="1" Classes="small" Content="Choose…" Command="{Binding BrowseConversionIconCommand}" Margin="8,0,0,0" />
+                          <Button Grid.Column="2" Classes="small ghost" Content="Default" Command="{Binding ClearConversionIconCommand}" IsVisible="{Binding HasConversionIcon}" Margin="6,0,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <Grid ColumnDefinitions="*,12,*">
+                        <StackPanel Spacing="4">
+                          <TextBlock Classes="formlabel" Text="TARGET PLATFORM AND ARCHITECTURE" Margin="0" />
+                          <ComboBox ItemsSource="{Binding ConversionTargets}" SelectedItem="{Binding SelectedConversionTarget}" HorizontalAlignment="Stretch" PlaceholderText="No desktop target can be built on this computer" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="4">
+                          <TextBlock Classes="formlabel" Text="PACKAGE FORMATS" Margin="0" />
+                          <ItemsControl ItemsSource="{Binding ConversionFormats}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:ConversionFormatItem">
+                                <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsEnabled}" Content="{Binding Label}" />
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </Grid>
+                      <TextBlock Classes="muted" FontSize="11.5" TextWrapping="Wrap"
+                                 Text="Only targets this computer can package are offered: macOS apps are built on a Mac, Linux app folders on Linux. Windows packaging of Electron apps is not implemented in this version. This is a desktop app; it is never labelled as an iOS or Android app." />
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="OUTPUT FOLDER" Margin="0" />
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox Text="{Binding ConversionOutputDirectory}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                          <Button Grid.Column="1" Classes="small" Content="Browse…" Command="{Binding BrowseConversionOutputCommand}" Margin="8,0,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <Border Classes="inset" Padding="14,12">
+                        <StackPanel Spacing="8">
+                          <TextBlock Text="Signing and notarization (separate operations)" FontWeight="SemiBold" FontSize="12.5" />
+                          <ComboBox ItemsSource="{Binding ConversionSigningChoices}" SelectedItem="{Binding SelectedConversionSigning}" HorizontalAlignment="Stretch" IsVisible="{Binding IsMacHost}" />
+                          <TextBlock FontSize="12" TextWrapping="Wrap"><Run Text="Signing: " FontWeight="SemiBold" /><Run Text="{Binding ConversionSigningStatus}" /></TextBlock>
+                          <TextBlock FontSize="12" TextWrapping="Wrap"><Run Text="Notarization: " FontWeight="SemiBold" /><Run Text="{Binding ConversionNotarizationStatus}" /></TextBlock>
+                        </StackPanel>
+                      </Border>
+                      <StackPanel Spacing="4">
+                        <CheckBox IsChecked="{Binding ConversionUsePublicEnvironment}" Content="Use the web build's public VITE_ settings from the project's .env files" />
+                        <TextBlock Classes="muted" FontSize="11.5" Text="{Binding ConversionEnvironmentText}" TextWrapping="Wrap" Margin="28,0,0,0" />
+                      </StackPanel>
+                    </StackPanel>
+                    <Border Classes="callout warning" IsVisible="{Binding HasConversionWarnings}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Check before relying on the desktop app (backend, sign-in, network)" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding ConversionWarnings}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ConversionFindingItem">
+                              <StackPanel Spacing="1" Margin="0,2">
+                                <SelectableTextBlock FontSize="12.5" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Location}" IsVisible="{Binding HasLocation}" Margin="10,0,0,0" />
+                              </StackPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <Expander Header="How HCG handles loading, routing, settings and security" HorizontalAlignment="Stretch" IsVisible="{Binding CanEditConversion}">
+                      <ItemsControl ItemsSource="{Binding ConversionInfos}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:ConversionFindingItem">
+                            <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Message, StringFormat='• {0}'}" TextWrapping="Wrap" Margin="0,2" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Expander>
+                    <StackPanel Spacing="10" IsVisible="{Binding ConversionPlan.CanApply, FallbackValue=False}">
+                      <TextBlock Classes="formlabel" Text="FILES HCG WILL ADD OR CHANGE (IN THE NEW DESKTOP PROJECT ONLY)" Margin="0" />
+                      <ItemsControl ItemsSource="{Binding ConversionChanges}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:ConversionChangeItem">
+                            <Expander HorizontalAlignment="Stretch" Margin="0,2">
+                              <Expander.Header>
+                                <StackPanel Spacing="1">
+                                  <TextBlock FontSize="12.5"><Run Text="{Binding KindLabel}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding RelativePath}" FontFamily="{DynamicResource Hcg.Font.Mono}" /></TextBlock>
+                                  <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Reason}" TextWrapping="Wrap" />
+                                </StackPanel>
+                              </Expander.Header>
+                              <ScrollViewer MaxHeight="260" HorizontalScrollBarVisibility="Auto">
+                                <SelectableTextBlock Classes="mono" FontSize="11" Text="{Binding Preview}" />
+                              </ScrollViewer>
+                            </Expander>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionDestinationText}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Border Classes="callout" IsVisible="{Binding ConversionExistingProjectText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBlock FontSize="12.5" Text="{Binding ConversionExistingProjectText}" TextWrapping="Wrap" />
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding CanEditConversion}">
+                      <Button Classes="primary" Content="Create desktop application" Command="{Binding CreateDesktopWorkspaceCommand}" />
+                      <Button Classes="ghost" Content="Update preview" Command="{Binding PreviewDesktopConversionCommand}" IsVisible="{Binding ConversionPreviewStale}" />
+                      <Button Classes="ghost" Content="Cancel" Command="{Binding CancelDesktopConversionCommand}" IsVisible="{Binding IsConverting}" />
+                      <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" IsVisible="{Binding IsConverting}" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding ConversionPreviewStale}"
+                               Text="Options changed since the preview. Create desktop application checks them again before writing anything; Update preview shows the result first." />
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding ConversionStatus}" TextWrapping="Wrap" IsVisible="{Binding IsConverting}" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding CanEditConversion}"
+                               Text="Next: the desktop project opens at the Build step. After you confirm that you trust the project, HCG installs its dependencies (npm ci), compiles the web app, packages it and verifies the result — four separate stages, cancellable at any time." />
+                    <Border Classes="callout error" IsVisible="{Binding ConversionError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <SelectableTextBlock FontSize="12.5" Text="{Binding ConversionError}" TextWrapping="Wrap" />
+                    </Border>
+                    <Expander Header="Generation output" IsVisible="{Binding HasConversionLog}" HorizontalAlignment="Stretch">
+                      <ScrollViewer MaxHeight="180">
+                        <ItemsControl ItemsSource="{Binding ConversionLog}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </ScrollViewer>
+                    </Expander>
+                  </StackPanel>
+                  <StackPanel Spacing="6" IsVisible="{Binding OtherNodeProjectsText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Classes="formlabel" Text="OTHER NODE.JS PROJECTS (NOT DESKTOP APPS)" Margin="0" />
+                    <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding OtherNodeProjectsText}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Border Classes="callout warning" IsVisible="{Binding HasMacXcodeProjects}">
+                    <SelectableTextBlock FontSize="12.5" Text="{Binding MacXcodeProjectsText}" TextWrapping="Wrap" />
+                  </Border>
                 </StackPanel>
               </Border>
             </StackPanel>
@@ -247,7 +737,7 @@
               </Border>
               <Border Classes="callout warning" IsVisible="{Binding HasMissing}">
                 <StackPanel Spacing="6">
-                  <TextBlock Classes="h3 warning" Text="Missing requirements" />
+                  <TextBlock Classes="h3 warning" Text="{Binding MissingTitle}" />
                   <ItemsControl ItemsSource="{Binding MissingDependencies}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="x:String">
@@ -255,7 +745,26 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-                  <TextBlock Classes="muted" Text="Install the missing tools (see the Toolchains page), then press Re-inspect." TextWrapping="Wrap" />
+                  <TextBlock Classes="muted" Text="{Binding MissingHint}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+              <!-- Not buildable as it is: explain, and offer HCG support (nothing is sent from here) -->
+              <Border Classes="card" IsVisible="{Binding ShowSupportActions}">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="h2" Text="What you can do" />
+                  <TextBlock Classes="muted" TextWrapping="Wrap" Text="HCG Executable Maker cannot build this project as it is. Review the diagnostics, or ask HCG to support it: you choose what is sent and nothing leaves this computer until you submit." />
+                  <WrapPanel>
+                    <Button Classes="small ghost" Margin="0,0,8,6" Command="{Binding ViewDiagnosticsCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Log}" Width="14" /><TextBlock Text="View diagnostics" /></StackPanel>
+                    </Button>
+                    <Button Classes="small" Margin="0,0,8,6" Command="{Binding RequestProjectSupportCommand}">
+                      <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Support}" Width="14" /><TextBlock Text="Request project support" /></StackPanel>
+                    </Button>
+                    <Button Classes="small" Margin="0,0,8,6" Command="{Binding AnalyseWithAiCommand}" IsVisible="{Binding AiAnalysisAvailable}">
+                      <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Ai}" Width="14" /><TextBlock Text="AI analysis" /></StackPanel>
+                    </Button>
+                  </WrapPanel>
+                  <TextBlock Classes="muted" FontSize="12" Text="{Binding AiAnalysisNote}" IsVisible="{Binding !AiAnalysisAvailable}" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
               <Border Classes="card" IsVisible="{Binding HasDiagnostics}">
@@ -287,9 +796,13 @@
                   <TextBlock Classes="h2" Text="Application identity" />
                   <TextBlock Classes="muted" Text="Branding of the generated application — independent of HCG Executable Maker." />
                 </StackPanel>
+                <Border Classes="callout" IsVisible="{Binding IsElectronBuild}">
+                  <TextBlock FontSize="12" TextWrapping="Wrap"
+                             Text="Electron app: electron-builder takes the name, version, app id, icon and signing identity from the project's configuration (electron-builder.yml or package.json). They are shown here for the output folder name; change them in the project." />
+                </Border>
                 <StackPanel>
                   <TextBlock Classes="formlabel" Text="APPLICATION NAME" />
-                  <TextBox Text="{Binding AppName}" />
+                  <TextBox Text="{Binding AppName}" IsReadOnly="{Binding IsElectronBuild}" />
                 </StackPanel>
                 <UniformGrid Columns="2">
                   <StackPanel Margin="0,0,6,0">
@@ -298,20 +811,20 @@
                   </StackPanel>
                   <StackPanel Margin="6,0,0,0">
                     <TextBlock Classes="formlabel" Text="VERSION" />
-                    <TextBox Text="{Binding Version}" PlaceholderText="1.0.0" />
+                    <TextBox Text="{Binding Version}" PlaceholderText="1.0.0" IsReadOnly="{Binding IsElectronBuild}" />
                   </StackPanel>
                 </UniformGrid>
                 <StackPanel>
                   <TextBlock Classes="formlabel" Text="APPLICATION IDENTIFIER (REVERSE-DNS)" />
-                  <TextBox Text="{Binding AppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" PlaceholderText="com.company.app" />
+                  <TextBox Text="{Binding AppId}" FontFamily="{DynamicResource Hcg.Font.Mono}" PlaceholderText="com.company.app" IsReadOnly="{Binding IsElectronBuild}" />
                 </StackPanel>
                 <StackPanel>
                   <TextBlock Classes="formlabel" Text="DESCRIPTION" />
                   <TextBox Text="{Binding Description}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" />
                 </StackPanel>
                 <Border Classes="divider" />
-                <TextBlock Classes="formlabel" Text="APPLICATION ICON (PNG, ICO OR ICNS)" Margin="0" />
-                <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Classes="formlabel" Text="APPLICATION ICON (PNG, ICO OR ICNS)" Margin="0" IsVisible="{Binding IdentityEditable}" />
+                <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IdentityEditable}">
                   <Border Width="84" Height="84" Classes="inset" Padding="8">
                     <Panel>
                       <Image Source="{Binding IconPreview}" Stretch="Uniform" />
@@ -328,7 +841,7 @@
                     </StackPanel>
                   </StackPanel>
                 </Grid>
-                <ItemsControl ItemsSource="{Binding IconNotes}">
+                <ItemsControl ItemsSource="{Binding IconNotes}" IsVisible="{Binding IdentityEditable}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:IconNote">
                       <TextBlock FontSize="12" TextWrapping="Wrap" Margin="0,2" Text="{Binding Text, StringFormat='• {0}'}"
@@ -336,7 +849,7 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <TextBlock Classes="muted" TextWrapping="Wrap" Text="Your original icon file is never modified. Platform formats (.ico / .icns) are generated from it without distortion." />
+                <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding IdentityEditable}" Text="Your original icon file is never modified. Platform formats (.ico / .icns) are generated from it without distortion." />
               </StackPanel>
             </Border>
 
@@ -368,7 +881,7 @@
                     <TextBlock Text="{Binding PlatformNote}" FontSize="12" TextWrapping="Wrap" />
                   </Border>
                   <UniformGrid Columns="2">
-                    <StackPanel Margin="0,0,6,0">
+                    <StackPanel Margin="0,0,6,0" IsVisible="{Binding ShowConfigurationChoice}">
                       <TextBlock Classes="formlabel" Text="CONFIGURATION" />
                       <ComboBox ItemsSource="{Binding ConfigurationOptions}" SelectedItem="{Binding SelectedConfiguration}" />
                     </StackPanel>
@@ -377,16 +890,102 @@
                       <NumericUpDown Value="{Binding TimeoutMinutes}" Minimum="1" Maximum="720" Increment="5" FormatString="0" />
                     </StackPanel>
                   </UniformGrid>
-                  <CheckBox IsChecked="{Binding SelfContained}">
+                  <CheckBox IsChecked="{Binding SelfContained}" IsVisible="{Binding IsDotNetBuild}">
                     <StackPanel Spacing="1">
                       <TextBlock Text="Self-contained" FontWeight="Medium" />
                       <TextBlock Classes="muted" Text="Bundle the .NET runtime — no installation required on the target machine." TextWrapping="Wrap" />
                     </StackPanel>
                   </CheckBox>
-                  <CheckBox IsChecked="{Binding SingleFile}">
+                  <CheckBox IsChecked="{Binding SingleFile}" IsVisible="{Binding IsDotNetBuild}">
                     <StackPanel Spacing="1">
                       <TextBlock Text="Single-file executable" FontWeight="Medium" />
                       <TextBlock Classes="muted" Text="Package the app and its dependencies into one executable file." TextWrapping="Wrap" />
+                    </StackPanel>
+                  </CheckBox>
+                </StackPanel>
+              </Border>
+              <Border Classes="card" IsVisible="{Binding IsSwiftBuild}">
+                <StackPanel Spacing="12">
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h2" Text="macOS app (Swift package)" />
+                    <TextBlock Classes="muted" TextWrapping="Wrap" Text="Written to the .app's Info.plist. The application name above is the display name (e.g. Distil); the executable keeps the product name." />
+                  </StackPanel>
+                  <Border Classes="callout" Padding="10">
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding SwiftPrefillNote}" />
+                  </Border>
+                  <StackPanel>
+                    <TextBlock Classes="formlabel" Text="DELIVER AS" />
+                    <ComboBox ItemsSource="{Binding SwiftKindOptions}" SelectedItem="{Binding SelectedSwiftKind}" HorizontalAlignment="Stretch" />
+                    <TextBlock Classes="muted" FontSize="12" Margin="0,4,0,0" Text="{Binding SwiftKindNote}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <UniformGrid Columns="2">
+                    <StackPanel Margin="0,0,6,0">
+                      <TextBlock Classes="formlabel" Text="BUILD NUMBER (CFBUNDLEVERSION)" />
+                      <TextBox Text="{Binding SwiftBuildNumber}" PlaceholderText="1" />
+                    </StackPanel>
+                    <StackPanel Margin="6,0,0,0">
+                      <TextBlock Classes="formlabel" Text="MINIMUM MACOS" />
+                      <TextBox Text="{Binding SwiftMinimumMacOS}" PlaceholderText="from the executable" />
+                    </StackPanel>
+                  </UniformGrid>
+                  <StackPanel IsVisible="{Binding IsSwiftGui}">
+                    <TextBlock Classes="formlabel" Text="APP CATEGORY (LSAPPLICATIONCATEGORYTYPE)" />
+                    <ComboBox ItemsSource="{Binding SwiftCategoryOptions}" SelectedItem="{Binding SelectedSwiftCategory}" HorizontalAlignment="Stretch" />
+                  </StackPanel>
+                  <StackPanel Spacing="10" IsVisible="{Binding HasSwiftUsageDescriptions}">
+                    <TextBlock Classes="formlabel" Text="PRIVACY USAGE DESCRIPTIONS (REQUIRED)" Margin="0" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="macOS shows this text when the app asks for permission, and terminates the app if the key is missing." />
+                    <ItemsControl ItemsSource="{Binding SwiftUsageDescriptions}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SwiftUsageItem">
+                          <StackPanel Spacing="4" Margin="0,0,0,10">
+                            <TextBlock Text="{Binding Heading}" FontWeight="Medium" FontSize="12.5" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Evidence, StringFormat='Detected: {0}'}" TextWrapping="Wrap" />
+                            <TextBox Text="{Binding Text}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" PlaceholderText="Explain why the app needs this access." />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+              <Border Classes="card" IsVisible="{Binding HasSwiftContract}">
+                <StackPanel Spacing="10">
+                  <StackPanel Spacing="2">
+                    <TextBlock Classes="h2" Text="Packaging contract" />
+                    <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding SwiftContractSummary}" />
+                  </StackPanel>
+                  <Border Classes="callout error" Padding="10" IsVisible="{Binding SwiftContractError, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="{Binding SwiftContractError}" />
+                  </Border>
+                  <StackPanel Spacing="6" IsVisible="{Binding HasSwiftContractCommands}">
+                    <TextBlock Classes="formlabel" Text="COMMANDS RUN BEFORE SWIFT BUILD" Margin="0" />
+                    <ItemsControl ItemsSource="{Binding SwiftContractCommands}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SwiftContractLine">
+                          <StackPanel Spacing="2" Margin="0,0,0,8">
+                            <TextBlock Text="{Binding Description}" FontWeight="Medium" FontSize="12.5" TextWrapping="Wrap" />
+                            <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding Command}" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted" FontSize="11" Text="{Binding Detail}" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                  <StackPanel Spacing="4" IsVisible="{Binding HasSwiftContractContents}">
+                    <TextBlock Classes="formlabel" Text="ADDED TO THE APP" Margin="0" />
+                    <ItemsControl ItemsSource="{Binding SwiftContractContents}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                  <CheckBox IsChecked="{Binding SwiftContractConfirmed}" IsVisible="{Binding HasSwiftContractCommands}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="Run these commands while building" FontWeight="Medium" />
+                      <TextBlock Classes="muted" TextWrapping="Wrap" Text="They come from the project and run on this computer with your account's permissions, like the build itself (not sandboxed). HCG runs them exactly as shown, without a shell, and refuses to build if the file changes after you confirm." />
                     </StackPanel>
                   </CheckBox>
                 </StackPanel>
@@ -467,6 +1066,124 @@
                   </CheckBox>
                 </StackPanel>
               </Border>
+
+              <!-- macOS distribution: signing, entitlements, installer and Mac App Store -->
+              <Border Classes="inset" Padding="18,16" IsVisible="{Binding ShowDistribution}">
+                <StackPanel Spacing="12">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="h3" Text="macOS distribution" />
+                      <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding SigningInventoryNote}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="small" Content="Refresh certificates" Command="{Binding RefreshSigningCommand}" VerticalAlignment="Top" />
+                  </Grid>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding IsSwiftGui}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="formlabel" Text="SIGNING" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding DeveloperIdState}" />
+                    </Grid>
+                    <ComboBox ItemsSource="{Binding SigningModeOptions}" SelectedItem="{Binding SelectedSigningMode}" HorizontalAlignment="Stretch" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding DeveloperIdReason}" />
+                    <StackPanel Spacing="6" IsVisible="{Binding IsDeveloperId}">
+                      <TextBlock Classes="formlabel" Text="DEVELOPER ID APPLICATION CERTIFICATE" />
+                      <ComboBox ItemsSource="{Binding DeveloperIdIdentities}" SelectedItem="{Binding SelectedDeveloperIdIdentity}" HorizontalAlignment="Stretch" />
+                      <TextBlock Classes="formlabel" Text="HARDENED-RUNTIME ENTITLEMENTS (FROM THE SOURCES)" />
+                      <TextBlock Classes="muted" FontSize="12" Text="None needed: the sources use no protected resource." IsVisible="{Binding !HasDeveloperIdEntitlements}" TextWrapping="Wrap" />
+                      <ItemsControl ItemsSource="{Binding DeveloperIdEntitlements}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:EntitlementChoice">
+                            <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+                              <StackPanel Spacing="1">
+                                <TextBlock Text="{Binding Heading}" FontWeight="Medium" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Evidence}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                              </StackPanel>
+                            </CheckBox>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </StackPanel>
+
+                  <StackPanel Spacing="6" IsVisible="{Binding ShowPkgOptions}">
+                    <TextBlock Classes="formlabel" Text="INSTALLER PACKAGE SIGNATURE" />
+                    <ComboBox ItemsSource="{Binding InstallerIdentities}" SelectedItem="{Binding SelectedInstallerIdentity}" HorizontalAlignment="Stretch" IsEnabled="{Binding IsSwiftGui}" />
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                               Text="Unsigned packages are for testing on this Mac. Distribution needs a Developer ID Installer certificate and a Developer ID signed app, then notarization." />
+                  </StackPanel>
+
+                  <Expander IsVisible="{Binding IsSwiftGui}" HorizontalAlignment="Stretch">
+                    <Expander.Header>
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="Mac App Store preparation" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <c:StatusChip Grid.Column="1" Status="{Binding AppStoreState}" Margin="12,0,0,0" />
+                      </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding AppStoreReason}" />
+                      <TextBlock Classes="formlabel" Text="APPLE DISTRIBUTION CERTIFICATE" />
+                      <ComboBox ItemsSource="{Binding AppStoreIdentities}" SelectedItem="{Binding SelectedAppStoreIdentity}" HorizontalAlignment="Stretch" />
+                      <TextBlock Classes="formlabel" Text="MAC INSTALLER DISTRIBUTION CERTIFICATE" />
+                      <ComboBox ItemsSource="{Binding AppStoreInstallerIdentities}" SelectedItem="{Binding SelectedAppStoreInstaller}" HorizontalAlignment="Stretch" />
+                      <TextBlock Classes="formlabel" Text="MAC APP STORE PROVISIONING PROFILE" />
+                      <Grid ColumnDefinitions="*,Auto">
+                        <ComboBox ItemsSource="{Binding AppStoreProfiles}" SelectedItem="{Binding SelectedAppStoreProfile}" HorizontalAlignment="Stretch" />
+                        <Button Grid.Column="1" Classes="small" Content="Browse…" Command="{Binding BrowseProvisioningProfileCommand}" Margin="8,0,0,0" />
+                      </Grid>
+                      <TextBlock Classes="formlabel" Text="APP SANDBOX ENTITLEMENTS (FROM THE SOURCES; APP SANDBOX ITSELF IS ALWAYS ON)" />
+                      <ItemsControl ItemsSource="{Binding AppStoreEntitlements}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:EntitlementChoice">
+                            <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+                              <StackPanel Spacing="1">
+                                <TextBlock Text="{Binding Heading}" FontWeight="Medium" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Evidence}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontSize="12" Text="{Binding Explanation}" TextWrapping="Wrap" />
+                              </StackPanel>
+                            </CheckBox>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <StackPanel Spacing="4" IsVisible="{Binding HasAppStoreReviews}">
+                        <TextBlock Classes="formlabel" Text="REVIEW BEFORE SUBMITTING" />
+                        <ItemsControl ItemsSource="{Binding AppStoreReviews}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <TextBlock Classes="warning" FontSize="12" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                      <StackPanel Spacing="4" IsVisible="{Binding HasAppStoreBlockers}">
+                        <TextBlock Classes="formlabel" Text="BLOCKERS (NOT POSSIBLE IN THE APP SANDBOX)" />
+                        <ItemsControl ItemsSource="{Binding AppStoreBlockers}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <TextBlock Classes="error" FontSize="12" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </StackPanel>
+                  </Expander>
+
+                  <CheckBox IsChecked="{Binding EntitlementsConfirmed}" IsVisible="{Binding IsSwiftGui}">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="I reviewed these entitlements" FontWeight="Medium" />
+                      <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                                 Text="HCG proposes only what the sources need and never adds others. An unchecked entitlement disables that feature in the signed app; the summary lists it." />
+                    </StackPanel>
+                  </CheckBox>
+                  <ItemsControl ItemsSource="{Binding DistributionErrors}" IsVisible="{Binding HasDistributionErrors}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="x:String">
+                        <TextBlock Classes="error" FontSize="12.5" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </Border>
 
@@ -493,10 +1210,23 @@
                       <TextBlock Classes="label" Text="ERRORS" />
                       <TextBlock Text="{Binding Result.ErrorCount, FallbackValue=0}" FontWeight="SemiBold" Classes="error" />
                     </StackPanel>
-                    <StackPanel Spacing="2">
-                      <TextBlock Classes="label" Text="OUTPUT" />
-                      <SelectableTextBlock Text="{Binding ResultOutput}" Classes="mono" />
-                    </StackPanel>
+                  </StackPanel>
+                  <StackPanel Spacing="6" IsVisible="{Binding ShowBuildFailureActions}" Margin="0,4,0,0">
+                    <WrapPanel>
+                      <Button Classes="small" Margin="0,0,8,0" Command="{Binding ExplainBuildErrorCommand}" IsVisible="{Binding AiExplainAvailable}">
+                        <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Ai}" Width="14" /><TextBlock Text="Explain this build error" /></StackPanel>
+                      </Button>
+                      <Button Classes="small ghost" Margin="0,0,8,0" Command="{Binding RequestBuildSupportCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="6"><PathIcon Data="{StaticResource Icon.Support}" Width="14" /><TextBlock Text="Request support for this build" /></StackPanel>
+                      </Button>
+                    </WrapPanel>
+                    <TextBlock Classes="muted" FontSize="12" IsVisible="{Binding !AiExplainAvailable}" TextWrapping="Wrap"
+                               Text="{Binding AiExplainNote}" />
+                  </StackPanel>
+                  <!-- Own row: long output paths wrap instead of running under the action buttons. -->
+                  <StackPanel Spacing="2" Margin="0,0,16,0">
+                    <TextBlock Classes="label" Text="OUTPUT" />
+                    <SelectableTextBlock Text="{Binding ResultOutput}" Classes="mono" TextWrapping="Wrap" />
                   </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Spacing="8" Margin="20,0,0,0" MinWidth="200">
@@ -527,6 +1257,34 @@
                   </Button>
                 </StackPanel>
               </Grid>
+            </Border>
+
+            <Border Classes="card" IsVisible="{Binding ShowDistributionSteps}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="h2" Text="Distribution steps" />
+                <TextBlock Classes="muted" TextWrapping="Wrap"
+                           Text="Each step is explicit and reported on its own. Upload to App Store Connect and submission for review stay manual." />
+                <WrapPanel>
+                  <Button Content="Notarize with Apple…" Command="{Binding NotarizeCommand}" IsEnabled="{Binding CanNotarize}" Margin="0,0,8,8" />
+                  <Button Content="Test install…" Command="{Binding TestInstallCommand}" IsEnabled="{Binding CanTestInstall}" Margin="0,0,8,8" />
+                  <CheckBox Content="Launch after test install" IsChecked="{Binding LaunchAfterTestInstall}" IsEnabled="{Binding CanTestInstall}" Margin="0,0,16,8" />
+                  <Button Content="Validate with App Store Connect…" Command="{Binding ValidateAppStoreCommand}" IsEnabled="{Binding CanValidateAppStore}" Margin="0,0,8,8" />
+                </WrapPanel>
+                <TextBlock Classes="muted" FontSize="12" Text="{Binding NotarizeNote}" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunningDistributionAction}" />
+                <ItemsControl ItemsSource="{Binding DistributionResults}" IsVisible="{Binding HasDistributionResults}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DistributionStepItem">
+                      <Grid ColumnDefinitions="200,170,Auto,*" Margin="0,3">
+                        <TextBlock Text="{Binding Artifact}" FontSize="12" Classes="secondary" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" FontWeight="Medium" />
+                        <c:StatusChip Grid.Column="2" Status="{Binding Status}" Margin="0,0,10,0" />
+                        <SelectableTextBlock Grid.Column="3" Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
             </Border>
 
             <ItemsControl ItemsSource="{Binding ResultArtifacts}">
@@ -610,6 +1368,9 @@
                   <PathIcon Data="{StaticResource Icon.Warning}" Foreground="{DynamicResource Hcg.Brush.Warning}" Width="18" Height="18" />
                   <TextBlock Classes="h2" Text="{Binding TrustTitle}" />
                 </StackPanel>
+                <Border Classes="callout success" IsVisible="{Binding DesktopWorkspaceNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                  <SelectableTextBlock FontSize="12.5" Text="{Binding DesktopWorkspaceNotice}" TextWrapping="Wrap" />
+                </Border>
                 <TextBlock Classes="body" Text="{Binding TrustExplanation}" />
                 <TextBlock Classes="body secondary" Text="{Binding SecretsStatement}" />
                 <Border Classes="chip warning">
@@ -683,7 +1444,7 @@
                 <DataTemplate x:DataType="vm:LogLineItem">
                   <Grid ColumnDefinitions="70,*">
                     <TextBlock Classes="log" Text="{Binding Time}" Opacity="0.45" />
-                    <TextBlock Grid.Column="1" Classes="log" Text="{Binding Text}"
+                    <TextBlock Grid.Column="1" Classes="log" TextWrapping="Wrap" Text="{Binding Text}"
                                Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Classes.success="{Binding IsSuccess}"
                                Classes.command="{Binding IsCommand}" Classes.info="{Binding IsInfo}" />
                   </Grid>
