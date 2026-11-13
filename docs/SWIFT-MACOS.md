@@ -151,7 +151,8 @@ schema `hcg-app-packaging/1`. HCG reads that file as data during inspection, the
    - An icon chosen in HCG replaces the contract's icon.
 
 Rules HCG enforces (an invalid contract is reported in Configure, never half-applied):
-- unknown keys and other schema versions are rejected;
+- unknown keys and other schema versions are rejected (an optional top-level `description` string, for people
+  reading the file, is accepted and ignored);
 - commands are argument lists; `${…}` other than `${HELPERS_DIR}`, `$(…)` and backticks are rejected;
 - every path is relative and resolves inside the workspace (`workingDirectory: "../.."` is fine when it stays inside);
 - helpers go only to `Contents/Helpers/<name>`, resources only under `Contents/Resources/`;
