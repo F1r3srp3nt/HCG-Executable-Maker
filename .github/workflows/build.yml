@@ -85,58 +85,49 @@ jobs:
       # job timeout with no log (main, run 42540213014: macOS test step stuck for 40 minutes, log never uploaded).
       # The step has its own limit below the job's, so that when dotnet test itself never returns (a child process left
       # holding its output open — the blame collector cannot end that) the evidence steps after it still run.
-      # Runs 67-69 (feature/hcg-projects): the macOS runner stopped responding during the tests (even the step and job
-      # timeouts never fired). The Theos/Apple-route tests run first on their own so the step that stops names the set,
-      # and the managed heap is capped so runaway memory fails with a stack trace instead of freezing the machine.
+      # Runs 67-72 (feature/hcg-projects): the macOS runner stopped responding during the tests — no step or job timeout
+      # fired and no log was kept; process, memory and disk watchdogs saw nothing. The suite runs in groups, each its
+      # own step (the step that stops names the group), through .github/scripts/test-group.sh (watchdog on macOS).
+      # Every group runs even when an earlier one failed; the managed heap is capped at 3 GiB.
       - name: Test (Theos and Apple project routes)
-        timeout-minutes: 10
-        env:
-          DOTNET_GCHeapHardLimit: "0xC0000000"
-        run: >
-          dotnet test tests/HCG.ExecutableMaker.Tests -c Release --no-build --logger "trx;LogFileName=routes.trx"
-          --logger "console;verbosity=detailed" --results-directory TestResults
-          --filter "FullyQualifiedName~TheosTests|FullyQualifiedName~AppleProjectRoutesTests"
-          --blame-hang-timeout 3m --blame-hang-dump-type none
-
-      # Run 70: the Theos/Apple-route tests pass on macOS in seconds; the runner still stops responding in this step.
-      # On macOS a watchdog samples the process count and total resident memory every 5 s; when either runs away it
-      # prints which commands are multiplying or growing and stops the test run, so the machine survives and the log
-      # names the cause.
-      - name: Test (unit + end-to-end)
-        timeout-minutes: 20
+        if: success() || failure()
+        timeout-minutes: 12
         shell: bash
         env:
           DOTNET_GCHeapHardLimit: "0xC0000000"
-        run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            (
-              i=0
-              while sleep 5; do
-                i=$((i+1))
-                procs=$(ps -A | wc -l | tr -d ' ')
-                rss=$(ps -A -o rss= | awk '{s+=$1} END {print int(s/1024)}')
-                free=$(df -m "$RUNNER_TEMP" | awk 'NR==2 {print $4}')
-                [ $((i % 6)) -eq 0 ] && echo "watchdog: ${procs} processes, ${rss} MB resident, ${free} MB free disk"
-                if [ "$procs" -gt 700 ] || [ "$rss" -gt 9000 ] || [ "$free" -lt 4000 ]; then
-                  echo "::error::Watchdog: ${procs} processes, ${rss} MB resident, ${free} MB free disk — stopping the test run"
-                  echo "== largest folders in the temporary directories"
-                  du -xm -d 3 "${TMPDIR:-/tmp}" "$RUNNER_TEMP" /tmp 2>/dev/null | sort -rn | head -15
-                  echo "== most frequent commands"; ps -A -o comm= | sort | uniq -c | sort -rn | head -15
-                  echo "== largest processes";     ps -A -o rss=,pid=,ppid=,etime=,command= | sort -rn | head -15
-                  echo "== process tree (newest)"; ps -A -o pid=,ppid=,etime=,command= | tail -40
-                  pkill -f testhost; pkill -f vstest.console; break
-                fi
-              done
-            ) &
-            WATCHDOG=$!
-          fi
-          dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" \
-            --logger "console;verbosity=normal" --results-directory TestResults \
-            --filter "FullyQualifiedName!~TheosTests&FullyQualifiedName!~AppleProjectRoutesTests" \
-            --blame-hang-timeout 5m --blame-hang-dump-type none --diag TestResults/diag/vstest.log
-          status=$?
-          [ -n "${WATCHDOG:-}" ] && kill "$WATCHDOG" 2>/dev/null
-          exit $status
+        run: .github/scripts/test-group.sh routes "FullyQualifiedName~TheosTests|FullyQualifiedName~AppleProjectRoutesTests"
+
+      - name: Test (toolchain, Xcode and project detection)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh detection "FullyQualifiedName~ProcessAndToolchainTests|FullyQualifiedName~ToolchainSetupTests|FullyQualifiedName~XcodeDiscoveryTests|FullyQualifiedName~NativeTests|FullyQualifiedName~InspectionTests"
+
+      - name: Test (mobile, Swift and macOS distribution)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh apple "FullyQualifiedName~MobileBuildTests|FullyQualifiedName~MobileArtifactTests|FullyQualifiedName~MacDistributionTests|FullyQualifiedName~Swift"
+
+      - name: Test (end-to-end builds and packaging)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh builds "FullyQualifiedName~EndToEndTests|FullyQualifiedName~ElectronBuildTests|FullyQualifiedName~WindowsInstallerTests|FullyQualifiedName~BuildEngineTests|FullyQualifiedName~PackagingTests|FullyQualifiedName~WebDesktopConversionTests"
+
+      - name: Test (everything else)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh rest "FullyQualifiedName!~TheosTests&FullyQualifiedName!~AppleProjectRoutesTests&FullyQualifiedName!~ProcessAndToolchainTests&FullyQualifiedName!~ToolchainSetupTests&FullyQualifiedName!~XcodeDiscoveryTests&FullyQualifiedName!~NativeTests&FullyQualifiedName!~InspectionTests&FullyQualifiedName!~MobileBuildTests&FullyQualifiedName!~MobileArtifactTests&FullyQualifiedName!~MacDistributionTests&FullyQualifiedName!~Swift&FullyQualifiedName!~EndToEndTests&FullyQualifiedName!~ElectronBuildTests&FullyQualifiedName!~WindowsInstallerTests&FullyQualifiedName!~BuildEngineTests&FullyQualifiedName!~PackagingTests&FullyQualifiedName!~WebDesktopConversionTests"
 
       - name: Processes left after the tests (evidence for a hang)
         if: failure() || cancelled()
