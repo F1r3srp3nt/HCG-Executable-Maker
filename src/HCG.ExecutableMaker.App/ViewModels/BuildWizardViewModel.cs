@@ -179,6 +179,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private void Reset()
     {
         Project = null;
+        _inspectedAnalysis = null;
+        ClearBuildRoutes();
         Analysis = null;
         ImportError = null;
         ImportWarnings.Clear();
@@ -301,7 +303,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             return;
         }
         Project = project;
-        ApplyAnalysis(project.Analysis ?? await _projectService.InspectAsync(project, CancellationToken.None));
+        ApplyAnalysis(project.Analysis ?? await _projectService.InspectAsync(project, CancellationToken.None),
+            previous.Settings.Native is { Kind: NativeProjectKind.Theos } ? HCG.ExecutableMaker.ProjectInspection.BuildRoutes.TheosDeb : null);
         SelectedProject = ProjectOptions.FirstOrDefault(p => p.Path == previous.Settings.ProjectRelativePath) ?? SelectedProject;
         await PrepareConfigurationAsync();
         ApplySettings(previous.Settings);
@@ -317,6 +320,31 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasAnalysis), nameof(IsMobileProject))] private ProjectAnalysis? _analysis;
     /// <summary>Mobile projects and artifacts are built in Mobile Build Studio, not in this desktop wizard.</summary>
     public bool IsMobileProject => Analysis?.Mobile is not null;
+
+    /// <summary>The inspection result as stored with the project; <see cref="Analysis"/> is the chosen build route's view of it.</summary>
+    private ProjectAnalysis? _inspectedAnalysis;
+    private bool _applyingBuildRoutes;
+    /// <summary>The build routes of a folder with more than one kind of project (e.g. "iOS app (IPA, Xcode)" and "Jailbreak package (.deb, Theos)").</summary>
+    public ObservableCollection<HCG.ExecutableMaker.ProjectInspection.BuildRoute> BuildRouteOptions { get; } = [];
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(BuildRouteDescription))] private HCG.ExecutableMaker.ProjectInspection.BuildRoute? _selectedBuildRoute;
+    public bool HasBuildRoutes => BuildRouteOptions.Count > 1;
+    public string BuildRouteDescription => SelectedBuildRoute?.Description ?? "";
+
+    partial void OnSelectedBuildRouteChanged(HCG.ExecutableMaker.ProjectInspection.BuildRoute? value)
+    {
+        if (_applyingBuildRoutes) return;
+        // Another route is another build: identity, platform and packaging are prepared again for it.
+        _identityPrefilledFor = null;
+        ApplyRouteAnalysis();
+    }
+
+    private void ClearBuildRoutes()
+    {
+        _applyingBuildRoutes = true;
+        try { BuildRouteOptions.Clear(); SelectedBuildRoute = null; }
+        finally { _applyingBuildRoutes = false; }
+        OnPropertyChanged(nameof(HasBuildRoutes));
+    }
 
     [RelayCommand]
     private void OpenInMobileStudio()
@@ -366,7 +394,33 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         finally { IsInspecting = false; }
     }
 
-    private void ApplyAnalysis(ProjectAnalysis a)
+    /// <summary>
+    /// Shows an inspection result. When the folder holds more than one kind of project (an Xcode iOS app and a Theos
+    /// jailbreak project), the user chooses the build route and the wizard shows that route's own analysis.
+    /// </summary>
+    private void ApplyAnalysis(ProjectAnalysis a, string? routeId = null)
+    {
+        _inspectedAnalysis = a;
+        var keep = routeId ?? SelectedBuildRoute?.Id;
+        _applyingBuildRoutes = true;
+        try
+        {
+            BuildRouteOptions.Clear();
+            foreach (var r in HCG.ExecutableMaker.ProjectInspection.BuildRoutes.For(a)) BuildRouteOptions.Add(r);
+            SelectedBuildRoute = BuildRouteOptions.FirstOrDefault(r => r.Id == keep) ?? BuildRouteOptions.FirstOrDefault();
+        }
+        finally { _applyingBuildRoutes = false; }
+        OnPropertyChanged(nameof(HasBuildRoutes));
+        ApplyRouteAnalysis();
+    }
+
+    private void ApplyRouteAnalysis()
+    {
+        if (_inspectedAnalysis is null) return;
+        ApplyAnalysisView(HCG.ExecutableMaker.ProjectInspection.BuildRoutes.View(_inspectedAnalysis, SelectedBuildRoute?.Id, _toolchains.Latest));
+    }
+
+    private void ApplyAnalysisView(ProjectAnalysis a)
     {
         Analysis = a;
         SupportTag = new StatusTag(Format.Label(a.Support), Format.Tone(a.Support));
