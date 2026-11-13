@@ -98,15 +98,42 @@ jobs:
           --filter "FullyQualifiedName~TheosTests|FullyQualifiedName~AppleProjectRoutesTests"
           --blame-hang-timeout 3m --blame-hang-dump-type none
 
+      # Run 70: the Theos/Apple-route tests pass on macOS in seconds; the runner still stops responding in this step.
+      # On macOS a watchdog samples the process count and total resident memory every 5 s; when either runs away it
+      # prints which commands are multiplying or growing and stops the test run, so the machine survives and the log
+      # names the cause.
       - name: Test (unit + end-to-end)
         timeout-minutes: 20
+        shell: bash
         env:
           DOTNET_GCHeapHardLimit: "0xC0000000"
-        run: >
-          dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx"
-          --logger "console;verbosity=normal" --results-directory TestResults
-          --filter "FullyQualifiedName!~TheosTests&FullyQualifiedName!~AppleProjectRoutesTests"
-          --blame-hang-timeout 5m --blame-hang-dump-type none --diag TestResults/diag/vstest.log
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            (
+              i=0
+              while sleep 5; do
+                i=$((i+1))
+                procs=$(ps -A | wc -l | tr -d ' ')
+                rss=$(ps -A -o rss= | awk '{s+=$1} END {print int(s/1024)}')
+                [ $((i % 6)) -eq 0 ] && echo "watchdog: ${procs} processes, ${rss} MB resident"
+                if [ "$procs" -gt 700 ] || [ "$rss" -gt 9000 ]; then
+                  echo "::error::Watchdog: ${procs} processes, ${rss} MB resident — stopping the test run"
+                  echo "== most frequent commands"; ps -A -o comm= | sort | uniq -c | sort -rn | head -15
+                  echo "== largest processes";     ps -A -o rss=,pid=,ppid=,etime=,command= | sort -rn | head -15
+                  echo "== process tree (newest)"; ps -A -o pid=,ppid=,etime=,command= | tail -40
+                  pkill -f testhost; pkill -f vstest.console; break
+                fi
+              done
+            ) &
+            WATCHDOG=$!
+          fi
+          dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" \
+            --logger "console;verbosity=normal" --results-directory TestResults \
+            --filter "FullyQualifiedName!~TheosTests&FullyQualifiedName!~AppleProjectRoutesTests" \
+            --blame-hang-timeout 5m --blame-hang-dump-type none --diag TestResults/diag/vstest.log
+          status=$?
+          [ -n "${WATCHDOG:-}" ] && kill "$WATCHDOG" 2>/dev/null
+          exit $status
 
       - name: Processes left after the tests (evidence for a hang)
         if: failure() || cancelled()
