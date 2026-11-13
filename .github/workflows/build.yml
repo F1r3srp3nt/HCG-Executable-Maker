@@ -968,15 +968,15 @@ jobs:
       - name: The submission folder alone is "Configuration required" (its shared projects are outside it)
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail/iOS App Store Submission"
-          --output sim --expect-state "Configuration required" --output "$OUT/partial" --screenshots "$OUT/screens" --prefix mail-partial
+          --mobile-output sim --expect-state "Configuration required" --output "$OUT/partial" --screenshots "$OUT/screens" --prefix mail-partial
       - name: Simulator build from the repository root (shared projects resolved from the repository)
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
-          --output sim --expect-state "Ready to build" --output "$OUT/sim" --screenshots "$OUT/screens" --prefix mail-sim
+          --mobile-output sim --expect-state "Ready to build" --output "$OUT/sim" --screenshots "$OUT/screens" --prefix mail-sim
       - name: Unsigned device archive (ios-arm64, AOT) — inspection only, never exported to an IPA
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
-          --output archive --signing unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
+          --mobile-output archive --signing unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
       - name: Independent checks of what HCG produced
         run: |
           app="$(find "$OUT/sim/artifacts" -maxdepth 3 -name '*.app' -type d | head -1)"
@@ -1042,7 +1042,7 @@ jobs:
             i=$((i+1)); name="$(basename "$x" .app)"
             for scheme in HCGSentinel HCGSentinelModern; do
               DEVELOPER_DIR="$x/Contents/Developer" dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Sentinel" \
-                --output archive --scheme "$scheme" --signing unsigned --record-only \
+                --mobile-output archive --scheme "$scheme" --signing unsigned --record-only \
                 --output "$OUT/$name-$scheme" --screenshots "$OUT/screens" --prefix "sentinel-$name-$scheme" > "$OUT/$name-$scheme.driver.log" 2>&1 || true
               state="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["state"], "|", (d.get("firstError") or d.get("detail") or "")[:400])' "$OUT/$name-$scheme/sentinel-$name-$scheme-mobile.json" 2>/dev/null \
                        || grep -E 'State: \[' "$OUT/$name-$scheme.driver.log" | tail -1)"

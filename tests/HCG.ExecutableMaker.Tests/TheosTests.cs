@@ -233,8 +233,11 @@ public class TheosTests : IDisposable
         {
             using var ms = new MemoryStream();
             using (var w = new TarWriter(ms, TarEntryFormat.Gnu, leaveOpen: true))
+            {
+                w.WriteEntry(new GnuTarEntry(TarEntryType.Directory, "./"));     // dm.pl and dpkg-deb write the archive root first (CI run 74)
                 foreach (var (path, data) in entries)
                     w.WriteEntry(new GnuTarEntry(TarEntryType.RegularFile, "./" + path) { DataStream = new MemoryStream(data), Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute });
+            }
             return ms.ToArray();
         }
         byte[] Gzip(byte[] data) { using var ms = new MemoryStream(); using (var gz = new GZipStream(ms, CompressionLevel.Fastest)) gz.Write(data); return ms.ToArray(); }
@@ -319,6 +322,23 @@ public class TheosTests : IDisposable
         Assert.Contains("old (unversioned) pointer-authentication ABI", binary.Detail);
         Assert.Equal(VerificationStatus.PassedWithWarnings, r.Checks.Single(c => c.Name == "Maintainer scripts").Status);
         Assert.Contains("postinst run as root", r.Checks.Single(c => c.Name == "Maintainer scripts").Detail);
+    }
+
+    [Fact]
+    public async Task A_gzip_payload_with_the_archive_root_entry_is_read_and_an_entry_outside_the_root_is_refused()
+    {
+        var p = Scan(Repo()).Projects.Single(x => x.Directory == "");
+        var deb = Deb("gz.deb", Control("iphoneos-arm64"), NexusPayload("var/jb/"), "gz");
+        var r = await TheosDebVerifier.VerifyAsync(deb, Choice(p, "rootless"), new HCG.ExecutableMaker.Infrastructure.Processes.ProcessRunner(), CancellationToken.None);
+        Assert.Equal(VerificationStatus.Passed, r.Checks.Single(c => c.Name == "Install location").Status);
+        Assert.Contains("var/jb/Library/MobileSubstrate/DynamicLibraries/HCGNexus.dylib", r.Payload);
+
+        using var evil = new MemoryStream();
+        using (var w = new TarWriter(evil, TarEntryFormat.Gnu, leaveOpen: true))
+            w.WriteEntry(new GnuTarEntry(TarEntryType.RegularFile, "../escape") { DataStream = new MemoryStream([1]) });
+        evil.Position = 0;
+        await Assert.ThrowsAsync<InvalidDataException>(() => TheosDebVerifier.ExtractTarAsync(evil, _t.Combine("x"), CancellationToken.None));
+        Assert.False(File.Exists(_t.Combine("escape")));
     }
 
     [Fact]

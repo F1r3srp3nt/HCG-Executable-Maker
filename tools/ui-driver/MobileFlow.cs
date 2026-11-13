@@ -7,7 +7,7 @@ namespace HCG.ExecutableMaker.UiDriver;
 /// <summary>
 /// Mobile Build Studio driven like a user: the project imported in New Build is opened in Mobile Build Studio, the
 /// output (simulator / archive / ipa), scheme and signing are chosen, readiness and the precise state are recorded, and
-/// the build runs after the trust confirmation. Options: --mobile, --output sim|archive|ipa, --scheme S, --signing
+/// the build runs after the trust confirmation. Options: --mobile, --mobile-output sim|archive|ipa (--output is the output folder), --scheme S, --signing
 /// unsigned|project, --expect-state "Ready to build", --expect-blocked-by "Deployment target", --record-only (a failure is
 /// recorded, not fatal — used to reproduce HCG Sentinel's archive across Xcode versions).
 /// </summary>
@@ -25,7 +25,7 @@ internal static partial class Program
         foreach (var d in studio.Diagnostics) Log($"  {d.Severity}: {d.Message}");
         studio.SelectedPlatform = studio.Platforms.First(p => p.Platform == TargetPlatform.IOS);
         foreach (var o in studio.Outputs) Log($"Output {o.Name}: {(o.IsEnabled ? "available" : "unavailable — " + o.Reason)}");
-        var wanted = Arg("output", "sim") switch { "archive" => MobileOutput.IosArchive, "ipa" => MobileOutput.IosIpa, _ => MobileOutput.IosSimulatorApp };
+        var wanted = Arg("mobile-output", "sim") switch { "archive" => MobileOutput.IosArchive, "ipa" => MobileOutput.IosIpa, _ => MobileOutput.IosSimulatorApp };
         var item = studio.Outputs.FirstOrDefault(o => o.Option.Output == wanted);
         Check(item is not null, $"Output {wanted} offered");
         if (item is null) return 1;

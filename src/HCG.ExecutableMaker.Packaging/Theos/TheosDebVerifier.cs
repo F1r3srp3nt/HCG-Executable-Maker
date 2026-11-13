@@ -228,6 +228,45 @@ public static partial class TheosDebVerifier
         return fields;
     }
 
+    /// <summary>
+    /// Extracts regular files and directories of a tar stream. Theos' dm.pl (like dpkg-deb) writes the archive root as an
+    /// entry named "./", which TarFile.ExtractToDirectory rejects as "outside the destination" (CI run 74); it is skipped.
+    /// Every other entry must stay inside the folder; links and devices are not reproduced (only their names are needed).
+    /// </summary>
+    internal static async Task ExtractTarAsync(Stream tar, string targetDir, CancellationToken ct)
+    {
+        var root = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        await using var reader = new TarReader(tar);
+        long total = 0;
+        while (await reader.GetNextEntryAsync(copyData: false, ct).ConfigureAwait(false) is { } entry)
+        {
+            var name = entry.Name.Replace('\\', '/');
+            while (name.StartsWith("./", StringComparison.Ordinal)) name = name[2..];
+            name = name.TrimEnd('/');
+            if (name.Length == 0 || name == ".") continue;
+            var path = Path.GetFullPath(Path.Combine(root, name));
+            if (!path.StartsWith(root, StringComparison.Ordinal))
+                throw new InvalidDataException($"The package contains an entry outside its root: {entry.Name}");
+            switch (entry.EntryType)
+            {
+                case TarEntryType.Directory:
+                    Directory.CreateDirectory(path);
+                    break;
+                case TarEntryType.RegularFile or TarEntryType.V7RegularFile or TarEntryType.ContiguousFile:
+                    total += entry.Length;
+                    if (total > MaxMemberBytes) throw new InvalidDataException($"The package payload is larger than {MaxMemberBytes:N0} bytes.");
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    await using (var output = File.Create(path))
+                        if (entry.DataStream is { } data) await data.CopyToAsync(output, ct).ConfigureAwait(false);
+                    break;
+                case TarEntryType.SymbolicLink or TarEntryType.HardLink:
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    await File.WriteAllTextAsync(path, "", ct).ConfigureAwait(false);   // recorded by name; never followed
+                    break;
+            }
+        }
+    }
+
     private static async Task ExtractAsync(string debPath, ArMember member, string targetDir, IProcessRunner runner, CancellationToken ct)
     {
         if (member.Size > MaxMemberBytes) throw new InvalidDataException($"{member.Name} is larger than {MaxMemberBytes:N0} bytes.");
@@ -238,7 +277,7 @@ public static partial class TheosDebVerifier
         if (member.Name is "control.tar" or "data.tar" or "control.tar.gz" or "data.tar.gz")
         {
             Stream tar = member.Name.EndsWith(".gz", StringComparison.Ordinal) ? new GZipStream(bounded, CompressionMode.Decompress) : bounded;
-            await using (tar) await TarFile.ExtractToDirectoryAsync(tar, targetDir, overwriteFiles: false, ct).ConfigureAwait(false);
+            await using (tar) await ExtractTarAsync(tar, targetDir, ct).ConfigureAwait(false);
             return;
         }
         // xz / lzma / zstd / bzip2: the system tar reads them. The member is copied to a private file first.
