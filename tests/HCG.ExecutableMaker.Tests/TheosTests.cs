@@ -344,6 +344,20 @@ public class TheosTests : IDisposable
     }
 
     [Fact]
+    public void The_ios_clang_for_theos_is_found_in_the_developer_directory_without_starting_xcrun()
+    {
+        var dev = _t.Combine("Xcode.app", "Contents", "Developer");
+        var clang = Path.Combine(dev, "Toolchains", "XcodeDefault.xctoolchain", "usr", "bin", "clang");
+        Directory.CreateDirectory(Path.GetDirectoryName(clang)!);
+        File.WriteAllText(clang, "");
+        Assert.Contains("no iPhoneOS SDK", HCG.ExecutableMaker.Infrastructure.Toolchains.ToolchainDetector.LocateXcodeIosClang(dev).Problem);
+        Directory.CreateDirectory(Path.Combine(dev, "Platforms", "iPhoneOS.platform", "Developer", "SDKs", "iPhoneOS26.2.sdk"));
+        Assert.Equal((clang, "iPhoneOS26.2.sdk"), HCG.ExecutableMaker.Infrastructure.Toolchains.ToolchainDetector.LocateXcodeIosClang(dev) is var r ? (r.Clang, r.Sdk) : default);
+        Assert.Contains("Command Line Tools", HCG.ExecutableMaker.Infrastructure.Toolchains.ToolchainDetector.LocateXcodeIosClang("/Library/Developer/CommandLineTools").Problem);
+        Assert.Null(HCG.ExecutableMaker.Infrastructure.Toolchains.ToolchainDetector.LocateXcodeIosClang(null).Clang);
+    }
+
+    [Fact]
     public void Theos_errors_are_reported_with_their_message()
     {
         var parser = new NativeOutputParser();

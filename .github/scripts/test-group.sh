@@ -7,14 +7,20 @@ name="$1"; filter="$2"
 echo "== test group ${name}: ${filter}"
 if [ "${RUNNER_OS:-}" = "macOS" ]; then
   (
+    # Limits are relative to the runner's own level when the group starts (a macos-latest runner idles at ~540
+    # processes and ~12 GB resident — run 73), so only growth caused by the tests trips them.
+    base_procs=$(ps -A | wc -l | tr -d ' ')
+    base_rss=$(ps -A -o rss= | awk '{s+=$1} END {print int(s/1024)}')
+    echo "watchdog[${name}]: baseline ${base_procs} processes, ${base_rss} MB resident"
     i=0
     while sleep 5; do
       i=$((i+1))
       procs=$(ps -A | wc -l | tr -d ' ')
       rss=$(ps -A -o rss= | awk '{s+=$1} END {print int(s/1024)}')
       free=$(df -m "${RUNNER_TEMP:-/tmp}" | awk 'NR==2 {print $4}')
-      [ $((i % 6)) -eq 0 ] && echo "watchdog[${name}]: ${procs} processes, ${rss} MB resident, ${free} MB free disk"
-      if [ "$procs" -gt 700 ] || [ "$rss" -gt 9000 ] || [ "$free" -lt 4000 ]; then
+      xcb=$(ps -A -o comm= | grep -c '/xcodebuild$' || true)
+      [ $((i % 6)) -eq 0 ] && echo "watchdog[${name}]: ${procs} processes (${xcb} xcodebuild), ${rss} MB resident, ${free} MB free disk"
+      if [ "$procs" -gt $((base_procs + 400)) ] || [ "$rss" -gt $((base_rss + 6000)) ] || [ "$free" -lt 4000 ] || [ "$xcb" -gt 12 ]; then
         echo "::error::Watchdog[${name}]: ${procs} processes, ${rss} MB resident, ${free} MB free disk — stopping the test run"
         echo "== most frequent commands"; ps -A -o comm= | sort | uniq -c | sort -rn | head -15
         echo "== largest processes";     ps -A -o rss=,pid=,ppid=,etime=,command= | sort -rn | head -15

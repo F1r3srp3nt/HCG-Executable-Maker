@@ -144,6 +144,20 @@ public sealed partial class ToolchainDetector
         return await ProbeVersionAsync(id, name, TheosCategory, exe, args, regex, hint, ct).ConfigureAwait(false) with { InstallHint = hint };
     }
 
+    /// <summary>Xcode's clang and an iPhoneOS SDK inside a developer directory, found from the file system (no process).</summary>
+    public static (string? Clang, string? Sdk, string Problem) LocateXcodeIosClang(string? developerDirectory)
+    {
+        if (developerDirectory is null) return (null, null, "No developer directory is selected (xcode-select -p gave nothing).");
+        if (developerDirectory.Contains("CommandLineTools", StringComparison.Ordinal))
+            return (null, null, $"The selected developer directory is the Command Line Tools ({developerDirectory}); they have no iPhoneOS SDK. Select Xcode.");
+        var clang = Path.Combine(developerDirectory, "Toolchains", "XcodeDefault.xctoolchain", "usr", "bin", "clang");
+        if (!File.Exists(clang)) return (null, null, $"Xcode's clang was not found at {clang}.");
+        var sdks = Path.Combine(developerDirectory, "Platforms", "iPhoneOS.platform", "Developer", "SDKs");
+        var sdk = Directory.Exists(sdks) ? Directory.GetDirectories(sdks, "iPhoneOS*.sdk").Select(Path.GetFileName).OrderByDescending(n => n, StringComparer.Ordinal).FirstOrDefault() : null;
+        if (sdk is null) return (null, null, $"The selected Xcode ({developerDirectory}) has no iPhoneOS SDK; install the iOS platform in Xcode › Settings › Components.");
+        return (clang, sdk, "");
+    }
+
     /// <summary>On a Mac Theos compiles with Xcode's clang (needed for the current arm64e ABI); on Linux with $THEOS/toolchain.</summary>
     private async Task<ToolchainInfo> DetectTheosIosToolchainAsync(CancellationToken ct)
     {
@@ -151,17 +165,17 @@ public sealed partial class ToolchainDetector
         if (Host.Platform == TargetPlatform.MacOS)
         {
             var hint = "Install Xcode (App Store) and select it (Toolchains › Xcode). Theos compiles with Xcode's clang; it also produces the current arm64e ABI that iOS 14+ needs.";
-            try
+            // Read from the selected developer directory, never through `xcrun --sdk iphoneos`: xcrun resolves an SDK by
+            // starting xcodebuild, which is slow and, run by many detections at once, piled up on CI runners (runs 67-73).
+            var developer = await ActiveDeveloperDirectoryAsync(ct).ConfigureAwait(false);
+            var located = LocateXcodeIosClang(developer);
+            if (located.Clang is null)
+                return Missing(ToolchainIds.TheosIosToolchain, name, TheosCategory, hint) with { Detail = located.Problem };
+            return new ToolchainInfo
             {
-                var (r, stdout, stderr) = await runner.CaptureAsync(new ProcessSpec { Executable = "/usr/bin/xcrun", Arguments = ["--sdk", "iphoneos", "--find", "clang"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
-                if (!r.Succeeded) return Missing(ToolchainIds.TheosIosToolchain, name, TheosCategory, hint) with { Detail = "xcrun found no iOS clang: " + FirstLine(stderr + stdout) };
-                return new ToolchainInfo
-                {
-                    Id = ToolchainIds.TheosIosToolchain, DisplayName = name, Category = TheosCategory, Status = ToolchainStatus.Installed, ExecutablePath = stdout.Trim(),
-                    Detail = "Xcode's clang (Apple toolchain: current arm64e ABI).", Source = "Selected Xcode", InstallHint = hint,
-                };
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException) { return Failed(ToolchainIds.TheosIosToolchain, name, TheosCategory, "/usr/bin/xcrun", ex.Message, hint); }
+                Id = ToolchainIds.TheosIosToolchain, DisplayName = name, Category = TheosCategory, Status = ToolchainStatus.Installed, ExecutablePath = located.Clang,
+                Detail = "Xcode's clang (Apple toolchain: current arm64e ABI) with " + located.Sdk + ".", Source = "Selected Xcode", InstallHint = hint,
+            };
         }
         var linuxHint = "Install the iOS toolchain into $THEOS/toolchain (the Theos installer does this on Linux). Note: Linux toolchains emit the older arm64e ABI, which iOS 14+ arm64e processes reject; HCG's package check reports it.";
         var theos = FindTheos(Environment.GetEnvironmentVariable("THEOS"), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
