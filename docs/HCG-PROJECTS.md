@@ -105,7 +105,7 @@ for signed output a certificate in the keychain and an installed provisioning pr
 | Output | Command | Notes |
 |---|---|---|
 | iOS Simulator build | `dotnet build <csproj> -c Debug -f net10.0-ios -r iossimulator-arm64` (`-x64` on Intel) | Runs only in the Simulator. |
-| iOS Archive | `dotnet publish … -c Release -r ios-arm64 -p:ArchiveOnBuild=true -p:ArchiveDir=<HCG build folder> -p:BuildIpa=false` | Unsigned: `-p:EnableCodeSigning=false` (inspection only, never exported). Signed: `-p:CodesignKey=<certificate> -p:CodesignProvision=<profile>`. |
+| iOS Archive | `dotnet publish … -c Release -r ios-arm64 -p:ArchiveOnBuild=true -p:ArchiveDir=<HCG build folder> -p:BuildIpa=false -p:CodesignKey=<certificate> -p:CodesignProvision=<profile>` | Signed only: the .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode archive"), so Maker never offers one and blocks the archive until a certificate is in the keychain. |
 | iOS IPA | the signed archive above → archive signature check → `xcodebuild -exportArchive` with Maker's export options | Separate stages; the IPA exists only after export. Never uploaded. |
 
 ## HCG Sentinel — archive failure
@@ -153,6 +153,7 @@ in Toolchains › Xcode and archive scheme `HCGSentinel`; with only a newer Xcod
 
 See docs/STATUS.md for what ran where. In short: fixture tests on Linux (detection, readiness, plans, .deb
 verification with real lzma packages, parser, preflight); the real wizard and Mobile Build Studio on Linux for states
-and blocking; the real builds (Theos `.deb` for Nexus, .NET iOS Simulator build and unsigned archive for Mail, Sentinel
-archives with every installed Xcode) in the `hcg-nexus-theos`, `hcg-mail-ios` and `hcg-sentinel-archive` CI jobs on
-macOS. Signed IPAs and anything on a physical device need certificates, profiles and devices that CI does not have.
+and blocking; real builds on macOS CI: the three Nexus `.deb` packages (*Artifact verified*, confirmed by Nexus' own
+checker), Mail's iOS Simulator app (*Artifact verified*), Sentinel archives of both schemes with Xcode 16.4 and 26.0.1–26.6
+(*Artifact verified*). A signed archive or IPA (Mail, Sentinel) and anything on a physical device need certificates,
+provisioning profiles and devices that CI does not have.

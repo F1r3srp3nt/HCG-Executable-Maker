@@ -24,18 +24,34 @@ Details: docs/HCG-PROJECTS.md. Repositories inspected at Nexus c7cd62c, Mail 46d
   Mac is required) with the iOS head's evaluated properties; Mail (submission folder only) shows *Configuration required*.
 - Full test suite passes.
 
-## Real builds (CI on macOS, not yet run: needs a push)
+## Real builds (CI on macOS, feature/hcg-projects runs 75–78)
 
-- `hcg-nexus-theos`: rootless and rootful `.deb` and the preview app's `.deb` through the wizard, then HCG Nexus' own
-  `inspect-package.py --require-new-arm64e-abi` on Maker's output.
-- `hcg-mail-ios`: Simulator build and unsigned device archive through Mobile Build Studio with Xcode 26.3 and the
-  pinned workload.
-- `hcg-sentinel-archive`: archive of both schemes with every installed Xcode on macos-15 and macos-26, with the range
-  inventory; complete logs and `.xcresult` bundles uploaded.
+- `hcg-nexus-theos` (runs 75, 77, 78; macOS 26, Xcode 26.6, Theos master): through the New Build wizard, Theos' own
+  `make package` built `com.hakmicapitalgroup.hcgnexus_0.1.0_iphoneos-arm64.deb` (rootless, iOS 15.0+, `/var/jb`),
+  `…_iphoneos-arm.deb` (rootful, iOS 14.0+, `/`, own folder) and the preview app's
+  `com.hakmicapitalgroup.hcgnexus.preview_0.1.0_iphoneos-arm64.deb`; each *Artifact verified* (metadata, Architecture,
+  install prefix, every expected file, arm64 + arm64e with the versioned pointer-authentication ABI, minimum iOS,
+  SpringBoard filter, no maintainer scripts). HCG Nexus' own `inspect-package.py --require-new-arm64e-abi` agrees on
+  the rootless and rootful packages. `roothide` is refused with the project's own message.
+- `hcg-mail-ios` (macOS 26, Xcode 26.3, pinned workload 26.2.10233/10.0.100): the submission folder alone is
+  *Configuration required* (shared projects outside it); from the repository root the iOS Simulator build is
+  *Artifact verified* (`HCGMail.iOS.app`, com.hakmicapitalgroup.hcgmail 0.1.0 (1), iOS 16.0+, arm64, codesign valid).
+  The unsigned device archive is not possible: the .NET iOS SDK stops with "Code signing must be enabled to create an
+  Xcode archive" (run 78). Maker no longer offers it and blocks the archive before building until a certificate is in
+  the keychain (none on hosted runners).
+- `hcg-sentinel-archive` (run 78), archive through Mobile Build Studio, unsigned, both schemes, deployment targets
+  unchanged (HCGSentinel 14.7, HCGSentinelModern 15.0):
+  - macOS 15: *Artifact verified* with Xcode 16.4, 26.0.1, 26.1.1, 26.2, 26.3. Xcode 16.0–16.3 cannot target a
+    device there: "iOS 18.x is not installed. To use with Xcode, first download and install the platform" (now shown
+    in full as the first error).
+  - macOS 26: *Artifact verified* with Xcode 26.2, 26.3, 26.4.1, 26.5, 26.6. Xcode 26.0.1/26.1.1: "iOS 26.x is not
+    installed. Please download and install the platform from Xcode > Settings > Components".
+  - Every installed Xcode's iPhoneOS SDK supports iOS 12.0 and later, so none reproduces the original deployment-range
+    error; the preflight for that case is covered by tests.
 
 ## Not verified
 
-- Signed IPA export for Mail and Sentinel (no certificates or profiles in CI); installing the Nexus `.deb` or any app on
+- A signed archive or IPA for Mail and Sentinel (no certificates or provisioning profiles in CI); installing the Nexus `.deb` or any app on
   a physical device; an Xcode whose range excludes 14.7 (none is installed on hosted runners — the preflight is covered
   by tests with that range).
 

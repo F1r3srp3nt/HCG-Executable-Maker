@@ -157,13 +157,12 @@ public class AppleProjectRoutesTests : IDisposable
         Assert.Contains("net10.0-ios", simArgs);
         Assert.Equal(PackagingFormat.IosSimulatorApp, Assert.Single(sim.Outputs).Format);
 
-        var unsigned = DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.Unsigned }));
-        var args = Assert.Single(unsigned.Steps).Process.Arguments;
-        Assert.Equal(["publish", project, "-c", "Release", "-r", "ios-arm64", "-p:ArchiveOnBuild=true"], args.Take(7));
-        Assert.Contains("-p:ArchiveDir=" + DotNetIosPlanner.ArchiveDirectory(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive })), args);
-        Assert.Contains("-p:EnableCodeSigning=false", args);
-        Assert.Contains(unsigned.Notes, n => n.Contains("UNSIGNED archive"));
-        Assert.Equal(Path.Combine(MailRepo(), "iOS App Store Submission", "src", "HCG.Mail.iOS"), unsigned.Steps[0].Process.WorkingDirectory);   // inside the whole repository
+        // The .NET iOS SDK archives only with code signing (CI run 78: "Code signing must be enabled to create an Xcode
+        // archive"), so an unsigned archive is refused before anything runs — and readiness says why.
+        var refused = Assert.Throws<BuildValidationException>(() => DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.Unsigned })));
+        Assert.Contains("Code signing must be enabled", refused.Message);
+        var unsignedReadiness = MobileReadiness.Evaluate(m, MobileOutput.IosArchive, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.Unsigned }, MacReport());
+        Assert.Contains(unsignedReadiness.Blockers, b => b.Tool == "Code signing" && b.Detail.Contains("only with code signing"));
 
         var signed = DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions
         {
@@ -174,6 +173,14 @@ public class AppleProjectRoutesTests : IDisposable
         Assert.Contains("-p:CodesignKey=Apple Distribution: Hakmi Capital Group (ABCDE12345)", sargs);
         Assert.Contains("-p:CodesignProvision=HCG Mail App Store", sargs);
         Assert.Empty(signed.Outputs);                // an IPA only comes from the separate export stage, never from the archive step
+
+        var archiveOptions = new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.AppleManual, SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "HCG Mail Dev" };
+        var archive = DotNetIosPlanner.Plan(Input(m, archiveOptions));
+        var args = Assert.Single(archive.Steps).Process.Arguments;
+        Assert.Equal(["publish", project, "-c", "Release", "-r", "ios-arm64", "-p:ArchiveOnBuild=true"], args.Take(7));
+        Assert.Contains("-p:ArchiveDir=" + DotNetIosPlanner.ArchiveDirectory(Input(m, archiveOptions)), args);
+        Assert.DoesNotContain("-p:EnableCodeSigning=false", args);
+        Assert.Equal(Path.Combine(MailRepo(), "iOS App Store Submission", "src", "HCG.Mail.iOS"), archive.Steps[0].Process.WorkingDirectory);   // inside the whole repository
 
         Assert.Throws<BuildValidationException>(() => DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions
         {

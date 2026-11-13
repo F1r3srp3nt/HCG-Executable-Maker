@@ -213,7 +213,10 @@ public static class MobileReadiness
                     : new("Code-signing identity", ReadinessState.NotFound, true, $"\"{identity}\" is not in this Mac's keychain. Installed: {string.Join("; ", r.AppleIdentities.Select(i => i.Name).Take(3))}.",
                         "Install the certificate (Xcode › Settings › Accounts › Manage Certificates), then press Refresh.", SetupUrl: CertUrl));
         }
-        if (unsigned)
+        if (m.Framework == MobileFramework.DotNetIos && !simulator && signing == MobileSigningMode.Unsigned)
+            items.Add(new("Code signing", ReadinessState.SetupRequired, true, DotNetIosArchiveNeedsSigning,
+                "Choose a certificate and provisioning profile (CodesignKey / CodesignProvision), or build for the iOS Simulator."));
+        else if (unsigned)
         {
             var why = simulator ? "Simulator builds are not code-signed for devices." : "Unsigned archive (inspection only).";
             items.Add(new("Signing certificate", ReadinessState.NotNeeded, false, why));
@@ -262,6 +265,10 @@ public static class MobileReadiness
             " HCG does not change the project's deployment target.",
             string.Join("; ", routes) + "."));
     }
+
+    /// <summary>The .NET iOS SDK refuses an unsigned archive (Xamarin.Shared.targets, CI run 78).</summary>
+    public const string DotNetIosArchiveNeedsSigning =
+        ".NET for iOS creates an Xcode archive (and an IPA) only with code signing: the iOS SDK stops with \"Code signing must be enabled to create an Xcode archive\". An unsigned device archive is not possible for this project type.";
 
     private static void AddIosSigning(List<ReadinessItem> items, MobileAnalysis m, MobileOutput output, MobileBuildOptions? o, MobileSigningMode signing, ToolchainReport r)
     {

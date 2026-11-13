@@ -22,6 +22,12 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   architecture, output type).
 
 ### Changed
+- .NET for iOS archives are offered signed only: the iOS SDK refuses an unsigned archive ("Code signing must be enabled
+  to create an Xcode archive"); Maker blocks the archive before building until a certificate is in the keychain.
+- A first error that ends in ":" carries the reason xcodebuild prints on the following lines (e.g. "iOS 18.0 is not
+  installed. To use with Xcode, first download and install the platform").
+- The Theos iOS toolchain is found from the selected developer directory without starting `xcrun --sdk` (which starts
+  xcodebuild); the macOS SDK probe waits for xcrun's first answer and reports a timeout as one.
 - The static MSBuild reader follows `<Import>` with `$(MSBuildThisFileDirectory)` and never reads outside the import.
 - A net*-ios Exe is no longer listed as an "Avalonia desktop application".
 

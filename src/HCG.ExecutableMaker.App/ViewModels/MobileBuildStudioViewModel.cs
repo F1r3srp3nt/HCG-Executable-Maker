@@ -345,8 +345,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         {
             ShowSigning = true;
             SigningModes.Add(new(MobileSigningMode.ProjectDefault, Format.Label(MobileSigningMode.ProjectDefault)));
-            if (m.Framework is MobileFramework.NativeAndroid or MobileFramework.NativeIos || (m.Framework == MobileFramework.Flutter && output == MobileOutput.IosArchive)
-                || (m.Framework == MobileFramework.DotNetIos && output == MobileOutput.IosArchive))
+            // .NET for iOS creates an Xcode archive only with code signing (Xamarin.Shared.targets: "Code signing must be
+            // enabled to create an Xcode archive" — CI run 78), so it is never offered unsigned.
+            if (m.Framework is MobileFramework.NativeAndroid or MobileFramework.NativeIos || (m.Framework == MobileFramework.Flutter && output == MobileOutput.IosArchive))
                 SigningModes.Add(new(MobileSigningMode.Unsigned, Format.Label(MobileSigningMode.Unsigned)));
             if (android && m.Framework == MobileFramework.NativeAndroid)
                 SigningModes.Add(new(MobileSigningMode.DebugKeystore, Format.Label(MobileSigningMode.DebugKeystore)));

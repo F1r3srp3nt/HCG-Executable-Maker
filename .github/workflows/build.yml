@@ -973,10 +973,13 @@ jobs:
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
           --mobile-output sim --expect-state "Ready to build" --output "$OUT/sim" --screenshots "$OUT/screens" --prefix mail-sim
-      - name: Unsigned device archive (ios-arm64, AOT) — inspection only, never exported to an IPA
+      # CI run 78: the .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode
+      # archive"). Maker therefore offers no unsigned .NET iOS archive and, without a certificate in the keychain (none on
+      # hosted runners), blocks the archive before building. A signed archive/IPA needs the owner's certificate+profile.
+      - name: Device archive — not offered unsigned; blocked before building without a signing identity
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
-          --mobile-output archive --signing unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
+          --mobile-output archive --signing unsigned --expect-no-unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
       - name: Independent checks of what HCG produced
         run: |
           app="$(find "$OUT/sim/artifacts" -maxdepth 3 -name '*.app' -type d | head -1)"
@@ -984,12 +987,8 @@ jobs:
           plutil -p "$app/Info.plist" | grep -E 'CFBundle(Identifier|ShortVersionString|Version)|MinimumOSVersion'
           test -f "$app/Assets.car"
           xcrun vtool -show-build "$app/HCGMail.iOS" | grep -E 'platform|minos'
-          archive="$(find "$OUT/archive/artifacts" -maxdepth 3 -name '*.xcarchive' -type d | head -1)"
-          echo "Archive: $archive"
-          plutil -p "$archive/Info.plist" | head -30
-          dev="$(find "$archive/Products/Applications" -maxdepth 1 -name '*.app' | head -1)"
-          lipo -archs "$dev/HCGMail.iOS"; xcrun vtool -show-build "$dev/HCGMail.iOS" | grep -E 'platform|minos'
-          if codesign -dv "$dev" 2>/dev/null; then codesign -dv "$dev" 2>&1 | grep -E 'Signature|Authority'; else echo "unsigned (as chosen)"; fi
+          # No archive was produced (see the step above): HCG must not have written one.
+          test -z "$(find "$OUT/archive" -name '*.xcarchive' -type d 2>/dev/null | head -1)"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

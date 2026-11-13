@@ -62,7 +62,7 @@ public static class DotNetIosPlanner
                 var outputs = o.Output == MobileOutput.IosArchive
                     ? new List<OutputRule> { new(PackagingFormat.IosArchive, ArchiveDirectory(input), "*.xcarchive", IsDirectory: true, Recursive: true) }
                     : [];
-                return new MobilePlan([Step(BuildStage.Compiling, $"dotnet publish → archive (ios-arm64, {configuration}{(o.Signing == MobileSigningMode.Unsigned ? ", unsigned" : ", signed")})", args)], outputs) { Notes = notes };
+                return new MobilePlan([Step(BuildStage.Compiling, $"dotnet publish → archive (ios-arm64, {configuration}, signed)", args)], outputs) { Notes = notes };
             }
             default:
                 throw new BuildValidationException($"{o.Output.DisplayName()} is not an iOS output.");
@@ -70,7 +70,7 @@ public static class DotNetIosPlanner
     }
 
     /// <summary>
-    /// Unsigned: EnableCodeSigning=false (an archive for inspection, never exportable). Manual: the named certificate and
+    /// Unsigned is refused: the .NET iOS SDK archives only with code signing. Manual: the named certificate and
     /// installed provisioning profile (CodesignKey / CodesignProvision). Project default: whatever the project sets.
     /// </summary>
     internal static List<string> SigningArguments(MobileBuildOptions o, List<string> notes)
@@ -78,8 +78,7 @@ public static class DotNetIosPlanner
         switch (o.Signing)
         {
             case MobileSigningMode.Unsigned:
-                notes.Add("UNSIGNED archive: suitable for inspection only. It cannot be installed on devices or exported to an IPA.");
-                return ["-p:EnableCodeSigning=false"];
+                throw new BuildValidationException(HCG.ExecutableMaker.ProjectInspection.Mobile.MobileReadiness.DotNetIosArchiveNeedsSigning);
             case MobileSigningMode.AppleManual:
                 MobileArgs.RequireToken(o.SigningIdentity, "code-signing identity", out var identity, @"^[A-Za-z0-9][A-Za-z0-9 _.:()\-]{0,127}$");
                 MobileArgs.RequireToken(o.ProvisioningProfile, "provisioning profile name or UUID", out var profile, @"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,127}$");

@@ -36,7 +36,23 @@ internal static partial class Program
             studio.SelectedScheme = scheme;
         }
         if (Arg("signing") is { } signing)
-            studio.SelectedSigning = studio.SigningModes.First(m => m.Value == (signing == "unsigned" ? MobileSigningMode.Unsigned : MobileSigningMode.ProjectDefault));
+        {
+            var mode = signing == "unsigned" ? MobileSigningMode.Unsigned : MobileSigningMode.ProjectDefault;
+            var choice = studio.SigningModes.FirstOrDefault(m => m.Value == mode);
+            if (_args.ContainsKey("expect-no-unsigned"))
+            {
+                // .NET for iOS archives only with code signing: Maker must not offer an unsigned archive at all.
+                Check(choice is null, $"Signing {mode} is not offered ({string.Join(", ", studio.SigningModes.Select(m => m.Name))})");
+                foreach (var r in studio.ReadinessRequired) Log($"Readiness [{r.Status.Text}] {r.Tool}: {r.Detail}{(r.HasFix ? " → " + r.Fix : "")}");
+                Log($"State: [{studio.BuildStateTag.Text}] {studio.BuildStateDetail}");
+                studio.TrustAcknowledged = true;
+                Check(!studio.StartBuildCommand.CanExecute(null), "Archive cannot start without a signing identity (none in this keychain)");
+                return Failures.Count == 0 ? 0 : 1;
+            }
+            Check(choice is not null, $"Signing {mode} offered");
+            if (choice is null) return 1;
+            studio.SelectedSigning = choice;
+        }
         studio.OutputDirectory = Path.Combine(output, "artifacts");
         foreach (var r in studio.ReadinessRequired) Log($"Readiness [{r.Status.Text}] {r.Tool}: {r.Detail}{(r.HasFix ? " → " + r.Fix : "")}");
         foreach (var row in studio.Summary) Log($"Summary {row.Label}: {row.Value}");
