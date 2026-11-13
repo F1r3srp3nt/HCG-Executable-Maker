@@ -235,12 +235,14 @@ public class AppleProjectRoutesTests : IDisposable
         var blocked = MobileReadiness.Evaluate(m, MobileOutput.IosArchive, archive, newer);
         var item = Assert.Single(blocked.Blockers, b => b.Tool == "Deployment target");
         Assert.Equal(ReadinessState.IncompatibleVersion, item.State);
-        Assert.Contains("HCGSentinel (scheme HCGSentinel) needs iOS 14.7", item.Detail);
-        Assert.Contains("supports iOS 15.0–27.0.99 (it is below the minimum)", item.Detail);
+        Assert.Contains("HCGSentinel needs iOS 14.7", item.Detail);
+        Assert.Contains("in scheme HCGSentinel (Release)", item.Detail);
+        Assert.Contains("accepts iOS 15.0–27.0.99 (it is below the minimum)", item.Detail);
         Assert.Contains("is set to 14.7, but the range of supported deployment target versions is 15.0 to 27.0.99", item.Detail);
         Assert.Contains("does not change the project's deployment target", item.Detail);
-        Assert.Contains("Select an Xcode that supports iOS 14.7 in Toolchains", item.Fix);
-        Assert.Contains("or choose scheme HCGSentinelModern (iOS 15.0", item.Fix);
+        Assert.Contains("To keep scheme HCGSentinel (iOS 14.7): an Xcode whose iPhoneOS SDK accepts iOS 14.7 is required", item.Fix);
+        Assert.Contains("select it in Toolchains › Xcode", item.Fix);
+        Assert.Contains("or use scheme HCGSentinelModern, which is verified compatible with this Xcode (iOS 15.0)", item.Fix);
 
         var modern = MobileReadiness.Evaluate(m, MobileOutput.IosArchive, archive with { Scheme = "HCGSentinelModern" }, newer);
         Assert.Contains(modern.Items, i => i.Tool == "Deployment target" && i.State == ReadinessState.Ready);

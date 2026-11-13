@@ -70,7 +70,11 @@ public sealed partial class ToolchainDetector
         }
         var source = active is null ? DeveloperDirectorySource.None : DeveloperDirectorySelection.ProcessSource;
         var status = XcodeDiscovery.Diagnose(new XcodeDiscovery.ProbeResults(active, source, installed, versionExit, versionOut, versionErr, firstLaunch, sdks));
-        return status with { IosDeploymentRange = XcodeDiscovery.ReadIosDeploymentRange(active) };
+        return status with
+        {
+            IosDeploymentRange = XcodeDiscovery.ReadIosDeploymentRange(active),
+            IosSimulatorDeploymentRange = XcodeDiscovery.ReadIosSimulatorDeploymentRange(active),
+        };
     }
 
     private async Task<IReadOnlyList<string>> SpotlightXcodesAsync(CancellationToken ct)

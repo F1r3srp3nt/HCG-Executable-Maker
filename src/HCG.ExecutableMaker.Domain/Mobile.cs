@@ -102,6 +102,32 @@ public sealed record IosSchemeInfo(string Name, string File, bool Shared)
     public IReadOnlyList<string> ArchiveTargets { get; init; } = [];
     /// <summary>The configuration the Archive action uses (usually Release).</summary>
     public string? ArchiveConfiguration { get; init; }
+    /// <summary>Targets the scheme's build action builds for Run (Simulator and device builds).</summary>
+    public IReadOnlyList<string> RunTargets { get; init; } = [];
+    /// <summary>The configuration the Launch (Run) action uses (usually Debug).</summary>
+    public string? LaunchConfiguration { get; init; }
+}
+
+/// <summary>
+/// A target's effective build settings for one configuration and SDK, resolved statically from the project the way Xcode
+/// layers them: project .xcconfig, project settings, target .xcconfig, target settings; SDK and configuration conditional
+/// keys (KEY[sdk=iphonesimulator*]); $(inherited) and $(VAR) references. A value HCG cannot resolve statically is null and
+/// named in <see cref="Unresolved"/>.
+/// </summary>
+public sealed record IosResolvedSettings
+{
+    public required string Configuration { get; init; }
+    /// <summary>"iphoneos" or "iphonesimulator".</summary>
+    public required string Sdk { get; init; }
+    public string? DeploymentTarget { get; init; }
+    /// <summary>Where the deployment target came from, e.g. "target HCGSentinel (Release)", "Config/Base.xcconfig", "project (Release) [sdk=iphonesimulator*]".</summary>
+    public string? DeploymentTargetSource { get; init; }
+    public string? BundleIdentifier { get; init; }
+    public string? MarketingVersion { get; init; }
+    public string? BuildVersion { get; init; }
+    public string? DevelopmentTeam { get; init; }
+    public string? CodeSignStyle { get; init; }
+    public IReadOnlyList<string> Unresolved { get; init; } = [];
 }
 
 /// <summary>
@@ -129,7 +155,13 @@ public sealed record IosTargetInfo
     public string? DeploymentTarget { get; init; }
     public string? DevelopmentTeam { get; init; }
     public string? CodeSignStyle { get; init; }
+    /// <summary>Targets this target depends on (PBXTargetDependency): embedded extensions, frameworks, watch apps.</summary>
+    public IReadOnlyList<string> Dependencies { get; init; } = [];
+    /// <summary>Effective settings per configuration and SDK (iphoneos, iphonesimulator).</summary>
+    public IReadOnlyList<IosResolvedSettings> Resolved { get; init; } = [];
     public bool IsApplication => ProductType == "com.apple.product-type.application";
+    public IosResolvedSettings? SettingsFor(string? configuration, string sdk) =>
+        Resolved.FirstOrDefault(r => r.Configuration == configuration && r.Sdk == sdk) ?? Resolved.FirstOrDefault(r => r.Sdk == sdk && configuration is null);
 }
 
 public sealed record IosProjectInfo
@@ -307,6 +339,8 @@ public static class MobileNames
 /// <summary>Whether an output can be produced for this project on this host, and if not, exactly why.</summary>
 public sealed record MobileOutputOption(MobileOutput Output, bool IsAvailable, string Description, string? Reason)
 {
+    /// <summary>The readiness items that make this output unavailable (to tell a missing toolchain from an incompatible one).</summary>
+    public IReadOnlyList<ReadinessItem> Blockers { get; init; } = [];
     public string DisplayName => Output.DisplayName();
     public TargetPlatform Platform => Output.Platform();
 }

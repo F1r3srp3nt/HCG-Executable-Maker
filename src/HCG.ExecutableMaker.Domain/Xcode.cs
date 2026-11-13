@@ -3,6 +3,10 @@ namespace HCG.ExecutableMaker.Domain;
 /// <summary>An Xcode application found on this Mac (installed, whether or not it is selected).</summary>
 public sealed record XcodeInstallation(string AppPath, string DeveloperDirectory, string? Version, string? BuildVersion)
 {
+    /// <summary>Deployment range of this Xcode's iPhoneOS SDK (SDKSettings.json), read from disk; null when not readable.</summary>
+    public IosDeploymentRange? IosRange { get; init; }
+    /// <summary>Deployment range of this Xcode's iPhoneSimulator SDK (SDKSettings.json).</summary>
+    public IosDeploymentRange? SimulatorRange { get; init; }
     public string Display => $"Xcode {Version ?? "?"}{(BuildVersion is null ? "" : $" ({BuildVersion})")} — {AppPath}";
 }
 
@@ -57,5 +61,12 @@ public sealed record XcodeStatus
     public string? RawError { get; init; }
     /// <summary>Deployment targets the selected Xcode's iPhoneOS SDK supports (null when the SDK or its settings are absent).</summary>
     public IosDeploymentRange? IosDeploymentRange { get; init; }
+    /// <summary>
+    /// Deployment targets the selected Xcode's iPhoneSimulator SDK supports. Read separately: a Simulator build is judged by
+    /// the Simulator SDK, never by the device SDK's range.
+    /// </summary>
+    public IosDeploymentRange? IosSimulatorDeploymentRange { get; init; }
+    /// <summary>The range for an SDK ("iphoneos" or "iphonesimulator").</summary>
+    public IosDeploymentRange? RangeFor(string sdk) => sdk == "iphonesimulator" ? IosSimulatorDeploymentRange : IosDeploymentRange;
     public bool IsCommandLineToolsActive => ActiveDeveloperDirectory?.Contains("CommandLineTools", StringComparison.Ordinal) == true;
 }

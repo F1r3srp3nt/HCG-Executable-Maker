@@ -96,6 +96,61 @@ public sealed class BuildRecord
     public IDictionary<string, string> ToolchainVersions { get; init; } = new Dictionary<string, string>();
     public List<BuildMessage> Messages { get; init; } = [];
     public List<ArtifactRecord> Artifacts { get; init; } = [];
+    /// <summary>
+    /// What produced this build, fixed when it starts (source revision, scheme, configuration, SDK, destination, signing,
+    /// toolchain) and completed once with the artifact paths. Results are compared with the current selection through it.
+    /// </summary>
+    public BuildProvenance? Provenance { get; set; }
 
     public TimeSpan? Duration => EndedAt is { } end ? end - StartedAt : null;
+}
+
+/// <summary>
+/// Immutable record of the inputs that produced a build. Two selections that differ in any of these fields would not
+/// produce the same artifact, so a result whose provenance differs from the current selection is a "previous build".
+/// </summary>
+public sealed record BuildProvenance
+{
+    /// <summary>"git 1a2b3c4d5e6f (main)" or "import of 2026-11-13 21:10 UTC" when the source is not a git checkout.</summary>
+    public required string SourceRevision { get; init; }
+    public required string Output { get; init; }
+    public string? ProjectPath { get; init; }
+    public string? Scheme { get; init; }
+    public string? Configuration { get; init; }
+    /// <summary>"iphoneos" / "iphonesimulator" for iOS; null elsewhere.</summary>
+    public string? Sdk { get; init; }
+    /// <summary>e.g. "generic/platform=iOS Simulator".</summary>
+    public string? Destination { get; init; }
+    public string? Signing { get; init; }
+    public string? ExportMethod { get; init; }
+    /// <summary>e.g. "Xcode 26.6 (/Applications/Xcode.app/Contents/Developer)".</summary>
+    public string? Toolchain { get; init; }
+    public IReadOnlyList<string> ArtifactPaths { get; init; } = [];
+
+    /// <summary>Fields that differ from <paramref name="current"/>, as "Scheme: HCGSentinelModern (built) → HCGSentinel (now)". Artifact paths are not compared.</summary>
+    public IReadOnlyList<string> DifferencesFrom(BuildProvenance current)
+    {
+        var list = new List<string>();
+        void Compare(string label, string? built, string? now)
+        {
+            if (!string.Equals(built ?? "", now ?? "", StringComparison.Ordinal)) list.Add($"{label}: {built ?? "—"} (built) → {now ?? "—"} (now)");
+        }
+        Compare("Source", SourceRevision, current.SourceRevision);
+        Compare("Output", Output, current.Output);
+        Compare("Project", ProjectPath, current.ProjectPath);
+        Compare("Scheme", Scheme, current.Scheme);
+        Compare("Configuration", Configuration, current.Configuration);
+        Compare("SDK", Sdk, current.Sdk);
+        Compare("Destination", Destination, current.Destination);
+        Compare("Signing", Signing, current.Signing);
+        Compare("Export", ExportMethod, current.ExportMethod);
+        Compare("Toolchain", Toolchain, current.Toolchain);
+        return list;
+    }
+
+    public string Describe() => string.Join(" · ", new[]
+    {
+        Scheme is null ? null : "scheme " + Scheme, Configuration, Sdk is null ? null : "SDK " + Sdk, Destination, Signing is null ? null : "signing " + Signing,
+        ExportMethod is null ? null : "export " + ExportMethod, Toolchain, SourceRevision,
+    }.Where(s => s is not null));
 }

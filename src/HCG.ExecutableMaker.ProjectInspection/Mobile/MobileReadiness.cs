@@ -193,7 +193,7 @@ public static class MobileReadiness
                     ? new("Project references", ReadinessState.SetupRequired, true, "Missing: " + string.Join("; ", dn.MissingReferences.Take(3)))
                     : new("Project references", ReadinessState.Ready, true, dn.ProjectReferences.Count == 0 ? "None." : $"{dn.ProjectReferences.Count} project(s), resolved from the repository: {string.Join(", ", dn.ProjectReferences.Select(Path.GetFileNameWithoutExtension))}."));
         }
-        if (m.Framework == MobileFramework.NativeIos && x is { State: XcodeState.Ready or XcodeState.SdkMissing } && m.Ios is { } xi)
+        if (m.Framework is MobileFramework.NativeIos or MobileFramework.Capacitor && x is { State: XcodeState.Ready or XcodeState.SdkMissing } && m.Ios is { } xi)
             AddDeploymentRange(items, xi, o, x, simulator);
         if (x is { State: XcodeState.Ready or XcodeState.SdkMissing })
             items.Add(x.Sdks.Any(s => s.StartsWith(sdkName + " ", StringComparison.Ordinal))
@@ -228,42 +228,22 @@ public static class MobileReadiness
     }
 
     /// <summary>
-    /// Compares the deployment target of every app target the chosen scheme archives with the range the selected Xcode's
-    /// iPhoneOS SDK supports. Out of range blocks the build before xcodebuild runs and names the routes that work: another
-    /// Xcode (selected explicitly in Toolchains) or another scheme the project offers. HCG never changes the target.
+    /// Checks the deployment target of every target the chosen scheme builds — for the selected configuration and the SDK
+    /// this output uses (iPhoneOS for archives, iPhoneSimulator for Simulator builds) — against that SDK's range in the
+    /// selected Xcode (see <see cref="IosSchemeCompatibility"/>). Out of range blocks the build before xcodebuild runs and names
+    /// the routes that work: an installed Xcode verified to accept it, or another scheme verified compatible. HCG never
+    /// changes the target.
     /// </summary>
     internal static void AddDeploymentRange(List<ReadinessItem> items, IosProjectInfo ios, MobileBuildOptions? o, XcodeStatus x, bool simulator)
     {
-        var scheme = ios.Schemes.FirstOrDefault(sc => sc.Name == o?.Scheme) ?? ios.Schemes.FirstOrDefault(sc => ios.AppTargets.Any(t => t.Name == sc.Name)) ?? ios.Schemes.FirstOrDefault();
-        var targetNames = scheme?.ArchiveTargets.Count > 0 ? scheme.ArchiveTargets : [scheme?.Name ?? ios.AppTargets.FirstOrDefault()?.Name ?? ""];
-        var targets = ios.AppTargets.Where(t => targetNames.Contains(t.Name)).ToList();
-        if (targets.Count == 0) return;
-        var range = x.IosDeploymentRange;
-        var xcode = $"Xcode {x.VerifiedVersion} ({x.ActiveDeveloperDirectory})";
-        if (range is null)
+        var c = IosSchemeCompatibility.Evaluate(ios, o?.Scheme, o?.Variant, simulator, x);
+        items.Add(c.Fit switch
         {
-            items.Add(new("Deployment target", ReadinessState.NotVerifiable, false,
-                $"{string.Join(", ", targets.Select(t => $"{t.Name}: iOS {t.DeploymentTarget ?? "(not set)"}"))}. The supported range of {xcode} could not be read (no iPhoneOS SDKSettings.json); xcodebuild will check it."));
-            return;
-        }
-        var outside = targets.Where(t => range.Contains(t.DeploymentTarget) == false).ToList();
-        if (outside.Count == 0)
-        {
-            items.Add(new("Deployment target", ReadinessState.Ready, true,
-                $"{string.Join(", ", targets.Select(t => $"{t.Name}: iOS {t.DeploymentTarget}"))} — within {xcode}'s supported range iOS {range.Minimum}–{range.Maximum} (SDK {range.SdkVersion})."));
-            return;
-        }
-        var other = ios.Schemes.Where(sc => sc.Name != scheme?.Name)
-            .Select(sc => (Scheme: sc, Targets: ios.AppTargets.Where(t => (sc.ArchiveTargets.Count > 0 ? sc.ArchiveTargets : [sc.Name]).Contains(t.Name)).ToList()))
-            .Where(c => c.Targets.Count > 0 && c.Targets.All(t => range.Contains(t.DeploymentTarget) == true)).ToList();
-        var routes = new List<string> { $"Select an Xcode that supports iOS {outside[0].DeploymentTarget} in Toolchains › Xcode (HCG uses it for its own builds only; the system setting is unchanged)" };
-        routes.AddRange(other.Select(c => $"or choose scheme {c.Scheme.Name} (iOS {string.Join(", ", c.Targets.Select(t => t.DeploymentTarget).Distinct())}; it does not install on older iOS versions)"));
-        var below = IosDeploymentRange.Parse(outside[0].DeploymentTarget) < IosDeploymentRange.Parse(range.Minimum);
-        items.Add(new("Deployment target", ReadinessState.IncompatibleVersion, true,
-            $"{string.Join(", ", outside.Select(t => $"{t.Name} (scheme {scheme?.Name}) needs iOS {t.DeploymentTarget}"))}, but {xcode} with the iPhoneOS {range.SdkVersion} SDK supports iOS {range.Minimum}–{range.Maximum}" +
-            $" ({(below ? "it is below the minimum" : "it is above the maximum")}). xcodebuild would stop with “The iOS deployment target 'IPHONEOS_DEPLOYMENT_TARGET' is set to {outside[0].DeploymentTarget}, but the range of supported deployment target versions is {range.Minimum} to {range.Maximum}”." +
-            " HCG does not change the project's deployment target.",
-            string.Join("; ", routes) + "."));
+            IosToolchainFit.Compatible => new("Deployment target", ReadinessState.Ready, true, c.Detail),
+            IosToolchainFit.Incompatible => new("Deployment target", ReadinessState.IncompatibleVersion, true, c.Detail, c.Fix),
+            IosToolchainFit.NotVerifiable => new("Deployment target", ReadinessState.NotVerifiable, false, c.Detail),
+            _ => new("Deployment target", ReadinessState.NotVerifiable, false, "Checked once Xcode is selected: " + c.Detail),
+        });
     }
 
     /// <summary>The .NET iOS SDK refuses an unsigned archive (Xamarin.Shared.targets, CI run 78).</summary>

@@ -633,7 +633,12 @@ public class MobileBuildServiceTests : IDisposable
         Assert.Contains("app-store-connect", exportOptions);
         var ipa = Assert.Single(build.Artifacts);
         Assert.Equal(PackagingFormat.IosIpa, ipa.Format);
-        Assert.Equal(VerificationStatus.Passed, ipa.Verification);
+        // Artifact checks pass; installation and runtime are reported as not tested (HCG does not install or launch the app).
+        Assert.Equal(VerificationStatus.PassedWithWarnings, ipa.Verification);
+        Assert.DoesNotContain(ipa.Checks, c => c.Status == VerificationStatus.Failed);
+        Assert.Equal(VerificationStatus.NotVerifiable, Assert.Single(ipa.Checks, c => c.Name == "Installation and runtime").Status);
+        Assert.NotNull(build.Provenance);
+        Assert.Equal([ipa.Path], build.Provenance!.ArtifactPaths);
         Assert.False(File.Exists(Path.Combine(_paths.BuildsDirectory, build.Id.ToString("N"), "work", "ExportOptions.plist")));
         Assert.Contains("HCG never uploads", observer.Text);
     }

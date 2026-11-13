@@ -122,6 +122,31 @@
                 </DataTemplate>
               </ComboBox.ItemTemplate>
             </ComboBox>
+            <!-- The scheme belongs to the project, not to an output: it stays selectable even when no output is available. -->
+            <StackPanel IsVisible="{Binding ShowSchemes}" Spacing="4" IsEnabled="{Binding !IsBuilding}">
+              <TextBlock Classes="formlabel" Text="SCHEME" />
+              <ComboBox ItemsSource="{Binding Schemes}" SelectedItem="{Binding SelectedScheme}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+            <Border Classes="inset" Padding="14,12" IsVisible="{Binding HasSchemeChecks}">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="label" Text="SELECTED XCODE · THIS SCHEME" />
+                <ItemsControl ItemsSource="{Binding SchemeChecks}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SummaryRow">
+                      <StackPanel Spacing="1" Margin="0,0,0,6">
+                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12.5" />
+                        <SelectableTextBlock Classes="secondary" FontSize="12" Text="{Binding Value}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <SelectableTextBlock Classes="warning" FontSize="12" Text="{Binding ToolchainRouteText}" TextWrapping="Wrap" IsVisible="{Binding ToolchainRouteText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                <StackPanel Spacing="6" IsVisible="{Binding HasSchemeSuggestion}">
+                  <TextBlock Classes="secondary" FontSize="12" Text="{Binding SchemeSuggestionText}" TextWrapping="Wrap" />
+                  <Button Classes="primary" Content="{Binding UseSuggestedSchemeLabel}" Command="{Binding UseSuggestedSchemeCommand}" HorizontalAlignment="Left" IsEnabled="{Binding !IsBuilding}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
             <TextBlock Classes="label" Text="3 · BUILD OUTPUT" Margin="0,8,0,0" />
             <TextBlock Classes="muted" Text="Select a project to see the outputs it supports on this computer." IsVisible="{Binding !HasOutputs}" TextWrapping="Wrap" />
             <ItemsControl ItemsSource="{Binding Outputs}">
@@ -155,10 +180,6 @@
             <StackPanel IsVisible="{Binding ShowModules}">
               <TextBlock Classes="formlabel" Text="APP MODULE" />
               <ComboBox ItemsSource="{Binding Modules}" SelectedItem="{Binding SelectedModule}" HorizontalAlignment="Stretch" />
-            </StackPanel>
-            <StackPanel IsVisible="{Binding ShowSchemes}">
-              <TextBlock Classes="formlabel" Text="SCHEME" />
-              <ComboBox ItemsSource="{Binding Schemes}" SelectedItem="{Binding SelectedScheme}" HorizontalAlignment="Stretch" />
             </StackPanel>
             <StackPanel IsVisible="{Binding ShowVariants}">
               <TextBlock Classes="formlabel" Text="VARIANT / CONFIGURATION" />
@@ -238,6 +259,13 @@
               <c:StatusChip Status="{Binding ResultTag}" />
             </StackPanel>
           </Grid>
+          <Border Classes="inset" Padding="16,12" IsVisible="{Binding IsPreviousBuild}">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="PREVIOUS BUILD — MADE WITH OTHER SETTINGS" />
+              <SelectableTextBlock FontSize="12.5" Text="{Binding ResultDetail}" TextWrapping="Wrap" />
+              <TextBlock Classes="muted" FontSize="12" Text="Its artifacts are still listed below. The state underneath describes the current settings." TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
           <Border Classes="inset" Padding="16,12" IsVisible="{Binding HasProject}">
             <Grid ColumnDefinitions="*,Auto">
               <StackPanel Spacing="2">

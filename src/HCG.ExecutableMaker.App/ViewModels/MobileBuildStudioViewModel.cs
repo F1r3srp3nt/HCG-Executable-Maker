@@ -59,6 +59,10 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private CancellationTokenSource? _buildCts;
     private ToolchainReport? _report;
     private bool _loading;
+    /// <summary>One ticket per selected project: inspection work started for another project is discarded when it completes.</summary>
+    private readonly InspectionGate _projectGate = new();
+    private bool _recomputing;
+    private bool _suppressSchemeChange;
 
     public MobileBuildStudioViewModel(ProjectService projectService, IProjectRepository projects, MobileBuildService builder, MobileArtifactVerifier verifier,
         IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell)
@@ -74,6 +78,14 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         _shell = shell;
         _uiTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(120), DispatcherPriority.Background, (_, _) => FlushLog());
         OutputDirectory = paths.DefaultOutputDirectory;
+        // A toolchain change (e.g. another Xcode selected in Toolchains) re-evaluates outputs and compatibility at once.
+        _toolchains.Updated += (_, r) => Dispatcher.UIThread.Post(() => OnToolchainsUpdated(r));
+    }
+
+    private void OnToolchainsUpdated(ToolchainReport report)
+    {
+        _report = report;
+        if (Mobile is not null) RecomputeOutputs();
     }
 
     public override string Title => "Mobile Build Studio";
@@ -119,6 +131,15 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     partial void OnSelectedProjectChanged(ProjectItem? value)
     {
         if (_loading) return;
+        _projectGate.Next();
+        // A result belongs to the project that produced it; another project's build is not shown as this one's.
+        _lastResult = null;
+        BuiltArtifacts.Clear();
+        OnPropertyChanged(nameof(HasBuiltArtifacts));
+        HasBuildStarted = false;
+        ResultTag = new StatusTag("Not started", "neutral");
+        ResultDetail = "";
+        IsPreviousBuild = false;
         if (value is null) { ClearProject(); return; }
         ApplyProject(value.Project);
     }
@@ -174,10 +195,14 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     [RelayCommand]
     private async Task RefreshAsync()
     {
+        var ticket = _projectGate.Current;
+        var project = SelectedProject;
         _report = await _toolchains.GetAsync(refresh: true);
-        if (SelectedProject is { } p)
+        if (project is { } p)
         {
             await _projectService.InspectAsync(p.Project, CancellationToken.None);
+            // Another project was selected meanwhile: this inspection no longer describes what is shown.
+            if (!_projectGate.IsCurrent(ticket) || SelectedProject != project) return;
             ApplyProject(p.Project);
         }
     }
@@ -220,7 +245,17 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         Diagnostics.Clear();
         foreach (var d in a.Diagnostics) Diagnostics.Add(new DiagnosticItem(d));
 
-        var options = MobileCapabilities.Evaluate(m, _report);
+        // Schemes belong to the project, not to an output: the selector stays available even when the current scheme cannot
+        // be built with the selected Xcode, so another scheme can always be chosen.
+        var keepScheme = SelectedScheme;
+        _suppressSchemeChange = true;
+        Schemes.Clear();
+        if (m.Ios is { } schemesOf && m.ArtifactPath is null)
+            foreach (var s in schemesOf.Schemes.Select(s => s.Name).DefaultIfEmpty(schemesOf.AppTargets.FirstOrDefault()?.Name).OfType<string>()) Schemes.Add(s);
+        SelectedScheme = keepScheme is not null && Schemes.Contains(keepScheme) ? keepScheme : Schemes.FirstOrDefault();
+        _suppressSchemeChange = false;
+
+        var options = MobileCapabilities.Evaluate(m, _report, SelectionContext(m));
         Platforms.Clear();
         foreach (var platform in new[] { TargetPlatform.Android, TargetPlatform.IOS })
         {
@@ -249,7 +284,111 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         if (value is not null)
             foreach (var o in _allOptions.Where(o => o.Platform == value.Platform)) Outputs.Add(new MobileOutputItem(o));
         OnPropertyChanged(nameof(HasOutputs));
+        ShowSchemes = Schemes.Count > 1 && value?.Platform == TargetPlatform.IOS;
         SelectOutput(Outputs.FirstOrDefault(o => o.IsEnabled));
+        UpdateSchemeCompatibility();
+    }
+
+    /// <summary>The selection outputs are judged for: scheme and the configuration chosen for the current output.</summary>
+    private MobileBuildOptions SelectionContext(MobileAnalysis m) => new()
+    {
+        Framework = m.Framework,
+        Output = SelectedOutput?.Option.Output ?? MobileOutput.IosSimulatorApp,
+        Scheme = SelectedScheme,
+        Variant = SelectedOutput is null ? null : SelectedVariant,
+    };
+
+    /// <summary>
+    /// Re-evaluates every output for the current scheme, configuration and toolchain. The selected output is kept while it is
+    /// still available (its configuration and signing choices stay); otherwise the first available output is chosen.
+    /// </summary>
+    private void RecomputeOutputs()
+    {
+        if (_recomputing || Mobile is not { } m) return;
+        _recomputing = true;
+        try
+        {
+            _allOptions = MobileCapabilities.Evaluate(m, _report, SelectionContext(m));
+            var keep = SelectedOutput?.Option.Output;
+            Outputs.Clear();
+            if (SelectedPlatform is { } platform)
+                foreach (var o in _allOptions.Where(o => o.Platform == platform.Platform)) Outputs.Add(new MobileOutputItem(o));
+            OnPropertyChanged(nameof(HasOutputs));
+            var same = Outputs.FirstOrDefault(o => o.Option.Output == keep && o.IsEnabled);
+            if (keep is not null && same is not null)
+            {
+                foreach (var o in Outputs) o.IsSelected = o == same;
+                SelectedOutput = same;
+            }
+            else SelectOutput(Outputs.FirstOrDefault(o => o.IsEnabled));
+        }
+        finally { _recomputing = false; }
+        UpdateSchemeCompatibility();
+        PrepareSummary();
+    }
+
+    partial void OnSelectedSchemeChanged(string? value)
+    {
+        if (_suppressSchemeChange || Mobile is null) return;
+        RecomputeOutputs();
+    }
+
+    // ───────────── Scheme compatibility (Simulator and device judged separately) ─────────────
+
+    public ObservableCollection<SummaryRow> SchemeChecks { get; } = [];
+    [ObservableProperty] private bool _hasSchemeChecks;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSchemeSuggestion))] private string? _suggestedScheme;
+    [ObservableProperty] private string _schemeSuggestionText = "";
+    [ObservableProperty] private string? _toolchainRouteText;
+    public bool HasSchemeSuggestion => SuggestedScheme is not null;
+    public string UseSuggestedSchemeLabel => SuggestedScheme is null ? "" : $"Use {SuggestedScheme}";
+    partial void OnSuggestedSchemeChanged(string? value) => OnPropertyChanged(nameof(UseSuggestedSchemeLabel));
+
+    /// <summary>Switches to the scheme verified compatible. Only on request: HCG never changes the scheme or the deployment target by itself.</summary>
+    [RelayCommand]
+    private void UseSuggestedScheme()
+    {
+        if (SuggestedScheme is { } s && Schemes.Contains(s)) SelectedScheme = s;
+    }
+
+    private void UpdateSchemeCompatibility()
+    {
+        SchemeChecks.Clear();
+        SuggestedScheme = null;
+        SchemeSuggestionText = "";
+        ToolchainRouteText = null;
+        if (Mobile is not { Ios: { } ios, ArtifactPath: null } m || m.Framework is not (MobileFramework.NativeIos or MobileFramework.Capacitor)
+            || SelectedPlatform?.Platform != TargetPlatform.IOS || _report?.Xcode is not { } x)
+        {
+            HasSchemeChecks = false;
+            return;
+        }
+        var output = SelectedOutput?.Option.Output;
+        var sim = IosSchemeCompatibility.Evaluate(ios, SelectedScheme, output == MobileOutput.IosSimulatorApp ? SelectedVariant : null, true, x);
+        var device = IosSchemeCompatibility.Evaluate(ios, SelectedScheme, output is MobileOutput.IosArchive or MobileOutput.IosIpa ? SelectedVariant : null, false, x);
+        string Line(IosSchemeCompatibilityResult r) => r.Fit switch
+        {
+            IosToolchainFit.Compatible => "Compatible — " + r.Detail,
+            IosToolchainFit.Incompatible => "Selected toolchain incompatible — " + r.Detail,
+            IosToolchainFit.ToolchainMissing => "Toolchain missing — " + r.Detail,
+            _ => "Not verifiable before building — " + r.Detail,
+        };
+        SchemeChecks.Add(new($"Simulator · {sim.SdkDisplay}{(sim.Range?.SdkVersion is { } sv ? " " + sv : "")} · {sim.Configuration}", Line(sim)));
+        SchemeChecks.Add(new($"Device · {device.SdkDisplay}{(device.Range?.SdkVersion is { } dv ? " " + dv : "")} · {device.Configuration}", Line(device)));
+        HasSchemeChecks = true;
+        // The result that matters is the one for the chosen output's SDK; with no output, the device archive route.
+        var relevant = output == MobileOutput.IosSimulatorApp ? sim : output is null && sim.Fit == IosToolchainFit.Incompatible && device.Fit != IosToolchainFit.Incompatible ? sim : device;
+        if (relevant.Fit == IosToolchainFit.Incompatible)
+        {
+            ToolchainRouteText = relevant.Fix;
+            if (relevant.CompatibleSchemes.FirstOrDefault() is { } alt)
+            {
+                SuggestedScheme = alt;
+                SchemeSuggestionText = $"{relevant.Scheme} needs iOS {relevant.Outside.FirstOrDefault()?.DeploymentTarget}, which the selected Xcode's {relevant.SdkDisplay} SDK does not accept. " +
+                                       $"{alt} is verified compatible with it. Switching changes only the scheme HCG builds — not the project, and not {relevant.Scheme}'s deployment target; " +
+                                       $"{relevant.Scheme} stays available with a compatible Xcode.";
+            }
+        }
     }
 
     [RelayCommand]
@@ -314,8 +453,8 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     {
         var m = Mobile;
         var output = SelectedOutput?.Option.Output;
-        Modules.Clear(); Variants.Clear(); Schemes.Clear(); SigningModes.Clear(); ExportMethods.Clear();
-        ShowModules = ShowVariants = ShowSchemes = ShowSigning = ShowExport = ShowApkSet = false;
+        Modules.Clear(); Variants.Clear(); SigningModes.Clear(); ExportMethods.Clear();
+        ShowModules = ShowVariants = ShowSigning = ShowExport = ShowApkSet = false;
         if (m is null || output is null) { OnPropertyChanged(nameof(ShowDeviceSpec)); return; }
         var android = output.Value.Platform() == TargetPlatform.Android;
         var debugOutput = output is MobileOutput.AndroidDebugApk or MobileOutput.IosSimulatorApp;
@@ -333,9 +472,6 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         }
         if (!android && m.Ios is { } ios && m.ArtifactPath is null)
         {
-            foreach (var s in ios.Schemes.Select(s => s.Name).DefaultIfEmpty(ios.AppTargets.FirstOrDefault()?.Name).OfType<string>()) Schemes.Add(s);
-            ShowSchemes = Schemes.Count > 1;
-            SelectedScheme = Schemes.FirstOrDefault();
             foreach (var c in ios.Configurations) Variants.Add(c);
             ShowVariants = Variants.Count > 1;
             SelectedVariant = Variants.FirstOrDefault(c => c == (debugOutput ? "Debug" : "Release")) ?? Variants.FirstOrDefault();
@@ -454,7 +590,12 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public event EventHandler? LogAppended;
 
     partial void OnSelectedSigningChanged(Choice<MobileSigningMode>? value) => PrepareSummary();
-    partial void OnSelectedVariantChanged(string? value) => PrepareSummary();
+    partial void OnSelectedVariantChanged(string? value)
+    {
+        // The configuration decides the effective deployment target (configuration-specific settings), so iOS outputs are re-judged.
+        if (SelectedPlatform?.Platform == TargetPlatform.IOS && Mobile?.Ios is not null) RecomputeOutputs();
+        else PrepareSummary();
+    }
     partial void OnOutputDirectoryChanged(string value) => PrepareSummary();
     partial void OnAppNameChanged(string value) => PrepareSummary();
     partial void OnAppVersionChanged(string value) => PrepareSummary();
@@ -487,31 +628,40 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     {
         var a = SelectedProject?.Project.Analysis;
         if (a?.Mobile is not { } m) { (BuildStateTag, BuildStateDetail) = (new StatusTag("—", "neutral"), ""); return; }
-        if (_lastResult is { } last && last.Status == BuildStatus.Succeeded && last.Artifacts.Count > 0 && last.Artifacts.All(x => x.Verification != VerificationStatus.Failed))
-        { (BuildStateTag, BuildStateDetail) = (new StatusTag("Artifact verified", "success"), $"{last.Artifacts.Count} artifact(s) built and verified: {string.Join(", ", last.Artifacts.Select(x => x.Format.DisplayName()))}."); return; }
-        if (_lastResult is { Status: BuildStatus.Failed or BuildStatus.TimedOut or BuildStatus.Cancelled } failed)
-        { (BuildStateTag, BuildStateDetail) = (new StatusTag("Build failed", "error"), FirstErrorOf(failed.FailureReason) ?? failed.FailureReason ?? ""); return; }
-        var noTarget = m.Framework == MobileFramework.NativeIos && m.Ios is { } ios && !ios.AppTargets.Any() || m.Framework == MobileFramework.NativeAndroid && m.Android is { AppModules.Count: 0 };
-        if (noTarget) { (BuildStateTag, BuildStateDetail) = (new StatusTag("Project implementation incomplete", "error"), "The project has no application target or module to build."); return; }
-        if (SelectedOutput is null)
+        var current = CurrentProvenance();
+        var forPlatform = _allOptions.Where(o => SelectedPlatform is null || o.Platform == SelectedPlatform.Platform).ToList();
+        var view = MobileBuildState.Describe(a, m, forPlatform, SelectedOutput?.Option, readiness, _lastResult, current);
+        (BuildStateTag, BuildStateDetail) = (new StatusTag(view.Tag, view.Tone), view.Detail);
+        UpdateResultView(current);
+    }
+
+    /// <summary>What building with the current selection would record as its inputs (null when no output is selected).</summary>
+    private BuildProvenance? CurrentProvenance() =>
+        SelectedProject is { } p && CreateOptions() is { } o ? MobileBuildState.ProvenanceFor(p.Project, CreateSettings(o), _report) : null;
+
+    /// <summary>"Previous build": the last result was produced with other inputs than the current selection.</summary>
+    [ObservableProperty] private bool _isPreviousBuild;
+
+    private void UpdateResultView(BuildProvenance? current)
+    {
+        if (_lastResult is not { } r || IsBuilding) { IsPreviousBuild = false; return; }
+        var view = MobileBuildState.DescribeResult(r, current);
+        IsPreviousBuild = !view.IsCurrent;
+        if (view.IsCurrent)
         {
-            var what = m.DotNetIos is { } dn ? $"{dn.ApplicationTitle ?? dn.AssemblyName} — {m.Framework.DisplayName()} app ({dn.ProjectPath})" : $"{a.ApplicationType} ({m.Framework.DisplayName()})";
-            var forPlatform = _allOptions.Where(o => SelectedPlatform is null || o.Platform == SelectedPlatform.Platform).ToList();
-            (BuildStateTag, BuildStateDetail) =
-                forPlatform.Count == 0 ? (new StatusTag("Build adapter unavailable", "error"), $"{what}: HCG has no build route for this project's outputs.")
-                : forPlatform.Any(o => o.IsAvailable) ? (new StatusTag("Recognized project", "info"), $"{what}. Choose an output.")
-                : a.Support == SupportLevel.RequiresConfiguration ? (new StatusTag("Configuration required", "warning"), $"{what}: {a.SupportSummary}")
-                : (new StatusTag("Required toolchain missing", "warning"), $"{what}: {forPlatform[0].Reason}");
-            return;
+            ResultTag = new StatusTag(Format.Label(r.Status), Format.Tone(r.Status));
+            CurrentStage = r.Status == BuildStatus.Succeeded ? "Completed" : Format.Label(r.Status);
+            ResultDetail = r.Status == BuildStatus.Succeeded
+                ? $"{r.Artifacts.Count} artifact(s) in {Format.Duration(r.Duration)}. Nothing was uploaded or published."
+                : r.FailureReason ?? "";
         }
-        if (readiness is null) return;
-        var blockers = readiness.Blockers.ToList();
-        if (blockers.Count == 0) { (BuildStateTag, BuildStateDetail) = (new StatusTag("Ready to build", "success"), $"{SelectedOutput.Name} can be built on this computer."); return; }
-        var toolchain = blockers.Where(b => b.State is ReadinessState.NotFound or ReadinessState.IncompatibleVersion or ReadinessState.OtherHost or ReadinessState.InvalidPath
-                                            && b.Tool is not ("Provisioning profile" or "Code-signing identity") && !b.Tool.Contains("certificate", StringComparison.OrdinalIgnoreCase)).ToList();
-        (BuildStateTag, BuildStateDetail) = toolchain.Count > 0
-            ? (new StatusTag("Required toolchain missing", "warning"), string.Join(" ", toolchain.Select(b => $"{b.Tool}: {b.Detail}")))
-            : (new StatusTag("Configuration required", "warning"), string.Join(" ", blockers.Select(b => $"{b.Tool}: {b.Detail}")));
+        else
+        {
+            // The artifacts stay listed and openable; they are labelled as what produced them, not as the current state.
+            ResultTag = new StatusTag("Previous build", "neutral");
+            CurrentStage = "Previous build";
+            ResultDetail = $"{Format.Label(r.Status)} · {view.Detail}";
+        }
     }
 
     private BuildRecord? _lastResult;
@@ -634,11 +784,6 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         _lastResult = result;
         LastLogPath = result.LogPath;
         FirstError = result.Status == BuildStatus.Succeeded ? null : FirstErrorOf(result.FailureReason);
-        ResultTag = new StatusTag(Format.Label(result.Status), Format.Tone(result.Status));
-        CurrentStage = result.Status == BuildStatus.Succeeded ? "Completed" : Format.Label(result.Status);
-        ResultDetail = result.Status == BuildStatus.Succeeded
-            ? $"{result.Artifacts.Count} artifact(s) in {Format.Duration(result.Duration)}. Nothing was uploaded or published."
-            : result.FailureReason ?? "";
         foreach (var a in result.Artifacts) BuiltArtifacts.Add(new ArtifactItem(a, result));
         OnPropertyChanged(nameof(HasBuiltArtifacts));
         UpdateBuildState(CreateOptions() is { } again && Mobile is { } mm ? MobileReadiness.Evaluate(mm, again.Output, again, _report) : null);

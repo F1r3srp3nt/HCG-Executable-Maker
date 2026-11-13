@@ -66,9 +66,14 @@ public static class XcodeDiscovery
         if (plist.GetValueOrDefault("CFBundleIdentifier") is { } id && id != "com.apple.dt.Xcode") return null;
         var version = ReadPlist(Path.Combine(appPath, "Contents", "version.plist"));
         // Xcode's Info.plist is a binary plist (not read here); version.plist is XML and carries the same version.
+        // Each installation's own SDK ranges, read from disk: they name the Xcodes a deployment target actually needs.
         return new XcodeInstallation(appPath, dev,
             plist.GetValueOrDefault("CFBundleShortVersionString") ?? version.GetValueOrDefault("CFBundleShortVersionString"),
-            version.GetValueOrDefault("ProductBuildVersion"));
+            version.GetValueOrDefault("ProductBuildVersion"))
+        {
+            IosRange = ReadIosDeploymentRange(dev),
+            SimulatorRange = ReadIosSimulatorDeploymentRange(dev),
+        };
     }
 
     private static Dictionary<string, string> ReadPlist(string path)
@@ -103,23 +108,31 @@ public static class XcodeDiscovery
     /// The iOS deployment range of a developer directory's iPhoneOS SDK, from SDKSettings.json
     /// (SupportedTargets.iphoneos.MinimumDeploymentTarget / MaximumDeploymentTarget). Read only; nothing is run.
     /// </summary>
-    public static IosDeploymentRange? ReadIosDeploymentRange(string? developerDirectory)
+    public static IosDeploymentRange? ReadIosDeploymentRange(string? developerDirectory) => ReadDeploymentRange(developerDirectory, "iphoneos");
+
+    /// <summary>The iPhoneSimulator SDK's own range (SupportedTargets.iphonesimulator); a Simulator build is judged by it.</summary>
+    public static IosDeploymentRange? ReadIosSimulatorDeploymentRange(string? developerDirectory) => ReadDeploymentRange(developerDirectory, "iphonesimulator");
+
+    /// <summary>Reads the deployment range of an SDK ("iphoneos" or "iphonesimulator") from its SDKSettings.json. Nothing is run.</summary>
+    public static IosDeploymentRange? ReadDeploymentRange(string? developerDirectory, string sdk)
     {
         if (developerDirectory is null) return null;
-        var sdks = Path.Combine(developerDirectory, "Platforms", "iPhoneOS.platform", "Developer", "SDKs");
-        var settings = new[] { Path.Combine(sdks, "iPhoneOS.sdk", "SDKSettings.json") }
-            .Concat(Directory.Exists(sdks) ? Directory.GetDirectories(sdks, "iPhoneOS*.sdk").Select(d => Path.Combine(d, "SDKSettings.json")) : [])
+        var platform = sdk == "iphonesimulator" ? "iPhoneSimulator" : "iPhoneOS";
+        var sdks = Path.Combine(developerDirectory, "Platforms", platform + ".platform", "Developer", "SDKs");
+        var settings = new[] { Path.Combine(sdks, platform + ".sdk", "SDKSettings.json") }
+            .Concat(Directory.Exists(sdks) ? Directory.GetDirectories(sdks, platform + "*.sdk").Select(d => Path.Combine(d, "SDKSettings.json")) : [])
             .FirstOrDefault(File.Exists);
-        return settings is null ? null : ParseIosDeploymentRange(File.ReadAllText(settings));
+        try { return settings is null ? null : ParseIosDeploymentRange(File.ReadAllText(settings), sdk); }
+        catch (IOException) { return null; }
     }
 
-    public static IosDeploymentRange? ParseIosDeploymentRange(string json)
+    public static IosDeploymentRange? ParseIosDeploymentRange(string json, string sdk = "iphoneos")
     {
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (!root.TryGetProperty("SupportedTargets", out var targets) || !targets.TryGetProperty("iphoneos", out var ios)) return null;
+            if (!root.TryGetProperty("SupportedTargets", out var targets) || !targets.TryGetProperty(sdk, out var ios)) return null;
             string? S(System.Text.Json.JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
             var min = S(ios, "MinimumDeploymentTarget");
             var max = S(ios, "MaximumDeploymentTarget");

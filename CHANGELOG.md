@@ -2,6 +2,23 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Mobile Build Studio: scheme selection and status (`fix/sentinel-build-selection`)
+
+### Fixed
+- Output availability is judged for the **selected** scheme and configuration (it used the project's default scheme, so a
+  legacy scheme an Xcode cannot build disabled every output); the build service re-checks the selected scheme too.
+- The scheme selector stays available when no output is; changing scheme, configuration or Xcode recomputes outputs,
+  readiness and signing; inspection results for another project are discarded.
+- Simulator builds are judged by the iPhoneSimulator SDK's own range, device builds by iPhoneOS.
+- "Selected toolchain incompatible" is distinct from "Required toolchain missing".
+- A result built with other settings is a "Previous build" (with what produced it), never the current state.
+
+### Added
+- Static effective Xcode build settings (.xcconfig with #include, SDK/configuration conditions, $(inherited), $(VAR) with
+  modifiers) and target dependencies; per-installation SDK ranges; "Use <scheme>" for a verified-compatible scheme; the
+  Xcodes verified to accept a legacy deployment target; immutable build provenance; IPA/app expectation checks (bundle id,
+  version, minimum iOS, platform, architectures) with installation and runtime reported as not tested.
+
 ## [Unreleased] — `feature/mobile-conversion`
 
 ### Added — desktop → mobile conversion workspace ([docs/MOBILE-CONVERSION.md](docs/MOBILE-CONVERSION.md))
