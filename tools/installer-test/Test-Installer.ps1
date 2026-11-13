@@ -77,7 +77,9 @@ if (Test-Path $exe) {
     $running = -not $app.HasExited
     Check $running "Installed application launched and is still running after $LaunchSeconds s"
     if (-not $running) { Write-Host "         exit code: $($app.ExitCode)" }
-    if ($running) { Stop-Process -Id $app.Id -Force; $app.WaitForExit() }
+    # End the whole tree: the app starts tool probes (e.g. dotnet workload list) that inherit the install folder as their
+    # working directory, and a surviving child keeps Windows from deleting that folder after uninstall (CI run 75).
+    if ($running) { & taskkill.exe /PID $app.Id /T /F | Out-Null; $app.WaitForExit() }
 }
 
 # 4. Uninstall
@@ -91,6 +93,11 @@ if (Test-Path $uninstaller) {
 }
 
 # 5. Cleanup
+if (Test-Path $installDir) {
+    Write-Host "         still present: $((Get-ChildItem -Recurse -Force $installDir | Select-Object -First 15 | ForEach-Object FullName) -join '; ')"
+    Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like "$installDir*" -or $_.CommandLine -like "*$installDir*" } |
+        ForEach-Object { Write-Host "         process: $($_.ProcessId) $($_.Name) $($_.CommandLine)" }
+}
 Check (-not (Test-Path $installDir)) 'Install folder removed'
 Check (-not (Test-Path $startMenu)) 'Start-menu shortcut removed'
 Check (-not (Test-Path $desktop)) 'Desktop shortcut removed'
