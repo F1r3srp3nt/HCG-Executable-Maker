@@ -10,8 +10,43 @@ public sealed partial class MobileOutputParser
 {
     private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
     private readonly MsBuildOutputParser _msbuild = new();
+    private readonly Dictionary<BuildMessage, List<string>> _details = new(ReferenceEqualityComparer.Instance);
+    private BuildMessage? _open;
+
+    /// <summary>
+    /// The lines that continue a message ending in ':' — xcodebuild prints the reason on the following, indented lines:
+    /// "Unable to find a destination matching the provided destination specifier:" / "{ generic:1, platform:iOS }" /
+    /// "Ineligible destinations …" / "{ …, error:iOS 18.0 is not installed. To use with Xcode, first download and install the platform }".
+    /// </summary>
+    public IReadOnlyList<string> DetailOf(BuildMessage message) => _details.TryGetValue(message, out var d) ? d : [];
+
+    /// <summary>The message in full: its text, and for a message continued on the next lines the reasons given there.</summary>
+    public string Describe(BuildMessage message)
+    {
+        var detail = DetailOf(message);
+        if (detail.Count == 0) return message.Text;
+        var reasons = detail.SelectMany(l => DetailError().Matches(l).Select(m => m.Groups["e"].Value.Trim())).Where(e => e.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        return message.Text + " " + (reasons.Count > 0 ? string.Join(" · ", reasons) : string.Join(" ", detail.Take(4)));
+    }
 
     public BuildMessage? Parse(string line)
+    {
+        if (_open is not null && _details[_open].Count < 24 && line.Length > 0 && (char.IsWhiteSpace(line[0]) || line[0] == '{'))
+        {
+            if (line.Trim().Length > 0) _details[_open].Add(line.Trim());
+            return null;
+        }
+        if (line.Trim().Length == 0) return null;
+        _open = null;
+        var parsed = ParseLine(line);
+        if (parsed is not null && parsed.Text.EndsWith(':')) { _open = parsed; _details[parsed] = []; }
+        return parsed;
+    }
+
+    [GeneratedRegex(@"\berror:(?<e>[^}]+?)\s*(?:\}|$)")]
+    private static partial Regex DetailError();
+
+    private BuildMessage? ParseLine(string line)
     {
         BuildMessage? m = null;
         if (FileDiagnostic().Match(line) is { Success: true } f)

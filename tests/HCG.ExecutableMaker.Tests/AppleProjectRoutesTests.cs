@@ -287,4 +287,27 @@ public class AppleProjectRoutesTests : IDisposable
         Assert.DoesNotContain(args, a => a.StartsWith("IPHONEOS_DEPLOYMENT_TARGET", StringComparison.Ordinal));   // HCG never overrides the project's target
         Assert.StartsWith(input.WorkDirectory, XcodePlanner.ResultBundle(input, "HCGSentinel", "archive"));
     }
+
+    [Fact]
+    public void A_destination_error_carries_the_reason_xcodebuild_prints_on_the_following_lines()
+    {
+        // CI run 76, macos-15 runner: Xcode 16.0–16.3 are installed without their iOS platform component.
+        var parser = new MobileOutputParser();
+        string[] output =
+        [
+            "xcodebuild: error: Unable to find a destination matching the provided destination specifier:",
+            "\t\t{ generic:1, platform:iOS }",
+            "",
+            "\tIneligible destinations for the \"HCGSentinel\" scheme:",
+            "\t\t{ id:dvtdevice-DVTiPhonePlaceholder-iphoneos:placeholder, name:Any iOS Device, error:iOS 18.0 is not installed. To use with Xcode, first download and install the platform }",
+            "** ARCHIVE FAILED **",
+        ];
+        var messages = output.Select(parser.Parse).Where(m => m is not null).ToList();
+        var first = messages.First(m => m!.Severity == DiagnosticSeverity.Error)!;
+        Assert.EndsWith("destination specifier:", first.Text);
+        Assert.Equal(3, parser.DetailOf(first).Count);
+        var described = parser.Describe(first);
+        Assert.Contains("iOS 18.0 is not installed. To use with Xcode, first download and install the platform", described);
+        Assert.Contains(messages, m => m!.Text.Contains("** ARCHIVE FAILED **"));
+    }
 }

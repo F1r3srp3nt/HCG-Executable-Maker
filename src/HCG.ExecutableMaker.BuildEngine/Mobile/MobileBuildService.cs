@@ -135,7 +135,7 @@ public sealed class MobileBuildService(
                                                   ?? build.Messages.Skip(errorsBefore).FirstOrDefault(m => m.Severity == DiagnosticSeverity.Error);
                     var bundle = step.Process.Arguments.SkipWhile(a => a != "-resultBundlePath").Skip(1).FirstOrDefault();
                     throw new StepFailedException($"{step.Title} failed with exit code {result.ExitCode}." +
-                        (first is null ? " No error line was recognized; see the complete log." : $"\nFirst error: {(first.File is null ? "" : first.File + (first.Line is { } ln ? $":{ln}" : "") + ": ")}{first.Text}") +
+                        (first is null ? " No error line was recognized; see the complete log." : $"\nFirst error: {(first.File is null ? "" : first.File + (first.Line is { } ln ? $":{ln}" : "") + ": ")}{parser.Describe(first)}") +
                         $"\nComplete log: {build.LogPath}" + (bundle is not null && Directory.Exists(bundle) ? $"\nResult bundle: {bundle}" : ""));
                 }
                 Log(BuildLogKind.Success, $"{step.Title} completed in {result.Duration.TotalSeconds:F1}s");
