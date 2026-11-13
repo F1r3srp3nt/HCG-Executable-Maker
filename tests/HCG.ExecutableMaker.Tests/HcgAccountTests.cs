@@ -243,13 +243,23 @@ public class HcgAuthTests
         finally { blocker.Stop(); }
     }
 
+    private static readonly HashSet<int> HandedOutPorts = [];
+
+    /// <summary>
+    /// A loopback port that was free a moment ago and has not been handed to another test in this run. The probe is
+    /// closed before the code under test binds the port, so a parallel test could still be given it by the OS (CI run 84,
+    /// macOS, which reuses freed ports readily); callers that bind later register several ports, as the app does.
+    /// </summary>
     internal static int FreePort()
     {
-        var l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        var port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return port;
+        while (true)
+        {
+            var l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            l.Start();
+            var port = ((IPEndPoint)l.LocalEndpoint).Port;
+            l.Stop();
+            lock (HandedOutPorts) if (HandedOutPorts.Add(port)) return port;
+        }
     }
 
     [Fact]
@@ -294,8 +304,10 @@ public partial class HcgSessionTests
         await http.GetAsync(q["redirect_uri"] + "?" + query);
     });
 
+    // Three registered callback ports, as a real configuration has: sign-in moves to the next one when a port is busy,
+    // so a parallel test briefly holding one of them no longer turns into "all ports in use" (CI run 84, macOS).
     private static HcgConnectConfiguration WithFreePorts(HcgConnectConfiguration c) =>
-        c with { RedirectUris = [new Uri($"http://127.0.0.1:{HcgAuthTests.FreePort()}/oauth/callback")] };
+        c with { RedirectUris = [.. Enumerable.Range(0, 3).Select(_ => new Uri($"http://127.0.0.1:{HcgAuthTests.FreePort()}/oauth/callback"))] };
 
     private static HcgAccountService AccountWith(HcgConnectConfiguration config, MockIdentityServer server, ISecureCredentialStore store) =>
         new(config, new HcgAuthClient(new HttpClient(server), config, TimeProvider.System), store, TimeProvider.System);
