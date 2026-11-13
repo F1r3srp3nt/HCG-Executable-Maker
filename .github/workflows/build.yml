@@ -85,11 +85,27 @@ jobs:
       # job timeout with no log (main, run 42540213014: macOS test step stuck for 40 minutes, log never uploaded).
       # The step has its own limit below the job's, so that when dotnet test itself never returns (a child process left
       # holding its output open — the blame collector cannot end that) the evidence steps after it still run.
+      # Runs 67-69 (feature/hcg-projects): the macOS runner stopped responding during the tests (even the step and job
+      # timeouts never fired). The Theos/Apple-route tests run first on their own so the step that stops names the set,
+      # and the managed heap is capped so runaway memory fails with a stack trace instead of freezing the machine.
+      - name: Test (Theos and Apple project routes)
+        timeout-minutes: 10
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: >
+          dotnet test tests/HCG.ExecutableMaker.Tests -c Release --no-build --logger "trx;LogFileName=routes.trx"
+          --logger "console;verbosity=detailed" --results-directory TestResults
+          --filter "FullyQualifiedName~TheosTests|FullyQualifiedName~AppleProjectRoutesTests"
+          --blame-hang-timeout 3m --blame-hang-dump-type none
+
       - name: Test (unit + end-to-end)
         timeout-minutes: 20
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
         run: >
           dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx"
           --logger "console;verbosity=normal" --results-directory TestResults
+          --filter "FullyQualifiedName!~TheosTests&FullyQualifiedName!~AppleProjectRoutesTests"
           --blame-hang-timeout 5m --blame-hang-dump-type none --diag TestResults/diag/vstest.log
 
       - name: Processes left after the tests (evidence for a hang)
