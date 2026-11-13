@@ -77,12 +77,25 @@ public sealed partial class ToolchainDetector
         if (!File.Exists(xcrun)) return Missing(ToolchainIds.MacOSSdk, "macOS SDK", SwiftCategory, hint);
         try
         {
-            var (rv, version, _) = await runner.CaptureAsync(new ProcessSpec { Executable = xcrun, Arguments = ["--sdk", "macosx", "--show-sdk-version"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
-            var (rp, path, err) = await runner.CaptureAsync(new ProcessSpec { Executable = xcrun, Arguments = ["--sdk", "macosx", "--show-sdk-path"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
+            // xcrun resolves an SDK through xcodebuild and caches the answer per developer directory; the first call after
+            // another Xcode is selected can take well over 20 s on a busy Mac (CI run 77), so these probes wait longer
+            // and a timeout is reported as such, never as a missing SDK.
+            var timeout = TimeSpan.FromSeconds(60);
+            var (rv, version, _) = await runner.CaptureAsync(new ProcessSpec { Executable = xcrun, Arguments = ["--sdk", "macosx", "--show-sdk-version"], Timeout = timeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
+            if (rv.TimedOut) return TimedOutSdk();
+            var (rp, path, err) = await runner.CaptureAsync(new ProcessSpec { Executable = xcrun, Arguments = ["--sdk", "macosx", "--show-sdk-path"], Timeout = timeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
+            if (rp.TimedOut) return TimedOutSdk();
             var sdkPath = path.Trim();
             return rv.Succeeded && rp.Succeeded && Directory.Exists(sdkPath)
                 ? new ToolchainInfo { Id = ToolchainIds.MacOSSdk, DisplayName = "macOS SDK", Category = SwiftCategory, Status = ToolchainStatus.Installed, Version = version.Trim(), ExecutablePath = sdkPath, Detail = sdkPath }
-                : new ToolchainInfo { Id = ToolchainIds.MacOSSdk, DisplayName = "macOS SDK", Category = SwiftCategory, Status = ToolchainStatus.Missing, Detail = FirstLine(err), InstallHint = hint };
+                : new ToolchainInfo
+                {
+                    Id = ToolchainIds.MacOSSdk, DisplayName = "macOS SDK", Category = SwiftCategory, Status = ToolchainStatus.Missing, InstallHint = hint,
+                    Detail = FirstLine(err) is { Length: > 0 } e ? e : $"xcrun --sdk macosx --show-sdk-path exited with code {rp.ExitCode}" + (sdkPath.Length > 0 ? $" ({sdkPath} does not exist)" : "") + ".",
+                };
+
+            ToolchainInfo TimedOutSdk() => Failed(ToolchainIds.MacOSSdk, "macOS SDK", SwiftCategory, xcrun,
+                $"xcrun --sdk macosx did not answer within {timeout.TotalSeconds:F0} s. After another Xcode is selected, xcrun builds its SDK cache on first use; press Refresh.", hint);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
