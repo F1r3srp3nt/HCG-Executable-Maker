@@ -49,6 +49,13 @@ public sealed class ProjectInspectionService(IEnumerable<IProjectInspector> insp
                         $"Electron desktop app {p.DisplayName} found in {p.DisplayDirectory}. This build uses the {analysis.Framework} project; import {p.DisplayDirectory} on its own to build the Electron app.", p.ManifestPath));
             }
         }
+        // A .NET iOS head in a repository led by its desktop app (HCG Mail): attached, so Mobile Build Studio can build it.
+        if (analysis.Mobile is null && Mobile.MobileProjectInspector.AnalyzeDotNetIos(index) is { } ios)
+        {
+            analysis = analysis with { Mobile = ios };
+            extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info,
+                $"iPhone/iPad app {ios.DotNetIos!.ProjectPath} ({ios.DotNetIos.TargetFramework}) found. Build it in Mobile Build Studio; New Build publishes the desktop app.", ios.DotNetIos.ProjectPath));
+        }
         if (others.Count > 0)
             extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info, $"Also found files for: {string.Join(", ", others)}. These are not part of this build."));
         if (index.Truncated)

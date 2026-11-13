@@ -114,6 +114,72 @@ It only uses a script that packages the selected product, and the Configure step
 the script computes at build time are not reproduced, and the wizard says so. Examples are `DistilGitCommit` and
 `RelayBuildDate`.
 
+### Packaging contracts (`AppPackaging.json`)
+
+Some apps need more than the SwiftPM product. HCG Server, for example, runs a separate Go agent from
+`Contents/Helpers/hcg-agent`. A package declares such parts in `AppPackaging.json`, next to `Package.swift`, using
+schema `hcg-app-packaging/1`. HCG reads that file as data during inspection, then follows it:
+
+1. **Configure** shows a *Packaging contract* card. It lists every prebuild command exactly as it will run (program,
+   arguments, working directory and required tools), and what the contract adds to the app.
+   - The commands run only after **Run these commands while building** is ticked. They run with your account's
+     permissions, like the build itself.
+   - Without that confirmation the build is refused: "This app needs its helper programs…".
+   - Identity is prefilled from the contract and its Info.plist template:
+     - display name and bundle id;
+     - minimum macOS;
+     - version and build number, unless they are placeholders such as `0.0.0` / `0`;
+     - category and privacy texts.
+2. **At build time:**
+   - **Unchanged since confirmation:** the file is re-read and must have the same SHA-256 as when it was confirmed.
+     If it changed or was removed, the build stops and asks for a new review.
+   - **Required tools:** each one (for example `go >= 1.25`) is located on PATH and in `/opt/homebrew/bin` and
+     `/usr/local/bin`, then version-checked. Its folder is put first on the command's PATH, because apps opened from
+     Finder do not inherit the shell PATH.
+   - **Prebuild commands** run before `swift build`, as argument vectors (never through a shell), with the scrubbed
+     build environment and a 30-minute limit. `${HELPERS_DIR}` is the only variable, a fresh per-build folder.
+3. **After `swift build`:**
+   - helpers, resources, the Info.plist template and the icon are staged at their bundle paths;
+   - a missing required file fails the build and names the prebuild step that should have written it.
+4. **The packager:**
+   - places helpers in `Contents/Helpers/…` (mode 0755) and resources in `Contents/Resources/…`, so `Contents/MacOS`
+     still holds only the product;
+   - builds Info.plist from the template: HCG's values replace the identity, version and other keys you set, and all
+     other template keys (arrays included) are kept;
+   - signs each helper **before** the app. With Developer ID, helpers get the hardened runtime and a secure timestamp,
+     and no entitlements.
+   - An icon chosen in HCG replaces the contract's icon.
+
+Rules HCG enforces (an invalid contract is reported in Configure, never half-applied):
+- unknown keys and other schema versions are rejected (an optional top-level `description` string, for people
+  reading the file, is accepted and ignored);
+- commands are argument lists; `${…}` other than `${HELPERS_DIR}`, `$(…)` and backticks are rejected;
+- every path is relative and resolves inside the workspace (`workingDirectory: "../.."` is fine when it stays inside);
+- helpers go only to `Contents/Helpers/<name>`, resources only under `Contents/Resources/`;
+- a helper from `${HELPERS_DIR}` must be written by some prebuild command;
+- `sign` is `before-app`; `verify` supports `version`;
+- the app's architecture must be covered by each helper's `architectures`;
+- Mac App Store packages of apps with helpers are refused (each helper would need sandbox entitlements);
+- the delivery kind must be *macOS app*.
+
+Example (HCG Server):
+
+```json
+{
+  "schema": "hcg-app-packaging/1",
+  "product": "HCGServer",
+  "bundle": { "displayName": "HCG Server", "identifier": "com.hcg.server.app",
+              "infoPlist": "Resources/Info.plist", "icon": "Resources/AppIcon.icns", "minimumMacOS": "13.0" },
+  "prebuild": [ { "description": "Build the host agent (Go) as a universal helper", "requires": ["go >= 1.25"],
+                  "workingDirectory": "../..",
+                  "command": ["scripts/build-agent-helper.sh", "--output", "${HELPERS_DIR}/hcg-agent"] } ],
+  "helpers": [ { "name": "hcg-agent", "source": "${HELPERS_DIR}/hcg-agent", "destination": "Contents/Helpers/hcg-agent",
+                 "required": true, "architectures": ["arm64", "x86_64"], "sign": "before-app", "verify": ["version"] } ],
+  "resources": [ { "source": "Resources/Artwork/hcg-server-artwork.jpg",
+                   "destination": "Contents/Resources/hcg-server-artwork.jpg", "required": true } ]
+}
+```
+
 ### Tests
 
 HCG builds the selected product only. Test targets are neither compiled nor run, and every build log says so. XCTest
@@ -136,6 +202,14 @@ Swift package it is.
 - `LSMinimumSystemVersion` ≥ the executable's deployment target.
 - Every configured privacy key is present.
 - Icon and resource bundles are present.
+- With a packaging contract, each helper is checked:
+  - it is present in `Contents/Helpers` (not `Contents/MacOS`), executable and Mach-O, with every slice the contract
+    promises;
+  - its own `codesign --verify --strict` passes;
+  - with `verify: ["version"]`, `<helper> version` runs and prints `<name> <app version> …`. A mismatch fails and
+    says which version to set.
+
+  Every contract resource must also be present.
 - `codesign --verify --strict --deep` passes.
 - App ZIP: extracted again with `ditto -x -k` and the signature re-verified.
 - DMG: `hdiutil verify`.

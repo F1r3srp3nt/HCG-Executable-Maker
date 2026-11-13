@@ -97,6 +97,16 @@ checked against developer.android.com.
 - **Per project:** HCG uses the newest installation that satisfies the project's `engines.node`. It also checks
   `engines.npm` and a `packageManager: npm@…` pin. An unreadable range is reported, never assumed to match.
 
+## C / C++ (Toolchains › C / C++)
+
+- **CMake** 3.20 or later (the CMake File API and presets need it); an older CMake is *Incompatible version*.
+- **Ninja**, **make** (`make`, `gmake`; `mingw32-make` on Windows).
+- **C and C++ compilers**: `cc`, `clang`, `gcc` and `c++`, `clang++`, `g++`, each validated with `--version`. On a Mac,
+  `xcode-select -p` is checked first, so the `/usr/bin` stubs never trigger Apple's Command Line Tools install prompt.
+- **Visual Studio C++ tools** (Windows only), found with `vswhere`; CMake's Visual Studio generator uses them.
+- A project's C/C++ panel lists exactly what it is missing (for example a C++ compiler for a C++ target) with the
+  install guidance. Nothing is installed by HCG. Details: [NATIVE-CPP.md](NATIVE-CPP.md).
+
 ## Project readiness (Mobile Build Studio)
 
 For the selected project, output and signing mode, HCG lists:

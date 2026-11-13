@@ -118,4 +118,20 @@ public static class ToolchainIds
     // Node.js / Electron
     public const string Node = "node";
     public const string Npm = "npm";
+
+    // C / C++
+    public const string CMake = "cmake";
+    public const string Ninja = "ninja";
+    public const string Make = "make";
+    public const string CCompiler = "c-compiler";
+    public const string CxxCompiler = "cxx-compiler";
+    /// <summary>Visual Studio with the C++ workload (Windows): CMake's default generator uses it.</summary>
+    public const string MsvcTools = "msvc";
+    // Theos (jailbreak packages)
+    public const string DotNetIosWorkload = "dotnet-ios-workload";
+    public const string Theos = "theos";
+    public const string TheosMake = "theos-make";
+    public const string Ldid = "ldid";
+    public const string Perl = "perl";
+    public const string TheosIosToolchain = "theos-ios-toolchain";
 }

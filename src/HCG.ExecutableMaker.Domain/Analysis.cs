@@ -86,6 +86,8 @@ public sealed record ProjectAnalysis
     public SwiftAnalysis? Swift { get; init; }
     /// <summary>Node.js / Electron projects in the workspace (also attached when another ecosystem leads the analysis).</summary>
     public NodeAnalysis? Node { get; init; }
+    /// <summary>C/C++ projects (CMake, Make, sources, Theos) found in the workspace.</summary>
+    public NativeAnalysis? Native { get; init; }
     public IReadOnlyList<AnalysisDiagnostic> Diagnostics { get; init; } = [];
     public required DateTimeOffset AnalyzedAt { get; init; }
 }

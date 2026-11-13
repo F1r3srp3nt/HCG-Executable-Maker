@@ -55,5 +55,7 @@ public sealed record XcodeStatus
     public string CorrectiveAction { get; init; } = "";
     /// <summary>First line of the tool's own error output, when a probe failed.</summary>
     public string? RawError { get; init; }
+    /// <summary>Deployment targets the selected Xcode's iPhoneOS SDK supports (null when the SDK or its settings are absent).</summary>
+    public IosDeploymentRange? IosDeploymentRange { get; init; }
     public bool IsCommandLineToolsActive => ActiveDeveloperDirectory?.Contains("CommandLineTools", StringComparison.Ordinal) == true;
 }

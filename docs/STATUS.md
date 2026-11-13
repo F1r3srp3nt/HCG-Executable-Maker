@@ -5,6 +5,87 @@ desktop apps (docs/ELECTRON.md), guided toolchain setup (docs/TOOLCHAINS.md) and
 (docs/HCG-ACCOUNT.md — not live until HCG's external setup is done) to 0.2.0.
 0.2.0 contained M0.1, M0.2 (Windows installer) and M0.5 (Mobile Build Studio), merged into `main` with founder approval.
 
+# HCG Nexus, HCG Mail iOS, HCG Sentinel (unreleased, not pushed)
+
+Details: docs/HCG-PROJECTS.md. Repositories inspected at Nexus c7cd62c, Mail 46d4228, Sentinel 810c6f9.
+
+## Verified locally (Linux x64)
+
+- Tests (TheosTests, AppleProjectRoutesTests) with fixtures copied from the three repositories: Theos detection of
+  Nexus (tweak + preference bundle subproject, separate preview app, rootless/rootful/roothide), missing tools listed
+  one by one (incl. the iPhoneOS SDK a configuration needs), the build plan (whole-repository copy, one folder per
+  configuration, space-free path, argument list), `.deb` verification against real lzma/xz packages with synthesized
+  Mach-O binaries (rootless pass; wrong layout, wrong Architecture field, missing files, old arm64e ABI, maintainer
+  scripts each reported; a non-deb rejected); Mail's iOS head through the imported props chain at the repository root
+  and as a partial import; workload pin readiness; the .NET iOS plans; Sentinel's targets/schemes, the deployment-range
+  preflight, SDKSettings parsing, the project-level xcodebuild error, result bundles.
+- The real wizard / Mobile Build Studio (ui-driver, headless) on the real repositories: Nexus shows *Required toolchain
+  missing* with Theos, ldid and the iOS toolchain listed; Mail (repository root) shows *Required toolchain missing* (a
+  Mac is required) with the iOS head's evaluated properties; Mail (submission folder only) shows *Configuration required*.
+- Full test suite passes.
+
+## Real builds (CI on macOS, feature/hcg-projects runs 75–78)
+
+- `hcg-nexus-theos` (runs 75, 77, 78; macOS 26, Xcode 26.6, Theos master): through the New Build wizard, Theos' own
+  `make package` built `com.hakmicapitalgroup.hcgnexus_0.1.0_iphoneos-arm64.deb` (rootless, iOS 15.0+, `/var/jb`),
+  `…_iphoneos-arm.deb` (rootful, iOS 14.0+, `/`, own folder) and the preview app's
+  `com.hakmicapitalgroup.hcgnexus.preview_0.1.0_iphoneos-arm64.deb`; each *Artifact verified* (metadata, Architecture,
+  install prefix, every expected file, arm64 + arm64e with the versioned pointer-authentication ABI, minimum iOS,
+  SpringBoard filter, no maintainer scripts). HCG Nexus' own `inspect-package.py --require-new-arm64e-abi` agrees on
+  the rootless and rootful packages. `roothide` is refused with the project's own message.
+- `hcg-mail-ios` (macOS 26, Xcode 26.3, pinned workload 26.2.10233/10.0.100): the submission folder alone is
+  *Configuration required* (shared projects outside it); from the repository root the iOS Simulator build is
+  *Artifact verified* (`HCGMail.iOS.app`, com.hakmicapitalgroup.hcgmail 0.1.0 (1), iOS 16.0+, arm64, codesign valid).
+  The unsigned device archive is not possible: the .NET iOS SDK stops with "Code signing must be enabled to create an
+  Xcode archive" (run 78). Maker no longer offers it and blocks the archive before building until a certificate is in
+  the keychain (none on hosted runners).
+- `hcg-sentinel-archive` (run 78), archive through Mobile Build Studio, unsigned, both schemes, deployment targets
+  unchanged (HCGSentinel 14.7, HCGSentinelModern 15.0):
+  - macOS 15: *Artifact verified* with Xcode 16.4, 26.0.1, 26.1.1, 26.2, 26.3. Xcode 16.0–16.3 cannot target a
+    device there: "iOS 18.x is not installed. To use with Xcode, first download and install the platform" (now shown
+    in full as the first error).
+  - macOS 26: *Artifact verified* with Xcode 26.2, 26.3, 26.4.1, 26.5, 26.6. Xcode 26.0.1/26.1.1: "iOS 26.x is not
+    installed. Please download and install the platform from Xcode > Settings > Components".
+  - Every installed Xcode's iPhoneOS SDK supports iOS 12.0 and later, so none reproduces the original deployment-range
+    error; the preflight for that case is covered by tests.
+
+## Not verified
+
+- A signed archive or IPA for Mail and Sentinel (no certificates or provisioning profiles in CI); installing the Nexus `.deb` or any app on
+  a physical device; an Xcode whose range excludes 14.7 (none is installed on hosted runners — the preflight is covered
+  by tests with that range).
+
+# C/C++ projects (unreleased, branch `feature/native-cpp`, not pushed)
+
+Details: docs/NATIVE-CPP.md. Development host: Linux x64 (Ubuntu 24.04), CMake 3.28.3, Ninja 1.11.1, GNU Make 4.3,
+GCC 13.3, Clang 18.
+
+## Verified locally (Linux)
+
+- The 28 C/C++ tests pass, including real builds: a C project in paths with spaces (configure refused without trust),
+  a C++17 project (Debug), a multi-target project (calc + greeter, shared library shipped with a portability warning),
+  a library-only project (refused), a Make target with a variable, a missing expected output, a compile error reported
+  at `main.c:4`, cancellation of a running make (child processes stopped), and loose sources.
+- The real New Build wizard (`tools/ui-driver --native`, Avalonia headless) on the fixtures: MultiTarget (trusted
+  configure → targets calc and greeter, libraries listed separately → build calc → Verified), CppHello, MakeHello
+  (target, variable, expected output), LooseSources (selected files), MacBundle (plain executable on Linux) and
+  TheosTweak (Not supported, explained). The produced programs were run afterwards by hand, outside HCG, and printed
+  the expected output.
+- The full test suite passes (see the commit for counts).
+
+## Implemented, not verified on that platform yet
+
+- macOS: `MACOSX_BUNDLE` and Makefile-built `.app` bundles kept as built, ad-hoc or Developer ID signing stage, ZIP
+  with ditto, universal (arm64 + x86_64) builds, `otool` runtime-library report, the `xcode-select` check before the
+  compiler probe. Covered by the new `native-cpp` CI job (macos-latest), which has not run yet.
+- Windows: Visual Studio generator with MSVC (`vswhere`), MinGW Makefiles, PE verification. Not run on Windows.
+
+## Not implemented
+
+- Cross-compilation of any kind; DMG, PKG, Windows installer, AppImage or .deb outputs for C/C++ builds; Theos,
+  Meson, Autotools-without-Makefile, Bazel and Visual-Studio-solution-only projects; installing compilers, packages or
+  package managers (vcpkg, Conan).
+
 # Swift macOS apps (unreleased, branch `feature/swift-macos`, not merged)
 
 Evidence: CI run #20 (<https://github.com/F1r3srp3nt/HCG-Executable-Maker/actions/runs/42428955743>), all jobs green.

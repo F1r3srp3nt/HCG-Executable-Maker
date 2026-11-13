@@ -184,6 +184,17 @@ public static class MobileReadiness
             else if (ios.UsesCocoaPods && ios.WorkspacePath is null)
                 items.Add(new("CocoaPods workspace", ReadinessState.SetupRequired, true, "The project uses CocoaPods but has no .xcworkspace.", "Run `pod install` in the project, then re-import."));
         }
+        if (m.DotNetIos is { } dn)
+        {
+            items.Add(dn.OutsideWorkspace.Count > 0
+                ? new("Project references", ReadinessState.SetupRequired, true, $"{dn.ProjectPath} uses files outside the imported folder: {string.Join(", ", dn.OutsideWorkspace.Take(3))}.",
+                    "Import the repository root that contains them (HCG builds the whole repository, never a partial copy).")
+                : dn.MissingReferences.Count > 0
+                    ? new("Project references", ReadinessState.SetupRequired, true, "Missing: " + string.Join("; ", dn.MissingReferences.Take(3)))
+                    : new("Project references", ReadinessState.Ready, true, dn.ProjectReferences.Count == 0 ? "None." : $"{dn.ProjectReferences.Count} project(s), resolved from the repository: {string.Join(", ", dn.ProjectReferences.Select(Path.GetFileNameWithoutExtension))}."));
+        }
+        if (m.Framework == MobileFramework.NativeIos && x is { State: XcodeState.Ready or XcodeState.SdkMissing } && m.Ios is { } xi)
+            AddDeploymentRange(items, xi, o, x, simulator);
         if (x is { State: XcodeState.Ready or XcodeState.SdkMissing })
             items.Add(x.Sdks.Any(s => s.StartsWith(sdkName + " ", StringComparison.Ordinal))
                 ? new(simulator ? "iOS Simulator SDK" : "iOS SDK", ReadinessState.Ready, true, x.Sdks.First(s => s.StartsWith(sdkName + " ", StringComparison.Ordinal)))
@@ -192,7 +203,20 @@ public static class MobileReadiness
 
         var signing = o?.Signing ?? MobileSigningMode.ProjectDefault;
         var unsigned = simulator || signing == MobileSigningMode.Unsigned;
-        if (unsigned)
+        if (m.Framework == MobileFramework.DotNetIos && !unsigned && signing == MobileSigningMode.AppleManual)
+        {
+            var identity = o?.SigningIdentity;
+            items.Add(identity is null
+                ? new("Code-signing identity", ReadinessState.SetupRequired, true, "Name the certificate to sign with (CodesignKey), e.g. \"Apple Distribution: Company (TEAMID)\".")
+                : r.AppleIdentities.Count == 0 || r.AppleIdentities.Any(i => i.Name == identity || i.Sha1.Equals(identity, StringComparison.OrdinalIgnoreCase))
+                    ? new("Code-signing identity", r.AppleIdentities.Count == 0 ? ReadinessState.NotVerifiable : ReadinessState.Ready, true, $"\"{identity}\"" + (r.AppleIdentities.Count == 0 ? " (the keychain was not read; the build confirms)." : " is in the keychain."))
+                    : new("Code-signing identity", ReadinessState.NotFound, true, $"\"{identity}\" is not in this Mac's keychain. Installed: {string.Join("; ", r.AppleIdentities.Select(i => i.Name).Take(3))}.",
+                        "Install the certificate (Xcode › Settings › Accounts › Manage Certificates), then press Refresh.", SetupUrl: CertUrl));
+        }
+        if (m.Framework == MobileFramework.DotNetIos && !simulator && signing == MobileSigningMode.Unsigned)
+            items.Add(new("Code signing", ReadinessState.SetupRequired, true, DotNetIosArchiveNeedsSigning,
+                "Choose a certificate and provisioning profile (CodesignKey / CodesignProvision), or build for the iOS Simulator."));
+        else if (unsigned)
         {
             var why = simulator ? "Simulator builds are not code-signed for devices." : "Unsigned archive (inspection only).";
             items.Add(new("Signing certificate", ReadinessState.NotNeeded, false, why));
@@ -202,6 +226,49 @@ public static class MobileReadiness
         foreach (var name in new[] { "JDK", "Android SDK" })
             items.Add(new(name, ReadinessState.NotNeeded, false, "Not used for iOS builds."));
     }
+
+    /// <summary>
+    /// Compares the deployment target of every app target the chosen scheme archives with the range the selected Xcode's
+    /// iPhoneOS SDK supports. Out of range blocks the build before xcodebuild runs and names the routes that work: another
+    /// Xcode (selected explicitly in Toolchains) or another scheme the project offers. HCG never changes the target.
+    /// </summary>
+    internal static void AddDeploymentRange(List<ReadinessItem> items, IosProjectInfo ios, MobileBuildOptions? o, XcodeStatus x, bool simulator)
+    {
+        var scheme = ios.Schemes.FirstOrDefault(sc => sc.Name == o?.Scheme) ?? ios.Schemes.FirstOrDefault(sc => ios.AppTargets.Any(t => t.Name == sc.Name)) ?? ios.Schemes.FirstOrDefault();
+        var targetNames = scheme?.ArchiveTargets.Count > 0 ? scheme.ArchiveTargets : [scheme?.Name ?? ios.AppTargets.FirstOrDefault()?.Name ?? ""];
+        var targets = ios.AppTargets.Where(t => targetNames.Contains(t.Name)).ToList();
+        if (targets.Count == 0) return;
+        var range = x.IosDeploymentRange;
+        var xcode = $"Xcode {x.VerifiedVersion} ({x.ActiveDeveloperDirectory})";
+        if (range is null)
+        {
+            items.Add(new("Deployment target", ReadinessState.NotVerifiable, false,
+                $"{string.Join(", ", targets.Select(t => $"{t.Name}: iOS {t.DeploymentTarget ?? "(not set)"}"))}. The supported range of {xcode} could not be read (no iPhoneOS SDKSettings.json); xcodebuild will check it."));
+            return;
+        }
+        var outside = targets.Where(t => range.Contains(t.DeploymentTarget) == false).ToList();
+        if (outside.Count == 0)
+        {
+            items.Add(new("Deployment target", ReadinessState.Ready, true,
+                $"{string.Join(", ", targets.Select(t => $"{t.Name}: iOS {t.DeploymentTarget}"))} — within {xcode}'s supported range iOS {range.Minimum}–{range.Maximum} (SDK {range.SdkVersion})."));
+            return;
+        }
+        var other = ios.Schemes.Where(sc => sc.Name != scheme?.Name)
+            .Select(sc => (Scheme: sc, Targets: ios.AppTargets.Where(t => (sc.ArchiveTargets.Count > 0 ? sc.ArchiveTargets : [sc.Name]).Contains(t.Name)).ToList()))
+            .Where(c => c.Targets.Count > 0 && c.Targets.All(t => range.Contains(t.DeploymentTarget) == true)).ToList();
+        var routes = new List<string> { $"Select an Xcode that supports iOS {outside[0].DeploymentTarget} in Toolchains › Xcode (HCG uses it for its own builds only; the system setting is unchanged)" };
+        routes.AddRange(other.Select(c => $"or choose scheme {c.Scheme.Name} (iOS {string.Join(", ", c.Targets.Select(t => t.DeploymentTarget).Distinct())}; it does not install on older iOS versions)"));
+        var below = IosDeploymentRange.Parse(outside[0].DeploymentTarget) < IosDeploymentRange.Parse(range.Minimum);
+        items.Add(new("Deployment target", ReadinessState.IncompatibleVersion, true,
+            $"{string.Join(", ", outside.Select(t => $"{t.Name} (scheme {scheme?.Name}) needs iOS {t.DeploymentTarget}"))}, but {xcode} with the iPhoneOS {range.SdkVersion} SDK supports iOS {range.Minimum}–{range.Maximum}" +
+            $" ({(below ? "it is below the minimum" : "it is above the maximum")}). xcodebuild would stop with “The iOS deployment target 'IPHONEOS_DEPLOYMENT_TARGET' is set to {outside[0].DeploymentTarget}, but the range of supported deployment target versions is {range.Minimum} to {range.Maximum}”." +
+            " HCG does not change the project's deployment target.",
+            string.Join("; ", routes) + "."));
+    }
+
+    /// <summary>The .NET iOS SDK refuses an unsigned archive (Xamarin.Shared.targets, CI run 78).</summary>
+    public const string DotNetIosArchiveNeedsSigning =
+        ".NET for iOS creates an Xcode archive (and an IPA) only with code signing: the iOS SDK stops with \"Code signing must be enabled to create an Xcode archive\". An unsigned device archive is not possible for this project type.";
 
     private static void AddIosSigning(List<ReadinessItem> items, MobileAnalysis m, MobileOutput output, MobileBuildOptions? o, MobileSigningMode signing, ToolchainReport r)
     {
@@ -239,7 +306,8 @@ public static class MobileReadiness
             IosExportMethod.Enterprise => IosProfileKind.Enterprise,
             _ => IosProfileKind.Development,
         };
-        var bundleIds = m.Ios?.AppTargets.Select(t => t.BundleIdentifier).OfType<string>().ToList() ?? [];
+        var bundleIds = m.Ios?.AppTargets.Select(t => t.BundleIdentifier).OfType<string>().ToList()
+                        ?? (m.DotNetIos?.ApplicationId is { } dotnetId ? [dotnetId] : []);
         var now = DateTimeOffset.UtcNow;
         var candidates = r.IosProfiles.Where(p => !p.IsExpired(now) && p.Kind == wantedKind && (bundleIds.Count == 0 || bundleIds.Any(p.Matches))).ToList();
         switch (signing)
@@ -303,6 +371,23 @@ public static class MobileReadiness
                     ? new(".NET MAUI workload", ReadinessState.Ready, true, string.Join(", ", workloads))
                     : new(".NET MAUI workload", ReadinessState.NotFound, true, $"The .NET MAUI {(android ? "Android" : "iOS")} workload is not installed.",
                         $"Run: dotnet workload install {(android ? "maui-android" : "maui-ios")} (HCG never installs workloads).", SetupUrl: "https://learn.microsoft.com/dotnet/maui/get-started/installation"));
+                items.Add(new("Flutter SDK", ReadinessState.NotNeeded, false, "Not a Flutter project."));
+                break;
+            case MobileFramework.DotNetIos:
+                items.Add(r.Find(ToolchainIds.DotNetSdk) is { IsAvailable: true } sdkRow
+                    ? new(".NET SDK", ReadinessState.Ready, true, $".NET SDK {sdkRow.Version}" + (m.DotNetIos?.GlobalJsonSdk is { } gj ? $" (global.json asks for {gj})" : ""), Path: sdkRow.ExecutablePath, Version: sdkRow.Version)
+                    : new(".NET SDK", ReadinessState.NotFound, true, "The .NET SDK was not found.", "Install the .NET SDK the project's global.json names, then press Refresh.", SetupUrl: "https://dotnet.microsoft.com/download"));
+                var ios = r.Find(ToolchainIds.DotNetIosWorkload);
+                var pin = m.DotNetIos?.WorkloadPin;
+                items.Add(ios is not { IsAvailable: true }
+                    ? new(".NET iOS workload", r.Host.Platform == TargetPlatform.MacOS ? ReadinessState.NotFound : ReadinessState.OtherHost, true,
+                        ios?.Detail ?? "The .NET iOS workload is not installed.",
+                        pin is null ? "Run: dotnet workload install ios (HCG never installs workloads)." : $"Run: dotnet workload install ios --from-rollback-file \"{m.DotNetIos!.WorkloadPinFile}\" — the version the project pins ({pin}). HCG never installs workloads.",
+                        SetupUrl: "https://learn.microsoft.com/dotnet/core/tools/dotnet-workload-install")
+                    : pin is not null && ios.Version is { } installed && !pin.StartsWith(installed.Split('/')[0], StringComparison.Ordinal)
+                        ? new(".NET iOS workload", ReadinessState.IncompatibleVersion, true, $"Installed {installed}; the project pins {pin} ({m.DotNetIos!.WorkloadPinFile}). Each workload version requires a specific Xcode.",
+                            $"Install the pinned version: dotnet workload install ios --from-rollback-file \"{m.DotNetIos.WorkloadPinFile}\", or update the project's pin deliberately.", Version: installed)
+                        : new(".NET iOS workload", ReadinessState.Ready, true, ios.Detail ?? "Installed" + (pin is null ? "" : $"; matches the project's pin {pin}"), Version: ios.Version));
                 items.Add(new("Flutter SDK", ReadinessState.NotNeeded, false, "Not a Flutter project."));
                 break;
             default:

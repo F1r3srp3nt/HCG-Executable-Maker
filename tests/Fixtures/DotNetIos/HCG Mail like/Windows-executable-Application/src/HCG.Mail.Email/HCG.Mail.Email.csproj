@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- MailKit/MimeKit implementation of the Core mail contracts, plus HTML sanitization. -->
+  <PropertyGroup>
+    <RootNamespace>HCG.Mail.Email</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.Mail.Core\HCG.Mail.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MailKit" />
+    <PackageReference Include="MimeKit" />
+    <PackageReference Include="HtmlSanitizer" />
+    <PackageReference Include="DnsClient" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.Mail.Tests" />
+  </ItemGroup>
+</Project>

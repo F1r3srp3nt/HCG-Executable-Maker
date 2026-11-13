@@ -47,7 +47,8 @@ public static class SwiftCapabilities
 
         var sdk = report.Find(ToolchainIds.MacOSSdk);
         requirements.Add(new ToolchainRequirement(ToolchainIds.MacOSSdk, "macOS SDK", package.MinimumMacOSHint, sdk?.IsAvailable == true, sdk?.Version is { } v ? $"macOS SDK {v}" : sdk?.Detail));
-        if (sdk?.IsAvailable != true) fixes.Add("No macOS SDK was found (xcrun --sdk macosx --show-sdk-path failed). " + DeveloperDirHint);
+        if (sdk?.Status == ToolchainStatus.ValidationFailed) fixes.Add("The macOS SDK could not be checked: " + sdk.Detail + " " + DeveloperDirHint);
+        else if (sdk?.IsAvailable != true) fixes.Add("No macOS SDK was found (xcrun --sdk macosx --show-sdk-path failed" + (sdk?.Detail is { Length: > 0 } d ? ": " + d : "") + "). " + DeveloperDirHint);
         else if (package.MinimumMacOSHint is { } min && sdk.Version is { } sdkVersion && Compare(sdkVersion, min) < 0)
             fixes.Add($"The package targets macOS {min}, newer than the installed macOS SDK {sdkVersion}. Install a newer Xcode.");
 

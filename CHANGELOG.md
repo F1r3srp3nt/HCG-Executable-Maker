@@ -25,7 +25,82 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ### Changed
 - The web → desktop conversion's change kind is now `WorkspaceChangeKind`, so it no longer clashes with the porting domain's `FileChangeKind`.
 
+## [Unreleased] — HCG Nexus, HCG Mail iOS, HCG Sentinel ([docs/HCG-PROJECTS.md](docs/HCG-PROJECTS.md))
+
+### Added
+- **Theos jailbreak packages:** detection before generic Make (tweak, preference bundle, app, tool, library; subprojects;
+  separately packaged projects), the configurations the Makefile defines (rootless / rootful, SDK and deployment target
+  from TARGET, project refusals shown verbatim), per-item toolchain checks (Theos, SDK, GNU make 4+, ldid, perl, iOS
+  clang), `make package` in a per-configuration copy, and `.deb` verification (metadata, Architecture, install prefix,
+  payload, binary slices, arm64e pointer-authentication ABI, minimum iOS, maintainer scripts) with INSTALL.txt.
+  Never an IPA; never installed; never a respring.
+- **.NET for iOS applications (non-MAUI, e.g. HCG Mail's Avalonia.iOS head):** detected through the imported props
+  chain; repository-root references; workload pin readiness; Simulator build, device archive (`ArchiveOnBuild` into
+  HCG's folder), signed IPA through a separate `xcodebuild -exportArchive` stage.
+- **Xcode deployment-range preflight** (from the selected Xcode's iPhoneOS SDKSettings.json) per archived target, with
+  the routes: another Xcode or another scheme. The project's target is never changed.
+- **Readable failures:** project-level xcodebuild diagnostics parsed; the first actionable error in full (copy), full log
+  and `.xcresult` export; result bundles kept for every xcodebuild action; wrapping log lines.
+- **Precise states** in New Build and Mobile Build Studio, and a pre-build summary (project, adapter, toolchain,
+  architecture, output type).
+
+### Changed
+- .NET for iOS archives are offered signed only: the iOS SDK refuses an unsigned archive ("Code signing must be enabled
+  to create an Xcode archive"); Maker blocks the archive before building until a certificate is in the keychain.
+- A first error that ends in ":" carries the reason xcodebuild prints on the following lines (e.g. "iOS 18.0 is not
+  installed. To use with Xcode, first download and install the platform").
+- The Theos iOS toolchain is found from the selected developer directory without starting `xcrun --sdk` (which starts
+  xcodebuild); the macOS SDK probe waits for xcrun's first answer and reports a timeout as one.
+- The static MSBuild reader follows `<Import>` with `$(MSBuildThisFileDirectory)` and never reads outside the import.
+- A net*-ios Exe is no longer listed as an "Avalonia desktop application".
+
+## [Unreleased] — `feature/native-cpp`
+
+### Added — C/C++ projects ([docs/NATIVE-CPP.md](docs/NATIVE-CPP.md))
+- **The "C/C++ support planned" placeholder is gone.** C/C++ projects are inspected, configured, built, verified and
+  packaged through the New Build wizard.
+- **Detection (static):** CMake (topmost `project()`), generic Make, sources without a build system (only when a
+  `main()` exists) and Theos, checked before Make. Project roots inside repositories skip `build/`, `_deps/`,
+  `third_party/`, `vendor/`, `cmake-build-*` and similar folders. Meson, Autotools without a Makefile and Visual Studio
+  solutions are recognized and explained.
+- **CMake:** a trusted *Configure with CMake* step runs CMake in HCG's own folder and reads the targets through the
+  CMake File API. Presets, build type, cache entries and an explicit downloads switch
+  (`FETCHCONTENT_FULLY_DISCONNECTED` by default). Each executable target is an entry under *Project to build*;
+  libraries are listed separately and never offered as runnable.
+- **Make:** an explicit target, expected output and variables; the build runs in a copy of the project.
+- **Sources:** explicit file selection, language and standard; the generated CMakeLists.txt lives in HCG's build folder.
+- **Build:** the existing trusted-build flow and worker, argument lists only, streamed logs, GCC/Clang/MSVC/CMake/linker
+  error parsing with file and line, cancellation and time limits that stop child processes.
+- **Verification:** real executable image (ELF/Mach-O/PE), format and architecture, a runtime-library report
+  (`RUNTIME-DEPENDENCIES.txt`) with a warning when the project's own shared libraries are not found from the
+  executable's folder. Portable folder/ZIP; on a Mac, the project's own `.app` with a separate signing stage and a
+  ditto ZIP. HCG never runs or installs the produced program.
+- **Wizard states:** toolchain missing · configuration required · ready · building · failed · verified (or not
+  supported). Only this computer's platform and architectures can be chosen.
+- **Toolchains:** a C / C++ group (CMake 3.20+, Ninja, make, C and C++ compilers, MSVC via vswhere).
+- **Tests and CI:** 28 tests with fixtures under `tests/Fixtures/Native/`, a `--native` UI-driver flow, and a
+  `native-cpp` CI job on Linux and macOS (including a universal `MACOSX_BUNDLE` app).
+
 ## [Unreleased] — `feature/web-desktop-app`
+
+### Added — Swift packaging contracts (`AppPackaging.json`) ([docs/SWIFT-MACOS.md](docs/SWIFT-MACOS.md#packaging-contracts-apppackagingjson))
+- **Swift packages can declare what a complete .app contains:** helper executables built by prebuild commands,
+  resources, an Info.plist template and an icon (schema `hcg-app-packaging/1`). Apps such as HCG Server, whose Go
+  agent lives in `Contents/Helpers`, are now packaged complete instead of without their helper.
+- **Read as data during inspection, with strict validation:**
+  - unknown keys and schemas are rejected;
+  - commands must be argument lists;
+  - paths must stay inside the workspace;
+  - helpers go only to `Contents/Helpers` and resources to `Contents/Resources`;
+  - invalid contracts are reported in Configure.
+- **Configure shows the prebuild commands verbatim.** They run only after explicit confirmation, and the build refuses
+  if the file changed after it was confirmed (SHA-256).
+- **Required tools** (for example `go >= 1.25`) are located (PATH, Homebrew, `/usr/local`) and version-checked, then
+  put first on the command's PATH.
+- **Helpers are placed in `Contents/Helpers` and signed before the app** (ad hoc, or Developer ID with the hardened
+  runtime). They are verified: present, executable, promised slices, own signature, and `<helper> version` matching
+  the app version.
+- Identity is prefilled from the contract and its Info.plist template; the template's other keys are kept in the app.
 
 ### Changed — Web app to desktop app ([docs/ELECTRON.md](docs/ELECTRON.md#browser-apps-create-desktop-application-vite--react))
 - **A recognised web app is now a selectable conversion candidate.** Browser apps, including nested ones such as

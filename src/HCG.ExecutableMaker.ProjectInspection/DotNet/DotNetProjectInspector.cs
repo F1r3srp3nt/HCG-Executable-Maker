@@ -143,7 +143,7 @@ public sealed partial class DotNetProjectInspector(TimeProvider time) : IProject
         MsBuildProjectFile file;
         try
         {
-            file = MsBuildProjectFile.Parse(full, FindAncestorFiles(index.Root, projDir, "Directory.Build.props"), FindCentralVersions(index.Root, projDir));
+            file = MsBuildProjectFile.Parse(full, FindAncestorFiles(index.Root, projDir, "Directory.Build.props"), FindCentralVersions(index.Root, projDir), index.Root);
         }
         catch (Exception ex) when (ex is System.Xml.XmlException or IOException)
         {
@@ -179,11 +179,14 @@ public sealed partial class DotNetProjectInspector(TimeProvider time) : IProject
         var isWpf = file.IsTrue("UseWPF");
         var isWinForms = file.IsTrue("UseWindowsForms");
         var isExe = outputType.Equals("Exe", StringComparison.OrdinalIgnoreCase) || outputType.Equals("WinExe", StringComparison.OrdinalIgnoreCase);
+        // A net*-ios Exe is an iPhone/iPad app: built by the .NET iOS workload in Mobile Build Studio, never published as a desktop app.
+        var isIosApp = isExe && !isMaui && tfms.Count > 0 && tfms.All(t => t.Contains("-ios", StringComparison.OrdinalIgnoreCase));
 
         var appType =
             !file.IsSdkStyle ? "Legacy .NET Framework project" :
             isTest ? "Test project" :
             isMaui ? ".NET MAUI application" :
+            isIosApp ? (isAvalonia ? ".NET for iOS application (Avalonia)" : ".NET for iOS application") :
             isBlazorWasm ? "Blazor WebAssembly application" :
             isAvalonia && isExe ? "Avalonia desktop application" :
             isWpf && isExe ? "WPF desktop application" :
@@ -192,9 +195,15 @@ public sealed partial class DotNetProjectInspector(TimeProvider time) : IProject
             isExe ? "Console application" :
             isAvalonia ? "Avalonia library" : "Class library";
 
-        var runnable = file.IsSdkStyle && isExe && !isTest && !isMaui && !isBlazorWasm;
+        var runnable = file.IsSdkStyle && isExe && !isTest && !isMaui && !isBlazorWasm && !isIosApp;
         var compatible = ComputeCompatiblePlatforms(tfms, isWpf || isWinForms, out var tfmNotes);
-        diags.AddRange(tfmNotes.Select(n => new AnalysisDiagnostic(DiagnosticSeverity.Warning, n, rel)));
+        if (isIosApp)
+            diags.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info,
+                $"{name} is an iPhone/iPad app ({string.Join(", ", tfms)}). It is built with the .NET iOS workload and Xcode in Mobile Build Studio (Simulator build, device archive, signed IPA), not published as a desktop app.", rel));
+        else diags.AddRange(tfmNotes.Select(n => new AnalysisDiagnostic(DiagnosticSeverity.Warning, n, rel)));
+        foreach (var outside in file.OutsideWorkspace.Take(4))
+            diags.Add(new AnalysisDiagnostic(DiagnosticSeverity.Warning,
+                $"Uses {outside}, which is outside the imported folder. Import the repository root that contains it: HCG never builds a partial copy of a repository.", rel));
         if (!file.IsSdkStyle)
             diags.Add(new AnalysisDiagnostic(DiagnosticSeverity.Warning, "Non-SDK-style (legacy) project. M0.1 only builds SDK-style projects.", rel));
         if (isMaui)
@@ -374,7 +383,7 @@ public sealed partial class DotNetProjectInspector(TimeProvider time) : IProject
     [GeneratedRegex(@"^\s*(?:public\s+|internal\s+|static\s+|sealed\s+|partial\s+)*(?:class|struct|record)\s+\w+", RegexOptions.Multiline)]
     private static partial Regex TypeDeclarationRegex();
 
-    private static IReadOnlyList<string> FindAncestorFiles(string root, string startDir, string fileName)
+    internal static IReadOnlyList<string> FindAncestorFiles(string root, string startDir, string fileName)
     {
         // MSBuild imports the nearest Directory.Build.props only (unless it imports its parent). We mirror that.
         var dir = new DirectoryInfo(startDir);
@@ -388,9 +397,9 @@ public sealed partial class DotNetProjectInspector(TimeProvider time) : IProject
         return [];
     }
 
-    private static IReadOnlyDictionary<string, string>? FindCentralVersions(string root, string projDir)
+    internal static IReadOnlyDictionary<string, string>? FindCentralVersions(string root, string projDir)
     {
         var file = FindAncestorFiles(root, projDir, "Directory.Packages.props").FirstOrDefault();
-        return file is null ? null : MsBuildProjectFile.ReadCentralVersions(file);
+        return file is null ? null : MsBuildProjectFile.ReadCentralVersions(file, root);
     }
 }

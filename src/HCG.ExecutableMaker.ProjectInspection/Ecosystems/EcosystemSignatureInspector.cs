@@ -66,7 +66,7 @@ public sealed class EcosystemSignatureInspector(
         new EcosystemSignatureInspector("rust", "Rust / Cargo", "Rust", "Cargo", 45, Files("Cargo.toml"), time),
         new EcosystemSignatureInspector("java", "Java", "Java", "Maven/Gradle", 35, Files("pom.xml", "build.gradle", "build.gradle.kts"), time),
         new EcosystemSignatureInspector("python", "Python", "Python", "Python", 25, Files("pyproject.toml", "setup.py", "requirements.txt"), time),
-        new EcosystemSignatureInspector("cpp", "C / C++", "C/C++", "CMake/Make", 20,
-            idx => idx.Named("CMakeLists.txt", "meson.build", "Makefile").Concat(idx.WithExtension(".vcxproj")).ToList(), time),
+        // C/C++ (CMake, Make, sources, Theos) has a real inspector with build support.
+        new Native.NativeProjectInspector(time),
     ];
 }

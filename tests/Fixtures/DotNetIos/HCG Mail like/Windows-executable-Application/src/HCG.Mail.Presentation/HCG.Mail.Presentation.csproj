@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Platform-neutral user interface shared by the desktop app (Windows/macOS) and the iOS app: view models, the HCG
+    theme, icons and the sanitized HTML message view. Nothing here may depend on desktop windows, process start-up or
+    a particular operating system. Namespaces keep their original HCG.Mail.App.* names so desktop code is unchanged.
+  -->
+  <PropertyGroup>
+    <RootNamespace>HCG.Mail.App</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.Mail.Core\HCG.Mail.Core.csproj" />
+    <ProjectReference Include="..\HCG.Mail.Email\HCG.Mail.Email.csproj" />
+    <ProjectReference Include="..\HCG.Mail.Infrastructure\HCG.Mail.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.HtmlRenderer" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCGMail" />
+    <InternalsVisibleTo Include="HCG.Mail.App.Tests" />
+    <InternalsVisibleTo Include="HCG.Mail.Mobile" />
+    <InternalsVisibleTo Include="HCG.Mail.Mobile.Tests" />
+  </ItemGroup>
+</Project>

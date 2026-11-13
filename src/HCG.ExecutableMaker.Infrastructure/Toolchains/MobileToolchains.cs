@@ -34,7 +34,9 @@ public sealed partial class ToolchainDetector
         var (appleRows, identities, profiles) = await DetectAppleMobileAsync(xcode, ct).ConfigureAwait(false);
         list.AddRange(appleRows);
         list.Add(DetectFlutter());
-        list.Add(await DetectMauiWorkloadsAsync(ct).ConfigureAwait(false));
+        var workloads = await DetectMauiWorkloadsAsync(ct).ConfigureAwait(false);
+        list.Add(workloads.Row);
+        list.Add(workloads.Ios);
         return new MobileDetection(list, java, android, identities, profiles);
     }
 
@@ -372,21 +374,52 @@ public sealed partial class ToolchainDetector
 
     // ---------- .NET MAUI ----------
 
-    private async Task<ToolchainInfo> DetectMauiWorkloadsAsync(CancellationToken ct)
+    private async Task<(ToolchainInfo Row, ToolchainInfo Ios)> DetectMauiWorkloadsAsync(CancellationToken ct)
     {
         const string hint = "Install with: dotnet workload install maui (or maui-android / maui-ios). HCG never installs workloads itself.";
+        const string iosName = ".NET iOS workload";
+        var iosHint = Host.Platform == TargetPlatform.MacOS
+            ? "Install it yourself: dotnet workload install ios (or the exact version a project pins, e.g. dotnet workload install ios --from-rollback-file <file>). The workload also requires a matching Xcode. HCG never installs workloads."
+            : ".NET for iOS apps are compiled on a Mac (Xcode provides the iOS SDK, the linker and codesign).";
         var dotnet = locator.Find("dotnet", ExecutableLocator.DotNetCandidates());
-        if (dotnet is null) return Missing(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, hint);
+        if (dotnet is null) return (Missing(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, hint), Missing(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, iosHint));
         try
         {
             var (r, stdout, _) = await runner.CaptureAsync(new ProcessSpec { Executable = dotnet, Arguments = ["workload", "list"], Timeout = TimeSpan.FromSeconds(60), Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
             var workloads = r.Succeeded ? ParseWorkloadList(stdout) : [];
             var mobile = workloads.Where(w => w is "maui" or "maui-android" or "maui-ios" or "android" or "ios" or "maui-mobile").ToList();
-            return mobile.Count > 0
+            var row = mobile.Count > 0
                 ? new ToolchainInfo { Id = ToolchainIds.MauiWorkloads, DisplayName = ".NET MAUI workloads", Category = MauiCat, Status = ToolchainStatus.Installed, ExecutablePath = dotnet, Version = string.Join(", ", mobile), AdditionalVersions = mobile }
                 : Missing(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, hint);
+            var iosVersion = WorkloadManifestVersion(stdout, "ios");
+            var hasIos = workloads.Any(w => w is "ios" or "maui-ios" or "maui" or "maui-mobile");
+            var ios = Host.Platform != TargetPlatform.MacOS
+                ? Unsupported(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, iosHint)
+                : hasIos
+                    ? new ToolchainInfo
+                    {
+                        Id = ToolchainIds.DotNetIosWorkload, DisplayName = iosName, Category = MauiCat, Status = ToolchainStatus.Installed, ExecutablePath = dotnet,
+                        Version = iosVersion, Detail = $"Installed via {string.Join(", ", workloads.Where(w => w is "ios" or "maui-ios" or "maui" or "maui-mobile"))}" + (iosVersion is null ? "" : $"; manifest {iosVersion}"),
+                        InstallHint = iosHint,
+                    }
+                    : Missing(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, iosHint);
+            return (row, ios);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return Failed(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, dotnet, ex.Message, hint); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (Failed(ToolchainIds.MauiWorkloads, ".NET MAUI workloads", MauiCat, dotnet, ex.Message, hint), Failed(ToolchainIds.DotNetIosWorkload, iosName, MauiCat, dotnet, ex.Message, iosHint));
+        }
+    }
+
+    /// <summary>The manifest version column of a workload in <c>dotnet workload list</c> (e.g. "26.2.10233/10.0.100").</summary>
+    public static string? WorkloadManifestVersion(string output, string id)
+    {
+        foreach (var raw in output.Split('\n'))
+        {
+            var parts = raw.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2 && parts[0] == id && Regex.IsMatch(parts[1], @"^\d+\.\d+")) return parts[1];
+        }
+        return null;
     }
 
     /// <summary>Workload ids from the <c>dotnet workload list</c> table.</summary>

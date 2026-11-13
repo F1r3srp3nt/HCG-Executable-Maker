@@ -1,0 +1,11 @@
+<Project>
+  <!--
+    Central package versions: everything the shared projects use is pinned in the desktop file and imported here, so
+    the iOS app can never drift onto different versions of Avalonia, MailKit, MSAL or the sanitizer.
+    Only iOS-only packages are added below, pinned to the same Avalonia version.
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)../Windows-executable-Application/Directory.Packages.props" />
+  <ItemGroup Label="iOS">
+    <PackageVersion Include="Avalonia.iOS" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+</Project>

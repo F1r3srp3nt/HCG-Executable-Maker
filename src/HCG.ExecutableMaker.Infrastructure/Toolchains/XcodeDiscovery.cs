@@ -99,6 +99,35 @@ public static class XcodeDiscovery
         int? FirstLaunchExitCode,
         IReadOnlyList<string> Sdks);
 
+    /// <summary>
+    /// The iOS deployment range of a developer directory's iPhoneOS SDK, from SDKSettings.json
+    /// (SupportedTargets.iphoneos.MinimumDeploymentTarget / MaximumDeploymentTarget). Read only; nothing is run.
+    /// </summary>
+    public static IosDeploymentRange? ReadIosDeploymentRange(string? developerDirectory)
+    {
+        if (developerDirectory is null) return null;
+        var sdks = Path.Combine(developerDirectory, "Platforms", "iPhoneOS.platform", "Developer", "SDKs");
+        var settings = new[] { Path.Combine(sdks, "iPhoneOS.sdk", "SDKSettings.json") }
+            .Concat(Directory.Exists(sdks) ? Directory.GetDirectories(sdks, "iPhoneOS*.sdk").Select(d => Path.Combine(d, "SDKSettings.json")) : [])
+            .FirstOrDefault(File.Exists);
+        return settings is null ? null : ParseIosDeploymentRange(File.ReadAllText(settings));
+    }
+
+    public static IosDeploymentRange? ParseIosDeploymentRange(string json)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("SupportedTargets", out var targets) || !targets.TryGetProperty("iphoneos", out var ios)) return null;
+            string? S(System.Text.Json.JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+            var min = S(ios, "MinimumDeploymentTarget");
+            var max = S(ios, "MaximumDeploymentTarget");
+            return min is null || max is null ? null : new IosDeploymentRange(min, max, S(ios, "RecommendedDeploymentTarget"), S(root, "Version"));
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
     public static XcodeStatus Diagnose(ProbeResults p)
     {
         var active = p.ActiveDeveloperDirectory;

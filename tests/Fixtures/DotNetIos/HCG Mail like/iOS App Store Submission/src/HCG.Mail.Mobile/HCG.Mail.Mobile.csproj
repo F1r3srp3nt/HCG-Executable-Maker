@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The iPhone/iPad user interface: navigation shell, touch-sized pages, adaptive iPhone/iPad layout, keyboard,
+    safe-area and text-size handling. It is a plain net10.0 Avalonia library with no iOS API calls, so it is
+    built and tested headlessly on any OS; everything iOS-specific (Keychain, MSAL redirect, share sheet,
+    Dynamic Type, idiom) is supplied by HCG.Mail.iOS through IMobilePlatform.
+    Mail engine, view models and theme are reused from the shared projects; nothing is duplicated here.
+  -->
+  <PropertyGroup>
+    <RootNamespace>HCG.Mail.Mobile</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(HcgSharedSource)HCG.Mail.Core/HCG.Mail.Core.csproj" />
+    <ProjectReference Include="$(HcgSharedSource)HCG.Mail.Email/HCG.Mail.Email.csproj" />
+    <ProjectReference Include="$(HcgSharedSource)HCG.Mail.Infrastructure/HCG.Mail.Infrastructure.csproj" />
+    <ProjectReference Include="$(HcgSharedSource)HCG.Mail.Presentation/HCG.Mail.Presentation.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.HtmlRenderer" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The official HCG logo, shared with the desktop app (one copy in the repository). -->
+    <AvaloniaResource Include="$(HcgSharedSource)HCG.Mail.App/Assets/Branding/hcg-logo.png" Link="Assets/hcg-logo.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.Mail.Mobile.Tests" />
+    <InternalsVisibleTo Include="HCGMail.iOS" />
+  </ItemGroup>
+</Project>

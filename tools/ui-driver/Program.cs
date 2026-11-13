@@ -11,6 +11,9 @@
 //       [--expect-products TokenLab] [--expect-libraries TokenLabCore] [--expect-tests TokenLabCoreTests]
 //       --output <dir> --screenshots <dir> [--prefix distil]
 //   --expect-blocked-host: on Windows/Linux, prove the wizard refuses to evaluate/build the package and explains why.
+//   Packaging contract (AppPackaging.json): --expect-contract-command "<argv as shown>" proves the command is shown and the
+//       build is refused until confirmed; --expect-contract-helpers Contents/Helpers/x[,…]; --confirm-contract ticks
+//       “Run these commands while building”.
 // Usage (Electron app, built with the project's own electron-builder workflow):
 //   dotnet run --project tools/ui-driver -- --electron --source <folder|zip> [--project <dir>] [--arch arm64|x64]
 //       [--formats app,zip,dmg | folder] [--expect-name N] [--expect-bundle-id ID] [--expect-version V] --output <dir> --screenshots <dir>
@@ -52,7 +55,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -201,6 +204,8 @@ internal static partial class Program
         if (wizard.ImportError is not null) return 1;
         if (_args.ContainsKey("prepare-desktop")) return await RunPrepareDesktopAsync(wizard, host, output);
         if (_args.ContainsKey("electron")) return await RunElectronAsync(wizard, host, output);
+        if (_args.ContainsKey("native")) return await RunNativeAsync(wizard, host, output);
+        if (_args.ContainsKey("mobile")) return await RunMobileAsync(main, wizard, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
 
         // 2. Inspect: packages listed, none auto-selected when there are several.
@@ -287,6 +292,26 @@ internal static partial class Program
         if (Arg("expect-bundle-id") is { } eb) Check(wizard.AppId == eb, $"Bundle id {wizard.AppId} (expected {eb}, from the project's packaging script)");
         if (Arg("expect-version") is { } ev) Check($"{wizard.Version} ({wizard.SwiftBuildNumber})" == ev, $"Version {wizard.Version} ({wizard.SwiftBuildNumber}) (expected {ev})");
         if (Arg("expect-name") is { } en) Check(wizard.AppName == en, $"Display name {wizard.AppName} (expected {en})");
+        // Packaging contract (AppPackaging.json): its commands are shown verbatim and run only once confirmed.
+        if (wizard.HasSwiftContract)
+        {
+            Log("Packaging contract: " + wizard.SwiftContractSummary);
+            if (wizard.SwiftContractError is { } contractError) Log("Packaging contract error: " + contractError);
+            foreach (var c in wizard.SwiftContractCommands) Log($"Contract command: {c.Description} | {c.Command} | {c.Detail}");
+            foreach (var c in wizard.SwiftContractContents) Log("Contract adds: " + c);
+        }
+        if (Arg("expect-contract-command") is { } expectedCommand)
+        {
+            Check(wizard.HasSwiftContract && wizard.SwiftContractError is null, "Packaging contract shown in Configure");
+            Check(wizard.SwiftContractCommands.Any(c => c.Command == expectedCommand), $"Contract command shown verbatim: {expectedCommand}");
+            Check(!wizard.SwiftContractConfirmed, "Contract commands are not confirmed by default");
+            Check(wizard.ConfigErrors.Any(e => e.StartsWith("This app needs its helper programs", StringComparison.Ordinal)),
+                "Build refused until the contract's commands are confirmed");
+            Shot("contract-unconfirmed");
+        }
+        foreach (var helper in (Arg("expect-contract-helpers") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            Check(wizard.SwiftContractContents.Any(c => c.StartsWith(helper + "  ", StringComparison.Ordinal)), $"Contract places {helper}");
+        if (_args.ContainsKey("confirm-contract")) wizard.SwiftContractConfirmed = true;
         foreach (var err in wizard.ConfigErrors) Log("Config error: " + err);
         Check(wizard.ConfigErrors.Count == 0, "Configuration valid");
         Shot("configure");

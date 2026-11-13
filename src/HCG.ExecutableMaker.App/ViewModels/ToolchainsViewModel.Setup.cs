@@ -143,7 +143,7 @@ public static class ToolchainGrouping
         var host = report.Host.Platform;
         static int Order(string cat) => cat switch
         {
-            "Build" or "Source control" => 0, "macOS" or "Swift" or "Swift / macOS apps" => 1, "Android" => 2, "Apple mobile" => 3, "Flutter" => 4, ".NET MAUI" => 5, "Node.js / Electron" => 6, _ => 7,
+            "Build" or "Source control" => 0, "macOS" or "Swift" or "Swift / macOS apps" => 1, "Android" => 2, "Apple mobile" => 3, "Flutter" => 4, ".NET MAUI" => 5, "Node.js / Electron" => 6, "C / C++" => 7, _ => 8,
         };
         // Groups that belong entirely to another host OS go last: they are information, not work to do.
         foreach (var g in report.Toolchains.GroupBy(t => t.Category)
@@ -157,6 +157,7 @@ public static class ToolchainGrouping
                 "Flutter" => ("Flutter", "Needed only for Flutter projects.", true),
                 ".NET MAUI" => (".NET MAUI", "Needed only for .NET MAUI projects.", true),
                 "Node.js / Electron" => ("Node.js / Electron", "Needed only for Electron desktop apps. The Node.js version is checked against each project's engines field when you inspect it.", true),
+                "C / C++" => ("C / C++", "Needed only for C/C++ projects. CMake projects need CMake and a compiler (Ninja is optional); Makefile projects need make and a compiler. HCG builds for this computer's platform only.", true),
                 "Windows" when otherHost => ("Windows (other host)", "These tools exist only on Windows and are used when building Windows installers on a Windows PC. Nothing to set up on this computer.", true),
                 "macOS" when otherHost => ("macOS (other host)", "These tools exist only on macOS. Nothing to set up on this computer.", true),
                 "Swift / macOS apps" when host != TargetPlatform.MacOS => ("Swift / macOS apps (Mac only)", "Swift macOS apps are built on a Mac. Nothing to set up on this computer.", true),

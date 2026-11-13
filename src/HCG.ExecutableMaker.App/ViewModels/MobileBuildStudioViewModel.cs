@@ -208,6 +208,14 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         }
         if (m.Flutter is { } f) ProjectRows.Add(new("Flutter", $"{f.Name} {f.Version} · SDK {f.SdkConstraint}"));
         if (m.Maui is { } maui) ProjectRows.Add(new(".NET MAUI", $"{maui.ProjectPath} · {string.Join(", ", maui.TargetFrameworks)}"));
+        if (m.DotNetIos is { } dn)
+        {
+            ProjectRows.Add(new(".NET for iOS", $"{dn.ProjectPath} · {dn.TargetFramework}{(dn.UiFramework is { } ui ? $" · {ui} {dn.UiFrameworkVersion}" : "")} · no .xcodeproj (the .NET iOS workload drives Xcode)"));
+            ProjectRows.Add(new("App", $"{dn.ApplicationTitle} · {dn.ApplicationId} · {dn.DisplayVersion ?? "version not known (its props are outside the import)"} ({dn.BuildNumber}) · iOS {dn.MinimumOS}+{(dn.Entitlements is { } e ? " · entitlements " + e : "")}"));
+            ProjectRows.Add(new("Shared projects", dn.ProjectReferences.Count == 0 ? "none" : string.Join(", ", dn.ProjectReferences)));
+            if (dn.OutsideWorkspace.Count > 0) ProjectRows.Add(new("Outside the import", string.Join(", ", dn.OutsideWorkspace) + " — import the repository root"));
+            ProjectRows.Add(new("Toolchain pins", $".NET SDK {dn.GlobalJsonSdk ?? "(no global.json)"} · iOS workload {dn.WorkloadPin ?? "(not pinned)"}{(dn.WorkloadPinFile is { } pinFile ? $" ({pinFile})" : "")}"));
+        }
         if (m.ArtifactPath is { } artifact) ProjectRows.Add(new("Artifact", artifact));
         Diagnostics.Clear();
         foreach (var d in a.Diagnostics) Diagnostics.Add(new DiagnosticItem(d));
@@ -264,7 +272,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     [ObservableProperty] private string? _selectedModule;
     [ObservableProperty] private string? _selectedVariant;
     [ObservableProperty] private string? _selectedScheme;
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(ShowTeam), nameof(ShowProfile), nameof(ShowProvisioningUpdates), nameof(SigningExplanation))] private Choice<MobileSigningMode>? _selectedSigning;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(ShowTeam), nameof(ShowProfile), nameof(ShowProvisioningUpdates), nameof(SigningExplanation), nameof(ShowSigningIdentity))] private Choice<MobileSigningMode>? _selectedSigning;
     [ObservableProperty] private Choice<IosExportMethod>? _selectedExportMethod;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(ShowDeviceSpec))] private Choice<ApkSetMode>? _selectedApkSetMode;
     [ObservableProperty] private string _developmentTeam = "";
@@ -282,6 +290,10 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     [ObservableProperty] private bool _showApkSet;
 
     public bool ShowTeam => SelectedSigning?.Value is MobileSigningMode.AppleAutomatic or MobileSigningMode.AppleManual;
+    /// <summary>.NET for iOS signs with a named certificate (CodesignKey).</summary>
+    public bool ShowSigningIdentity => SelectedSigning?.Value == MobileSigningMode.AppleManual && Mobile?.Framework == MobileFramework.DotNetIos;
+    [ObservableProperty] private string _signingIdentity = "";
+    partial void OnSigningIdentityChanged(string value) => PrepareSummary();
     public bool ShowProfile => SelectedSigning?.Value is MobileSigningMode.AppleManual;
     public bool ShowProvisioningUpdates => SelectedSigning?.Value is MobileSigningMode.AppleAutomatic;
     public bool ShowDeviceSpec => ShowApkSet && SelectedApkSetMode?.Value == ApkSetMode.DeviceTargeted;
@@ -292,6 +304,8 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         MobileSigningMode.Unsigned => "Produces an unsigned artifact. It cannot be installed (Android) or exported to an IPA (iOS) until it is signed.",
         MobileSigningMode.DebugKeystore => "Signs with HCG's local Android debug key (created once in HCG's data folder; the conventional public debug password). Installable for testing — never accepted by Google Play.",
         MobileSigningMode.AppleAutomatic => "Xcode automatic signing for your Apple Developer team, using certificates already in this Mac's keychain.",
+        MobileSigningMode.AppleManual when Mobile?.Framework == MobileFramework.DotNetIos =>
+            "The .NET iOS build signs with the certificate you name (CodesignKey) and an installed provisioning profile (CodesignProvision). The team ID is used for the IPA export options. HCG never creates certificates or profiles.",
         MobileSigningMode.AppleManual => "Xcode manual signing with an installed provisioning profile (by name). HCG never creates certificates or profiles.",
         _ => "",
     };
@@ -331,10 +345,14 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         {
             ShowSigning = true;
             SigningModes.Add(new(MobileSigningMode.ProjectDefault, Format.Label(MobileSigningMode.ProjectDefault)));
+            // .NET for iOS creates an Xcode archive only with code signing (Xamarin.Shared.targets: "Code signing must be
+            // enabled to create an Xcode archive" — CI run 78), so it is never offered unsigned.
             if (m.Framework is MobileFramework.NativeAndroid or MobileFramework.NativeIos || (m.Framework == MobileFramework.Flutter && output == MobileOutput.IosArchive))
                 SigningModes.Add(new(MobileSigningMode.Unsigned, Format.Label(MobileSigningMode.Unsigned)));
             if (android && m.Framework == MobileFramework.NativeAndroid)
                 SigningModes.Add(new(MobileSigningMode.DebugKeystore, Format.Label(MobileSigningMode.DebugKeystore)));
+            if (!android && m.Framework == MobileFramework.DotNetIos)
+                SigningModes.Add(new(MobileSigningMode.AppleManual, "Named certificate and provisioning profile (CodesignKey / CodesignProvision)"));
             if (!android && m.Framework == MobileFramework.NativeIos)
             {
                 SigningModes.Add(new(MobileSigningMode.AppleAutomatic, Format.Label(MobileSigningMode.AppleAutomatic)));
@@ -358,7 +376,8 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private void ApplyIdentityDefaults(ProjectRecord project, MobileAnalysis m)
     {
         AppName = project.Analysis?.ProjectName ?? project.Name;
-        AppVersion = m.Android?.AppModules.FirstOrDefault()?.VersionName ?? m.Flutter?.Version?.Split('+')[0] ?? m.Maui?.DisplayVersion ?? "1.0.0";
+        AppVersion = m.Android?.AppModules.FirstOrDefault()?.VersionName ?? m.Flutter?.Version?.Split('+')[0] ?? m.Maui?.DisplayVersion ?? m.DotNetIos?.DisplayVersion ?? "1.0.0";
+        if (m.DotNetIos?.ApplicationTitle is { } title) AppName = title;
     }
 
     [RelayCommand]
@@ -392,12 +411,13 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             ApkSetMode = SelectedApkSetMode?.Value ?? ApkSetMode.Universal,
             DeviceSpecPath = DeviceSpecPath,
             InputArtifact = m.ArtifactPath,
+            SigningIdentity = string.IsNullOrWhiteSpace(SigningIdentity) ? null : SigningIdentity.Trim(),
         };
     }
 
     private BuildSettings CreateSettings(MobileBuildOptions o) => new()
     {
-        ProjectRelativePath = Mobile?.Android?.Root ?? Mobile?.Ios?.WorkspacePath ?? Mobile?.Ios?.ProjectPath ?? Mobile?.Flutter?.Root ?? Mobile?.Maui?.ProjectPath ?? Mobile?.ArtifactPath ?? "",
+        ProjectRelativePath = Mobile?.Android?.Root ?? Mobile?.Ios?.WorkspacePath ?? Mobile?.Ios?.ProjectPath ?? Mobile?.Flutter?.Root ?? Mobile?.Maui?.ProjectPath ?? Mobile?.DotNetIos?.ProjectPath ?? Mobile?.ArtifactPath ?? "",
         Platform = o.Output.Platform(),
         Architecture = TargetArchitecture.Universal,
         Configuration = o.Output is MobileOutput.AndroidDebugApk or MobileOutput.IosSimulatorApp ? BuildConfigurationKind.Debug : BuildConfigurationKind.Release,
@@ -454,6 +474,52 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
 
     [RelayCommand] private async Task OpenSetupUrlAsync(ReadinessRow? row) { if (row?.SetupUrl is { } u) await _shell.OpenUrlAsync(u); }
 
+    // ───────────── Precise state of the selected project + output ─────────────
+
+    /// <summary>
+    /// Recognized project · Project implementation incomplete · Build adapter unavailable · Required toolchain missing ·
+    /// Configuration required · Ready to build · Build failed · Artifact verified.
+    /// </summary>
+    [ObservableProperty] private StatusTag _buildStateTag = new("—", "neutral");
+    [ObservableProperty] private string _buildStateDetail = "";
+
+    private void UpdateBuildState(BuildReadiness? readiness)
+    {
+        var a = SelectedProject?.Project.Analysis;
+        if (a?.Mobile is not { } m) { (BuildStateTag, BuildStateDetail) = (new StatusTag("—", "neutral"), ""); return; }
+        if (_lastResult is { } last && last.Status == BuildStatus.Succeeded && last.Artifacts.Count > 0 && last.Artifacts.All(x => x.Verification != VerificationStatus.Failed))
+        { (BuildStateTag, BuildStateDetail) = (new StatusTag("Artifact verified", "success"), $"{last.Artifacts.Count} artifact(s) built and verified: {string.Join(", ", last.Artifacts.Select(x => x.Format.DisplayName()))}."); return; }
+        if (_lastResult is { Status: BuildStatus.Failed or BuildStatus.TimedOut or BuildStatus.Cancelled } failed)
+        { (BuildStateTag, BuildStateDetail) = (new StatusTag("Build failed", "error"), FirstErrorOf(failed.FailureReason) ?? failed.FailureReason ?? ""); return; }
+        var noTarget = m.Framework == MobileFramework.NativeIos && m.Ios is { } ios && !ios.AppTargets.Any() || m.Framework == MobileFramework.NativeAndroid && m.Android is { AppModules.Count: 0 };
+        if (noTarget) { (BuildStateTag, BuildStateDetail) = (new StatusTag("Project implementation incomplete", "error"), "The project has no application target or module to build."); return; }
+        if (SelectedOutput is null)
+        {
+            var what = m.DotNetIos is { } dn ? $"{dn.ApplicationTitle ?? dn.AssemblyName} — {m.Framework.DisplayName()} app ({dn.ProjectPath})" : $"{a.ApplicationType} ({m.Framework.DisplayName()})";
+            var forPlatform = _allOptions.Where(o => SelectedPlatform is null || o.Platform == SelectedPlatform.Platform).ToList();
+            (BuildStateTag, BuildStateDetail) =
+                forPlatform.Count == 0 ? (new StatusTag("Build adapter unavailable", "error"), $"{what}: HCG has no build route for this project's outputs.")
+                : forPlatform.Any(o => o.IsAvailable) ? (new StatusTag("Recognized project", "info"), $"{what}. Choose an output.")
+                : a.Support == SupportLevel.RequiresConfiguration ? (new StatusTag("Configuration required", "warning"), $"{what}: {a.SupportSummary}")
+                : (new StatusTag("Required toolchain missing", "warning"), $"{what}: {forPlatform[0].Reason}");
+            return;
+        }
+        if (readiness is null) return;
+        var blockers = readiness.Blockers.ToList();
+        if (blockers.Count == 0) { (BuildStateTag, BuildStateDetail) = (new StatusTag("Ready to build", "success"), $"{SelectedOutput.Name} can be built on this computer."); return; }
+        var toolchain = blockers.Where(b => b.State is ReadinessState.NotFound or ReadinessState.IncompatibleVersion or ReadinessState.OtherHost or ReadinessState.InvalidPath
+                                            && b.Tool is not ("Provisioning profile" or "Code-signing identity") && !b.Tool.Contains("certificate", StringComparison.OrdinalIgnoreCase)).ToList();
+        (BuildStateTag, BuildStateDetail) = toolchain.Count > 0
+            ? (new StatusTag("Required toolchain missing", "warning"), string.Join(" ", toolchain.Select(b => $"{b.Tool}: {b.Detail}")))
+            : (new StatusTag("Configuration required", "warning"), string.Join(" ", blockers.Select(b => $"{b.Tool}: {b.Detail}")));
+    }
+
+    private BuildRecord? _lastResult;
+
+    /// <summary>The minimum iOS of what the build archives: the scheme's app target (Xcode) or SupportedOSPlatformVersion (.NET).</summary>
+    private static string? DeviceMinimum(MobileAnalysis m, MobileBuildOptions o) =>
+        m.DotNetIos?.MinimumOS ?? m.Ios?.AppTargets.FirstOrDefault(t => t.Name == o.Scheme)?.DeploymentTarget ?? m.Ios?.AppTargets.FirstOrDefault()?.DeploymentTarget;
+
     private void UpdateReadiness(MobileBuildOptions? o)
     {
         ReadinessRequired.Clear();
@@ -462,9 +528,11 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         {
             HasReadiness = false;
             ReadinessCanBuild = false;
+            UpdateBuildState(null);
             return;
         }
         var r = MobileReadiness.Evaluate(m, o.Output, o, _report);
+        UpdateBuildState(r);
         foreach (var i in r.Items.Where(i => i.Required)) ReadinessRequired.Add(new ReadinessRow(i));
         foreach (var i in r.Items.Where(i => !i.Required)) ReadinessOptional.Add(new ReadinessRow(i));
         HasReadiness = true;
@@ -481,7 +549,30 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         UpdateReadiness(CreateOptions());
         if (CreateOptions() is not { } o) return;
         var s = CreateSettings(o);
-        Summary.Add(new("Output", $"{o.Output.DisplayName()} · {o.Framework.DisplayName()}"));
+        var m = Mobile!;
+        Summary.Add(new("Project", $"{SelectedProject?.Project.Name} · {s.ProjectRelativePath}"));
+        Summary.Add(new("Adapter", o.Framework switch
+        {
+            MobileFramework.NativeIos => o.Output == MobileOutput.IosSimulatorApp ? "xcodebuild build (Simulator SDK)" : o.Output == MobileOutput.IosIpa ? "xcodebuild archive → signature check → xcodebuild -exportArchive (separate stages)" : "xcodebuild archive",
+            MobileFramework.DotNetIos => o.Output == MobileOutput.IosSimulatorApp ? ".NET iOS workload: dotnet build (Simulator)" : o.Output == MobileOutput.IosIpa
+                ? ".NET iOS workload: dotnet publish (ArchiveOnBuild) → signature check → xcodebuild -exportArchive (separate stages)" : ".NET iOS workload: dotnet publish (ArchiveOnBuild)",
+            MobileFramework.DotNetMaui => ".NET MAUI workload: dotnet build/publish",
+            MobileFramework.Flutter => "flutter build",
+            _ => "Gradle (project wrapper)",
+        }));
+        var tc = _report;
+        string Tool(string id) => tc?.Find(id) is { IsAvailable: true } t ? $"{t.DisplayName} {t.Version}".Trim() : "";
+        var xcode = tc?.Xcode is { VerifiedVersion: { } xv } xs ? $"Xcode {xv} ({xs.ActiveDeveloperDirectory})" + (xs.IosDeploymentRange is { } range ? $" · iOS SDK {range.SdkVersion}, deployment iOS {range.Minimum}–{range.Maximum}" : "") : Tool(ToolchainIds.Xcode);
+        Summary.Add(new("Toolchain", o.Output.Platform() == TargetPlatform.IOS
+            ? string.Join(" · ", new[] { xcode, o.Framework is MobileFramework.DotNetIos or MobileFramework.DotNetMaui ? Tool(ToolchainIds.DotNetSdk) : "", o.Framework == MobileFramework.DotNetIos ? Tool(ToolchainIds.DotNetIosWorkload) : "" }.Where(x => x.Length > 0))
+            : string.Join(" · ", new[] { Tool(ToolchainIds.Jdk), Tool(ToolchainIds.AndroidSdk) }.Where(x => x.Length > 0))));
+        Summary.Add(new("Architecture", o.Output switch
+        {
+            MobileOutput.IosSimulatorApp => $"iOS Simulator ({(tc?.Host.Architecture == TargetArchitecture.Arm64 ? "arm64" : "x86_64")})",
+            MobileOutput.IosArchive or MobileOutput.IosIpa => "iOS device, arm64" + (DeviceMinimum(m, o) is { } min ? $" · iOS {min}+" : ""),
+            _ => "Android ABIs as the project defines them",
+        }));
+        Summary.Add(new("Output type", o.Output.DisplayName()));
         if (o.Variant is not null) Summary.Add(new(o.Output.Platform() == TargetPlatform.Android ? "Variant" : "Configuration", o.Variant));
         if (SelectedSigning is not null) Summary.Add(new("Signing", Format.Label(o.Signing)));
         if (o.ExportMethod is { } e) Summary.Add(new("Export", Format.Label(e)));
@@ -540,6 +631,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             _buildCts = null;
         }
         if (result is null) return;
+        _lastResult = result;
+        LastLogPath = result.LogPath;
+        FirstError = result.Status == BuildStatus.Succeeded ? null : FirstErrorOf(result.FailureReason);
         ResultTag = new StatusTag(Format.Label(result.Status), Format.Tone(result.Status));
         CurrentStage = result.Status == BuildStatus.Succeeded ? "Completed" : Format.Label(result.Status);
         ResultDetail = result.Status == BuildStatus.Succeeded
@@ -547,7 +641,38 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             : result.FailureReason ?? "";
         foreach (var a in result.Artifacts) BuiltArtifacts.Add(new ArtifactItem(a, result));
         OnPropertyChanged(nameof(HasBuiltArtifacts));
+        UpdateBuildState(CreateOptions() is { } again && Mobile is { } mm ? MobileReadiness.Evaluate(mm, again.Output, again, _report) : null);
     }
+
+    // ───────────── Readable failures: first actionable error, copy, full log and result bundles ─────────────
+
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasFirstError))] private string? _firstError;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasLog))] private string? _lastLogPath;
+    public bool HasFirstError => !string.IsNullOrEmpty(FirstError);
+    public bool HasLog => LastLogPath is not null && File.Exists(LastLogPath);
+
+    internal static string? FirstErrorOf(string? reason) => MobileBuildService.FirstErrorOf(reason);
+
+    [RelayCommand] private async Task CopyFirstErrorAsync() { if (FirstError is { } e) await _shell.CopyAsync(e); }
+    [RelayCommand] private async Task CopyFailureAsync() { if (_lastResult?.FailureReason is { } r) await _shell.CopyAsync(r); }
+
+    /// <summary>Copies the complete build log and every .xcresult bundle of the last build to a folder the user chooses.</summary>
+    [RelayCommand]
+    private async Task ExportFullLogAsync()
+    {
+        if (LastLogPath is not { } log || !File.Exists(log)) return;
+        if (await _shell.PickFolderAsync("Export the complete build log and result bundles") is not { } dir) return;
+        var target = Path.Combine(dir, "hcg-build-" + Path.GetFileName(Path.GetDirectoryName(log)));
+        Directory.CreateDirectory(target);
+        File.Copy(log, Path.Combine(target, "build.log"), overwrite: true);
+        var work = Path.Combine(Path.GetDirectoryName(log)!, "work");
+        var bundles = Directory.Exists(work) ? Directory.GetDirectories(work, "*.xcresult") : [];
+        foreach (var b in bundles) MobileBuildService.CopyDirectory(b, Path.Combine(target, Path.GetFileName(b)));
+        await _dialogs.AlertAsync("Build log exported", $"{target}\n\nbuild.log{(bundles.Length > 0 ? " and " + string.Join(", ", bundles.Select(Path.GetFileName)) : "")}. Open .xcresult bundles in Xcode.");
+    }
+
+    [RelayCommand]
+    private async Task OpenLogFolderAsync() { if (LastLogPath is { } log && Path.GetDirectoryName(log) is { } d) await _shell.OpenFolderAsync(d); }
 
     private bool CanCancelBuild() => IsBuilding;
 

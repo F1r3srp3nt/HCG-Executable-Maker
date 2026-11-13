@@ -19,6 +19,14 @@
 #                 Oslo-Sprint repository as a folder and as a ZIP, evaluates Package.swift after trust, and builds
 #                 Distil.app (+ ZIP, DMG), Relay.app (universal, + ZIP) and the relay-runner CLI; the apps are then
 #                 verified independently (codesign, plutil, lipo), launched and screenshotted.
+#   native-cpp  — on Linux and macOS: the real New Build wizard configures a multi-target CMake fixture after trust
+#                 (targets from the CMake File API; libraries listed separately), builds a target, a Makefile target
+#                 with an explicit output, explains a Theos project without building it, and on macOS keeps a
+#                 MACOSX_BUNDLE .app (universal, ad-hoc signed as its own stage, zipped); CI then checks the outputs.
+#   hcg-nexus-theos / hcg-mail-ios / hcg-sentinel-archive — the three HCG projects at pinned commits through the real
+#                 wizard and Mobile Build Studio: Nexus' Theos .deb (rootless, rootful, preview app) checked by HCG and by
+#                 Nexus' own script; Mail's .NET for iOS head (Simulator build, unsigned device archive); Sentinel archived
+#                 with every installed Xcode, with the deployment-range preflight, full logs and .xcresult bundles kept.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -75,11 +83,59 @@ jobs:
       # --blame-hang-timeout: a test that does not finish within 5 minutes (the slowest takes ~40 s) is aborted and named
       # in the log and in TestResults (Sequence_*.xml), so a hang fails fast with evidence instead of running into the
       # job timeout with no log (main, run 42540213014: macOS test step stuck for 40 minutes, log never uploaded).
-      - name: Test (unit + end-to-end)
-        run: >
-          dotnet test HCG.ExecutableMaker.slnx -c Release --no-build --logger "trx;LogFileName=results.trx"
-          --logger "console;verbosity=normal" --results-directory TestResults
-          --blame-hang-timeout 5m --blame-hang-dump-type none
+      # The step has its own limit below the job's, so that when dotnet test itself never returns (a child process left
+      # holding its output open — the blame collector cannot end that) the evidence steps after it still run.
+      # Runs 67-72 (feature/hcg-projects): the macOS runner stopped responding during the tests — no step or job timeout
+      # fired and no log was kept; process, memory and disk watchdogs saw nothing. The suite runs in groups, each its
+      # own step (the step that stops names the group), through .github/scripts/test-group.sh (watchdog on macOS).
+      # Every group runs even when an earlier one failed; the managed heap is capped at 3 GiB.
+      - name: Test (Theos and Apple project routes)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh routes "FullyQualifiedName~TheosTests|FullyQualifiedName~AppleProjectRoutesTests"
+
+      - name: Test (toolchain, Xcode and project detection)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh detection "FullyQualifiedName~ProcessAndToolchainTests|FullyQualifiedName~ToolchainSetupTests|FullyQualifiedName~XcodeDiscoveryTests|FullyQualifiedName~NativeTests|FullyQualifiedName~InspectionTests"
+
+      - name: Test (mobile, Swift and macOS distribution)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh apple "FullyQualifiedName~MobileBuildTests|FullyQualifiedName~MobileArtifactTests|FullyQualifiedName~MacDistributionTests|FullyQualifiedName~Swift"
+
+      - name: Test (end-to-end builds and packaging)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh builds "FullyQualifiedName~EndToEndTests|FullyQualifiedName~ElectronBuildTests|FullyQualifiedName~WindowsInstallerTests|FullyQualifiedName~BuildEngineTests|FullyQualifiedName~PackagingTests|FullyQualifiedName~WebDesktopConversionTests"
+
+      - name: Test (everything else)
+        if: success() || failure()
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+        run: .github/scripts/test-group.sh rest "FullyQualifiedName!~TheosTests&FullyQualifiedName!~AppleProjectRoutesTests&FullyQualifiedName!~ProcessAndToolchainTests&FullyQualifiedName!~ToolchainSetupTests&FullyQualifiedName!~XcodeDiscoveryTests&FullyQualifiedName!~NativeTests&FullyQualifiedName!~InspectionTests&FullyQualifiedName!~MobileBuildTests&FullyQualifiedName!~MobileArtifactTests&FullyQualifiedName!~MacDistributionTests&FullyQualifiedName!~Swift&FullyQualifiedName!~EndToEndTests&FullyQualifiedName!~ElectronBuildTests&FullyQualifiedName!~WindowsInstallerTests&FullyQualifiedName!~BuildEngineTests&FullyQualifiedName!~PackagingTests&FullyQualifiedName!~WebDesktopConversionTests"
+
+      - name: Processes left after the tests (evidence for a hang)
+        if: failure() || cancelled()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then tasklist //v || true; else ps -axo pid,ppid,etime,stat,command | grep -v "ps -axo" || true; fi
+          ls -la TestResults || true
+          find TestResults -name "Sequence_*.xml" -exec sh -c 'echo "== $1"; tail -n 20 "$1"' _ {} \; || true
 
       - name: Upload test results
         if: always()
@@ -814,6 +870,345 @@ jobs:
           grep -Eq "^[[:space:]]*Total tests:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
           grep -Eq "^[[:space:]]*Passed:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
 
+  hcg-nexus-theos:
+    name: HCG Nexus — Theos .deb (rootless + rootful + preview app) through the New Build wizard
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/nexus-out
+      NEXUS_COMMIT: c7cd62cc065bc2bddd7cdf431b5f8e5e078173b9
+      # Theos and its SDKs are set up on this disposable runner the way HCG Nexus' own CI does; HCG never installs them.
+      THEOS: ${{ github.workspace }}/theos
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Runner setup — Theos, iPhoneOS 16.5/14.5 SDKs, ldid, GNU make, dpkg (for HCG Nexus' own package check)
+        run: |
+          brew install ldid make dpkg
+          git clone --depth 1 --recursive https://github.com/theos/theos.git "$THEOS"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$RUNNER_TEMP/sdks"
+          git -C "$RUNNER_TEMP/sdks" sparse-checkout set iPhoneOS16.5.sdk iPhoneOS14.5.sdk
+          cp -R "$RUNNER_TEMP/sdks/iPhoneOS16.5.sdk" "$RUNNER_TEMP/sdks/iPhoneOS14.5.sdk" "$THEOS/sdks/"
+          xcodebuild -version
+      - name: HCG Nexus at a pinned commit, in a path with spaces
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Nexus.git "$OUT/src/HCG Nexus"
+          git -C "$OUT/src/HCG Nexus" checkout --quiet "$NEXUS_COMMIT"
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      - name: Rootless (the project's default, iOS 15.0+, /var/jb) — roothide is refused by the project itself
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          --project Makefile --theos-scheme rootless --expect-refused roothide
+          --output "$OUT/rootless" --screenshots "$OUT/screens" --prefix nexus-rootless
+      - name: Rootful (iOS 14.0+, /), built in its own folder
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          --project Makefile --theos-scheme rootful
+          --output "$OUT/rootful" --screenshots "$OUT/screens" --prefix nexus-rootful
+      - name: Preview app (separate package, packaged as a .deb — not an IPA)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          --project PreviewHarness/Makefile --theos-scheme rootless
+          --output "$OUT/preview" --screenshots "$OUT/screens" --prefix nexus-preview
+      - name: HCG Nexus' own package check agrees with HCG's (new arm64e ABI required)
+        working-directory: ${{ github.workspace }}/nexus-out/src/HCG Nexus
+        run: |
+          for scheme in rootless rootful; do
+            deb="$(sed -n 1p "$OUT/$scheme/nexus-$scheme-artifacts.txt")"
+            echo "== $scheme: $deb"; ls -l "$deb"
+            python3 scripts/inspect-package.py "$deb" "$scheme" --require-new-arm64e-abi
+            cat "$(dirname "$deb")/INSTALL.txt"
+          done
+          # The imported source was not written to: no .theos/ or packages/ appeared in the user's folder.
+          if [ -e "$OUT/src/HCG Nexus/.theos" ] || [ -e "$OUT/src/HCG Nexus/packages" ]; then echo "build output in the source"; exit 1; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-nexus-theos
+          path: |
+            ${{ github.workspace }}/nexus-out/screens
+            ${{ github.workspace }}/nexus-out/*/artifacts/**/*.deb
+            ${{ github.workspace }}/nexus-out/*/artifacts/**/*.txt
+            ${{ github.workspace }}/nexus-out/*/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  hcg-mail-ios:
+    name: HCG Mail iOS — .NET for iOS (Avalonia) Simulator build and unsigned device archive through Mobile Build Studio
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/mail-out
+      MAIL_COMMIT: 46d422806434d1938553cf62717c1683a67d5676
+      XCODE_VERSION: "26.3"   # what HCG Mail's pinned iOS workload (26.2.10233) requires
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.1xx"
+      - name: HCG Mail at a pinned commit (whole repository, path with spaces)
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Mail.git "$OUT/src/HCG Mail"
+          git -C "$OUT/src/HCG Mail" checkout --quiet "$MAIL_COMMIT"
+      - name: Runner setup — Xcode ${{ env.XCODE_VERSION }} and the iOS workload version the project pins (HCG never installs workloads)
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          xcodebuild -version
+          cd "$OUT/src/HCG Mail/iOS App Store Submission"
+          dotnet workload config --update-mode manifests
+          dotnet workload install ios --from-rollback-file scripts/workload-rollback.json --skip-sign-check
+          dotnet workload list
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      - name: The submission folder alone is "Configuration required" (its shared projects are outside it)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail/iOS App Store Submission"
+          --mobile-output sim --expect-state "Configuration required" --output "$OUT/partial" --screenshots "$OUT/screens" --prefix mail-partial
+      - name: Simulator build from the repository root (shared projects resolved from the repository)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
+          --mobile-output sim --expect-state "Ready to build" --output "$OUT/sim" --screenshots "$OUT/screens" --prefix mail-sim
+      # CI run 78: the .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode
+      # archive"). Maker therefore offers no unsigned .NET iOS archive and, without a certificate in the keychain (none on
+      # hosted runners), blocks the archive before building. A signed archive/IPA needs the owner's certificate+profile.
+      - name: Device archive — unavailable without code signing (the .NET iOS SDK archives only signed)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
+          --mobile-output archive --signing unsigned --expect-no-unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
+      - name: Independent checks of what HCG produced
+        run: |
+          app="$(find "$OUT/sim/artifacts" -maxdepth 3 -name '*.app' -type d | head -1)"
+          echo "Simulator app: $app"
+          plutil -p "$app/Info.plist" | grep -E 'CFBundle(Identifier|ShortVersionString|Version)|MinimumOSVersion'
+          test -f "$app/Assets.car"
+          xcrun vtool -show-build "$app/HCGMail.iOS" | grep -E 'platform|minos'
+          # No archive was produced (see the step above): HCG must not have written one.
+          test -z "$(find "$OUT/archive" -name '*.xcarchive' -type d 2>/dev/null | head -1)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-mail-ios
+          path: |
+            ${{ github.workspace }}/mail-out/screens
+            ${{ github.workspace }}/mail-out/*/*.json
+            ${{ github.workspace }}/mail-out/*/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  hcg-sentinel-archive:
+    name: HCG Sentinel — archive through Mobile Build Studio with every installed Xcode (reproduction, full logs and .xcresult kept)
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      OUT: ${{ github.workspace }}/sentinel-out
+      SENTINEL_COMMIT: 810c6f99103a5e4f60e91a6fecda8259be01e0da
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: HCG Sentinel at a pinned commit, in a path with spaces
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Sentinel.git "$OUT/src/HCG Sentinel"
+          git -C "$OUT/src/HCG Sentinel" checkout --quiet "$SENTINEL_COMMIT"
+      - name: Xcode inventory — version and the iOS deployment range each iPhoneOS SDK supports (SDKSettings.json)
+        run: |
+          for x in /Applications/Xcode*.app; do
+            s="$x/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json"
+            [ -f "$s" ] || continue
+            v="$(DEVELOPER_DIR="$x/Contents/Developer" xcodebuild -version | head -1)"
+            r="$(python3 -c 'import json,sys; t=json.load(open(sys.argv[1]))["SupportedTargets"]["iphoneos"]; print(t["MinimumDeploymentTarget"], "to", t["MaximumDeploymentTarget"])' "$s")"
+            echo "$x · $v · iOS deployment $r" | tee -a "$OUT/xcodes.txt"
+          done
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      - name: Archive HCGSentinel (iOS 14.7) and HCGSentinelModern (iOS 15.0) with each Xcode, unsigned, as Maker does
+        run: |
+          i=0
+          for x in /Applications/Xcode*.app; do
+            [ -f "$x/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json" ] || continue
+            [ -L "$x" ] && continue
+            i=$((i+1)); name="$(basename "$x" .app)"
+            for scheme in HCGSentinel HCGSentinelModern; do
+              DEVELOPER_DIR="$x/Contents/Developer" dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Sentinel" \
+                --mobile-output archive --scheme "$scheme" --signing unsigned --record-only \
+                --output "$OUT/$name-$scheme" --screenshots "$OUT/screens" --prefix "sentinel-$name-$scheme" > "$OUT/$name-$scheme.driver.log" 2>&1 || true
+              state="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["state"], "|", (d.get("firstError") or d.get("detail") or "")[:400])' "$OUT/$name-$scheme/sentinel-$name-$scheme-mobile.json" 2>/dev/null \
+                       || grep -E 'State: \[' "$OUT/$name-$scheme.driver.log" | tail -1)"
+              echo "$name · $scheme · $state" | tee -a "$OUT/results.txt"
+            done
+          done
+          echo "### HCG Sentinel archive through HCG Executable Maker (${{ matrix.runner }})" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/- /' "$OUT/xcodes.txt" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/- /' "$OUT/results.txt" >> "$GITHUB_STEP_SUMMARY"
+          # The default scheme must be archivable with an Xcode whose range includes 14.7 (preflight passed, build ran).
+          grep -E "· HCGSentinel · Artifact verified" "$OUT/results.txt"
+      - name: Collect complete logs and .xcresult bundles
+        if: always()
+        run: |
+          mkdir -p "$OUT/diagnostics"
+          find "$OUT" -path '*hcg-data/builds/*' -name build.log -exec sh -c 'cp "$1" "$OUT/diagnostics/$(basename "$(dirname "$1")").log"' _ {} \;
+          find "$OUT" -path '*hcg-data/builds/*' -name '*.xcresult' -type d -exec cp -R {} "$OUT/diagnostics/" \; || true
+          ls -la "$OUT/diagnostics"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-sentinel-archive-${{ matrix.runner }}
+          path: |
+            ${{ github.workspace }}/sentinel-out/*.txt
+            ${{ github.workspace }}/sentinel-out/*.driver.log
+            ${{ github.workspace }}/sentinel-out/diagnostics
+            ${{ github.workspace }}/sentinel-out/screens
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-cpp:
+    name: C/C++ — CMake and Make fixtures through the New Build wizard (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      OUT: ${{ github.workspace }}/native-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Host C/C++ toolchain (preinstalled on the runner; HCG installs nothing)
+        run: |
+          cmake --version | head -1
+          ninja --version || echo "ninja: not installed (CMake uses make)"
+          make --version | head -1
+          cc --version | head -1
+          c++ --version | head -1
+
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Fixtures copied to paths with spaces (the imported source is never written to)
+        run: |
+          mkdir -p "$OUT/src"
+          for f in MultiTarget MakeHello TheosTweak MacBundle; do cp -R "tests/Fixtures/Native/$f" "$OUT/src/$f copy"; rm -rf "$OUT/src/$f copy/build"; done
+
+      - name: CMake — trusted configure lists calc and greeter (libraries separately), builds calc, verified
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/MultiTarget copy"
+          --target calc --expect-targets calc,greeter --expect-libraries mathlib,greet
+          --output "$OUT/multi" --screenshots "$OUT/screens" --prefix native-multi
+
+      - name: Make — explicit target, variable and expected output
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/MakeHello copy"
+          --make-target all --expected-output bin/makehello --make-vars "GREETING=from CI"
+          --output "$OUT/make" --screenshots "$OUT/screens" --prefix native-make
+
+      - name: Theos — recognized as a jailbreak package; without Theos on this runner the missing tools are listed (never a desktop build)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/TheosTweak copy" --expect-native-state "Required toolchain missing"
+          --output "$OUT/theos" --screenshots "$OUT/screens" --prefix native-theos
+
+      - name: The produced programs are real (run here by CI, never by HCG)
+        run: |
+          calc="$(sed -n 1p "$OUT/multi/native-multi-artifacts.txt")/calc"
+          file "$calc"; "$calc" 2 3 | tee /dev/stderr | grep -qx "2 + 3 = 5 (dep 42)"
+          mk="$(sed -n 1p "$OUT/make/native-make-artifacts.txt")/makehello"
+          "$mk" | grep -qx "Hello from make: from CI"
+          unzip -tq "$(sed -n 2p "$OUT/multi/native-multi-artifacts.txt")"
+          cat "$(sed -n 1p "$OUT/multi/native-multi-artifacts.txt")/RUNTIME-DEPENDENCIES.txt"
+          if ls "$OUT/src/MultiTarget copy" | grep -qx build; then echo "a build folder was created in the imported source"; exit 1; fi
+
+      - name: macOS — MACOSX_BUNDLE target kept as the project's .app (universal), ad-hoc signed as a separate stage, zipped
+        if: runner.os == 'macOS'
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/MacBundle copy" \
+            --expect-targets MacHello --expect-app-bundle --arch universal --formats app,zip --expect-version 1.2.0 \
+            --output "$OUT/bundle" --screenshots "$OUT/screens" --prefix native-bundle
+          APP="$(sed -n 1p "$OUT/bundle/native-bundle-artifacts.txt")"
+          echo "App: $APP"; [[ "$APP" == *"/MacHello.app" ]]
+          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle(Name|Identifier|Executable|ShortVersionString)'
+          plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist" | grep -qx com.example.machello
+          lipo -archs "$APP/Contents/MacOS/MacHello" | tee /dev/stderr | grep -q "x86_64" && lipo -archs "$APP/Contents/MacOS/MacHello" | grep -q "arm64"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Signature=adhoc"
+          ditto -x -k "$(sed -n 2p "$OUT/bundle/native-bundle-artifacts.txt")" "$OUT/unzipped" && codesign --verify --deep --strict "$OUT/unzipped/MacHello.app"
+          "$APP/Contents/MacOS/MacHello" | grep -qx "Hello from a CMake app bundle"
+
+      - name: Upload C/C++ outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-cpp-${{ matrix.os }}
+          path: |
+            ${{ github.workspace }}/native-out/screens
+            ${{ github.workspace }}/native-out/*/*.txt
+            ${{ github.workspace }}/native-out/*/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  release:
+    name: Publish pre-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: hcg-executable-maker-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          HCG Executable Maker ${GITHUB_REF_NAME#v} — built and packaged by HCG Executable Maker itself on GitHub's macOS, Windows and Linux runners.
+
+          | Platform | Download |
+          |---|---|
+          | macOS (Apple Silicon) | \`*-osx-arm64.dmg\` (or \`.app.zip\`) |
+          | macOS (Intel) | \`*-osx-x64.dmg\` (or \`.app.zip\`) |
+          | Windows x64 / ARM64 (installer) | \`*-win-x64-Setup.exe\` / \`*-win-arm64-Setup.exe\` |
+          | Windows x64 / ARM64 (portable) | \`*-win-x64.zip\` / \`*-win-arm64.zip\` |
+          | Linux (preview) | \`*-linux-x64.zip\` / \`*-linux-arm64.zip\` |
+
+          **Unsigned pre-release** — HCG itself is not code-signed or notarized.
+          - macOS first launch: \`xattr -cr "/Applications/HCG Executable Maker.app"\`, then right-click → Open.
+          - Windows: SmartScreen → More info → Run anyway.
+
+          Install the .NET 10 SDK to build projects with the app. See docs/TESTING.md. Verify downloads with SHA256SUMS.txt.
+          EOF
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+              --title "HCG Executable Maker ${GITHUB_REF_NAME#v}" --notes-file notes.md --prerelease --verify-tag
+          fi
+
   port-ios:
     name: Porting — macOS source → iOS app, compiled and launched in the Simulator
     needs: test
@@ -1066,51 +1461,3 @@ jobs:
             ${{ github.workspace }}/port-web-android-out/*/ports/*/HCG-PORT
           if-no-files-found: warn
           retention-days: 7
-
-  release:
-    name: Publish pre-release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: hcg-executable-maker-*
-          merge-multiple: true
-          path: dist
-
-      - name: Checksums
-        working-directory: dist
-        run: |
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-
-      - name: Create or update GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cat > notes.md <<EOF
-          HCG Executable Maker ${GITHUB_REF_NAME#v} — built and packaged by HCG Executable Maker itself on GitHub's macOS, Windows and Linux runners.
-
-          | Platform | Download |
-          |---|---|
-          | macOS (Apple Silicon) | \`*-osx-arm64.dmg\` (or \`.app.zip\`) |
-          | macOS (Intel) | \`*-osx-x64.dmg\` (or \`.app.zip\`) |
-          | Windows x64 / ARM64 (installer) | \`*-win-x64-Setup.exe\` / \`*-win-arm64-Setup.exe\` |
-          | Windows x64 / ARM64 (portable) | \`*-win-x64.zip\` / \`*-win-arm64.zip\` |
-          | Linux (preview) | \`*-linux-x64.zip\` / \`*-linux-arm64.zip\` |
-
-          **Unsigned pre-release** — HCG itself is not code-signed or notarized.
-          - macOS first launch: \`xattr -cr "/Applications/HCG Executable Maker.app"\`, then right-click → Open.
-          - Windows: SmartScreen → More info → Run anyway.
-
-          Install the .NET 10 SDK to build projects with the app. See docs/TESTING.md. Verify downloads with SHA256SUMS.txt.
-          EOF
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
-              --title "HCG Executable Maker ${GITHUB_REF_NAME#v}" --notes-file notes.md --prerelease --verify-tag
-          fi

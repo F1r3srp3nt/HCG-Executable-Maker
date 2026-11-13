@@ -59,6 +59,10 @@ public static class Composition
         services.AddSingleton<IPackager, ElectronZipPackager>();
         services.AddSingleton<IPackager, ElectronDmgPackager>();
         services.AddSingleton<IPackager, ElectronFolderPackager>();
+        services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.Packagers.JailbreakDebPackager>();
+        // C/C++ app bundles (a project's own .app) before the generic packagers.
+        services.AddSingleton<IPackager, NativeAppBundlePackager>();
+        services.AddSingleton<IPackager, NativeAppZipPackager>();
         services.AddSingleton<IPackager, PortableFolderPackager>();
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();
@@ -76,6 +80,7 @@ public static class Composition
         services.AddSingleton<PackagingRegistry>();
         services.AddSingleton<BuildService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileArtifactVerifier>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Mobile.MobileBuildService>();
         services.AddSingleton<HCG.ExecutableMaker.Porting.DeviceLauncher>();
