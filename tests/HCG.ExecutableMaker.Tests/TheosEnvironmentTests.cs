@@ -135,7 +135,7 @@ public sealed class TheosEnvironmentTests : IDisposable
             Assert.Contains("lzma: command not found", Assert.Single(none.Warnings));
     }
 
-    [Fact]
+    [SkippableUnixFact]
     public void Path_keeps_the_parent_order_adds_system_directories_and_only_unreachable_tool_directories()
     {
         var (ldid, _) = FakeLdid();
@@ -145,7 +145,7 @@ public sealed class TheosEnvironmentTests : IDisposable
         Assert.Null(TheosBuildEnvironment.Resolve(new ToolchainReport(Linux, [], null, null, DateTimeOffset.UtcNow), Sanitized()));
     }
 
-    [Fact]
+    [SkippableUnixFact]
     public void The_build_step_runs_the_detected_make_with_the_resolved_environment()
     {
         var (ldid, _) = FakeLdid();
@@ -163,6 +163,14 @@ public sealed class TheosEnvironmentTests : IDisposable
         Assert.Equal(env.Path, step.Process.Environment!["PATH"]);
         Assert.Equal(ldid, step.Process.Environment["TARGET_CODESIGN"]);
         Assert.DoesNotContain(step.Process.Arguments, a => a.StartsWith("TARGET_CODESIGN", StringComparison.Ordinal)); // environment, not command line: a project's own assignment still wins
+    }
+
+    [Fact]
+    public void The_path_is_built_with_posix_separators_on_every_host()
+    {
+        // Theos runs on macOS/Linux; the PATH HCG builds for it must not depend on the host's directory separator.
+        Assert.Equal("/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin", TheosBuildEnvironment.BuildPath("/usr/bin", ["/opt/homebrew/bin/ldid"]));
+        Assert.Equal("/usr/bin:/bin:/usr/sbin:/sbin", TheosBuildEnvironment.BuildPath("relative/bin:C:\\Windows", []));
     }
 
     [Fact]

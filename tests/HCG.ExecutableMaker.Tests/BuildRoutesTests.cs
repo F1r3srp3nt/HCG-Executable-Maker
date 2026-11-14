@@ -297,7 +297,7 @@ public class BuildRoutesTests : IDisposable
 
         Assert.DoesNotContain("not in the workspace's inspection", build.FailureReason ?? "");
         Assert.Equal(2, worker.Calls.Count);
-        Assert.Equal("/bin/bash", worker.Calls[0].Executable);
+        Assert.Contains(worker.Calls[0].Executable, new[] { "/bin/bash", "/bin/sh" });   // the preflight shell (sh where bash is absent)
         var make = worker.Calls[1];
         Assert.Equal("/opt/homebrew/bin/gmake", make.Executable);
         Assert.Equal(worker.Calls[0].Environment, make.Environment);              // checked and run with the same environment

@@ -81,7 +81,7 @@ public sealed record TheosBuildEnvironment(
         var dirs = new List<string>();
         void Add(string? d)
         {
-            if (string.IsNullOrWhiteSpace(d) || !System.IO.Path.IsPathRooted(d)) return;   // "" or "." would mean the build folder
+            if (string.IsNullOrWhiteSpace(d) || !d.StartsWith('/')) return;   // "" or "." would mean the build folder
             var clean = d.TrimEnd('/');
             if (clean.Length == 0) clean = "/";
             if (!dirs.Contains(clean, StringComparer.Ordinal)) dirs.Add(clean);
@@ -90,9 +90,11 @@ public sealed record TheosBuildEnvironment(
         foreach (var d in SystemDirectories) Add(d);
         foreach (var tool in tools)
         {
-            var name = System.IO.Path.GetFileName(tool);
-            var resolved = Which(name, string.Join(':', dirs));
-            if (resolved is null || !SameFile(resolved, tool)) Add(System.IO.Path.GetDirectoryName(tool));
+            // POSIX paths (Theos builds run on macOS and Linux): split on '/', so the result is the same on every host.
+            var slash = tool.LastIndexOf('/');
+            if (slash < 0) continue;
+            var resolved = Which(tool[(slash + 1)..], string.Join(':', dirs));
+            if (resolved is null || !SameFile(resolved, tool)) Add(slash == 0 ? "/" : tool[..slash]);
         }
         return string.Join(':', dirs);
     }
@@ -102,7 +104,7 @@ public sealed record TheosBuildEnvironment(
     {
         foreach (var dir in path.Split(':', StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = System.IO.Path.Combine(dir, command);
+            var candidate = dir.TrimEnd('/') + "/" + command;
             if (File.Exists(candidate) && IsExecutable(candidate)) return candidate;
         }
         return null;
