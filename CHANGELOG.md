@@ -2,6 +2,17 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Mobile Build Studio: scheme workflow (HCG Sentinel)
+
+### Changed
+- Project/workspace, scheme, build configuration and Xcode are chosen before the outputs and stay usable when every output is unavailable.
+- One concise shared deployment-target message with a short line per SDK; outputs refer to it instead of repeating it.
+- "Use HCGSentinelModern (iOS 15.0 and later)" explains the minimum iOS and that the legacy scheme stays unchanged, before switching.
+- The selection is saved per project and restored on reopen, navigation and restart; re-inspection keeps it.
+- The summary shows the exact xcodebuild command from the planner's own resolution; an unset configuration resolves to the scheme's own in both the check and the build.
+- The project card shows the current state of the selection instead of the import-time toolchain state.
+- UI driver: `--scheme-workflow`, `--reopen-mobile`, `--simulate-xcode` (test-only); 5 new unit tests.
+
 ## [Unreleased] — Mobile Build Studio: scheme selection and status (`fix/sentinel-build-selection`)
 
 ### Fixed

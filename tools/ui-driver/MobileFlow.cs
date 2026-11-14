@@ -33,6 +33,7 @@ internal static partial class Program
             if (studio.HasSchemeSuggestion) Log($"Suggested: {studio.UseSuggestedSchemeLabel}");
         }
         foreach (var o in studio.Outputs) Log($"Output {o.Name}: {(o.IsEnabled ? "available" : "unavailable — " + o.Reason)}");
+        Shot("mobile-scheme");
         var wanted = Arg("mobile-output", "sim") switch { "archive" => MobileOutput.IosArchive, "ipa" => MobileOutput.IosIpa, _ => MobileOutput.IosSimulatorApp };
         var item = studio.Outputs.FirstOrDefault(o => o.Option.Output == wanted);
         Check(item is not null, $"Output {wanted} offered");

@@ -1053,6 +1053,18 @@ jobs:
           sed 's/^/- /' "$OUT/results.txt" >> "$GITHUB_STEP_SUMMARY"
           # The default scheme must be archivable with an Xcode whose range includes 14.7 (preflight passed, build ran).
           grep -E "· HCGSentinel · Artifact verified" "$OUT/results.txt"
+      # The screenshot's state (a selected Xcode whose SDKs start at iOS 15.0) on any runner: --simulate-xcode presents that
+      # Xcode to Mobile Build Studio (labelled SIMULATED in the log; nothing is built with it). Checks: selection before the
+      # outputs, one shared deployment-target message, "Use HCGSentinelModern" explained first, re-inspection, New Build
+      # Back/Next, leaving/returning, reopening after a restart, Simulator vs device SDKs, and that the command shown is the
+      # command the build service plans.
+      - name: Scheme workflow — legacy iOS 14.7 scheme vs HCGSentinelModern with an Xcode that starts at iOS 15.0 (simulated)
+        if: matrix.runner == 'macos-15'
+        run: |
+          d=tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll; f=tests/Fixtures/XcodeDeployment/Sentinel
+          dotnet $d --scheme-workflow --source $f --simulate-xcode 27.0:15.0:15.0 --output "$OUT/scheme-workflow" --screenshots "$OUT/screens" --prefix scheme-workflow
+          dotnet $d --reopen-mobile --source $f --simulate-xcode 27.0:15.0:15.0 --output "$OUT/scheme-workflow" --screenshots "$OUT/screens" --prefix scheme-reopen
+          dotnet $d --scheme-workflow --expect-simulator-only --source $f --simulate-xcode 27.0:15.0:14.0 --output "$OUT/scheme-simulator" --screenshots "$OUT/screens" --prefix scheme-simulator
       - name: Collect complete logs and .xcresult bundles
         if: always()
         run: |

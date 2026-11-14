@@ -344,3 +344,17 @@ public sealed record MobileOutputOption(MobileOutput Output, bool IsAvailable, s
     public string DisplayName => Output.DisplayName();
     public TargetPlatform Platform => Output.Platform();
 }
+
+/// <summary>
+/// What the user chose for an iOS project in Mobile Build Studio, remembered per project: the Xcode project or workspace,
+/// the scheme and the build configuration (null = the scheme's own: Launch for Simulator, Archive for device). The Xcode
+/// itself is HCG's app-wide developer-directory choice (Toolchains › Xcode) and is not stored here.
+/// </summary>
+public sealed record MobileSelection
+{
+    public required string ProjectId { get; init; }
+    public string? Container { get; init; }
+    public string? Scheme { get; init; }
+    public string? Configuration { get; init; }
+    public DateTimeOffset SavedAt { get; init; }
+}

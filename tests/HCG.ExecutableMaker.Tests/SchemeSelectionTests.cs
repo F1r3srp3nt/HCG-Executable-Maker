@@ -1,3 +1,4 @@
+using HCG.ExecutableMaker.BuildEngine;
 using HCG.ExecutableMaker.BuildEngine.Mobile;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -224,6 +225,105 @@ public sealed class SchemeSelectionTests : IDisposable
         Assert.False(Option("HCGSentinel", MobileOutput.IosArchive).IsAvailable);
         // Without a selection the project's default scheme is judged, as before.
         Assert.False(MobileCapabilities.Evaluate(m, report).Single(x => x.Output == MobileOutput.IosArchive).IsAvailable);
+    }
+
+    // ───────────── Selection workflow (shared by Mobile Build Studio and the build) ─────────────
+
+    [Fact]
+    public void One_concise_shared_message_and_outputs_that_only_refer_to_it()
+    {
+        var ios = Sentinel();
+        var summary = IosBuildSelection.Summarize(ios, "HCGSentinel", null, Xcode());
+        Assert.Equal("HCGSentinel targets iOS 14.7; Xcode 27.0 builds iOS 15.0 and later (device and Simulator).", summary.Problem);
+        Assert.Equal(2, summary.Lines.Count);
+        Assert.StartsWith("Device · iPhoneOS 27.0 · Release", summary.Lines[0].Label);
+        Assert.StartsWith("Simulator · iPhoneSimulator 27.0 · Debug", summary.Lines[1].Label);
+        Assert.Equal("HCGSentinelModern", summary.Alternative);
+        Assert.Equal("15.0", summary.AlternativeMinimum);
+        Assert.Contains("only on iOS 15.0 or later", summary.SwitchExplanation);
+        Assert.Contains("HCGSentinel and its iOS 14.7 deployment target stay in the project unchanged", summary.SwitchExplanation);
+
+        var m = Mobile(ios);
+        var options = MobileCapabilities.Evaluate(m, Report(Xcode()), new MobileBuildOptions { Framework = m.Framework, Output = MobileOutput.IosArchive, Scheme = "HCGSentinel" });
+        foreach (var o in options)
+        {
+            var reason = IosBuildSelection.ShortReason(o)!;
+            Assert.StartsWith("Blocked by the deployment target", reason);
+            Assert.DoesNotContain("xcodebuild would stop", reason);
+            Assert.Contains("xcodebuild would stop", o.Reason);            // the full detail stays available in the readiness item
+        }
+        Assert.Null(IosBuildSelection.Summarize(ios, "HCGSentinelModern", null, Xcode()).Problem);
+    }
+
+    [Fact]
+    public void Device_and_simulator_are_summarised_separately()
+    {
+        var summary = IosBuildSelection.Summarize(Sentinel(), "HCGSentinel", null, Xcode(deviceMin: "15.0", simulatorMin: "14.0"));
+        Assert.EndsWith("(device).", summary.Problem);
+        Assert.False(summary.DeviceFits);
+        Assert.True(summary.SimulatorFits);
+        Assert.Equal("HCGSentinelModern", summary.Alternative);
+    }
+
+    [Fact]
+    public void A_saved_selection_is_restored_only_while_it_still_matches_the_project()
+    {
+        var ios = Sentinel();
+        var fresh = IosBuildSelection.Restore("p", ios, null);
+        Assert.Equal("HCGSentinel.xcodeproj", fresh.Container);
+        Assert.Equal("HCGSentinel", fresh.Scheme);
+        Assert.Null(fresh.Configuration);
+        var saved = new MobileSelection { ProjectId = "p", Container = "HCGSentinel.xcodeproj", Scheme = "HCGSentinelModern", Configuration = "Debug" };
+        Assert.Equal(saved with { SavedAt = default }, IosBuildSelection.Restore("p", ios, saved) with { SavedAt = default });
+        var stale = IosBuildSelection.Restore("p", ios, saved with { Scheme = "Deleted", Configuration = "Staging", Container = "Other.xcworkspace" });
+        Assert.Equal("HCGSentinel", stale.Scheme);
+        Assert.Null(stale.Configuration);
+        Assert.Equal("HCGSentinel.xcodeproj", stale.Container);
+    }
+
+    [Fact]
+    public void The_command_shown_is_the_command_planned_for_the_build()
+    {
+        var ios = Sentinel();
+        var root = _t.Combine("sentinel src");
+        var m = Mobile(ios);
+        foreach (var (scheme, output, config) in new[] { ("HCGSentinelModern", MobileOutput.IosArchive, (string?)null), ("HCGSentinel", MobileOutput.IosSimulatorApp, "Release"), ("HCGSentinelModern", MobileOutput.IosSimulatorApp, null) })
+        {
+            var o = new MobileBuildOptions { Framework = m.Framework, Output = output, Scheme = scheme, Variant = config, Signing = MobileSigningMode.Unsigned, Container = "HCGSentinel.xcodeproj" };
+            var preview = XcodePlanner.Preview(o, ios);
+            var plan = XcodePlanner.Plan(new MobilePlanInput
+            {
+                Options = o, Analysis = m, SourceDirectory = root, WorkDirectory = _t.Combine("work"), Toolchains = Report(Xcode()),
+                Environment = new Dictionary<string, string>(), ToolHomeDirectory = _t.Combine("home"),
+            });
+            var args = plan.Steps[0].Process.Arguments.ToList();
+            Assert.Equal(scheme, args[args.IndexOf("-scheme") + 1]);
+            var expectedConfig = config ?? (output == MobileOutput.IosSimulatorApp ? "Debug" : "Release");
+            Assert.Equal(expectedConfig, args[args.IndexOf("-configuration") + 1]);
+            var destination = args[args.IndexOf("-destination") + 1];
+            Assert.Equal(output == MobileOutput.IosSimulatorApp ? "generic/platform=iOS Simulator" : "generic/platform=iOS", destination);
+            Assert.Equal(output == MobileOutput.IosSimulatorApp, args.Contains("iphonesimulator"));
+            Assert.Contains($"-scheme {scheme} -configuration {expectedConfig} ", preview);
+            Assert.Contains("-destination " + (destination.Contains(' ') ? $"\"{destination}\"" : destination), preview);
+            Assert.Equal(output == MobileOutput.IosSimulatorApp, preview.Contains("-sdk iphonesimulator"));
+        }
+        Assert.Throws<BuildValidationException>(() => XcodePlanner.Resolve(new MobileBuildOptions { Framework = m.Framework, Output = MobileOutput.IosArchive, Container = "../elsewhere.xcodeproj" }, ios));
+    }
+
+    [Fact]
+    public async Task The_selection_is_saved_per_project()
+    {
+        var db = new HCG.ExecutableMaker.Infrastructure.Persistence.SqliteDatabase(_t.Combine("data", "t.db"));
+        await db.MigrateAsync();
+        var store = new HCG.ExecutableMaker.Infrastructure.Persistence.SqliteMobileSelectionStore(db);
+        Assert.Null(await store.LoadAsync("a"));
+        await store.SaveAsync(new MobileSelection { ProjectId = "a", Scheme = "HCGSentinelModern", Container = "HCGSentinel.xcodeproj" });
+        await store.SaveAsync(new MobileSelection { ProjectId = "b", Scheme = "Other" });
+        await store.SaveAsync(new MobileSelection { ProjectId = "a", Scheme = "HCGSentinelModern", Configuration = "Debug" });
+        var a = await store.LoadAsync("a");
+        Assert.Equal("HCGSentinelModern", a!.Scheme);
+        Assert.Equal("Debug", a.Configuration);
+        Assert.Equal("Other", (await store.LoadAsync("b"))!.Scheme);
     }
 
     // ───────────── States ─────────────

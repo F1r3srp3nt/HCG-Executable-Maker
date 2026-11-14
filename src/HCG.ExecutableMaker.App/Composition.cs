@@ -32,6 +32,7 @@ public static class Composition
         services.AddSingleton<IProjectRepository, SqliteProjectRepository>();
         services.AddSingleton<IBuildRepository, SqliteBuildRepository>();
         services.AddSingleton<ISettingsStore, SqliteSettingsStore>();
+        services.AddSingleton<IMobileSelectionStore, SqliteMobileSelectionStore>();
 
         // Environment & toolchains
         services.AddSingleton<IProcessRunner, ProcessRunner>();

@@ -197,6 +197,42 @@ What it does now:
   configuration and SDK — bundle identifier, version and build number, MinimumOSVersion, platform, architectures — and
   "Installation and runtime: not tested" is stated: HCG checks artifacts, it does not install or launch them.
 
+### Scheme workflow: selection first, one shared message, the scheme that runs
+
+Reproduced with the Sentinel fixture and a simulated Xcode 27.0 whose iPhoneOS and Simulator SDKs start at iOS 15.0
+(`hcg-ui-driver --simulate-xcode 27.0:15.0:15.0`). On main, the scheme list was empty and hidden once every output was
+unavailable, the Simulator was judged by the iPhoneOS SDK, and the state said "Required toolchain missing". On the first
+fix (PR #4) the selector was reachable, but the full deployment-target paragraph was repeated in the scheme panel and in
+every output, the configuration appeared only after an output was chosen, Xcode could only be changed on the Toolchains
+page, the project card kept its import-time "Missing toolchain" tag, and the scheme was not remembered per project.
+
+Now, in **Platform, scheme and output**:
+- **Before the outputs:** project or workspace (when both exist), scheme, build configuration ("Scheme default": the
+  scheme's Run configuration for Simulator and Archive configuration for device, or one chosen explicitly) and the Xcode
+  used for HCG's builds (the installed Xcodes with the iOS minimum of each SDK; choosing one sets DEVELOPER_DIR for HCG
+  only, as in Toolchains › Xcode). All stay usable when every output is unavailable.
+- **One shared message**, e.g. "HCGSentinel targets iOS 14.7; Xcode 27.0 builds iOS 15.0 and later (device and
+  Simulator).", with one short line per SDK. Outputs say only "Blocked by the deployment target (iPhoneOS SDK) — see
+  Scheme compatibility above" (plus any blocker of their own, such as signing). Device and Simulator are judged with
+  their own SDK range and configuration; the scheme's targets and their dependencies are checked, not every target.
+- **"Use HCGSentinelModern (iOS 15.0 and later)"** is offered only when that scheme is verified compatible with the
+  SDKs that fail. Pressing it first explains: what it builds runs only on iOS 15.0 or later; HCGSentinel and its iOS 14.7
+  deployment target stay unchanged; HCGSentinel needs an Xcode whose SDK accepts iOS 14.7. Nothing is changed in the
+  project.
+- **Recomputed on every change** of scheme, project/workspace, configuration or Xcode, synchronously, so no older result
+  can arrive later; re-inspection keeps the current choice (also one made while it runs).
+- **Remembered per project** (settings database, `mobile-selection:<project id>`): reopening the project, returning to
+  the page, New Build's Back/Next and "Open in Mobile Build Studio", and restarting HCG restore it.
+- **What is shown is what runs:** the summary's *Command* line comes from `XcodePlanner.Resolve`, the function the build
+  uses for `-project/-workspace`, `-scheme`, `-configuration` and the destination. Unset configurations now resolve to the
+  scheme's own (previously the planner used Debug/Release while the check used the scheme's configuration).
+
+Verification (Linux, `hcg-ui-driver`, simulated Xcode): `--scheme-workflow` (36 checks), `--reopen-mobile` after a
+restart (5), `--expect-simulator-only` with a Simulator SDK that accepts iOS 14.7 (10); a real `--mobile` run recorded
+`COMMAND /usr/bin/xcodebuild … -scheme HCGSentinelModern -configuration Release` in its build log and then stopped at
+"Executable not found" — there is no Xcode on Linux. Unit tests: `SchemeSelectionTests` (17). Not run here: a real
+Sentinel build with a real Xcode (the macOS CI job "HCG Sentinel — archive …" does that, and runs these driver checks).
+
 ## Verification
 
 See docs/STATUS.md for what ran where. In short: fixture tests on Linux (detection, readiness, plans, .deb
