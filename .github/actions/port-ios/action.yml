@@ -1,0 +1,82 @@
+name: Porting — macOS source → iOS app (stages)
+description: >
+  The iOS porting checks: TallyPackage, HelloMac and WebViteDesktop are assessed, generated, compiled and launched in a
+  Simulator created for this job; Oslo-Sprint's apps are assessed as blocked. Each step runs under tools/ci/run-stage.sh
+  (timestamps, exit code, time limit, heartbeat, resource guard, diagnostics before anything is stopped); inside, the UI
+  driver times every stage (assessment, generation, validation, compilation, launch → boot/install/launch/ready).
+inputs:
+  simulator-name:
+    description: Name of the Simulator created for this job.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Toolchain, first-launch state and the job's own Simulator (explicit runtime and device type)
+      shell: bash
+      run: |
+        mkdir -p "$OUT/screens" "$OUT/diagnostics"
+        xcodebuild -version
+        # An Xcode that still needs its first-launch setup would prompt or install components: report it, never run it.
+        xcodebuild -checkFirstLaunchStatus && echo "Xcode first-launch setup: done" || { echo "Xcode requires first-launch setup (xcodebuild -runFirstLaunch); not run by CI."; exit 1; }
+        xcrun simctl list runtimes | grep -i ios || true
+        tools/ci/simulator.sh create "${{ inputs.simulator-name }}"
+
+    - name: The sources are real Mac apps (build them for macOS first)
+      shell: bash
+      run: |
+        tools/ci/run-stage.sh "macOS builds of the fixtures" 900 -- bash -c '
+          (cd tests/Fixtures/TallyPackage && swift build --scratch-path "$OUT/tally-mac" 2>&1 | tail -3)
+          xcodebuild -project tests/Fixtures/HelloMac/HelloMac.xcodeproj -scheme HelloMac -configuration Release -derivedDataPath "$OUT/hellomac-mac" build -quiet
+          echo "Both fixtures build as macOS apps."'
+
+    - name: Build the UI driver
+      shell: bash
+      run: tools/ci/run-stage.sh "Build the UI driver" 900 -- dotnet build tools/ui-driver -c Release
+
+    - name: Swift package app (TallyPackage) → iOS — assess, generate, compile, launch in Simulator
+      shell: bash
+      run: >
+        tools/ci/run-stage.sh "TallyPackage → iOS" 1800 --
+        dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/TallyPackage --port "swiftpm::TallyApp"
+        --name Tally --bundle-id com.hakmicapital.tally "--usage" "NSMicrophoneUsageDescription=Tally shows whether the microphone may be used for voice notes."
+        --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
+        --simulator-udid "$HCG_SIM_UDID" --on-stage-timeout tools/ci/diagnose.sh
+        --expect-ready ContentView --expect-ready-element1 "title=Tally" --expect-ready-element2 "total=0"
+        --output "$OUT/tally" --screenshots "$OUT/screens" --prefix tally-ios --window-height 3600
+
+    - name: macOS Xcode project (HelloMac) → iOS — assess, generate, compile, launch in Simulator
+      shell: bash
+      run: >
+        tools/ci/run-stage.sh "HelloMac → iOS" 1800 --
+        dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/HelloMac --port "xcode:HelloMac.xcodeproj"
+        --name "Hello HCG" --bundle-id com.hakmicapital.hellomac
+        --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
+        --simulator-udid "$HCG_SIM_UDID" --on-stage-timeout tools/ci/diagnose.sh
+        --expect-ready ContentView --expect-ready-element1 "title=Hello from HCG" --expect-ready-element2 "count=0"
+        --output "$OUT/hellomac" --screenshots "$OUT/screens" --prefix hellomac-ios --window-height 3600
+
+    - name: Web app (WebViteDesktop, Vite + React) → iOS with Capacitor — inspect, generate, validate, compile, launch in Simulator
+      shell: bash
+      run: >
+        tools/ci/run-stage.sh "WebViteDesktop → iOS" 1800 --
+        dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/WebViteDesktop --port "web:" --path WebToIOS
+        --name "Field Notes" --bundle-id com.hakmicapital.fieldnotes --expect-capability GenerateTarget
+        --validate --expect-validate Passed --compile --expect-compile Passed --launch --expect-launch Passed
+        --simulator-udid "$HCG_SIM_UDID" --on-stage-timeout tools/ci/diagnose.sh
+        --output "$OUT/fieldnotes" --screenshots "$OUT/screens" --prefix web-ios --window-height 3600
+
+    - name: Oslo-Sprint (real apps) — Relay and Distil are assessed as blocked, with specific blockers; Relay draft
+      shell: bash
+      run: |
+        git clone --quiet "$OSLO_REPO" "$OUT/Oslo-Sprint" && git -C "$OUT/Oslo-Sprint" checkout --quiet "$OSLO_COMMIT"
+        tools/ci/run-stage.sh "Oslo-Sprint Relay (draft)" 1200 -- dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --port "swiftpm:relay:RelayApp" \
+          --name Relay --bundle-id com.oslosprint.relay "--usage" "NSMicrophoneUsageDescription=Push to talk." --draft \
+          --expect-capability BlockedNeedsPorting --compile --expect-compile NotPerformed --on-stage-timeout tools/ci/diagnose.sh \
+          --output "$OUT/relay" --screenshots "$OUT/screens" --prefix relay-ios --window-height 3600
+        tools/ci/run-stage.sh "Oslo-Sprint Distil (assess)" 600 -- dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --port "swiftpm:distil:TokenLabApp" \
+          --assess-only --expect-capability BlockedNeedsPorting --output "$OUT/distil" --screenshots "$OUT/screens" --prefix distil-ios --window-height 3600
+        # The draft really does not compile for iOS, and fails only on HCG's explicit blocker marker.
+        relay_out="$(find "$OUT/relay/ports" -maxdepth 1 -type d -name '*-ios-port-*' | head -1)"
+        tools/ci/run-stage.sh "Relay draft compiles only up to its blocker markers" 900 -- bash -c '
+          xcodebuild -project "$0/relay/iOS/Relay.xcodeproj" -scheme Relay -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$OUT/relay-dd" build CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:" | sort -u | head -10; exit 0' "$relay_out"
