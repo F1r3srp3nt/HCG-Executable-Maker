@@ -96,6 +96,15 @@ public sealed class UnixFactAttribute : FactAttribute
     }
 }
 
+/// <summary>Linux only (reads /proc).</summary>
+public sealed class LinuxFactAttribute : FactAttribute
+{
+    public LinuxFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux()) Skip = "Requires Linux (/proc).";
+    }
+}
+
 /// <summary>Skips when the JDK tools (keytool, jarsigner) are not available.</summary>
 public sealed class RequiresJdkFactAttribute : FactAttribute
 {
