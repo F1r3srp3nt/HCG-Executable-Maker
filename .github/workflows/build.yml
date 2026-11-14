@@ -1461,3 +1461,114 @@ jobs:
             ${{ github.workspace }}/port-web-android-out/*/ports/*/HCG-PORT
           if-no-files-found: warn
           retention-days: 7
+
+  ios-port:
+    name: Mobile — port a Mac SwiftUI app to iOS and run it in the Simulator
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 50
+    env:
+      OUT: ${{ github.workspace }}/port-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: The fixture is a real Mac app (build and run it on macOS)
+        run: |
+          mkdir -p "$OUT/shots"
+          xcodebuild -version
+          xcodebuild -project tests/Fixtures/HelloMac/HelloMac.xcodeproj -scheme HelloMac -configuration Release \
+            -derivedDataPath "$OUT/mac-dd" build -quiet
+          app="$OUT/mac-dd/Build/Products/Release/HelloMac.app"
+          plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist"
+          lipo -archs "$app/Contents/MacOS/HelloMac"
+          "$app/Contents/MacOS/HelloMac" & pid=$!
+          sleep 6
+          kill -0 "$pid" && echo "HelloMac is running on macOS (pid $pid)"
+          kill "$pid"
+          echo "MAC_APP=$app" >> "$GITHUB_ENV"
+
+      - name: Port with Mobile Build Studio ("From Mac app…" → source .xcodeproj) and build for the Simulator, unchanged
+        run: |
+          set +e
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloMac "$OUT/first" \
+            --port-mac HelloMac.xcodeproj --from-app "$MAC_APP" --output ios-simulator --trust > "$OUT/1-port-and-build.log" 2>&1
+          code=$?
+          set -e
+          grep -E "^(Mac app|Ported|Review|Imported|Result|  [✓✗])" "$OUT/1-port-and-build.log" || true
+          echo "--- compiler diagnostics from the unchanged port:"
+          grep -E "error:|warning:" "$OUT/1-port-and-build.log" | grep -v "^ *WARNING: Isolation" | sort -u | head -40 || true
+          echo "Unchanged port build exit code: $code"
+          src=$(sed -n 's/^Ported source: //p' "$OUT/1-port-and-build.log")
+          test -n "$src"
+          cp -R "$src" "$OUT/HelloMac-iOS"
+          (cd "$OUT/HelloMac-iOS" && git init -q && git add -A && git -c user.name=ci -c user.email=ci@localhost commit -qm "port as generated")
+
+      - name: Prove each source change is needed (rebuild with only the AppKit import guarded)
+        run: |
+          cp -R "$OUT/HelloMac-iOS" "$OUT/HelloMac-iOS-importonly"
+          perl -0pi -e 's/import AppKit\n/#if canImport(AppKit)\nimport AppKit\n#endif\n/' "$OUT/HelloMac-iOS-importonly/HelloMac/ContentView.swift"
+          set +e
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- "$OUT/HelloMac-iOS-importonly" "$OUT/importonly" --output ios-simulator --trust \
+            > "$OUT/1b-import-guard-only.log" 2>&1
+          echo "Exit code with only the import guarded: $?"
+          set -e
+          grep -E "error:" "$OUT/1b-import-guard-only.log" | sed -E 's#^.*/(HelloMac/[A-Za-z]+\.swift)#\1#' | sort -u | head -20 || true
+
+      - name: Apply the source changes iOS needs, then rebuild in Mobile Build Studio
+        run: |
+          patch -p1 -d "$OUT/HelloMac-iOS" < tools/ios-port-check/HelloMac-ios-source-changes.patch
+          (cd "$OUT/HelloMac-iOS" && git diff --stat && git diff > "$OUT/2-source-changes.diff")
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- "$OUT/HelloMac-iOS" "$OUT/sim" --output ios-simulator --trust \
+            > "$OUT/3-rebuild.log" 2>&1 || { tail -60 "$OUT/3-rebuild.log"; exit 1; }
+          grep -E "^(Imported|Result|  /|     - )" "$OUT/3-rebuild.log"
+
+      - name: Install and launch in an iPhone simulator; exercise the main screen with XCUITest
+        run: |
+          app=$(find "$OUT/sim" -maxdepth 3 -type d -name "HelloMac.app" | head -1)
+          udid=$(xcrun simctl list devices available | grep -m1 -E "^ +iPhone" | grep -oE "[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
+          xcrun simctl list devices available | grep "$udid"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl install "$udid" "$app"
+          xcrun simctl launch "$udid" com.hakmicapital.hellomac
+          sleep 8
+          xcrun simctl io "$udid" screenshot "$OUT/shots/0-simctl-launched.png"
+          xcrun simctl terminate "$udid" com.hakmicapital.hellomac
+          command -v xcodegen >/dev/null || brew install xcodegen
+          (cd tools/ios-port-check/ui-probe && xcodegen generate)
+          xcodebuild test -project tools/ios-port-check/ui-probe/UIProbe.xcodeproj -scheme ProbeUITests \
+            -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$OUT/probe-dd" \
+            -resultBundlePath "$OUT/probe.xcresult" 2>&1 | grep -E "Test (Case|Suite)|error|passed|failed|\*\*" || true
+          xcrun xcresulttool export attachments --path "$OUT/probe.xcresult" --output-path "$OUT/shots"
+          ls -la "$OUT/shots"
+          xcrun xcresulttool get test-results summary --path "$OUT/probe.xcresult" | tee "$OUT/4-ui-test-summary.json"
+          grep -qE '"result" ?: ?"Passed"' "$OUT/4-ui-test-summary.json"
+
+      - name: Screenshots into the log (base64), for environments that cannot download artifacts
+        run: |
+          cd "$OUT/shots"
+          /usr/bin/python3 -c 'import json,os,shutil; m=json.load(open("manifest.json")); [shutil.copy(a["exportedFileName"], a["suggestedHumanReadableName"].split("_")[0]+".png") for t in m for a in t["attachments"]]'
+          ls
+          swift "$GITHUB_WORKSPACE/tools/ios-port-check/compose.swift" "$OUT/shots/composite.jpg" 900 \
+            0-simctl-launched.png 2-added-three-times.png 3-step-two-and-copied.png 4-reset.png
+          for f in composite.jpg 3-step-two-and-copied.png; do
+            echo "=====BEGIN $f====="; base64 -i "$f" | fold -w 4000; echo "=====END $f====="
+          done
+
+      - name: Upload port, logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-port-of-mac-app
+          path: |
+            ${{ github.workspace }}/port-out/*.log
+            ${{ github.workspace }}/port-out/*.diff
+            ${{ github.workspace }}/port-out/*.json
+            ${{ github.workspace }}/port-out/shots
+            ${{ github.workspace }}/port-out/HelloMac-iOS
+          if-no-files-found: warn
+          retention-days: 7

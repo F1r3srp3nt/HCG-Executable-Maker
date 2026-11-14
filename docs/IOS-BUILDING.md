@@ -4,6 +4,12 @@ iOS apps can only be built on **macOS with Xcode** — Apple's compilers, SDKs a
 or Linux. On other hosts every iOS output is shown as unavailable with that reason; Xcode projects can still be
 imported and inspected.
 
+## Port a macOS Xcode app
+
+On a Mac, open **Mobile Build Studio → From Xcode project…** and select the Mac app’s source `.xcodeproj`. **From Mac app…** reads the installed app’s bundle identifier and prompts for the corresponding source project. The desktop binary supplies identity only. The importer copies the folder containing the project into a new workspace, retargets that copy for iPhone and iPad, and opens its location in Finder.
+
+The first porting workflow supports one standalone macOS application target with inline Xcode build configurations. It preserves the existing source membership, resources and shared schemes, and sets an editable iOS 16 deployment target. Review the reported files for AppKit and macOS resources. Conditional imports can already be portable. Other desktop dependencies, entitlements, file access and window behavior need review in Xcode. Use **Simulator app** to compile the copy and test its behavior before considering device signing.
+
 ## Requirements
 
 | Tool | Detection |

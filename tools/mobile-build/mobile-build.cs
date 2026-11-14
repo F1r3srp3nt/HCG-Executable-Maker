@@ -12,6 +12,10 @@
 //        [--export app-store-connect|release-testing|enterprise|debugging] [--variant release] [--module :app]
 //        [--apks universal|device --device-spec spec.json] [--timeout-minutes 30] [--trust] [--expect-failure "text"]
 //   dotnet run --no-cache tools/mobile-build/mobile-build.cs -- <project-dir|artifact> <output-dir> --inspect-only
+//   dotnet run --no-cache tools/mobile-build/mobile-build.cs -- <mac-project-dir> <output-dir> --port-mac App.xcodeproj
+//        [--from-app App.app] [--output ios-simulator --trust]
+//   --port-mac runs Mobile Build Studio's "Port a Mac app to iOS" path (import copy + MacProjectPort retargeting);
+//   --from-app first reads the built Mac app's bundle identifier (like "From Mac app…") and requires the source to match.
 //   kinds: android-debug-apk | android-release-apk | android-aab | aab-to-apk | ios-simulator | ios-archive | ios-ipa
 //
 // --trust is REQUIRED: building executes the project's build scripts (Gradle wrapper, Xcode run phases).
@@ -31,7 +35,8 @@ using HCG.ExecutableMaker.ProjectInspection.Ecosystems;
 using HCG.ExecutableMaker.ProjectInspection.Mobile;
 using Microsoft.Extensions.Logging.Abstractions;
 
-var inspectOnly = args.Contains("--inspect-only");
+var portMac = Option("--port-mac");
+var inspectOnly = args.Contains("--inspect-only") || (portMac is not null && Option("--output") is null);
 if (args.Length < 2 || (Option("--output") is null && !inspectOnly))
 {
     Console.Error.WriteLine("Usage: mobile-build.cs <project-dir|artifact> <output-dir> --output <kind> [--trust] [options]  (see header)");
@@ -71,9 +76,30 @@ Console.WriteLine($"Host: {report.Host.DisplayName}");
 foreach (var t in report.Toolchains.Where(t => t.Category is "Android" or "Apple mobile" or "Flutter" or ".NET MAUI" || t.Id is ToolchainIds.Xcode))
     Console.WriteLine($"  {t.DisplayName,-28} {t.Status,-18} {t.Version} {t.ExecutablePath}");
 
-var import = File.Exists(input)
-    ? await projects.ImportArtifactAsync(input, null, CancellationToken.None)
-    : await projects.ImportDirectoryAsync(input, null, CancellationToken.None);
+ImportResult import;
+if (portMac is not null)
+{
+    string? bundleId = null;
+    if (Option("--from-app") is { } app)
+    {
+        var plist = Path.Combine(Path.GetFullPath(app), "Contents", "Info.plist");
+        bundleId = HCG.ExecutableMaker.Packaging.Mobile.PlistReader.ParseDictionary(File.ReadAllBytes(plist)).GetValueOrDefault("CFBundleIdentifier") as string
+                   ?? throw new InvalidDataException("The Mac app has no CFBundleIdentifier.");
+        Console.WriteLine($"Mac app {Path.GetFileName(app)}: bundle identifier {bundleId} — source required, porting {portMac}");
+    }
+    MacProjectPort.Result? port = null;
+    import = await projects.ImportDirectoryAsync(input, null, CancellationToken.None,
+        copy => port = MacProjectPort.PrepareCopy(copy, portMac, bundleId));
+    Console.WriteLine($"Ported project: {port!.ProjectFile}");
+    Console.WriteLine($"Ported source: {import.Project.SourceDirectory}");
+    Console.WriteLine(port.ReviewFiles.Count == 0 ? "Review: (no files flagged)" : "Review: " + string.Join(", ", port.ReviewFiles));
+}
+else
+{
+    import = File.Exists(input)
+        ? await projects.ImportArtifactAsync(input, null, CancellationToken.None)
+        : await projects.ImportDirectoryAsync(input, null, CancellationToken.None);
+}
 var analysis = import.Project.Analysis!;
 Console.WriteLine($"Imported {import.FileCount} file(s): {analysis.ApplicationType} — {analysis.Support} — {analysis.SupportSummary}");
 foreach (var d in analysis.Diagnostics) Console.WriteLine($"  [{d.Severity}] {d.Message}");

@@ -195,6 +195,12 @@
                       </StackPanel>
                     </Button>
                   </Grid>
+                  <!-- A folder with more than one kind of project (an Xcode iOS app and a Theos jailbreak project): the user chooses the route. -->
+                  <StackPanel Spacing="6" IsVisible="{Binding HasBuildRoutes}">
+                    <TextBlock Classes="formlabel" Text="Build route" Margin="0" />
+                    <ComboBox ItemsSource="{Binding BuildRouteOptions}" SelectedItem="{Binding SelectedBuildRoute}" HorizontalAlignment="Stretch" />
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding BuildRouteDescription}" TextWrapping="Wrap" />
+                  </StackPanel>
                   <TextBlock Classes="body secondary" Text="{Binding Analysis.SupportSummary, FallbackValue=''}" />
                   <Button Classes="primary" HorizontalAlignment="Left" Margin="0,8,0,0" Command="{Binding OpenInMobileStudioCommand}" IsVisible="{Binding IsMobileProject}">
                     <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Open in Mobile Build Studio" /></StackPanel>

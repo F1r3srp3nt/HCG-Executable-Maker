@@ -21,11 +21,20 @@ public sealed class ProjectService(
         return await FinishImportAsync(result, progress, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<ImportResult> ImportDirectoryAsync(string directory, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
+    public async Task<ImportResult> ImportDirectoryAsync(string directory, IProgress<ImportProgress>? progress, CancellationToken cancellationToken, Action<string>? prepareCopy = null)
     {
         var limits = (await settings.LoadAsync(cancellationToken).ConfigureAwait(false)).ImportLimits;
         var result = await importer.ImportDirectoryAsync(directory, limits, progress, cancellationToken).ConfigureAwait(false);
-        return await FinishImportAsync(result, progress, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            prepareCopy?.Invoke(result.Project.SourceDirectory);
+            return await FinishImportAsync(result, progress, cancellationToken).ConfigureAwait(false);
+        }
+        catch when (prepareCopy is not null)
+        {
+            await RemoveProjectAsync(result.Project, CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
     public async Task<ImportResult> ImportArtifactAsync(string file, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)

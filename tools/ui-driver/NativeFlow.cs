@@ -7,12 +7,33 @@ namespace HCG.ExecutableMaker.UiDriver;
 /// <summary>
 /// The C/C++ path through the real New Build wizard: Inspect (states, trusted CMake configure, target choice) →
 /// Configure → Package → Build → Results. Options: --project dir/CMakeLists.txt|dir/Makefile|dir, --target NAME,
-/// --make-target T --expected-output PATH, --expect-targets a,b --expect-libraries x,y, --expect-unsupported.
+/// --make-target T --expected-output PATH, --expect-targets a,b --expect-libraries x,y, --expect-unsupported. A folder with
+/// an app project next to a Theos project: --build-route theos-deb|xcode-ipa (default theos-deb).
 /// </summary>
 internal static partial class Program
 {
     private static async Task<int> RunNativeAsync(BuildWizardViewModel wizard, HostEnvironment host, string output)
     {
+        // A folder with an app project next to a Theos project (HCG Nexus with HCGNexus.xcodeproj): Build route chooses
+        // which one New Build builds. --build-route theos-deb|xcode-ipa (default theos-deb on such a folder).
+        if (wizard.HasBuildRoutes || Arg("build-route") is not null)
+        {
+            foreach (var r in wizard.BuildRouteOptions) Log($"Build route offered: {r.Label} — {r.Description}");
+            Check(wizard.HasBuildRoutes, "Build route choice shown: " + string.Join(" | ", wizard.BuildRouteOptions.Select(r => r.Label)));
+            var lead = wizard.SelectedBuildRoute;
+            if (lead?.Id == HCG.ExecutableMaker.ProjectInspection.BuildRoutes.XcodeIpa)
+                Check(wizard.IsMobileProject && !wizard.IsNativeProject && !wizard.CanConfigure, "iOS app (IPA, Xcode) route: built in Mobile Build Studio, no .deb offered in New Build");
+            Shot("native-route-" + lead?.Id);
+            var want = Arg("build-route", HCG.ExecutableMaker.ProjectInspection.BuildRoutes.TheosDeb);
+            var route = wizard.BuildRouteOptions.FirstOrDefault(r => r.Id == want || r.Label == want);
+            Check(route is not null, $"Build route {want} offered");
+            if (route is null) return 1;
+            wizard.SelectedBuildRoute = route;
+            Log($"Build route chosen: {route.Label}");
+            if (route.Id == HCG.ExecutableMaker.ProjectInspection.BuildRoutes.TheosDeb)
+                Check(!wizard.IsMobileProject && wizard.Analysis!.RecommendedFormats.SequenceEqual([PackagingFormat.JailbreakDeb]), "Jailbreak package (.deb, Theos) route: only a .deb is offered, never an IPA");
+            else return Failures.Count == 0 ? 0 : 1;
+        }
         var a = wizard.Analysis!;
         Log($"Inspection: {a.InspectorId} · {a.Framework} · {a.ApplicationType} · {a.Support} — {a.SupportSummary}");
         foreach (var d in a.Diagnostics) Log($"  {d.Severity}: {d.Message}{(d.Path is null ? "" : " (" + d.Path + ")")}");

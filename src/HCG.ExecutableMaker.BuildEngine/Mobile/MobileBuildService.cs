@@ -52,12 +52,23 @@ public sealed class MobileBuildService(
     public static string OutputRootFor(BuildSettings s) =>
         Path.Combine(Path.GetFullPath(s.OutputDirectory), $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{Suffix(s.Mobile!.Output)}");
 
+    /// <summary>
+    /// A mobile build (IPA, Xcode archive, APK/AAB…) never packages a Theos .deb, even when the folder also holds a
+    /// Theos project: that is the “Jailbreak package (.deb, Theos)” route of New Build.
+    /// </summary>
+    public static void ValidateRoute(BuildSettings settings)
+    {
+        if (settings.Native is not null || settings.PackagingFormats.Contains(PackagingFormat.JailbreakDeb))
+            throw new BuildValidationException("Mobile Build Studio builds the app project (IPA, archive, APK or AAB); it never packages a .deb. Build the Theos package on the “Jailbreak package (.deb, Theos)” route in New Build.");
+    }
+
     public async Task<BuildRecord> RunAsync(MobileBuildRequest request, IBuildObserver observer, CancellationToken cancellationToken)
     {
         if (!request.TrustAcknowledged)
             throw new InvalidOperationException("Build refused: the user has not acknowledged that this project is trusted. " + TrustPolicy.TrustBoundaryExplanation);
         var settings = request.Settings;
         var options = settings.Mobile ?? throw new ArgumentException("Mobile build settings are required.", nameof(request));
+        ValidateRoute(settings);
 
         var build = new BuildRecord
         {

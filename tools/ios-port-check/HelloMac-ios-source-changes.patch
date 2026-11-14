@@ -1,0 +1,47 @@
+diff -ru a/HelloMac/ContentView.swift b/HelloMac/ContentView.swift
+--- a/HelloMac/ContentView.swift	2026-11-05 17:36:00.663546090 +0000
++++ b/HelloMac/ContentView.swift	2026-11-05 17:36:00.678471396 +0000
+@@ -1,5 +1,9 @@
+ import SwiftUI
++#if canImport(AppKit)
+ import AppKit
++#elseif canImport(UIKit)
++import UIKit
++#endif
+ 
+ /// A tiny tally counter: add the configured step, reset, copy the result.
+ struct ContentView: View {
+@@ -21,9 +25,19 @@
+                 Button("Reset") { count = 0; copied = false }
+                     .accessibilityIdentifier("reset")
+             }
++            #if os(iOS)
++            // iOS has no Settings window: offer the step on the main screen.
++            Stepper("Step: \(step)", value: $step, in: 1...10)
++                .accessibilityIdentifier("step")
++                .frame(maxWidth: 220)
++            #endif
+             Button(copied ? "Copied" : "Copy result") {
++                #if os(macOS)
+                 NSPasteboard.general.clearContents()
+                 NSPasteboard.general.setString("\(count)", forType: .string)
++                #else
++                UIPasteboard.general.string = "\(count)"
++                #endif
+                 copied = true
+             }
+             .accessibilityIdentifier("copy")
+diff -ru a/HelloMac/HelloMacApp.swift b/HelloMac/HelloMacApp.swift
+--- a/HelloMac/HelloMacApp.swift	2026-11-05 17:36:00.663615463 +0000
++++ b/HelloMac/HelloMacApp.swift	2026-11-05 17:36:00.678303160 +0000
+@@ -7,8 +7,10 @@
+             ContentView()
+                 .frame(minWidth: 360, minHeight: 280)
+         }
++        #if os(macOS)
+         Settings {
+             SettingsView()
+         }
++        #endif
+     }
+ }

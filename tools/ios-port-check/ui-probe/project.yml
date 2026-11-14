@@ -1,0 +1,36 @@
+# XcodeGen spec for a throw-away UI-test runner. It drives an app that is already installed in the Simulator (the
+# iOS port of tests/Fixtures/HelloMac) by bundle identifier; the host app exists only because Xcode requires one.
+name: UIProbe
+options:
+  bundleIdPrefix: com.hakmicapital.uiprobe
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  ProbeHost:
+    type: application
+    platform: iOS
+    sources: [Host]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.hakmicapital.uiprobe.host
+  ProbeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: ProbeHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ProbeHost
+        PRODUCT_BUNDLE_IDENTIFIER: com.hakmicapital.uiprobe.uitests
+schemes:
+  ProbeUITests:
+    build:
+      targets:
+        ProbeHost: all
+        ProbeUITests: [test]
+    test:
+      targets: [ProbeUITests]

@@ -35,7 +35,7 @@ public sealed class ProjectInspectionService(IEnumerable<IProjectInspector> insp
         }
 
         var analysis = await ranked[0].Inspector.InspectAsync(index, toolchains, cancellationToken).ConfigureAwait(false);
-        var others = ranked.Skip(1).Select(r => r.Inspector.DisplayName).Distinct().ToList();
+        var others = ranked.Skip(1).Select(r => r.Inspector).ToList();
         var extra = new List<AnalysisDiagnostic>();
         // Node.js projects are reported whichever ecosystem leads, so an Electron app inside another repository is visible.
         if (analysis.Node is null && index.Named("package.json").Any())
@@ -56,8 +56,22 @@ public sealed class ProjectInspectionService(IEnumerable<IProjectInspector> insp
             extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info,
                 $"iPhone/iPad app {ios.DotNetIos!.ProjectPath} ({ios.DotNetIos.TargetFramework}) found. Build it in Mobile Build Studio; New Build publishes the desktop app.", ios.DotNetIos.ProjectPath));
         }
-        if (others.Count > 0)
-            extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info, $"Also found files for: {string.Join(", ", others)}. These are not part of this build."));
+        // A Theos jailbreak project in a folder led by another project (HCG Nexus: HCGNexus.xcodeproj next to the tweak's
+        // Makefile and control): attached, so New Build offers both routes and builds either with its own planner.
+        if (analysis.Native is null && BuildRoutes.TheosProjects(Native.NativeProjectInspector.Analyze(index)) is { Count: > 0 } theos)
+        {
+            analysis = analysis with { Native = new NativeAnalysis { Projects = theos } };
+            var lead = BuildRoutes.Lead(analysis);
+            foreach (var p in theos)
+                extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info,
+                    $"Theos project {p.Name} in {p.DisplayDirectory} ({p.Theos!.Summary}). In New Build, choose “{BuildRoutes.TheosDebLabel}” under Build route to build its .deb; “{lead.Label}” builds the {analysis.Framework} project.", p.ManifestPath));
+            // The note below lists what is not built: the C/C++ inspector only when it found more than Theos projects.
+            if (Native.NativeProjectInspector.Analyze(index).Projects.All(p => p.Kind == NativeProjectKind.Theos))
+                others.RemoveAll(i => i.Id == "native");
+        }
+        var otherNames = others.Select(i => i.DisplayName).Distinct().ToList();
+        if (otherNames.Count > 0)
+            extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info, $"Also found files for: {string.Join(", ", otherNames)}. These are not part of this build."));
         if (index.Truncated)
             extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Warning, $"Only the first {SourceIndex.MaxFiles:N0} files were scanned."));
         return extra.Count == 0 ? analysis : analysis with { Diagnostics = [.. analysis.Diagnostics, .. extra] };

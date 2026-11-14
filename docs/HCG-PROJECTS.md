@@ -45,6 +45,21 @@ installs to `PreferenceBundles` or links the Preferences framework), `APPLICATIO
 `FRAMEWORK_NAME`. The `control` file gives the package id, name, version and dependencies; maintainer scripts are
 listed because they run as root on installation.
 
+**Two routes in one folder.** When the imported folder also holds an iOS app project (HCG Nexus with
+`HCGNexus.xcodeproj` at the root, next to the tweak's `Makefile`, `control`, `Prefs/` and `PreviewHarness/`), the Xcode
+app still leads the inspection and the Theos projects are attached to it. New Build then shows **Build route** on the
+Inspect step:
+
+- *iOS app (IPA, Xcode)* — the Xcode project, archived and exported as an IPA in Mobile Build Studio (`XcodePlanner`).
+  It never packages a `.deb`: Mobile Build Studio refuses settings that carry Theos options or a `.deb` format.
+- *Jailbreak package (.deb, Theos)* — the same Theos analysis and panel as a Theos-only folder (configurations from
+  `HCG_ENV`, `PreviewHarness/` as its own package, the `.deb` verification with the arm64e ABI check), built by
+  `TheosBuildPlanner`. It never produces or exports an IPA: a Theos build with an IPA/archive format or mobile options is
+  refused.
+
+Import the repository root, not a subfolder: the Makefiles reach shared sources through `..`. An inspection stored
+before this route choice existed shows only the Xcode route; press *Re-inspect* once.
+
 **Tools.** The Toolchains page has a *Jailbreak packages (Theos)* group, each item reported on its own: Theos (`THEOS`,
 `~/theos` or `/opt/theos`, with the SDKs in `$THEOS/sdks`), GNU make 4+ (`gmake` on macOS; Apple's make 3.81 is
 reported as too old), ldid, perl, and the iOS clang (Xcode's on a Mac; `$THEOS/toolchain` on Linux). The SDK a
