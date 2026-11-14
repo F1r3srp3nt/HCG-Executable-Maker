@@ -2,6 +2,19 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG Signing Vault ([docs/SIGNING-VAULT.md](docs/SIGNING-VAULT.md))
+
+### Added
+- **Signing & Security › Apple Signing.** Identities (type, team, fingerprints, validity, private key on this Mac, revocation only as macOS reports it, location) and provisioning profiles (UUID, App ID, platforms, devices, entitlements, distribution type, signature). Assets on this Mac, recorded in the HCG account and on another Mac are shown separately; only local assets with a private key are ever "ready".
+- **Keychain import:** password-protected `.p12` (password checked in memory, never on a command line or stored; no `-A`/`-T` grants), `.cer` with an explanation of the missing private key, verified profile import. Duplicates by SHA-1 / profile UUID; refresh; specific errors.
+- **Separate removals:** remove HCG record, delete from this Mac (certificate + key, or certificate), revoke with Apple (explained, never performed).
+- **Project signing configuration:** Xcode automatic or manual; routes for iOS development / Ad Hoc / App Store / In-house and macOS development / Developer ID / Mac App Store; per-target profiles; stored locally, non-secret.
+- **Pre-build validation** (Signing & Security and before iOS archive/IPA builds with Apple signing): certificate type/key/validity/team, profile signature/expiry/platform/type/team/certificate, bundle ID with wildcard rules, entitlements with values, devices, embedded targets, tools. Apple-side checks are labelled not verified.
+- **Account metadata** client and website package routes `/signing/assets`, `/signing/projects/{key}` (migration `20261113230000`, tests on PostgreSQL, C# contract test). Not deployed: the app shows account backup as unavailable.
+- **Encrypted vault:** design contract only; shown as not available.
+- **App Store Connect API key** boundary (reference + validation), separate from signing.
+- Tests: 57 C# tests (synthetic certificates and CMS-signed profiles), 5 website tests, 1 contract test, opt-in macOS keychain test (CI step), UI driver `--signing`.
+
 ## [Unreleased] — `feature/mobile-conversion`
 
 ### Added — desktop → mobile conversion workspace ([docs/MOBILE-CONVERSION.md](docs/MOBILE-CONVERSION.md))

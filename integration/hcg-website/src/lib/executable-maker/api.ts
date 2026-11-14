@@ -12,6 +12,10 @@
 //   GET  /support/requests/{id}
 //   POST /support/requests/{id}/attachments/{aid}/upload-url | complete | download
 //   POST /support/requests/{id}/submit | messages | withdraw
+//   GET  /signing/assets         POST /signing/assets         DELETE /signing/assets/{id}
+//   GET  /signing/projects/{key} PUT  /signing/projects/{key}
+//   (signing metadata only — fingerprints, UUIDs, team, type, expiry; never private keys or passwords:
+//    supabase/migrations/20261113230000_executable_maker_signing_metadata.sql)
 // Staff routes (ERP website session, ERP App Access product executable-maker-support-desk):
 //   GET  /staff/requests?status=        GET /staff/requests/{id}
 //   POST /staff/requests/{id}/respond | status | task
@@ -128,7 +132,7 @@ export async function handleExecutableMakerApiRequest(request: Request, rpc: Rpc
   const ctx: Ctx = { request, url, token, rpc, storage };
   const m = request.method;
   const org = request.headers.get(EXM_ORGANISATION_HEADER) || null;
-  if (parts.some((p, i) => i > 0 && /^(requests|attachments)$/.test(parts[i - 1]) && !UUID.test(p))) return error(404, 'not_found');
+  if (parts.some((p, i) => i > 0 && /^(requests|attachments|assets)$/.test(parts[i - 1]) && !UUID.test(p))) return error(404, 'not_found');
 
   const unwrap = async (r: { data: any } | Response, map?: (d: any) => unknown | Promise<unknown>) =>
     r instanceof Response ? r : json(200, map ? await map(r.data) : r.data);
@@ -180,6 +184,26 @@ export async function handleExecutableMakerApiRequest(request: Request, rpc: Rpc
         if (r instanceof Response) return r;
         const signed = await storage.signDownload(r.data.path, token, DOWNLOAD_SECONDS);
         return json(200, { url: signed.url, expiresAt: signed.expiresAt });
+      }
+    }
+
+    // ---- Signing metadata (HCG Signing Vault, metadata only) ----
+    if (parts[0] === 'signing' && parts[1] === 'assets') {
+      const id = parts[2];
+      if (!id && m === 'GET') return unwrap(await call(ctx, 'exm_signing_list'));
+      if (!id && m === 'POST') {
+        const body = await readJson(request);
+        if (body instanceof Response) return body;
+        return unwrap(await call(ctx, 'exm_signing_record', { p_asset: body }));
+      }
+      if (id && parts.length === 3 && m === 'DELETE') return unwrap(await call(ctx, 'exm_signing_forget', { p_id: id }));
+    }
+    if (parts[0] === 'signing' && parts[1] === 'projects' && parts[2] && parts.length === 3) {
+      if (m === 'GET') return unwrap(await call(ctx, 'exm_signing_project_get', { p_project: parts[2] }));
+      if (m === 'PUT') {
+        const body = await readJson(request);
+        if (body instanceof Response) return body;
+        return unwrap(await call(ctx, 'exm_signing_project_put', { p_project: parts[2], p_preferences: body.preferences ?? null }));
       }
     }
 

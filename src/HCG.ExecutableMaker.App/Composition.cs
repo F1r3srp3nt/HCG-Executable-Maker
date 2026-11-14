@@ -72,6 +72,12 @@ public static class Composition
         services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacPkgPackager>();
         services.AddSingleton<IPackager, HCG.ExecutableMaker.Packaging.MacDistribution.MacAppStorePackager>();
         services.AddSingleton<HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningInventoryReader>();
+        // HCG Signing Vault (local): keychain, verified provisioning profiles, project signing settings, pre-build validation.
+        services.AddSingleton<HCG.ExecutableMaker.Packaging.Signing.IAppleKeychain, HCG.ExecutableMaker.Packaging.Signing.MacAppleKeychain>();
+        services.AddSingleton(_ => HCG.ExecutableMaker.Packaging.Signing.ProvisioningProfileStore.ForCurrentUser());
+        services.AddSingleton<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>();
+        services.AddSingleton<IProjectSigningStore, HCG.ExecutableMaker.Infrastructure.Persistence.SqliteProjectSigningStore>();
+        services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService>();
@@ -116,6 +122,8 @@ public static class Composition
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AccountPlanService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgEcosystemClient>(), TimeProvider.System));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Support.SupportService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), uploadHttp));
         // HCG AI: no verified gateway contract exists yet, so the "Not connected" adapter is used (never simulated answers).
+        // Optional account metadata for signing assets (never private keys; the encrypted vault is not available).
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Signing.SigningAccountService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>()));
         services.AddSingleton<HCG.ExecutableMaker.Account.Ai.IHcgAiGateway, HCG.ExecutableMaker.Account.Ai.NotConnectedAiGateway>();
         services.AddSingleton<HCG.ExecutableMaker.Account.Ai.AiAssistant>();
         services.AddSingleton<AccountViewModel>();
@@ -131,6 +139,7 @@ public static class Composition
         services.AddSingleton<BuildHistoryViewModel>();
         services.AddSingleton<ArtifactsViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
+        services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();
         services.AddSingleton<SettingsViewModel>();
         overrides?.Invoke(services);

@@ -6,6 +6,187 @@
              x:DataType="vm:SigningViewModel">
   <ScrollViewer>
     <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18">
+      <!-- HCG Signing Vault: Apple signing on this Mac -->
+      <Border Classes="card" x:DataType="vm:SigningViewModel">
+        <StackPanel Spacing="12" DataContext="{Binding Apple}" x:DataType="vm:AppleSigningViewModel">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="h2" Text="Apple Signing" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="Signing identities and provisioning profiles on this Mac. Private keys stay in the macOS keychain; HCG reads names and fingerprints only." />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+              <Button Classes="small" Content="Refresh" Command="{Binding RefreshCommand}" />
+              <Button Classes="small" Content="Import .p12…" Command="{Binding ImportP12Command}" IsEnabled="{Binding KeychainSupported}" />
+              <Button Classes="small" Content="Import .cer…" Command="{Binding ImportCerCommand}" IsEnabled="{Binding KeychainSupported}" />
+              <Button Classes="small" Content="Import profile…" Command="{Binding ImportProfileCommand}" />
+            </StackPanel>
+          </Grid>
+          <TextBlock Classes="muted" Text="{Binding KeychainHostNote}" IsVisible="{Binding !KeychainSupported}" TextWrapping="Wrap" />
+          <TextBlock Classes="body secondary" Text="{Binding KeychainStatus}" TextWrapping="Wrap" />
+
+          <Border Classes="inset" Padding="14">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="label" Text="WHERE IMPORTED ASSETS GO" />
+              <RadioButton GroupName="signingBackup" IsChecked="{Binding !BackUpToAccount}" Content="Import to this Mac (default)" />
+              <RadioButton GroupName="signingBackup" IsChecked="{Binding BackUpToAccount}" IsEnabled="{Binding AccountAvailable}"
+                           Content="Also back up to my HCG account (metadata only: fingerprint, team, type, expiry)" />
+              <TextBlock Classes="muted" Text="{Binding AccountStatus}" TextWrapping="Wrap" />
+              <TextBlock Classes="muted" Text="{Binding VaultStatus}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+
+          <Border Classes="callout" IsVisible="{Binding LastResult, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" Padding="12">
+            <SelectableTextBlock Text="{Binding LastResult}" TextWrapping="Wrap" />
+          </Border>
+
+          <TextBlock Classes="label" Text="SIGNING IDENTITIES" Margin="0,6,0,0" />
+          <TextBlock Classes="muted" Text="No Apple signing certificates found." IsVisible="{Binding !Certificates.Count}" />
+          <ItemsControl ItemsSource="{Binding Certificates}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:CertificateItem">
+                <StackPanel>
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,8">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding Type}" />
+                      <TextBlock Classes="muted" Text="{Binding Team}" />
+                      <TextBlock Classes="muted" Text="{Binding Expiry}" />
+                      <TextBlock Classes="muted" Text="{Binding KeyText}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding RevocationText}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding LocationText}" />
+                      <SelectableTextBlock Classes="mono muted" Text="{Binding Sha1}" />
+                      <SelectableTextBlock Classes="mono muted" Text="{Binding Sha256}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6" HorizontalAlignment="Right">
+                      <c:StatusChip Status="{Binding ReadinessTag}" HorizontalAlignment="Right" />
+                      <Button Classes="small danger" Content="Delete from this Mac…" IsVisible="{Binding IsOnThisMac}"
+                              Command="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).DeleteCertificateCommand}" CommandParameter="{Binding}" />
+                      <Button Classes="small ghost" Content="Remove HCG record…" IsVisible="{Binding IsInAccount}"
+                              Command="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).ForgetAccountRecordCommand}" CommandParameter="{Binding}" />
+                      <Button Classes="small ghost" Content="Record in HCG account" IsVisible="{Binding !IsInAccount}"
+                              IsEnabled="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).AccountAvailable}"
+                              Command="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).RecordInAccountCommand}" CommandParameter="{Binding}" />
+                    </StackPanel>
+                  </Grid>
+                  <Border Classes="divider" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Classes="muted" VerticalAlignment="Center" Text="Revoking a certificate is done only with Apple." />
+            <Button Classes="small ghost" Content="What revoking does…" Command="{Binding ExplainRevokeCommand}" />
+          </StackPanel>
+
+          <TextBlock Classes="label" Text="PROVISIONING PROFILES" Margin="0,6,0,0" />
+          <TextBlock Classes="muted" Text="No provisioning profiles installed." IsVisible="{Binding !Profiles.Count}" />
+          <ItemsControl ItemsSource="{Binding Profiles}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ProfileItem">
+                <StackPanel>
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,8">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding Distribution}" />
+                      <TextBlock Classes="muted" Text="{Binding BundleId}" />
+                      <TextBlock Classes="muted" Text="{Binding Team}" />
+                      <TextBlock Classes="muted" Text="{Binding Platforms}" />
+                      <TextBlock Classes="muted" Text="{Binding Expiry}" />
+                      <TextBlock Classes="muted" Text="{Binding Certificates}" />
+                      <TextBlock Classes="muted" Text="{Binding Entitlements}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding Signature}" />
+                      <TextBlock Classes="muted" Text="{Binding LocationText}" />
+                      <SelectableTextBlock Classes="mono muted" Text="{Binding Uuid}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6" HorizontalAlignment="Right">
+                      <c:StatusChip Status="{Binding StateTag}" HorizontalAlignment="Right" />
+                      <Button Classes="small danger" Content="Remove from this Mac…" IsVisible="{Binding IsOnThisMac}"
+                              Command="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).RemoveProfileCommand}" CommandParameter="{Binding}" />
+                      <Button Classes="small ghost" Content="Remove HCG record…" IsVisible="{Binding IsInAccount}"
+                              Command="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).ForgetAccountRecordCommand}" CommandParameter="{Binding}" />
+                      <Button Classes="small ghost" Content="Record in HCG account" IsVisible="{Binding !IsInAccount}"
+                              IsEnabled="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).AccountAvailable}"
+                              Command="{Binding $parent[ItemsControl].((vm:AppleSigningViewModel)DataContext).RecordInAccountCommand}" CommandParameter="{Binding}" />
+                    </StackPanel>
+                  </Grid>
+                  <Border Classes="divider" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <ItemsControl ItemsSource="{Binding UnreadableProfiles}" IsVisible="{Binding HasUnreadable}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock Classes="muted" Text="{Binding}" TextWrapping="Wrap" Foreground="{DynamicResource Hcg.Brush.Warning}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- Project signing configuration -->
+          <TextBlock Classes="label" Text="PROJECT SIGNING" Margin="0,10,0,0" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="Saved per project on this Mac: team, mode, route and references to a certificate (SHA-1) and profile (UUID). Apple Account sign-in stays in Xcode; HCG never asks for Apple passwords." />
+          <Grid ColumnDefinitions="160,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+            <TextBlock Grid.Row="0" Text="Project" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding SigningProjects}" SelectedItem="{Binding SelectedProject}" HorizontalAlignment="Stretch" PlaceholderText="Choose a project">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ProjectItem"><TextBlock Text="{Binding Name}" /></DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBlock Grid.Row="1" Text="Platform" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Platforms}" SelectedItem="{Binding SelectedPlatform}" HorizontalAlignment="Stretch" />
+            <TextBlock Grid.Row="2" Text="Signing mode" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding Modes}" SelectedItem="{Binding SelectedMode}" HorizontalAlignment="Stretch" />
+            <TextBlock Grid.Row="3" Text="Route" VerticalAlignment="Center" />
+            <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4">
+              <ComboBox ItemsSource="{Binding Routes}" SelectedItem="{Binding SelectedRoute}" HorizontalAlignment="Stretch" />
+              <TextBlock Classes="muted" Text="{Binding RouteDescription}" TextWrapping="Wrap" />
+            </StackPanel>
+            <TextBlock Grid.Row="4" Text="Team ID" VerticalAlignment="Center" />
+            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TeamId}" Watermark="10 characters, e.g. ABCDE12345" />
+            <TextBlock Grid.Row="5" Text="Certificate" VerticalAlignment="Center" IsVisible="{Binding IsManual}" />
+            <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding IdentityChoices}" SelectedItem="{Binding SelectedIdentity}" HorizontalAlignment="Stretch"
+                      IsVisible="{Binding IsManual}" PlaceholderText="No matching certificate on this Mac" />
+            <TextBlock Grid.Row="6" Text="Installer certificate" VerticalAlignment="Center" IsVisible="{Binding ShowInstaller}" />
+            <ComboBox Grid.Row="6" Grid.Column="1" ItemsSource="{Binding InstallerChoices}" SelectedItem="{Binding SelectedInstaller}" HorizontalAlignment="Stretch"
+                      IsVisible="{Binding ShowInstaller}" PlaceholderText="None (no signed .pkg)" />
+            <TextBlock Grid.Row="7" Text="Provisioning profile" VerticalAlignment="Center" IsVisible="{Binding IsManual}" />
+            <ComboBox Grid.Row="7" Grid.Column="1" ItemsSource="{Binding ProfileChoices}" SelectedItem="{Binding SelectedProfile}" HorizontalAlignment="Stretch"
+                      IsVisible="{Binding IsManual}" PlaceholderText="None (not needed for every macOS route)" />
+            <TextBlock Grid.Row="8" Text="Install on devices" VerticalAlignment="Center" />
+            <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding IntendedDevices}" Watermark="Optional: device UDIDs, comma separated (checked against the profile)" />
+          </Grid>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="small primary" Content="Check signing" Command="{Binding ValidateCommand}" />
+            <Button Classes="small" Content="Save settings" Command="{Binding SaveConfigurationCommand}" />
+          </StackPanel>
+          <TextBlock Classes="body secondary" Text="{Binding ConfigStatus}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Checks}" IsVisible="{Binding HasChecks}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SigningCheckItem">
+                <StackPanel>
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,6">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                      <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding Remedy}" TextWrapping="Wrap" IsVisible="{Binding HasRemedy}" Foreground="{DynamicResource Hcg.Brush.Warning}" />
+                      <TextBlock Classes="muted" Text="{Binding Scope}" FontSize="11" />
+                    </StackPanel>
+                    <c:StatusChip Grid.Column="1" Status="{Binding Status}" VerticalAlignment="Top" />
+                  </Grid>
+                  <Border Classes="divider" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <TextBlock Classes="label" Text="APP STORE CONNECT API KEY (SEPARATE FROM SIGNING)" Margin="0,10,0,0" />
+          <TextBlock Classes="muted" Text="{Binding AscExplanation}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{Binding AscKeyStatus}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
       <Grid ColumnDefinitions="*,*">
         <Border Classes="callout warning" Padding="20" Margin="0,0,9,0">
           <StackPanel Spacing="10">

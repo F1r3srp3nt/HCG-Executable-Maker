@@ -50,3 +50,16 @@ public interface ISettingsStore
     Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Per-project Apple signing settings (team, mode, route, certificate SHA-1 and profile UUID references). Non-secret by
+/// construction: the record type has no field for keys, passwords or Apple Account credentials.
+/// </summary>
+public interface IProjectSigningStore
+{
+    Task<ProjectSigningConfiguration?> LoadAsync(string projectId, CancellationToken cancellationToken = default);
+    Task SaveAsync(ProjectSigningConfiguration configuration, CancellationToken cancellationToken = default);
+    Task DeleteAsync(string projectId, CancellationToken cancellationToken = default);
+    /// <summary>A random identifier for this installation (used to tell "this Mac" from "another Mac" in account metadata).</summary>
+    Task<string> DeviceIdAsync(CancellationToken cancellationToken = default);
+}
