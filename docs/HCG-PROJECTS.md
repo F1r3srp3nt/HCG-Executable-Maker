@@ -233,6 +233,39 @@ restart (5), `--expect-simulator-only` with a Simulator SDK that accepts iOS 14.
 "Executable not found" — there is no Xcode on Linux. Unit tests: `SchemeSelectionTests` (17). Not run here: a real
 Sentinel build with a real Xcode (the macOS CI job "HCG Sentinel — archive …" does that, and runs these driver checks).
 
+### Compatibility resolution: HCG Sentinel (iOS 14.7) with an Xcode whose SDKs start at iOS 15.0
+
+Checked against Sentinel `main` at 03bc6e5: scheme HCGSentinel builds target HCGSentinel (iOS 14.7) and the local
+package SentinelCore (`.iOS(.v14)`); scheme HCGSentinelModern builds HCGSentinelModern (iOS 15.0). The test targets are
+only in each scheme's Test action, so they are not part of a build and are not checked.
+
+**How to use it** (Mobile Build Studio › Platform, scheme and output):
+1. Choose the scheme, build configuration and Xcode at the top; outputs come after them.
+2. **Scheme compatibility** shows, in one panel: the current scheme with its effective minimum iOS for device and for
+   Simulator (each with its own configuration) and the targets checked; the selected Xcode with each SDK's range, read
+   from that SDK's `SDKSettings.json`; the resolutions.
+3. Under **Resolve it**:
+   - *Another Xcode* — pick an installed Xcode whose SDK accepts the scheme's minimum (for HCG's builds only;
+     xcode-select is not changed).
+   - *Compatible schemes found in this project* — one button per discovered scheme that passes for every SDK that
+     fails, judged by that scheme's own targets, dependencies and settings (scheme names are never interpreted), e.g.
+     "Use HCGSentinelModern (iOS 15.0 and later)". Pressing it explains that older iPhones and iPads are no longer
+     covered by what is built, then switches the scheme; the project is not edited.
+   - *Project change needed* — shown only when no discovered scheme and no installed Xcode fits: it names each target,
+     configuration and SDK whose `IPHONEOS_DEPLOYMENT_TARGET` is out of range, where it is set, and the minimum the SDK
+     accepts. HCG does not make that change.
+   - The explicit build-only minimum iOS from the deployment-target workflow remains available where it is safe.
+4. The command shown (`-scheme … -configuration … -destination …`) is the command the build runs. Any change of scheme,
+   project/workspace, configuration or Xcode recomputes everything; a stale selection is refused.
+5. **Build status** only describes builds of the current selection. A result from an earlier selection is labelled
+   "Previous build" with its scheme, configuration and finish time (UTC), e.g. "Succeeded: 1 artifact(s) in 42s — built
+   with scheme HCGSentinelModern, Release, finished 2026-11-14 12:03 UTC", and never as the current configuration's result.
+
+Verification: unit tests in `CompatibilityResolutionTests` (fixture refreshed from Sentinel 03bc6e5); `hcg-ui-driver
+--scheme-workflow --simulate-xcode 27.0:15.0:15.0` on the fixture and on a real 03bc6e5 checkout (40 checks each), and
+`--expect-simulator-only` (10). Real-Xcode archives of both schemes run in the macOS CI job "HCG Sentinel — archive …",
+now pinned to 03bc6e5.
+
 ### Deployment-target workflow: HCG Nexus' Xcode app (iOS 14.0) with an Xcode whose SDKs start at iOS 15.0
 
 HCG Nexus now contains a standalone iPhone/iPad app, `HCGNexus.xcodeproj` (shared scheme HCGNexus, target HCGNexus,

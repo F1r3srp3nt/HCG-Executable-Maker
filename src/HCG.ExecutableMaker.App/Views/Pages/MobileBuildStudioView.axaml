@@ -199,6 +199,7 @@
             <Border Classes="inset" Padding="14,12" IsVisible="{Binding HasSchemeChecks}">
               <StackPanel Spacing="8">
                 <TextBlock Classes="label" Text="SCHEME COMPATIBILITY · SELECTED XCODE" />
+                <SelectableTextBlock FontSize="12.5" Text="{Binding CurrentSchemeText}" TextWrapping="Wrap" IsVisible="{Binding CurrentSchemeText, Converter={x:Static ObjectConverters.IsNotNull}}" />
                 <TextBlock Classes="warning" FontSize="13" FontWeight="SemiBold" Text="{Binding CompatibilityProblem}" TextWrapping="Wrap" IsVisible="{Binding HasCompatibilityProblem}" />
                 <TextBlock Classes="warning" FontSize="12" Text="{Binding OverrideNotice}" TextWrapping="Wrap" IsVisible="{Binding OverrideNotice, Converter={x:Static ObjectConverters.IsNotNull}}" />
                 <StackPanel Spacing="6" IsVisible="{Binding HasActiveOverride}">
@@ -226,10 +227,19 @@
                 <StackPanel Spacing="8" IsVisible="{Binding HasCompatibilityProblem}">
                   <TextBlock Classes="formlabel" Text="RESOLVE IT" />
                   <TextBlock Classes="secondary" FontSize="12" Text="{Binding ToolchainRouteText}" TextWrapping="Wrap" IsVisible="{Binding ToolchainRouteText, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                  <StackPanel Spacing="6" IsVisible="{Binding HasSchemeSuggestion}">
+                  <StackPanel Spacing="6" IsVisible="{Binding HasCompatibleSchemes}">
+                    <TextBlock Classes="secondary" FontSize="12" Text="Compatible schemes found in this project (each judged by its own targets and settings):" TextWrapping="Wrap" />
                     <TextBlock Classes="secondary" FontSize="12" Text="{Binding SchemeSuggestionText}" TextWrapping="Wrap" />
-                    <Button Classes="primary" Content="{Binding UseSuggestedSchemeLabel}" Command="{Binding UseSuggestedSchemeCommand}" HorizontalAlignment="Left" IsEnabled="{Binding !IsBuilding}" />
+                    <ItemsControl ItemsSource="{Binding CompatibleSchemeChoices}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:CompatibleSchemeItem">
+                          <Button Classes="primary" Margin="0,0,0,6" Content="{Binding Label}" HorizontalAlignment="Left"
+                                  Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).UseSchemeCommand}" CommandParameter="{Binding}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                   </StackPanel>
+                  <SelectableTextBlock Classes="warning" FontSize="12" Text="{Binding ProjectChangeText}" TextWrapping="Wrap" IsVisible="{Binding HasProjectChange}" />
                   <StackPanel Spacing="6" IsVisible="{Binding HasRaiseOffer}">
                     <TextBlock Classes="secondary" FontSize="12" Text="{Binding RaiseOfferText}" TextWrapping="Wrap" />
                     <Button Content="{Binding RaiseOfferLabel}" Command="{Binding RaiseMinimumCommand}" HorizontalAlignment="Left" IsEnabled="{Binding RaiseOfferSupported}" />

@@ -86,6 +86,12 @@ internal static partial class Program
             "Simulator and device are listed with their own SDK");
         Check(studio.SupportTag.Text == "Selected toolchain incompatible", $"Project state is current: {studio.SupportTag.Text}");
 
+        // The panel: current scheme with its effective minimum per SDK, every compatible scheme (each its own "Use" action).
+        Log("Current scheme: " + studio.CurrentSchemeText);
+        Check(studio.CurrentSchemeText?.StartsWith($"{Legacy} — minimum iOS 14.7 for device", StringComparison.Ordinal) == true, "The panel names the scheme and its minimum iOS per SDK");
+        Check(studio.CompatibleSchemeChoices.Select(c => c.Scheme).SequenceEqual([Modern]), $"Compatible schemes: {string.Join(", ", studio.CompatibleSchemeChoices.Select(c => c.Label))}");
+        Check(!studio.HasProjectChange, "A compatible option exists, so no project change is demanded");
+
         // 5. The verified alternative, with its minimum iOS explained before switching.
         Check(studio.SuggestedScheme == Modern, $"Suggested: {studio.SuggestedScheme}");
         Check(studio.UseSuggestedSchemeLabel.Contains("iOS 15.0"), $"Action names its minimum: {studio.UseSuggestedSchemeLabel}");
@@ -106,6 +112,8 @@ internal static partial class Program
         Check(studio.Outputs.First(o => o.Option.Output == MobileOutput.IosArchive).IsEnabled, "Device archive available");
         Check(studio.Schemes.Contains(Legacy), "HCGSentinel is still offered (legacy support kept)");
         Check(studio.SupportTag.Text == "Supported", $"Project state updated: {studio.SupportTag.Text} — {studio.SupportSummary}");
+        Check(studio.CurrentSchemeText?.StartsWith($"{Modern} — minimum iOS 15.0", StringComparison.Ordinal) == true && studio.CompatibleSchemeChoices.Count == 0,
+            $"After switching: {studio.CurrentSchemeText}");
 
         // Configuration chosen before the output, applied to it.
         studio.SelectedConfiguration = studio.Configurations.First(c => c.Value == "Debug");

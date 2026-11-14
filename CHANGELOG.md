@@ -2,6 +2,17 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Mobile Build Studio: compatibility resolution (HCG Sentinel)
+
+### Changed
+- The Scheme compatibility panel starts with the current scheme and its effective minimum iOS for device and Simulator (each with its own configuration) and the targets checked; test-only targets are not checked.
+- Build status: a result from another selection is labelled "Previous build" with its scheme, configuration and finish time (UTC); the status word is no longer shown twice, and no earlier result is presented as the current configuration's.
+
+### Added
+- "Compatible schemes found in this project": one "Use <scheme> (iOS x and later)" button for each discovered scheme that passes for every failing SDK, judged by that scheme's own targets, dependencies and settings, never by its name. A confirmation explains which devices are excluded; a stale choice is refused.
+- When no discovered scheme and no installed Xcode fits, the panel names the exact target, configuration and SDK that need a project change and the minimum required. HCG does not edit the project.
+- Sentinel fixture refreshed from Sentinel 03bc6e5 (SentinelCore package); the CI archive job is pinned to 03bc6e5 and also runs the scheme-workflow checks on the real checkout. 6 new unit tests.
+
 ## [Unreleased] — Mobile Build Studio: deployment-target workflow (HCG Nexus)
 
 ### Changed

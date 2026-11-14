@@ -476,3 +476,181 @@ public sealed class SchemeSelectionTests : IDisposable
         Assert.Null(XcodeDiscovery.ParseIosDeploymentRange(json, "iphoneos"));
     }
 }
+
+/// <summary>
+/// The compatibility panel's resolution choices (HCG Sentinel at 03bc6e5: HCGSentinel iOS 14.7, HCGSentinelModern iOS 15.0,
+/// a test target per scheme in its Test action, and the local SentinelCore package): the current scheme with its effective
+/// minimum per SDK, every compatible discovered scheme judged by its own settings, the exact project change when nothing
+/// compatible exists, and historical results labelled with what produced them and when.
+/// </summary>
+public sealed class CompatibilityResolutionTests : IDisposable
+{
+    private readonly TempDir _t = new();
+    public void Dispose() => _t.Dispose();
+
+    private string Copy(string name)
+    {
+        var root = _t.Combine(name);
+        if (!Directory.Exists(root)) MobileTestKit.CopyTree(Path.Combine(Fixtures.RepoRoot, "tests", "Fixtures", "XcodeDeployment", "Sentinel"), root);
+        return root;
+    }
+
+    private IosProjectInfo Sentinel(string name = "sentinel") => XcodeProjectAnalyzer.Analyze(SourceIndex.Build(Copy(name), CancellationToken.None), "HCGSentinel.xcodeproj", out _);
+
+    private static XcodeStatus Xcode(string min = "15.0", string simMin = "15.0", params XcodeInstallation[] others) => new()
+    {
+        State = XcodeState.Ready, ActiveDeveloperDirectory = "/Applications/Xcode.app/Contents/Developer", VerifiedVersion = "27.0", Diagnosis = "Ready",
+        Sdks = ["iphoneos 27.0", "iphonesimulator 27.0"],
+        IosDeploymentRange = new IosDeploymentRange(min, "27.2.99", null, "27.2"), IosSimulatorDeploymentRange = new IosDeploymentRange(simMin, "27.2.99", null, "27.2"),
+        Installed = [new XcodeInstallation("/Applications/Xcode.app", "/Applications/Xcode.app/Contents/Developer", "27.0", null), .. others],
+    };
+
+    [Fact]
+    public void The_panel_names_the_current_scheme_its_minimum_per_sdk_and_only_the_targets_its_builds_contain()
+    {
+        var ios = Sentinel();
+        // Test targets exist in the project but belong to the schemes' Test actions, not to their run/archive builds.
+        Assert.Contains(ios.Targets, t => t.Name == "HCGSentinelTests");
+        var summary = IosBuildSelection.Summarize(ios, "HCGSentinel", null, Xcode());
+        Assert.Equal("HCGSentinel — minimum iOS 14.7 for device (Release), iOS 14.7 for Simulator (Debug); checked: HCGSentinel.", summary.CurrentScheme);
+        Assert.Equal("Project minimum: iOS 14.7. Selected toolchain minimum: iOS 15.0 (Xcode 27.0 · device and Simulator SDKs).", summary.Problem);
+        Assert.All(summary.Lines, l => Assert.Contains("27.2", l.Label));            // the selected SDK, read from that Xcode
+        Assert.Equal([("HCGSentinelModern", (string?)"15.0")], summary.CompatibleSchemes);
+        Assert.Null(summary.ProjectChange);                                          // a compatible option exists
+        Assert.Equal("HCGSentinelModern — minimum iOS 15.0 for device (Release), iOS 15.0 for Simulator (Debug); checked: HCGSentinelModern.",
+            IosBuildSelection.Summarize(ios, "HCGSentinelModern", null, Xcode()).CurrentScheme);
+    }
+
+    [Fact]
+    public void Compatibility_comes_from_each_schemes_settings_not_from_its_name()
+    {
+        // Rename the schemes: the modern one is now "Aardvark", the legacy one "ZModern".
+        var root = Copy("renamed");
+        var schemes = Path.Combine(root, "HCGSentinel.xcodeproj", "xcshareddata", "xcschemes");
+        File.Move(Path.Combine(schemes, "HCGSentinelModern.xcscheme"), Path.Combine(schemes, "Aardvark.xcscheme"));
+        File.Move(Path.Combine(schemes, "HCGSentinel.xcscheme"), Path.Combine(schemes, "ZModern.xcscheme"));
+        var ios = XcodeProjectAnalyzer.Analyze(SourceIndex.Build(root, CancellationToken.None), "HCGSentinel.xcodeproj", out _);
+        var summary = IosBuildSelection.Summarize(ios, "ZModern", null, Xcode());
+        Assert.NotNull(summary.Problem);
+        Assert.Equal("Aardvark", summary.Alternative);                               // the one whose targets fit
+        Assert.Null(IosBuildSelection.Summarize(ios, "Aardvark", null, Xcode()).Problem);
+    }
+
+    [Fact]
+    public void Without_a_compatible_scheme_or_xcode_the_exact_targets_and_configurations_needing_a_change_are_named()
+    {
+        // An Xcode whose SDKs start at iOS 16.0: neither scheme fits and no other Xcode is installed.
+        var summary = IosBuildSelection.Summarize(Sentinel(), "HCGSentinel", null, Xcode("16.0", "16.0"));
+        Assert.Empty(summary.CompatibleSchemes);
+        Assert.Null(summary.Alternative);
+        Assert.Equal("No discovered scheme and no installed Xcode can build HCGSentinel with Xcode 27.0. A project change is needed: " +
+                     "target HCGSentinel: IPHONEOS_DEPLOYMENT_TARGET = 14.7 in Release (device, set in target HCGSentinel (Release)) and Debug (Simulator, set in target HCGSentinel (Debug)) " +
+                     "— must be iOS 16.0 or later. HCG does not change the project; the build-only option below, where offered, applies to one build only.", summary.ProjectChange);
+
+        // An installed Xcode that accepts 14.7 is a compatible option: no project change is demanded.
+        var older = new XcodeInstallation("/Applications/Xcode_16.4.app", "/Applications/Xcode_16.4.app/Contents/Developer", "16.4", null)
+        {
+            IosRange = new IosDeploymentRange("12.0", "18.5.99", null, "18.5"), SimulatorRange = new IosDeploymentRange("12.0", "18.5.99", null, "18.5"),
+        };
+        var withOlder = IosBuildSelection.Summarize(Sentinel(), "HCGSentinel", null, Xcode("16.0", "16.0", older));
+        Assert.Null(withOlder.ProjectChange);
+        Assert.Contains("select Xcode 16.4", withOlder.KeepRoute);
+    }
+
+    [Fact]
+    public void An_incompatible_dependency_is_named_in_the_project_change()
+    {
+        // The app fits; its embedded widget (a dependency, iOS 14.0) does not, and no other scheme or Xcode helps.
+        var root = _t.Combine("dep");
+        _t.Write(Path.GetRelativePath(_t.Path, Path.Combine(root, "Demo.xcodeproj", "project.pbxproj")), """
+            // !$*UTF8*$!
+            {
+            	archiveVersion = 1;
+            	objectVersion = 56;
+            	objects = {
+            		P0 = {isa = PBXProject; buildConfigurationList = PL; mainGroup = G0; targets = (T1, T2); };
+            		G0 = {isa = PBXGroup; children = (); sourceTree = "<group>"; };
+            		PL = {isa = XCConfigurationList; buildConfigurations = (PD, PR); };
+            		PD = {isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; }; };
+            		PR = {isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 16.0; }; };
+            		T1 = {isa = PBXNativeTarget; name = App; productType = "com.apple.product-type.application"; buildConfigurationList = TL1; dependencies = (D1); };
+            		D1 = {isa = PBXTargetDependency; target = T2; };
+            		TL1 = {isa = XCConfigurationList; buildConfigurations = (AD, AR); };
+            		AD = {isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.example.app; }; };
+            		AR = {isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.example.app; }; };
+            		T2 = {isa = PBXNativeTarget; name = Widget; productType = "com.apple.product-type.app-extension"; buildConfigurationList = TL2; dependencies = (); };
+            		TL2 = {isa = XCConfigurationList; buildConfigurations = (WD, WR); };
+            		WD = {isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.example.app.widget; IPHONEOS_DEPLOYMENT_TARGET = 14.0; }; };
+            		WR = {isa = XCBuildConfiguration; name = Release; buildSettings = { PRODUCT_BUNDLE_IDENTIFIER = com.example.app.widget; IPHONEOS_DEPLOYMENT_TARGET = 14.0; }; };
+            	};
+            	rootObject = P0;
+            }
+            """);
+        var ios = XcodeProjectAnalyzer.Analyze(SourceIndex.Build(root, CancellationToken.None), "Demo.xcodeproj", out _);
+        var summary = IosBuildSelection.Summarize(ios, null, null, Xcode());
+        Assert.Contains("checked: App, Widget (dependency).", summary.CurrentScheme);
+        Assert.Contains("target Widget (dependency): IPHONEOS_DEPLOYMENT_TARGET = 14.0 in Release (device, set in target Widget (Release))", summary.ProjectChange);
+        Assert.DoesNotContain("target App:", summary.ProjectChange);
+    }
+
+    [Fact]
+    public void A_scheme_change_reaches_the_command_and_simulator_and_archive_use_their_own_settings()
+    {
+        var ios = Sentinel();
+        foreach (var scheme in new[] { "HCGSentinel", "HCGSentinelModern" })
+        {
+            var sim = XcodePlanner.Resolve(new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosSimulatorApp, Scheme = scheme }, ios);
+            var archive = XcodePlanner.Resolve(new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosArchive, Scheme = scheme }, ios);
+            Assert.Equal((scheme, "Debug", "build"), (sim.Scheme, sim.Configuration, sim.Action));
+            Assert.Equal(["-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator"], sim.Destination);
+            Assert.Equal((scheme, "Release", "archive"), (archive.Scheme, archive.Configuration, archive.Action));
+            Assert.Equal(["-destination", "generic/platform=iOS"], archive.Destination);
+            Assert.Contains($"-scheme {scheme} -configuration Release -destination generic/platform=iOS", XcodePlanner.Preview(new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosArchive, Scheme = scheme }, ios));
+        }
+        // Different Simulator and device ranges: only the device fails, and only its outputs are blocked.
+        var split = IosBuildSelection.Summarize(ios, "HCGSentinel", null, Xcode("15.0", "14.0"));
+        Assert.Equal((false, true), (split.DeviceFits, split.SimulatorFits));
+        var options = MobileCapabilities.Evaluate(new MobileAnalysis { Framework = MobileFramework.NativeIos, Platforms = [TargetPlatform.IOS], Ios = ios },
+            new ToolchainReport(new HostEnvironment(TargetPlatform.MacOS, TargetArchitecture.Arm64, "macOS", ".NET", "osx"), [], null, null, DateTimeOffset.UtcNow) { Xcode = Xcode("15.0", "14.0") },
+            new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosSimulatorApp, Scheme = "HCGSentinel" });
+        Assert.True(options.Single(o => o.Output == MobileOutput.IosSimulatorApp).IsAvailable);
+        Assert.False(options.Single(o => o.Output == MobileOutput.IosArchive).IsAvailable);
+    }
+
+    [Fact]
+    public void A_historical_result_is_labelled_with_its_scheme_configuration_and_time_and_never_as_the_current_state()
+    {
+        var ios = Sentinel();
+        var m = new MobileAnalysis { Framework = MobileFramework.NativeIos, Platforms = [TargetPlatform.IOS], Ios = ios };
+        var project = new ProjectRecord
+        {
+            Id = Guid.NewGuid(), Name = "HCG Sentinel", SourceKind = ProjectSourceKind.Directory, SourceLocation = Copy("sentinel"), WorkspacePath = _t.Combine("ws"),
+            ImportedAt = new DateTimeOffset(2026, 11, 14, 9, 0, 0, TimeSpan.Zero),
+            Analysis = new ProjectAnalysis { InspectorId = "mobile", ProjectName = "HCGSentinel", Language = "Swift", Framework = "Xcode", Runtime = "iOS", ApplicationType = "iOS application", Support = SupportLevel.Supported, SupportSummary = "", Mobile = m, AnalyzedAt = DateTimeOffset.UtcNow },
+        };
+        BuildSettings Settings(string scheme) => new()
+        {
+            ProjectRelativePath = "HCGSentinel.xcodeproj", Platform = TargetPlatform.IOS, Architecture = TargetArchitecture.Universal, Configuration = BuildConfigurationKind.Release, OutputDirectory = "/tmp/out",
+            Identity = new AppIdentity { ApplicationName = "Sentinel", Version = "1.0", ApplicationId = "com.hcg.sentinel" },
+            Mobile = new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosArchive, Scheme = scheme, Signing = MobileSigningMode.Unsigned },
+        };
+        var report = new ToolchainReport(new HostEnvironment(TargetPlatform.MacOS, TargetArchitecture.Arm64, "macOS", ".NET", "osx"), [], null, null, DateTimeOffset.UtcNow) { Xcode = Xcode() };
+        var last = new BuildRecord
+        {
+            Id = Guid.NewGuid(), ProjectId = project.Id, Settings = Settings("HCGSentinelModern"), Status = BuildStatus.Succeeded,
+            StartedAt = new DateTimeOffset(2026, 11, 14, 12, 1, 0, TimeSpan.Zero), EndedAt = new DateTimeOffset(2026, 11, 14, 12, 3, 30, TimeSpan.Zero),
+            Provenance = MobileBuildState.ProvenanceFor(project, Settings("HCGSentinelModern"), report),
+        };
+        // Now the legacy scheme is selected and nothing is buildable (every output unavailable): no current result.
+        var view = MobileBuildState.DescribeResult(last, null);
+        Assert.False(view.IsCurrent);
+        Assert.Equal("Previous build", view.Tag);
+        Assert.StartsWith("Succeeded", view.Detail);
+        Assert.Contains("built with scheme HCGSentinelModern, Release, finished 2026-11-14 12:03 UTC", view.Detail);
+        Assert.Contains("does not describe them", view.Detail);
+        // With other settings selected, the differences are listed as well.
+        var other = MobileBuildState.DescribeResult(last, MobileBuildState.ProvenanceFor(project, Settings("HCGSentinel"), report));
+        Assert.False(other.IsCurrent);
+        Assert.Contains("Scheme: HCGSentinelModern (built) → HCGSentinel (now)", other.Differences);
+    }
+}

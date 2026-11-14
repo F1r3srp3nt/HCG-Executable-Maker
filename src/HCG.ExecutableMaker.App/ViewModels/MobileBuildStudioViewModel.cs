@@ -50,6 +50,14 @@ public sealed class BuildTargetChoice(HCG.ExecutableMaker.ProjectInspection.Buil
     public override string ToString() => Name;
 }
 
+/// <summary>A discovered scheme verified compatible with the selected Xcode, offered as "Use &lt;scheme&gt;".</summary>
+public sealed class CompatibleSchemeItem(string scheme, string? minimum)
+{
+    public string Scheme { get; } = scheme;
+    public string? Minimum { get; } = minimum;
+    public string Label => $"Use {Scheme}" + (Minimum is null ? "" : $" (iOS {Minimum} and later)");
+}
+
 public sealed class PlatformChoice(TargetPlatform platform, bool supported, string? reason)
 {
     public TargetPlatform Platform { get; } = platform;
@@ -724,6 +732,29 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         SelectedScheme = s;
     }
 
+    /// <summary>The selected scheme, its effective minimum iOS per SDK and the targets checked.</summary>
+    [ObservableProperty] private string? _currentSchemeText;
+    /// <summary>Every discovered scheme verified compatible with the selected Xcode (each judged by its own settings).</summary>
+    public ObservableCollection<CompatibleSchemeItem> CompatibleSchemeChoices { get; } = [];
+    [ObservableProperty] private bool _hasCompatibleSchemes;
+    /// <summary>No scheme and no installed Xcode can build it: the exact target/configuration a project change must address.</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProjectChange))] private string? _projectChangeText;
+    public bool HasProjectChange => ProjectChangeText is not null;
+
+    /// <summary>Switches to a compatible scheme, after explaining what its minimum iOS means. Nothing in the project changes.</summary>
+    [RelayCommand]
+    private async Task UseSchemeAsync(CompatibleSchemeItem? item)
+    {
+        if (item is null || !Schemes.Contains(item.Scheme) || IsBuilding) return;
+        var current = SelectedScheme;
+        var text = item.Scheme == SuggestedScheme && SchemeSuggestionText.Length > 0 ? SchemeSuggestionText
+            : $"{item.Scheme} targets iOS {item.Minimum ?? "(not resolved)"}: what it builds installs and runs only on iOS {item.Minimum ?? "that version"} or later, " +
+              $"so older devices are excluded. Switching changes only the scheme HCG builds; {current} stays in the project unchanged.";
+        if (!await _dialogs.ConfirmAsync($"Use {item.Scheme}?", text, $"Use {item.Scheme}")) return;
+        if (SelectedScheme != current) return;   // the selection changed while the dialog was open
+        SelectedScheme = item.Scheme;
+    }
+
     private void UpdateSchemeCompatibility()
     {
         SchemeChecks.Clear();
@@ -734,6 +765,10 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         CompatibilityProblem = null;
         InspectionNotices.Clear();
         HasInspectionNotices = false;
+        CurrentSchemeText = null;
+        CompatibleSchemeChoices.Clear();
+        HasCompatibleSchemes = false;
+        ProjectChangeText = null;
         _raiseOffer = null;
         RaiseOfferLabel = null;
         RaiseOfferText = "";
@@ -761,6 +796,10 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         ToolchainRouteText = summary.KeepRoute;
         foreach (var n in summary.InspectionNotices) InspectionNotices.Add(n);
         HasInspectionNotices = InspectionNotices.Count > 0;
+        CurrentSchemeText = summary.CurrentScheme;
+        foreach (var (name, min) in summary.CompatibleSchemes) CompatibleSchemeChoices.Add(new CompatibleSchemeItem(name, min));
+        HasCompatibleSchemes = CompatibleSchemeChoices.Count > 0;
+        ProjectChangeText = summary.ProjectChange;
         if (summary.ActiveOverride is { } active)
             ActiveOverrideText = $"Build-only minimum iOS {active.Value} is applied ({active.BuildSetting} on the xcodebuild command line). " +
                                  $"{active.Consequence} The project's files are unchanged.";
@@ -1074,7 +1113,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             // The artifacts stay listed and openable; they are labelled as what produced them, not as the current state.
             ResultTag = new StatusTag("Previous build", "neutral");
             CurrentStage = "Previous build";
-            ResultDetail = $"{Format.Label(r.Status)} · {view.Detail}";
+            ResultDetail = view.Detail;   // "Succeeded: … — built with scheme …, Release, finished … UTC (…). The current settings differ …"
         }
     }
 

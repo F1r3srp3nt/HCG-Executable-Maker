@@ -51,9 +51,12 @@ public static class MobileBuildState
     public static BuildResultView DescribeResult(BuildRecord result, BuildProvenance? current)
     {
         var differences = result.Provenance is { } p && current is not null ? p.DifferencesFrom(current) : [];
-        var produced = result.Provenance?.Describe();
+        var when = (result.EndedAt ?? result.StartedAt).UtcDateTime;
+        // What produced it, first: scheme, configuration and when — so a previous result is never read as the current state.
+        var produced = $"{(result.Provenance?.Scheme is { } sc ? "scheme " + sc + ", " : "")}{(result.Provenance?.Configuration is { } cf ? cf + ", " : "")}" +
+                       $"finished {when:yyyy-MM-dd HH:mm} UTC" + (result.Provenance?.Describe() is { Length: > 0 } inputs ? $" ({inputs})" : "");
         var summary = result.Status == BuildStatus.Succeeded
-            ? $"{result.Artifacts.Count} artifact(s) in {(result.Duration is { } d ? $"{d.TotalSeconds:F0}s" : "—")}"
+            ? $"{result.Status}: {result.Artifacts.Count} artifact(s) in {(result.Duration is { } d ? $"{d.TotalSeconds:F0}s" : "—")}"
             : $"{result.Status}: {MobileBuildService.FirstErrorOf(result.FailureReason) ?? result.FailureReason}";
         if (result.Provenance is null || current is not null && differences.Count == 0)
             return new BuildResultView(true, result.Status.ToString(), result.Status == BuildStatus.Succeeded ? "success" : "error", summary, []);

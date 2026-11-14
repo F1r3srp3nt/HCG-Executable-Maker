@@ -25,6 +25,10 @@
 			isa = PBXBuildFile;
 			fileRef = 50B9C78F8D6CE7155EFFDE38;
 		};
+		1815783805A4ECFF4CBCC859 = {
+			isa = PBXBuildFile;
+			fileRef = F72D2F61D743A839B8243948;
+		};
 		1D44BA41B1836A9B04EFF63B = {
 			isa = PBXBuildFile;
 			fileRef = 2A5A747FB219F9D3C6BA1700;
@@ -33,13 +37,29 @@
 			isa = PBXBuildFile;
 			fileRef = 5F2811738549F1EF373FB313;
 		};
+		25473607A8F41989361A9211 = {
+			isa = PBXBuildFile;
+			fileRef = 4751A22D65F1D1961EC45604;
+		};
 		26D59DA831A38EA6B7CB311C = {
 			isa = PBXBuildFile;
 			fileRef = 31C5859F99483F16DD7B2062;
 		};
+		2D1E1A10BBC58CBC5A90A567 = {
+			isa = PBXBuildFile;
+			fileRef = DE21A280EA0732BB6BC4756D;
+		};
 		304BCD622FA11070B734B848 = {
 			isa = PBXBuildFile;
 			fileRef = B2656B33FA9426E806C4D254;
+		};
+		3099FDA331A9AED9794C57BF = {
+			isa = PBXBuildFile;
+			fileRef = 8953467BB375D3F422963209;
+		};
+		35E0E047E8A422E04637F4A9 = {
+			isa = PBXBuildFile;
+			fileRef = CD42F08BBEBE850DF40BF21E;
 		};
 		38BC38D3C648A528AB7E0793 = {
 			isa = PBXBuildFile;
@@ -61,6 +81,14 @@
 			isa = PBXBuildFile;
 			fileRef = E9904427C1AC4207661F6226;
 		};
+		4F7DDC71E44C334F93985BC4 = {
+			isa = PBXBuildFile;
+			fileRef = 8953467BB375D3F422963209;
+		};
+		4F98B60C1E04FE6F8015F636 = {
+			isa = PBXBuildFile;
+			fileRef = B45CDB043CA134786722F0CF;
+		};
 		54401FD0870082CB186859B5 = {
 			isa = PBXBuildFile;
 			fileRef = F2C03D9AF5A8FBEB20BF0832;
@@ -77,6 +105,10 @@
 			isa = PBXBuildFile;
 			fileRef = BCD7F464D35F9BBE2B3F584E;
 		};
+		5AC496A0228B274533FEFAD5 = {
+			isa = PBXBuildFile;
+			fileRef = DE21A280EA0732BB6BC4756D;
+		};
 		5AD8CB302B66DDC8D6E11F69 = {
 			isa = PBXBuildFile;
 			fileRef = 1872EE232338710C27AB82C7;
@@ -89,13 +121,45 @@
 			isa = PBXBuildFile;
 			fileRef = C6B9776991A6ACE26BA549EE;
 		};
+		6E90E190FD7DF70E0E94BFED = {
+			isa = PBXBuildFile;
+			fileRef = CDDBFBE5C403BA9743998BE6;
+		};
+		76273B9F17CA2AC636E74465 = {
+			isa = PBXBuildFile;
+			fileRef = BA1DEA5F23D47369D5EA3AF6;
+		};
+		790D0812F4C07F819ED05A47 = {
+			isa = PBXBuildFile;
+			fileRef = 9682A16F8A32150289C8CF97;
+		};
+		7B8B027BDD33649C3F52BD01 = {
+			isa = PBXBuildFile;
+			fileRef = CD42F08BBEBE850DF40BF21E;
+		};
+		7D4F6258591AEEAFADF1C9C6 = {
+			isa = PBXBuildFile;
+			fileRef = C2422B703FDCCE97662D43A2;
+		};
 		867B2F884CE9E3583F4CFA49 = {
 			isa = PBXBuildFile;
 			fileRef = 16B7D591CAA76D555A803EF1;
 		};
+		8724B86160671E554ED548CF = {
+			isa = PBXBuildFile;
+			fileRef = 2D34C64B3B1C926D510FC9E5;
+		};
 		8761A8A77150FEDE77F3CE85 = {
 			isa = PBXBuildFile;
 			fileRef = CC890A1DE343FC8121DDF7A5;
+		};
+		87901043FE72E00CACC56565 = {
+			isa = PBXBuildFile;
+			fileRef = A091C20761EA4F0FAF6E04A1;
+		};
+		8B01B6A9303B657BB8A01717 = {
+			isa = PBXBuildFile;
+			fileRef = 2D34C64B3B1C926D510FC9E5;
 		};
 		8B3ACFFDC3B70DDDB8617E01 = {
 			isa = PBXBuildFile;
@@ -105,6 +169,10 @@
 			isa = PBXBuildFile;
 			fileRef = 5C4848C94B72C491235569FA;
 		};
+		8CA226AEE999AE86C78419D9 = {
+			isa = PBXBuildFile;
+			fileRef = BA1DEA5F23D47369D5EA3AF6;
+		};
 		8F7164C86593E399E677FBA3 = {
 			isa = PBXBuildFile;
 			fileRef = 5F2811738549F1EF373FB313;
@@ -112,6 +180,10 @@
 		B0497617C77CB7B2FA40EEF3 = {
 			isa = PBXBuildFile;
 			productRef = B1759CFEBF67FABEFEB2EC05;
+		};
+		B1033BC3BB708A7430BB1295 = {
+			isa = PBXBuildFile;
+			fileRef = CDDBFBE5C403BA9743998BE6;
 		};
 		B20E3EAB7B113D266D60C1EB = {
 			isa = PBXBuildFile;
@@ -124,6 +196,10 @@
 		B46D08AF6D620EC4D5544037 = {
 			isa = PBXBuildFile;
 			fileRef = F2C03D9AF5A8FBEB20BF0832;
+		};
+		B544119036F0DFC21280EC85 = {
+			isa = PBXBuildFile;
+			fileRef = F72D2F61D743A839B8243948;
 		};
 		B91D1E3A79609A8AAE77087A = {
 			isa = PBXBuildFile;
@@ -149,6 +225,10 @@
 			isa = PBXBuildFile;
 			fileRef = E9904427C1AC4207661F6226;
 		};
+		D1306221E2CD99F7610FEAFF = {
+			isa = PBXBuildFile;
+			fileRef = 129E2D3986154F1EA268EA56;
+		};
 		D3E71E4C4E3A9531FEBCDE37 = {
 			isa = PBXBuildFile;
 			fileRef = C6B9776991A6ACE26BA549EE;
@@ -169,9 +249,29 @@
 			isa = PBXBuildFile;
 			fileRef = 69F325EE7EC20A3C1C3AD4EE;
 		};
+		EB57B4772751E74F60188A1A = {
+			isa = PBXBuildFile;
+			fileRef = 129E2D3986154F1EA268EA56;
+		};
 		ECFE217818CBDB65841F2FDB = {
 			isa = PBXBuildFile;
 			fileRef = B2656B33FA9426E806C4D254;
+		};
+		F02E98F076DCF261EB8F25F7 = {
+			isa = PBXBuildFile;
+			fileRef = 4751A22D65F1D1961EC45604;
+		};
+		F3F7C896614BEC81FA85F020 = {
+			isa = PBXBuildFile;
+			fileRef = C2422B703FDCCE97662D43A2;
+		};
+		F73CDB9CD02E3FC77A88B4D5 = {
+			isa = PBXBuildFile;
+			fileRef = 9682A16F8A32150289C8CF97;
+		};
+		F83D26BFB709D19D89663CDC = {
+			isa = PBXBuildFile;
+			fileRef = B45CDB043CA134786722F0CF;
 		};
 		FF48EF547108BB631411DC55 = {
 			isa = PBXBuildFile;
@@ -183,6 +283,19 @@
 			proxyType = 1;
 			remoteGlobalIDString = 3FF5336FD5D9D57BED527C38;
 			remoteInfo = HCGSentinel;
+		};
+		E7DB36256726E37DED85D956 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFF32A4E65AA1ACDBAD95ACA;
+			proxyType = 1;
+			remoteGlobalIDString = 8776530F491B39AE81E90336;
+			remoteInfo = HCGSentinelModern;
+		};
+		129E2D3986154F1EA268EA56 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SecurityLabComponents.swift;
+			sourceTree = "<group>";
 		};
 		16B7D591CAA76D555A803EF1 = {
 			isa = PBXFileReference;
@@ -208,6 +321,12 @@
 			path = SentinelCore;
 			sourceTree = "<group>";
 		};
+		2D34C64B3B1C926D510FC9E5 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = NetworkCheckView.swift;
+			sourceTree = "<group>";
+		};
 		31C5859F99483F16DD7B2062 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -220,6 +339,12 @@
 			includeInIndex = 0;
 			path = HCGSentinel.app;
 			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		4751A22D65F1D1961EC45604 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = MockNodeIntegrationTests.swift;
+			sourceTree = "<group>";
 		};
 		50B9C78F8D6CE7155EFFDE38 = {
 			isa = PBXFileReference;
@@ -252,16 +377,35 @@
 			path = WebSocketNodeTransport.swift;
 			sourceTree = "<group>";
 		};
+		8953467BB375D3F422963209 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SecurityLabModel.swift;
+			sourceTree = "<group>";
+		};
 		8F0E96B575BE00FE93154471 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = BluetoothExplorerView.swift;
 			sourceTree = "<group>";
 		};
+		8F93341B3E296739595DF3CA = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.cfbundle;
+			includeInIndex = 0;
+			path = HCGSentinelModernTests.xctest;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
 		93361BA16006C6C084CEA5C8 = {
 			isa = PBXFileReference;
 			lastKnownFileType = text.plist.xml;
 			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		9682A16F8A32150289C8CF97 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = NetworkCheckModel.swift;
 			sourceTree = "<group>";
 		};
 		A060F98EA53E595620A976B9 = {
@@ -280,7 +424,7 @@
 			isa = PBXFileReference;
 			explicitFileType = wrapper.application;
 			includeInIndex = 0;
-			path = HCGSentinel.app;
+			path = HCGSentinelModern.app;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
 		ADB158B392D819399534D9D3 = {
@@ -295,6 +439,18 @@
 			path = DashboardView.swift;
 			sourceTree = "<group>";
 		};
+		B45CDB043CA134786722F0CF = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = FilteringCard.swift;
+			sourceTree = "<group>";
+		};
+		BA1DEA5F23D47369D5EA3AF6 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SecurityModuleViews.swift;
+			sourceTree = "<group>";
+		};
 		BCD7F464D35F9BBE2B3F584E = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -305,6 +461,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = SystemViews.swift;
+			sourceTree = "<group>";
+		};
+		C2422B703FDCCE97662D43A2 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SecurityLabAppTests.swift;
 			sourceTree = "<group>";
 		};
 		C2EE7BFA497C83E8CB6CC4C5 = {
@@ -325,10 +487,28 @@
 			path = AppModel.swift;
 			sourceTree = "<group>";
 		};
+		CD42F08BBEBE850DF40BF21E = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = NetworkCheckLiveTests.swift;
+			sourceTree = "<group>";
+		};
+		CDDBFBE5C403BA9743998BE6 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = PlatformNetworkProbe.swift;
+			sourceTree = "<group>";
+		};
 		D1E3E66E4D5FEE69008260D7 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
 			path = HCGSentinelApp.swift;
+			sourceTree = "<group>";
+		};
+		DE21A280EA0732BB6BC4756D = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SecurityLabView.swift;
 			sourceTree = "<group>";
 		};
 		E9904427C1AC4207661F6226 = {
@@ -343,7 +523,20 @@
 			path = PreviewData.swift;
 			sourceTree = "<group>";
 		};
+		F72D2F61D743A839B8243948 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = BluetoothModelTests.swift;
+			sourceTree = "<group>";
+		};
 		312B8DDB1885AA95C7E64651 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		912A6FEB2FFA28F8E0BADB11 = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -392,6 +585,7 @@
 				5F2811738549F1EF373FB313,
 				1872EE232338710C27AB82C7,
 				2A5A747FB219F9D3C6BA1700,
+				CDDBFBE5C403BA9743998BE6,
 				BF58F56693ED85973A16363E,
 				69F325EE7EC20A3C1C3AD4EE,
 			);
@@ -418,12 +612,27 @@
 			path = Theme;
 			sourceTree = "<group>";
 		};
+		8307520261DB5FBF531718F4 = {
+			isa = PBXGroup;
+			children = (
+				129E2D3986154F1EA268EA56,
+				8953467BB375D3F422963209,
+				DE21A280EA0732BB6BC4756D,
+				BA1DEA5F23D47369D5EA3AF6,
+			);
+			path = SecurityLab;
+			sourceTree = "<group>";
+		};
 		98E8A36B4FB7934181228642 = {
 			isa = PBXGroup;
 			children = (
+				8307520261DB5FBF531718F4,
 				8F0E96B575BE00FE93154471,
 				BCD7F464D35F9BBE2B3F584E,
 				B2656B33FA9426E806C4D254,
+				B45CDB043CA134786722F0CF,
+				9682A16F8A32150289C8CF97,
+				2D34C64B3B1C926D510FC9E5,
 				50B9C78F8D6CE7155EFFDE38,
 				F2C03D9AF5A8FBEB20BF0832,
 				31C5859F99483F16DD7B2062,
@@ -441,6 +650,7 @@
 				3AA016A11901BA515A6789B9,
 				AAAB233F8B9D0656D03DC2F3,
 				5FDF93948DB1C325BB601E53,
+				8F93341B3E296739595DF3CA,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -458,6 +668,10 @@
 			isa = PBXGroup;
 			children = (
 				A091C20761EA4F0FAF6E04A1,
+				F72D2F61D743A839B8243948,
+				4751A22D65F1D1961EC45604,
+				CD42F08BBEBE850DF40BF21E,
+				C2422B703FDCCE97662D43A2,
 			);
 			path = HCGSentinelTests;
 			sourceTree = "<group>";
@@ -519,6 +733,23 @@
 			productReference = AAAB233F8B9D0656D03DC2F3;
 			productType = "com.apple.product-type.application";
 		};
+		B349C814CB8D6C962B143ECF = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 40EBD8CA984C863F3FAA1CB7;
+			buildPhases = (
+				19A66DA810C3560251AB8666,
+				912A6FEB2FFA28F8E0BADB11,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EB266CB323E94557918FF81F,
+			);
+			name = HCGSentinelModernTests;
+			productName = HCGSentinelModernTests;
+			productReference = 8F93341B3E296739595DF3CA;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		CFF32A4E65AA1ACDBAD95ACA = {
 			isa = PBXProject;
 			attributes = {
@@ -535,6 +766,10 @@
 					4411DF04F15D67072153D380 = {
 						CreatedOnToolsVersion = 15.0;
 						TestTargetID = 3FF5336FD5D9D57BED527C38;
+					};
+					B349C814CB8D6C962B143ECF = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 8776530F491B39AE81E90336;
 					};
 				};
 			};
@@ -554,6 +789,7 @@
 				3FF5336FD5D9D57BED527C38,
 				8776530F491B39AE81E90336,
 				4411DF04F15D67072153D380,
+				B349C814CB8D6C962B143ECF,
 			);
 		};
 		0A1AC18FFC80D23A300DD420 = {
@@ -572,15 +808,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		19A66DA810C3560251AB8666 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				87901043FE72E00CACC56565,
+				B544119036F0DFC21280EC85,
+				25473607A8F41989361A9211,
+				35E0E047E8A422E04637F4A9,
+				7D4F6258591AEEAFADF1C9C6,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		429749D7755279783EA4CD92 = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				5569C91EB42F4D9A37E647AD,
 				E698F4B5A7F650E848DD6916,
+				D1306221E2CD99F7610FEAFF,
+				4F7DDC71E44C334F93985BC4,
+				2D1E1A10BBC58CBC5A90A567,
+				8CA226AEE999AE86C78419D9,
 				66B5498E9B41A9383E2A456F,
 				59C3C87C9DFE2C7974F731C9,
 				ECFE217818CBDB65841F2FDB,
+				4F98B60C1E04FE6F8015F636,
+				F73CDB9CD02E3FC77A88B4D5,
+				8724B86160671E554ED548CF,
 				DE5A232D509A6E55ACDF16A7,
 				54401FD0870082CB186859B5,
 				C32BDB66B976D80BE2BDE744,
@@ -592,6 +847,7 @@
 				8F7164C86593E399E677FBA3,
 				5AD8CB302B66DDC8D6E11F69,
 				1D44BA41B1836A9B04EFF63B,
+				6E90E190FD7DF70E0E94BFED,
 				8B3ACFFDC3B70DDDB8617E01,
 				E7C1FAE647C4436878A24595,
 				68CA03619FB983DAF35777DB,
@@ -603,6 +859,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				BCF9D3424C7921671D089749,
+				1815783805A4ECFF4CBCC859,
+				F02E98F076DCF261EB8F25F7,
+				7B8B027BDD33649C3F52BD01,
+				F3F7C896614BEC81FA85F020,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -612,9 +872,16 @@
 			files = (
 				8761A8A77150FEDE77F3CE85,
 				097A1B3FD549A24C3A5B094D,
+				EB57B4772751E74F60188A1A,
+				3099FDA331A9AED9794C57BF,
+				5AC496A0228B274533FEFAD5,
+				76273B9F17CA2AC636E74465,
 				03DB76429F34AF7AD922F784,
 				3A34F2F87743BC90D7C3E317,
 				304BCD622FA11070B734B848,
+				F83D26BFB709D19D89663CDC,
+				790D0812F4C07F819ED05A47,
+				8B01B6A9303B657BB8A01717,
 				1765642323B19698F68CA5A5,
 				B46D08AF6D620EC4D5544037,
 				26D59DA831A38EA6B7CB311C,
@@ -626,6 +893,7 @@
 				243F6ED582899AD41241A7B0,
 				E50049314E2EA966A736FEFC,
 				BB84D1EB4E6439E7F6EB5E09,
+				B1033BC3BB708A7430BB1295,
 				114BF76CCED53D3C43938ADA,
 				B2BF4ED09B5D8EE2456D0ABA,
 				D3E71E4C4E3A9531FEBCDE37,
@@ -636,6 +904,11 @@
 			isa = PBXTargetDependency;
 			target = 3FF5336FD5D9D57BED527C38;
 			targetProxy = E14AFF94513A8630C47A3475;
+		};
+		EB266CB323E94557918FF81F = {
+			isa = PBXTargetDependency;
+			target = 8776530F491B39AE81E90336;
+			targetProxy = E7DB36256726E37DED85D956;
 		};
 		12431A5B282500319235D740 = {
 			isa = XCBuildConfiguration;
@@ -654,7 +927,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -674,6 +947,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -696,16 +970,16 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel;
-				PRODUCT_NAME = HCGSentinel;
+				PRODUCT_NAME = HCGSentinelModern;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 			};
 			name = Debug;
 		};
@@ -719,16 +993,16 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel;
-				PRODUCT_NAME = HCGSentinel;
+				PRODUCT_NAME = HCGSentinelModern;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 			};
 			name = Release;
 		};
@@ -742,6 +1016,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -751,6 +1026,31 @@
 				PRODUCT_NAME = HCGSentinel;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		46227F403FD242DE3FDC0A2E = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel.moderntests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HCGSentinelModern.app/HCGSentinelModern";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = (
+					"$(inherited)",
+					SENTINEL_MODERN_TESTS,
+				);
 			};
 			name = Debug;
 		};
@@ -771,7 +1071,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -797,6 +1097,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -809,6 +1110,31 @@
 			};
 			name = Debug;
 		};
+		AB78386C12712F27017EF818 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hcg.sentinel.moderntests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HCGSentinelModern.app/HCGSentinelModern";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = (
+					"$(inherited)",
+					SENTINEL_MODERN_TESTS,
+				);
+			};
+			name = Release;
+		};
 		F618E6A3209B9E2217605A4F = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -819,6 +1145,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = HCGSentinel/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.7;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -845,6 +1172,15 @@
 			buildConfigurations = (
 				27A0BA0275132FF4CD3530BF,
 				2B60E8FA74D08D8F2E543AA1,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		40EBD8CA984C863F3FAA1CB7 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				46227F403FD242DE3FDC0A2E,
+				AB78386C12712F27017EF818,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

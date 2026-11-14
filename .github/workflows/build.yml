@@ -1015,7 +1015,7 @@ jobs:
     timeout-minutes: 90
     env:
       OUT: ${{ github.workspace }}/sentinel-out
-      SENTINEL_COMMIT: 810c6f99103a5e4f60e91a6fecda8259be01e0da
+      SENTINEL_COMMIT: 03bc6e55f0a75c32df0a05415d70b55e95f5ad9d
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -1069,6 +1069,8 @@ jobs:
           dotnet $d --scheme-workflow --source $f --simulate-xcode 27.0:15.0:15.0 --output "$OUT/scheme-workflow" --screenshots "$OUT/screens" --prefix scheme-workflow
           dotnet $d --reopen-mobile --source $f --simulate-xcode 27.0:15.0:15.0 --output "$OUT/scheme-workflow" --screenshots "$OUT/screens" --prefix scheme-reopen
           dotnet $d --scheme-workflow --expect-simulator-only --source $f --simulate-xcode 27.0:15.0:14.0 --output "$OUT/scheme-simulator" --screenshots "$OUT/screens" --prefix scheme-simulator
+          # The same checks on the pinned Sentinel checkout itself (real project, schemes and SentinelCore package).
+          dotnet $d --scheme-workflow --source "$OUT/src/HCG Sentinel" --simulate-xcode 27.0:15.0:15.0 --output "$OUT/scheme-workflow-real" --screenshots "$OUT/screens" --prefix scheme-workflow-real
       - name: Collect complete logs and .xcresult bundles
         if: always()
         run: |
