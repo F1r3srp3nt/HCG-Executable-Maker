@@ -39,6 +39,12 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      port_ios_repeat:
+        description: "Run ONLY the iOS porting job, this many times in parallel (everything else is skipped)"
+        type: choice
+        default: "no"
+        options: ["no", "[1,2,3]", "[1,2,3,4,5,6]"]
 
 permissions:
   contents: read
@@ -55,6 +61,8 @@ env:
 jobs:
   test:
     name: Test (${{ matrix.os }})
+    # A port_ios_repeat dispatch runs only port-ios-repeat; every other job needs this one and is skipped with it.
+    if: github.event_name != 'workflow_dispatch' || inputs.port_ios_repeat == 'no' || inputs.port_ios_repeat == ''
     strategy:
       fail-fast: false
       matrix:
@@ -1224,7 +1232,8 @@ jobs:
     name: Porting — macOS source → iOS app, compiled and launched in the Simulator
     needs: test
     runs-on: macos-latest
-    timeout-minutes: 75
+    # Overall bound; every step and every stage inside has its own, smaller one (tools/ci/run-stage.sh, --budget-*).
+    timeout-minutes: 60
     env:
       OUT: ${{ github.workspace }}/port-ios-out
       OSLO_REPO: https://github.com/F1r3srp3nt/Oslo-Sprint.git
@@ -1240,63 +1249,22 @@ jobs:
         with:
           node-version: 22
 
-      - name: Toolchain
-        run: |
-          mkdir -p "$OUT/screens"
-          xcodebuild -version
-          xcrun simctl list runtimes | grep -i ios || true
+      - name: Ports — assess, generate, compile, launch (stages timed and bounded)
+        timeout-minutes: 48
+        uses: ./.github/actions/port-ios
+        with:
+          simulator-name: hcg-ci-${{ github.run_id }}-${{ github.run_attempt }}-port-ios
 
-      - name: The sources are real Mac apps (build them for macOS first)
-        run: |
-          (cd tests/Fixtures/TallyPackage && swift build --scratch-path "$OUT/tally-mac" 2>&1 | tail -3)
-          xcodebuild -project tests/Fixtures/HelloMac/HelloMac.xcodeproj -scheme HelloMac -configuration Release -derivedDataPath "$OUT/hellomac-mac" build -quiet
-          echo "Both fixtures build as macOS apps."
-
-      - name: Build the UI driver
-        run: dotnet build tools/ui-driver -c Release
-
-      - name: Swift package app (TallyPackage) → iOS — assess, generate, compile, launch in Simulator
-        run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/TallyPackage --port "swiftpm::TallyApp"
-          --name Tally --bundle-id com.hakmicapital.tally "--usage" "NSMicrophoneUsageDescription=Tally shows whether the microphone may be used for voice notes."
-          --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
-          --output "$OUT/tally" --screenshots "$OUT/screens" --prefix tally-ios --window-height 3600
-
-      - name: macOS Xcode project (HelloMac) → iOS — assess, generate, compile, launch in Simulator
-        run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/HelloMac --port "xcode:HelloMac.xcodeproj"
-          --name "Hello HCG" --bundle-id com.hakmicapital.hellomac
-          --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
-          --output "$OUT/hellomac" --screenshots "$OUT/screens" --prefix hellomac-ios --window-height 3600
-
-      - name: Web app (WebViteDesktop, Vite + React) → iOS with Capacitor — inspect, generate, validate, compile, launch in Simulator
-        run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/WebViteDesktop --port "web:" --path WebToIOS
-          --name "Field Notes" --bundle-id com.hakmicapital.fieldnotes --expect-capability GenerateTarget
-          --validate --expect-validate Passed --compile --expect-compile Passed --launch --expect-launch Passed
-          --output "$OUT/fieldnotes" --screenshots "$OUT/screens" --prefix web-ios --window-height 3600
-
-      - name: Oslo-Sprint (real apps) — Relay and Distil are assessed as blocked, with specific blockers; Relay draft
-        run: |
-          git clone --quiet "$OSLO_REPO" "$OUT/Oslo-Sprint" && git -C "$OUT/Oslo-Sprint" checkout --quiet "$OSLO_COMMIT"
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --port "swiftpm:relay:RelayApp" \
-            --name Relay --bundle-id com.oslosprint.relay "--usage" "NSMicrophoneUsageDescription=Push to talk." --draft \
-            --expect-capability BlockedNeedsPorting --compile --expect-compile NotPerformed \
-            --output "$OUT/relay" --screenshots "$OUT/screens" --prefix relay-ios --window-height 3600
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/Oslo-Sprint" --port "swiftpm:distil:TokenLabApp" \
-            --assess-only --expect-capability BlockedNeedsPorting --output "$OUT/distil" --screenshots "$OUT/screens" --prefix distil-ios --window-height 3600
-          # The draft really does not compile for iOS, and fails only on HCG's explicit blocker marker.
-          relay_out="$(find "$OUT/relay/ports" -maxdepth 1 -type d -name '*-ios-port-*' | head -1)"
-          set +e
-          xcodebuild -project "$relay_out/relay/iOS/Relay.xcodeproj" -scheme Relay -destination "generic/platform=iOS Simulator" \
-            -derivedDataPath "$OUT/relay-dd" build CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:" | sort -u | head -10
-          set -e
+      - name: Diagnostics (failed or cancelled)
+        if: failure() || cancelled()
+        run: tools/ci/diagnose.sh job-end || true
 
       - name: Screenshots (JPEG, base64 in the log)
         if: always()
         run: |
           shopt -s nullglob
           for f in "$OUT"/screens/*.png "$OUT"/*/ports/*/HCG-PORT/launch-*.png; do
+            case "$f" in *-before.png|*-after.png) continue ;; esac
             j="$OUT/screens/$(basename "$(dirname "$(dirname "$f")")")-$(basename "${f%.png}").jpg"
             case "$f" in "$OUT"/screens/*) j="${f%.png}.jpg" ;; esac
             sips -s format jpeg -s formatOptions 55 -Z 1600 "$f" --out "$j" >/dev/null
@@ -1305,17 +1273,93 @@ jobs:
             echo "=====END-IMG====="
           done
 
-      - name: Upload ports, reports and screenshots
+      - name: Upload ports, reports, screenshots, build logs and diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: port-ios-outputs
+          name: port-ios-outputs${{ matrix.rep && format('-{0}', matrix.rep) || '' }}
           path: |
             ${{ github.workspace }}/port-ios-out/screens
             ${{ github.workspace }}/port-ios-out/*/ports/*/HCG-PORT
             ${{ github.workspace }}/port-ios-out/*/*.txt
+            ${{ github.workspace }}/port-ios-out/diagnostics
+            ${{ github.workspace }}/port-ios-out/*/hcg-data/builds/*/build.log
           if-no-files-found: warn
           retention-days: 7
+
+      # Last, after the upload: stop anything this job's steps left running and delete only the job's own Simulator.
+      - name: Cleanup — this job's processes and Simulator
+        if: always()
+        run: tools/ci/cleanup.sh
+
+  # workflow_dispatch with port_ios_repeat: ONLY the iOS porting job, several times in parallel on separate runners (to
+  # validate a fix for an intermittent failure). Normal pushes and pull requests never run this job.
+  port-ios-repeat:
+    name: Porting — iOS (repeat ${{ matrix.rep }})
+    if: github.event_name == 'workflow_dispatch' && inputs.port_ios_repeat != 'no'
+    strategy:
+      fail-fast: false
+      matrix:
+        rep: ${{ fromJSON((inputs.port_ios_repeat == '' || inputs.port_ios_repeat == 'no') && '[0]' || inputs.port_ios_repeat) }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/port-ios-out
+      OSLO_REPO: https://github.com/F1r3srp3nt/Oslo-Sprint.git
+      OSLO_COMMIT: 45431255bcc50c0e48c553c1f522ed67adf7e954
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ports — assess, generate, compile, launch (stages timed and bounded)
+        timeout-minutes: 48
+        uses: ./.github/actions/port-ios
+        with:
+          simulator-name: hcg-ci-${{ github.run_id }}-${{ github.run_attempt }}-repeat-${{ matrix.rep }}
+
+      - name: Diagnostics (failed or cancelled)
+        if: failure() || cancelled()
+        run: tools/ci/diagnose.sh job-end || true
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png "$OUT"/*/ports/*/HCG-PORT/launch-*.png; do
+            case "$f" in *-before.png|*-after.png) continue ;; esac
+            j="$OUT/screens/$(basename "$(dirname "$(dirname "$f")")")-$(basename "${f%.png}").jpg"
+            case "$f" in "$OUT"/screens/*) j="${f%.png}.jpg" ;; esac
+            sips -s format jpeg -s formatOptions 55 -Z 1600 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload ports, reports, screenshots, build logs and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: port-ios-outputs${{ matrix.rep && format('-{0}', matrix.rep) || '' }}
+          path: |
+            ${{ github.workspace }}/port-ios-out/screens
+            ${{ github.workspace }}/port-ios-out/*/ports/*/HCG-PORT
+            ${{ github.workspace }}/port-ios-out/*/*.txt
+            ${{ github.workspace }}/port-ios-out/diagnostics
+            ${{ github.workspace }}/port-ios-out/*/hcg-data/builds/*/build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Last, after the upload: stop anything this job's steps left running and delete only the job's own Simulator.
+      - name: Cleanup — this job's processes and Simulator
+        if: always()
+        run: tools/ci/cleanup.sh
 
   port-android:
     name: Porting — Linux C program → Android app, compiled with the NDK and launched on an emulator

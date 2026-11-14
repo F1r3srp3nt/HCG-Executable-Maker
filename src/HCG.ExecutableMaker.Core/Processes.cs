@@ -28,7 +28,11 @@ public enum OutputStream
     StdErr,
 }
 
-public sealed record ProcessResult(int ExitCode, TimeSpan Duration, bool Cancelled, bool TimedOut)
+/// <param name="OutputLeftOpen">
+/// The process exited, but its output stayed open — a background process it started (e.g. xcodebuild's build service)
+/// inherited the pipes. HCG stopped waiting after a short grace period; the exit code is the process's own.
+/// </param>
+public sealed record ProcessResult(int ExitCode, TimeSpan Duration, bool Cancelled, bool TimedOut, bool OutputLeftOpen = false)
 {
     public bool Succeeded => ExitCode == 0 && !Cancelled && !TimedOut;
 }

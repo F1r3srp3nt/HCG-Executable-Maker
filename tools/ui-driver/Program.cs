@@ -138,6 +138,59 @@ internal static partial class Program
         for (var i = 0; i < scrollers.Count; i++) scrollers[i].Offset = saved[i];
     }
 
+    private static string? _lastOutput;
+
+    /// <summary>A stage budget: --budget-STAGE minutes (e.g. --budget-compilation 12), else the default.</summary>
+    private static TimeSpan Budget(string stage, double defaultMinutes) =>
+        TimeSpan.FromMinutes(Arg("budget-" + stage) is { } m ? double.Parse(m, System.Globalization.CultureInfo.InvariantCulture) : defaultMinutes);
+
+    /// <summary>
+    /// Runs one Porting Studio stage within its budget: "STAGE name start/end" lines with UTC timestamps and the outcome, a
+    /// progress line every 30 s naming the stage and the last output line, and the active stage written to --stage-file
+    /// (read by the CI watchdog). On timeout: --on-stage-timeout (a diagnostics script) runs first, then the stage is
+    /// cancelled through the page's own Cancel; the stage fails — nothing is retried and nothing is skipped silently.
+    /// </summary>
+    private static async Task<bool> PortStageAsync(PortingStudioViewModel studio, string stage, TimeSpan budget, Func<Task> start)
+    {
+        var sw = Stopwatch.StartNew();
+        void Mark(string state) { if ((Arg("stage-file") ?? Environment.GetEnvironmentVariable("HCG_STAGE_FILE")) is { Length: > 0 } f) File.WriteAllText(f, $"{stage} {state} {DateTimeOffset.UtcNow:O}\n"); }
+        Log($"STAGE {stage} start {DateTimeOffset.UtcNow:O} (budget {budget.TotalSeconds:F0} s)");
+        Mark("running");
+        var command = start();
+        var next = TimeSpan.FromSeconds(30);
+        while (!(command.IsCompleted && !studio.IsWorking))
+        {
+            if (sw.Elapsed > budget)
+            {
+                Log($"STAGE {stage} TIMEOUT {DateTimeOffset.UtcNow:O} after {sw.Elapsed.TotalSeconds:F0} s (budget {budget.TotalSeconds:F0} s) · last output: {_lastOutput ?? "(none)"}");
+                Mark("timeout");
+                if (Arg("on-stage-timeout") is { } script && File.Exists(script))
+                {
+                    // Diagnostics while the stalled processes still exist (process tree, stacks, open pipes, Simulator state).
+                    using var diag = Process.Start(new ProcessStartInfo(script) { ArgumentList = { stage }, UseShellExecute = false });
+                    if (diag is not null && !diag.WaitForExit(TimeSpan.FromMinutes(3))) HCG.ExecutableMaker.Infrastructure.Processes.ProcessTree.Kill(diag);
+                }
+                studio.CancelCommand.Execute(null);
+                var cancelled = Stopwatch.StartNew();
+                while (!(command.IsCompleted && !studio.IsWorking) && cancelled.Elapsed < TimeSpan.FromSeconds(60)) await Task.Delay(200);
+                Log($"STAGE {stage} end {DateTimeOffset.UtcNow:O} timeout after {sw.Elapsed.TotalSeconds:F1} s" +
+                    (command.IsCompleted && !studio.IsWorking ? " (cancelled)" : " (did not stop within 60 s of Cancel)"));
+                Check(false, $"{stage} finished within its {budget.TotalSeconds:F0} s budget");
+                return false;
+            }
+            if (sw.Elapsed > next)
+            {
+                Log($"… {stage} running for {sw.Elapsed.TotalSeconds:F0} s ({studio.WorkStatus}) · last output: {_lastOutput ?? "(none)"}");
+                next += TimeSpan.FromSeconds(30);
+            }
+            await Task.Delay(200);
+        }
+        var failed = command.IsFaulted || studio.Error is not null;
+        Log($"STAGE {stage} end {DateTimeOffset.UtcNow:O} {(failed ? "failed" : "ok")} after {sw.Elapsed.TotalSeconds:F1} s{(studio.Error is { } e ? ": " + e : "")}");
+        Mark(failed ? "failed" : "done");
+        return true;
+    }
+
     private static async Task WaitUntil(Func<bool> condition, TimeSpan timeout, string what)
     {
         var sw = Stopwatch.StartNew();
@@ -396,12 +449,32 @@ internal static partial class Program
     {
         await main.NavigateAsync("porting", null);
         var studio = (PortingStudioViewModel)main.CurrentPage!;
+        // Everything the page logs (xcodebuild, simctl, Gradle, the launch stages) is echoed as it happens, so a stalled
+        // command is visible in the CI log with the last line it printed.
+        studio.LogLines.CollectionChanged += (_, e) =>
+        {
+            foreach (var item in e.NewItems?.OfType<LogLineItem>() ?? []) { _lastOutput = item.Text; Console.WriteLine($"  | {item.Time} {item.Text}"); }
+        };
+        studio.SimulatorUdid = Arg("simulator-udid");
+        // The fixture apps report their first screen through a test-only readiness signal: --expect-ready SCREEN
+        // [--expect-ready-element id=value …]. That signal, not a screenshot, decides whether the launched app is ready.
+        if (Arg("expect-ready") is { } readyScreen)
+        {
+            var elements = _args.Where(x => x.Key.StartsWith("expect-ready-element", StringComparison.Ordinal)).Select(x => x.Value)
+                .ToDictionary(v => v[..v.IndexOf('=')], v => v[(v.IndexOf('=') + 1)..], StringComparer.Ordinal);
+            studio.Readiness = new HCG.ExecutableMaker.Porting.DeviceLauncher.ReadinessExpectation(readyScreen, elements);
+            Log($"Readiness signal expected: screen {readyScreen}{(elements.Count == 0 ? "" : " with " + string.Join(", ", elements.Select(e => $"{e.Key} = \"{e.Value}\"")))}");
+        }
+        if (studio.SimulatorUdid is { } udid) Log("Simulator selected explicitly: " + udid);
         var source = _args["source"];
         var isZip = File.Exists(source) && source.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
-        await (isZip ? studio.ImportZipCommand.ExecuteAsync(null) : studio.ImportFolderCommand.ExecuteAsync(null));
-        await WaitUntil(() => !studio.IsWorking && studio.SelectedProject is not null, TimeSpan.FromMinutes(5), "import");
-        await Task.Delay(300);
-        await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(5), "assessment");
+        if (!await PortStageAsync(studio, "assessment", Budget("assessment", 10), async () =>
+            {
+                await (isZip ? studio.ImportZipCommand.ExecuteAsync(null) : studio.ImportFolderCommand.ExecuteAsync(null));
+                await WaitUntil(() => !studio.IsWorking && studio.SelectedProject is not null, TimeSpan.FromMinutes(10), "import");
+                await Task.Delay(300);
+            }))
+            return 1;
         Check(studio.Error is null, "Imported and assessed" + (studio.Error is { } e ? ": " + e : ""));
         foreach (var path in studio.Paths)
         {
@@ -452,8 +525,7 @@ internal static partial class Program
         studio.OutputParent = Path.Combine(output, "ports");
         if (_args.ContainsKey("draft")) studio.Draft = true;
         Check(studio.GenerateCommand.CanExecute(null), "Generate enabled");
-        await studio.GenerateCommand.ExecuteAsync(null);
-        await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(5), "generation");
+        if (!await PortStageAsync(studio, "generation", Budget("generation", 5), () => studio.GenerateCommand.ExecuteAsync(null))) return 1;
         Check(studio.Error is null && studio.Report is not null, "Port generated" + (studio.Error is { } ge ? ": " + ge : ""));
         if (studio.Report is not { } report) { Shot("port-generate-failed"); return 1; }
         foreach (var step in report.Plan.Steps) Log("  plan: " + step);
@@ -467,8 +539,7 @@ internal static partial class Program
         if (_args.ContainsKey("validate"))
         {
             studio.TrustAcknowledged = true;
-            await studio.ValidateCommand.ExecuteAsync(null);
-            await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(30), "validate");
+            if (!await PortStageAsync(studio, "validation", Budget("validation", 15), () => studio.ValidateCommand.ExecuteAsync(null))) return 1;
             foreach (var c in studio.ValidationChecks) Log($"  validate {(c.Passed ? "PASS" : "FAIL")} {c.Name}: {c.Detail}");
             var v = studio.Report!.Level(HCG.ExecutableMaker.Domain.VerificationLevel.Validated);
             Log($"Validated: {v.Status} — {v.Detail}");
@@ -480,14 +551,13 @@ internal static partial class Program
         if (_args.ContainsKey("compile"))
         {
             studio.TrustAcknowledged = true;
-            await studio.CompileCommand.ExecuteAsync(null);
-            await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(50), "compile");
+            if (!await PortStageAsync(studio, "compilation", Budget("compilation", 12), () => studio.CompileCommand.ExecuteAsync(null))) return 1;
             foreach (var l in studio.LogLines.Where(l => l.IsError || l.IsWarning).Take(40)) Log("  build: " + l.Text);
         }
         if (_args.ContainsKey("launch") && studio.Report!.Level(HCG.ExecutableMaker.Domain.VerificationLevel.Compiled).Status == HCG.ExecutableMaker.Domain.LevelStatus.Passed)
         {
-            await studio.LaunchCommand.ExecuteAsync(null);
-            await WaitUntil(() => !studio.IsWorking, TimeSpan.FromMinutes(15), "launch");
+            // Boot, install, launch and ready are stages of their own inside (each bounded; see the "STAGE" lines).
+            if (!await PortStageAsync(studio, "launch", Budget("launch", 25), () => studio.LaunchCommand.ExecuteAsync(null))) return 1;
         }
         report = studio.Report!;
         foreach (var v in report.Verification.OrderBy(v => v.Level)) Log($"VERIFY {v.Level}: {v.Status} — {v.Detail}{(v.Evidence is null ? "" : " [" + v.Evidence + "]")}");
