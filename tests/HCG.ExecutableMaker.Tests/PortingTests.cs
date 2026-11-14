@@ -367,4 +367,73 @@ public class PortingTests : IDisposable
         Assert.Equal("A", DeviceLauncher.PickSimulator(json.Replace("\"A\",\"name\":\"iPhone 15\",\"state\":\"Shutdown\"", "\"A\",\"name\":\"iPhone 15\",\"state\":\"Booted\"", StringComparison.Ordinal))!.Value.Udid);
         Assert.Null(DeviceLauncher.PickSimulator("{\"devices\":{}}"));
     }
+
+    [Fact]
+    public void An_explicitly_selected_simulator_is_used_exactly_and_never_substituted()
+    {
+        const string json = """
+            {"devices": {
+              "com.apple.CoreSimulator.SimRuntime.iOS-26-5": [ {"udid":"JOB-1","name":"hcg-ci-1","state":"Shutdown","isAvailable":true},
+                                                              {"udid":"OTHER","name":"iPhone 17","state":"Booted","isAvailable":true} ],
+              "com.apple.CoreSimulator.SimRuntime.iOS-26-2": [ {"udid":"GONE","name":"old","state":"Shutdown","isAvailable":false} ]
+            }}
+            """;
+        var job = DeviceLauncher.FindSimulator(json, "job-1")!.Value;   // UDIDs compare case-insensitively
+        Assert.Equal(("JOB-1", "hcg-ci-1", "iOS 26.5", "Shutdown"), (job.Udid, job.Name, job.Runtime, job.State));
+        Assert.Null(DeviceLauncher.FindSimulator(json, "GONE"));          // unavailable: an error, not another device
+        Assert.Null(DeviceLauncher.FindSimulator(json, "MISSING"));
+    }
+
+    [Fact]
+    public void Ready_state_reads_the_launched_process_from_simctl_and_launchd()
+    {
+        Assert.Equal(14200, DeviceLauncher.ParseLaunchPid("com.hakmicapital.hellomac: 14200\n", "com.hakmicapital.hellomac"));
+        Assert.Null(DeviceLauncher.ParseLaunchPid("An error was encountered processing the command", "com.hakmicapital.hellomac"));
+        const string list = "PID\tStatus\tLabel\n" +
+                            "14200\t0\tUIKitApplication:com.hakmicapital.hellomac[3a1f][rb-legacy]\n" +
+                            "88\t0\tUIKitApplication:com.hakmicapital.hellomac.widget[1b2c]\n" +
+                            "-\t0\tcom.apple.something\n";
+        Assert.Equal(14200, DeviceLauncher.AppPid(list, "com.hakmicapital.hellomac"));        // not the .widget label
+        Assert.Null(DeviceLauncher.AppPid(list, "com.hakmicapital.tally"));
+        Assert.Equal("9", DeviceLauncher.ExitedWithStatus("-\t9\tUIKitApplication:com.hakmicapital.tally[aa]\n", "com.hakmicapital.tally"));
+        Assert.Null(DeviceLauncher.ExitedWithStatus(list, "com.hakmicapital.hellomac"));
+    }
+
+    [Fact]
+    public void The_apps_own_screen_is_told_apart_from_the_screen_before_launch_ignoring_the_status_bar()
+    {
+        using var t = new TempDir();
+        string Bmp(string name, Func<int, int, (byte R, byte G, byte B)> pixel, bool topDown = false, int bpp = 32)
+        {
+            const int w = 40, h = 80;
+            var bytes = bpp / 8;
+            var stride = (w * bytes + 3) & ~3;
+            var data = new byte[54 + stride * h];
+            data[0] = (byte)'B'; data[1] = (byte)'M';
+            BitConverter.GetBytes(data.Length).CopyTo(data, 2);
+            BitConverter.GetBytes(54).CopyTo(data, 10);
+            BitConverter.GetBytes(40).CopyTo(data, 14);
+            BitConverter.GetBytes(w).CopyTo(data, 18);
+            BitConverter.GetBytes(topDown ? -h : h).CopyTo(data, 22);
+            BitConverter.GetBytes((short)1).CopyTo(data, 26);
+            BitConverter.GetBytes((short)bpp).CopyTo(data, 28);
+            for (var y = 0; y < h; y++)
+                for (var x = 0; x < w; x++)
+                {
+                    var (r, g, b) = pixel(x, y);
+                    var i = 54 + (topDown ? y : h - 1 - y) * stride + x * bytes;
+                    data[i] = b; data[i + 1] = g; data[i + 2] = r;
+                }
+            var path = t.Write(name, "");
+            File.WriteAllBytes(path, data);
+            return path;
+        }
+        var home = Bmp("home.bmp", (x, y) => ((byte)(x * 5), 30, (byte)(y * 3)));
+        // Only the status bar (clock) changed: not the app's screen.
+        var clock = Bmp("clock.bmp", (x, y) => y < 6 ? ((byte)255, (byte)255, (byte)255) : ((byte)(x * 5), (byte)30, (byte)(y * 3)), topDown: true);
+        var app = Bmp("app.bmp", (x, y) => y > 30 ? ((byte)250, (byte)250, (byte)250) : ((byte)(x * 5), (byte)30, (byte)(y * 3)), bpp: 24);
+        Assert.Equal(0, DeviceLauncher.ScreenDifference(home, clock));
+        Assert.True(DeviceLauncher.ScreenDifference(home, app) > 0.5);
+        Assert.Equal(0, DeviceLauncher.ScreenDifference(home, t.Write("not.bmp", "PNG…")));   // unreadable: never "changed"
+    }
 }

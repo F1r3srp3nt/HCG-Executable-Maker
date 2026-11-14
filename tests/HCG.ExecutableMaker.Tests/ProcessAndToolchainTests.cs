@@ -56,6 +56,42 @@ public class ProcessRunnerTests
         Assert.Equal(["ONLY_ME=1"], lines);
     }
 
+    /// <summary>
+    /// CI (port-ios, runs 90 and 92): the HelloMac port's compile stage went silent and the job died ~45 min after compile
+    /// started — the Simulator build's 45-minute timeout. Process.WaitForExitAsync waits for the output PIPES to close, so a
+    /// command that finished but left a background process holding them (xcodebuild's build service) was held until its
+    /// timeout and reported as timed out. Reproduced here with a real shell whose background child keeps stdout open.
+    /// </summary>
+    [UnixFact]
+    public async Task A_finished_command_whose_background_child_keeps_the_output_open_is_not_held_until_its_timeout()
+    {
+        var runner = new ProcessRunner(outputGrace: TimeSpan.FromSeconds(2));
+        {
+            var lines = new List<string>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = await runner.RunAsync(new ProcessSpec
+            {
+                Executable = "/bin/sh", Arguments = ["-c", "sleep 30 & echo built; exit 0"], Timeout = TimeSpan.FromMinutes(5),
+            }, (_, l) => { lock (lines) lines.Add(l); }, CancellationToken.None);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"held for {sw.Elapsed}");
+            Assert.True(r.Succeeded, r.ToString());
+            Assert.False(r.TimedOut);
+            Assert.True(r.OutputLeftOpen);
+            Assert.Contains("built", lines);
+            Assert.Contains(lines, l => l.StartsWith("HCG: sh exited with code 0", StringComparison.Ordinal) && l.Contains("still holds its output open", StringComparison.Ordinal));
+        }
+    }
+
+    [UnixFact]
+    public async Task A_command_that_really_hangs_still_times_out_and_is_killed()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var r = await _runner.RunAsync(new ProcessSpec { Executable = "/bin/sh", Arguments = ["-c", "sleep 60"], Timeout = TimeSpan.FromSeconds(2) }, null, CancellationToken.None);
+        Assert.True(r.TimedOut);
+        Assert.False(r.Succeeded);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"took {sw.Elapsed}");
+    }
+
     [Fact]
     public async Task Rejects_relative_or_missing_executables()
     {

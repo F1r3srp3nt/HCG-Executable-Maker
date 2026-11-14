@@ -9,8 +9,12 @@ namespace HCG.ExecutableMaker.Infrastructure.Processes;
 /// Executes processes with structured arguments (<see cref="ProcessStartInfo.ArgumentList"/>), never via a shell.
 /// Cancellation and timeouts kill the whole process tree.
 /// </summary>
-public sealed class ProcessRunner(ILogger<ProcessRunner>? logger = null) : IProcessRunner
+/// <param name="outputGrace">How long output may stay open after the process exited (default 10 s).</param>
+public sealed class ProcessRunner(ILogger<ProcessRunner>? logger = null, TimeSpan? outputGrace = null) : IProcessRunner
 {
+    /// <summary>How long output may stay open after the process exited (a background child holding the pipe).</summary>
+    public TimeSpan OutputGrace { get; } = outputGrace ?? TimeSpan.FromSeconds(10);
+
     private readonly ILogger _logger = logger ?? NullLogger<ProcessRunner>.Instance;
 
     public async Task<ProcessResult> RunAsync(ProcessSpec spec, Action<OutputStream, string>? onOutput, CancellationToken cancellationToken)
@@ -42,8 +46,13 @@ public sealed class ProcessRunner(ILogger<ProcessRunner>? logger = null) : IProc
         }
 
         using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) onOutput?.Invoke(OutputStream.StdOut, e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) onOutput?.Invoke(OutputStream.StdErr, e.Data); };
+        // End of each stream (a null line): the pipe was closed by every process holding its write end.
+        var stdoutClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stderrClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) onOutput?.Invoke(OutputStream.StdOut, e.Data); else stdoutClosed.TrySetResult(); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) onOutput?.Invoke(OutputStream.StdErr, e.Data); else stderrClosed.TrySetResult(); };
+        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.Exited += (_, _) => exited.TrySetResult();
 
         using var timeoutCts = spec.Timeout is { } t ? new CancellationTokenSource(t) : new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -57,10 +66,29 @@ public sealed class ProcessRunner(ILogger<ProcessRunner>? logger = null) : IProc
 
         try
         {
-            await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
-            process.WaitForExit(); // flush async output handlers
+            // The process itself — not its output pipes. Process.WaitForExitAsync also waits for both pipes to close, so a
+            // background process that inherited them (xcodebuild's build service, a simulator helper) would hold a build
+            // that already finished until its timeout and turn it into a "timed out" failure.
+            if (!process.HasExited) await exited.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+            process.WaitForExit(0);
+            var exitCode = process.ExitCode;
+            var exitedAfter = sw.Elapsed;
+            var outputLeftOpen = false;
+            try
+            {
+                await Task.WhenAll(stdoutClosed.Task, stderrClosed.Task).WaitAsync(OutputGrace, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                outputLeftOpen = true;
+                try { process.CancelOutputRead(); process.CancelErrorRead(); } catch (InvalidOperationException) { }
+                var note = $"HCG: {Path.GetFileName(spec.Executable)} exited with code {exitCode} after {exitedAfter.TotalSeconds:F1} s, but a process it started still " +
+                           $"holds its output open; HCG stopped waiting for that output after {OutputGrace.TotalSeconds:F0} s (the exit code above is the result).";
+                _logger.LogWarning("{Note}", note);
+                onOutput?.Invoke(OutputStream.StdErr, note);
+            }
             sw.Stop();
-            return new ProcessResult(process.ExitCode, sw.Elapsed, Cancelled: false, TimedOut: false);
+            return new ProcessResult(exitCode, sw.Elapsed, Cancelled: false, TimedOut: false, OutputLeftOpen: outputLeftOpen);
         }
         catch (OperationCanceledException)
         {

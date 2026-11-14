@@ -2,6 +2,36 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — CI: iOS porting job, compile stall and Simulator stages
+
+### Fixed
+- **A finished command could be held until its timeout.** `ProcessRunner` waited for the command's output pipes to close, not just for the command to exit. When a background process the command had started kept those pipes open (for example xcodebuild's build service), a build that had already succeeded waited out its full timeout (45 min for Porting Studio's Simulator build) and was then reported as timed out.
+  - Now the runner waits for the process itself, then gives the output 10 s to close.
+  - If the output stays open, it says so in the log and uses the command's real exit code.
+  - A command that really hangs still times out and is killed.
+
+### Changed
+- **iOS Simulator launch** runs as timed stages (boot, install, launch, ready), each with its own budget, logged as it happens.
+- **"Ready" is verified:**
+  - the process simctl launched is the one launchd lists as the app;
+  - the screen below the status bar changed from what was shown before the launch (the app drew its own UI);
+  - the same process is still alive 5 s later.
+- **The Simulator can be chosen explicitly** (by UDID). The app is terminated after the check.
+- **The UI driver's porting stages** (assessment, generation, validation, compilation, launch):
+  - each runs within its own budget (`--budget-STAGE`);
+  - each logs its UTC start and end and its outcome;
+  - a progress line every 30 s names the active stage and the last output line;
+  - all build and simctl output is echoed live;
+  - on a timeout, diagnostics are collected before the stage is cancelled. The stage then fails; nothing is retried.
+- **CI `port-ios`** gets its own Simulator per job, with an explicitly chosen runtime and device type, deleted at the end. Each step runs under `tools/ci/run-stage.sh`:
+  - its own process group, with output kept in a file so no orphaned process can hold the step open;
+  - a time limit, and a heartbeat with stage, memory, swap, disk and process tree;
+  - a resource guard;
+  - diagnostics (`tools/ci/diagnose.sh`: stacks, open pipes, Simulator state and log, crash reports, build logs) before anything is stopped.
+  - Logs and diagnostics are uploaded, then only this job's processes and Simulator are cleaned up.
+  - The job's overall timeout drops from 75 to 60 min.
+- **Repeat mode:** `workflow_dispatch` with `port_ios_repeat` runs only the iOS porting job several times in parallel. Normal push and PR runs are unchanged.
+
 ## [Unreleased] — `feature/mobile-conversion`
 
 ### Added — desktop → mobile conversion workspace ([docs/MOBILE-CONVERSION.md](docs/MOBILE-CONVERSION.md))

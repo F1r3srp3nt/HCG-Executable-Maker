@@ -418,12 +418,23 @@ public sealed partial class PortingStudioViewModel : PageViewModel
         await LoadProjectsAsync();
     }
 
+    /// <summary>The iOS Simulator to launch in, chosen explicitly (UDID); null = the first available iPhone.</summary>
+    public string? SimulatorUdid { get; set; }
+
     [RelayCommand(CanExecute = nameof(CanLaunch))]
     private async Task LaunchAsync()
     {
         if (Report is not { } report) return;
+        // The launch stages (boot, install, launch, ready) and every simctl command are shown as they happen.
+        var timer = new DispatcherTimer(TimeSpan.FromMilliseconds(150), DispatcherPriority.Background, (_, _) => FlushLog());
+        timer.Start();
+        void Progress(string line) => _pendingLog.Enqueue(new BuildLogLine(DateTimeOffset.UtcNow,
+            line.StartsWith("STAGE", StringComparison.Ordinal) || line.StartsWith("RESULT", StringComparison.Ordinal) ? BuildLogKind.Info : BuildLogKind.Output, line));
         await RunAsync(report.Assessment.Target == MobileTarget.Ios ? "Launching in the iOS Simulator…" : "Installing and launching on the emulator/device…", async ct =>
-            Report = await Task.Run(() => _porting.LaunchAsync(report, TrustAcknowledged, ct, string.IsNullOrWhiteSpace(ExpectText) ? null : ExpectText.Trim()), ct));
+            Report = await Task.Run(() => _porting.LaunchAsync(report, TrustAcknowledged, ct, string.IsNullOrWhiteSpace(ExpectText) ? null : ExpectText.Trim(),
+                SimulatorUdid, Progress), ct));
+        timer.Stop();
+        FlushLog();
         RefreshVerification();
     }
 

@@ -14,51 +14,277 @@ public sealed record LaunchResult(VerificationLevel Level, LevelStatus Status, s
 public sealed class DeviceLauncher(IProcessRunner runner)
 {
     private async Task<(ProcessResult Result, string Out, string Err)> Run(string exe, IReadOnlyList<string> args, List<string> log, CancellationToken ct, int timeoutSeconds = 120)
+        => await Run(exe, args, log, ct, timeoutSeconds, null).ConfigureAwait(false);
+
+    private async Task<(ProcessResult Result, string Out, string Err)> Run(string exe, IReadOnlyList<string> args, List<string> log, CancellationToken ct, int timeoutSeconds, ProgressLog? progress)
     {
-        log.Add("$ " + exe + " " + string.Join(' ', args.Select(a => a.Contains(' ') ? "\"" + a + "\"" : a)));
+        void Add(string line) { if (progress is not null) progress.Add(line); else log.Add(line); }
+        Add($"$ {exe} {string.Join(' ', args.Select(a => a.Contains(' ') ? "\"" + a + "\"" : a))}   [{DateTimeOffset.UtcNow:HH:mm:ss}]");
         var r = await runner.CaptureAsync(new ProcessSpec { Executable = exe, Arguments = [.. args], Timeout = TimeSpan.FromSeconds(timeoutSeconds) }, ct).ConfigureAwait(false);
-        if (!r.Result.Succeeded) log.Add($"  exit {r.Result.ExitCode}: {(r.StdErr + r.StdOut).Trim().Split('\n').LastOrDefault()}");
+        Add($"  exit {r.Result.ExitCode} after {r.Result.Duration.TotalSeconds:F1} s{(r.Result.TimedOut ? " (timed out)" : r.Result.Cancelled ? " (cancelled)" : "")}" +
+            (r.Result.Succeeded ? "" : ": " + (r.StdErr + r.StdOut).Trim().Split('\n').LastOrDefault()));
         return r;
     }
 
     // ───────────── iOS Simulator ─────────────
 
-    public async Task<LaunchResult> LaunchIosSimulatorAsync(string appBundle, string bundleId, string screenshotPath, CancellationToken ct)
+    /// <summary>Budgets of the Simulator stages (each bounded on its own; a stage that exceeds its budget fails with that reason).</summary>
+    public sealed record SimulatorBudgets
     {
-        var log = new List<string>();
+        public TimeSpan Boot { get; init; } = TimeSpan.FromMinutes(10);
+        public TimeSpan Install { get; init; } = TimeSpan.FromMinutes(5);
+        public TimeSpan Launch { get; init; } = TimeSpan.FromMinutes(2);
+        public TimeSpan Ready { get; init; } = TimeSpan.FromMinutes(1);
+        /// <summary>How long the app must stay up, with the same process, after it first drew its own screen.</summary>
+        public TimeSpan Settle { get; init; } = TimeSpan.FromSeconds(5);
+    }
+
+    /// <summary>
+    /// Boot → install → launch → ready, each a timestamped stage with its own budget and exit codes logged.
+    /// <para><b>Ready</b> means more than an accepted launch command: the process simctl launched (pid) is listed by the
+    /// Simulator's launchd as the app's UIKit process, the screen below the status bar is no longer the screen shown before
+    /// the launch (the app drew its own UI), and the same process is still alive <see cref="SimulatorBudgets.Settle"/> later.</para>
+    /// </summary>
+    /// <param name="simulatorUdid">
+    /// The Simulator to use, chosen explicitly (e.g. a device created for one CI job). Null = the first available iPhone,
+    /// preferring one already booted.
+    /// </param>
+    /// <param name="progress">Each log line as it happens (stage starts/ends, commands, exit codes).</param>
+    public async Task<LaunchResult> LaunchIosSimulatorAsync(string appBundle, string bundleId, string screenshotPath, CancellationToken ct,
+        string? simulatorUdid = null, Action<string>? progress = null, SimulatorBudgets? budgets = null)
+    {
+        budgets ??= new SimulatorBudgets();
+        var log = new ProgressLog(progress);
         const string xcrun = "/usr/bin/xcrun";
-        LaunchResult Fail(string why) => new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Failed, why, null, log);
+        LaunchResult Fail(string why) { log.Add("RESULT failed: " + why); return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Failed, why, null, log.Lines); }
         if (!OperatingSystem.IsMacOS() || !File.Exists(xcrun))
-            return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.NotPossibleHere, "The iOS Simulator runs only on a Mac with Xcode.", null, log);
+            return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.NotPossibleHere, "The iOS Simulator runs only on a Mac with Xcode.", null, log.Lines);
         if (!Directory.Exists(appBundle)) return Fail($"The Simulator app bundle was not found: {appBundle}");
 
-        var list = await Run(xcrun, ["simctl", "list", "devices", "available", "--json"], log, ct).ConfigureAwait(false);
+        Task<(ProcessResult Result, string Out, string Err)> Sim(IReadOnlyList<string> args, CancellationToken token, TimeSpan timeout) =>
+            Run(xcrun, ["simctl", .. args], log.Lines, token, (int)Math.Ceiling(timeout.TotalSeconds), log);
+
+        var list = await Sim(["list", "devices", "available", "--json"], ct, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
         if (!list.Result.Succeeded) return Fail("simctl could not list simulators. Install an iOS Simulator runtime in Xcode › Settings › Components.");
-        var device = PickSimulator(list.Out);
-        if (device is null) return Fail("No available iPhone simulator. Create one in Xcode › Window › Devices and Simulators.");
-        log.Add($"Simulator: {device.Value.Name} ({device.Value.Runtime}, {device.Value.Udid}, {device.Value.State})");
+        var device = simulatorUdid is null ? PickSimulator(list.Out) : FindSimulator(list.Out, simulatorUdid);
+        if (device is null)
+            return Fail(simulatorUdid is null ? "No available iPhone simulator. Create one in Xcode › Window › Devices and Simulators."
+                : $"The selected Simulator {simulatorUdid} is not available (simctl list devices available).");
+        var udid = device.Value.Udid;
+        log.Add($"Simulator: {device.Value.Name} ({device.Value.Runtime}, {udid}, {device.Value.State}){(simulatorUdid is null ? "" : " — selected explicitly")}");
+
+        // ── boot ──
         if (device.Value.State != "Booted")
         {
-            await Run(xcrun, ["simctl", "boot", device.Value.Udid], log, ct).ConfigureAwait(false);
-            var booted = await Run(xcrun, ["simctl", "bootstatus", device.Value.Udid, "-b"], log, ct, 600).ConfigureAwait(false);
-            if (!booted.Result.Succeeded) return Fail("The simulator did not finish booting.");
+            var boot = await Stage("boot", budgets.Boot, async token =>
+            {
+                var b = await Sim(["boot", udid], token, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+                // "Unable to boot device in current state: Booted" is not a failure; bootstatus decides.
+                var s = await Sim(["bootstatus", udid, "-b"], token, budgets.Boot).ConfigureAwait(false);
+                return s.Result.Succeeded ? null : $"the Simulator did not finish booting (simctl bootstatus exit {s.Result.ExitCode}{(s.Result.TimedOut ? ", timed out" : "")}; boot exit {b.Result.ExitCode})";
+            }).ConfigureAwait(false);
+            if (boot is not null) return Fail(boot);
         }
-        var install = await Run(xcrun, ["simctl", "install", device.Value.Udid, appBundle], log, ct, 300).ConfigureAwait(false);
-        if (!install.Result.Succeeded) return Fail("simctl install failed: " + FirstLine(install.Err + install.Out));
-        var launch = await Run(xcrun, ["simctl", "launch", "--terminate-running-process", device.Value.Udid, bundleId], log, ct).ConfigureAwait(false);
-        if (!launch.Result.Succeeded) return Fail("simctl launch failed: " + FirstLine(launch.Err + launch.Out));
-        log.Add(launch.Out.Trim());
-        await Task.Delay(TimeSpan.FromSeconds(8), ct).ConfigureAwait(false);
-        var services = await Run(xcrun, ["simctl", "spawn", device.Value.Udid, "launchctl", "list"], log, ct).ConfigureAwait(false);
-        var running = services.Out.Split('\n').Any(l => l.Contains("UIKitApplication:" + bundleId, StringComparison.Ordinal));
+
+        // ── install ──
+        var installError = await Stage("install", budgets.Install, async token =>
+        {
+            var i = await Sim(["install", udid, appBundle], token, budgets.Install).ConfigureAwait(false);
+            return i.Result.Succeeded ? null : "simctl install failed: " + FirstLine(i.Err + i.Out);
+        }).ConfigureAwait(false);
+        if (installError is not null) return Fail(installError);
+
+        // The screen before the launch, to tell the app's own screen from what was shown before.
+        var before = Path.Combine(Path.GetDirectoryName(screenshotPath)!, Path.GetFileNameWithoutExtension(screenshotPath) + "-before.bmp");
         Directory.CreateDirectory(Path.GetDirectoryName(screenshotPath)!);
-        var shot = await Run(xcrun, ["simctl", "io", device.Value.Udid, "screenshot", screenshotPath], log, ct).ConfigureAwait(false);
-        var screenshot = shot.Result.Succeeded && File.Exists(screenshotPath) ? screenshotPath : null;
-        return running
-            ? new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Passed,
-                $"Installed and launched in {device.Value.Name} ({device.Value.Runtime}); still running 8 s after launch ({launch.Out.Trim()}).", screenshot, log)
-            : new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Failed,
-                $"Launched in {device.Value.Name}, but the app was not running 8 s later (crashed or exited). Check the simulator's crash logs.", screenshot, log);
+        await Sim(["io", udid, "screenshot", "--type=bmp", before], ct, TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+
+        // ── launch ──
+        string launchOut = "";
+        var launchError = await Stage("launch", budgets.Launch, async token =>
+        {
+            var l = await Sim(["launch", "--terminate-running-process", udid, bundleId], token, budgets.Launch).ConfigureAwait(false);
+            launchOut = l.Out.Trim();
+            return l.Result.Succeeded ? null : "simctl launch failed: " + FirstLine(l.Err + l.Out);
+        }).ConfigureAwait(false);
+        if (launchError is not null) return Fail(launchError);
+        log.Add(launchOut);
+        var pid = ParseLaunchPid(launchOut, bundleId);
+        if (pid is null) return Fail($"simctl launch did not report a process id for {bundleId} (\"{launchOut}\").");
+
+        // ── ready ──
+        double changed = 0;
+        string? readyError = await Stage("ready", budgets.Ready + budgets.Settle, async token =>
+        {
+            var after = Path.Combine(Path.GetDirectoryName(screenshotPath)!, Path.GetFileNameWithoutExtension(screenshotPath) + "-after.bmp");
+            var listed = false;
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                var services = await Sim(["spawn", udid, "launchctl", "list"], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                var current = AppPid(services.Out, bundleId);
+                if (current is not null && current != pid)
+                    return $"the app was relaunched (pid {pid} → {current}): it crashed and was started again";
+                listed = current == pid;
+                if (!listed && current is null && services.Result.Succeeded && ExitedWithStatus(services.Out, bundleId) is { } status)
+                    return $"the app exited (launchd status {status}) before it was ready";
+                if (listed)
+                {
+                    var shot = await Sim(["io", udid, "screenshot", "--type=bmp", after], token, TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+                    changed = shot.Result.Succeeded ? ScreenDifference(before, after) : 0;
+                    log.Add($"  ready check: pid {pid} listed as UIKitApplication:{bundleId}; {changed:P1} of the screen below the status bar differs from before the launch");
+                    if (changed >= 0.02) break;
+                }
+                else log.Add($"  ready check: UIKitApplication:{bundleId} with pid {pid} not listed yet");
+                await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+            }
+            await Task.Delay(budgets.Settle, token).ConfigureAwait(false);
+            var again = await Sim(["spawn", udid, "launchctl", "list"], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            var still = AppPid(again.Out, bundleId);
+            return still == pid ? null : $"the app did not stay up: pid {pid} {(still is null ? "is gone" : $"was replaced by {still}")} {budgets.Settle.TotalSeconds:F0} s after it drew its screen";
+        }, timeoutReason: $"the app did not reach a ready state within {(budgets.Ready + budgets.Settle).TotalSeconds:F0} s (its process listed by launchd and its own screen drawn)").ConfigureAwait(false);
+
+        var shotResult = await Sim(["io", udid, "screenshot", screenshotPath], ct, TimeSpan.FromMinutes(1)).ConfigureAwait(false);
+        var screenshot = shotResult.Result.Succeeded && File.Exists(screenshotPath) ? screenshotPath : null;
+        // Leave the Simulator as found: the app this check started is stopped (the Simulator itself belongs to the caller).
+        await Sim(["terminate", udid, bundleId], ct, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        if (readyError is not null) return Fail(readyError) with { ScreenshotPath = screenshot };
+        log.Add("RESULT passed");
+        return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Passed,
+            $"Installed, launched and ready in {device.Value.Name} ({device.Value.Runtime}): process {pid} listed by launchd as the app, its own screen drawn " +
+            $"({changed:P0} of the screen changed), still the same process {budgets.Settle.TotalSeconds:F0} s later.", screenshot, log.Lines);
+
+        async Task<string?> Stage(string name, TimeSpan budget, Func<CancellationToken, Task<string?>> work, string? timeoutReason = null)
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(budget);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            log.Add($"STAGE {name} start {DateTimeOffset.UtcNow:O} (budget {budget.TotalSeconds:F0} s)");
+            string? error;
+            try { error = await work(cts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                error = timeoutReason ?? $"the {name} stage exceeded its {budget.TotalSeconds:F0} s budget";
+            }
+            log.Add($"STAGE {name} end {DateTimeOffset.UtcNow:O} {(error is null ? "ok" : "failed")} after {sw.Elapsed.TotalSeconds:F1} s{(error is null ? "" : ": " + error)}");
+            return error;
+        }
+    }
+
+    /// <summary>The log of one launch: kept for the report and streamed to the caller as it happens.</summary>
+    private sealed class ProgressLog(Action<string>? progress)
+    {
+        public List<string> Lines { get; } = [];
+        public void Add(string line)
+        {
+            lock (Lines) Lines.Add(line);
+            progress?.Invoke(line);
+        }
+    }
+
+    /// <summary>"com.example.app: 1234" → 1234.</summary>
+    internal static int? ParseLaunchPid(string output, string bundleId)
+    {
+        foreach (var line in output.Split('\n'))
+        {
+            var t = line.Trim();
+            if (t.StartsWith(bundleId + ":", StringComparison.Ordinal) && int.TryParse(t[(bundleId.Length + 1)..].Trim(), out var pid)) return pid;
+        }
+        return null;
+    }
+
+    /// <summary>The pid launchctl lists for UIKitApplication:&lt;bundle id&gt;[…] ("PID Status Label"; "-" when not running).</summary>
+    internal static int? AppPid(string launchctlList, string bundleId)
+    {
+        foreach (var line in launchctlList.Split('\n'))
+        {
+            var parts = line.Split('\t', ' ').Where(p => p.Length > 0).ToArray();
+            if (parts.Length >= 3 && IsAppLabel(parts[^1], bundleId) && int.TryParse(parts[0], out var pid)) return pid;
+        }
+        return null;
+    }
+
+    /// <summary>The last exit status launchctl lists for the app's label when it is no longer running.</summary>
+    internal static string? ExitedWithStatus(string launchctlList, string bundleId)
+    {
+        foreach (var line in launchctlList.Split('\n'))
+        {
+            var parts = line.Split('\t', ' ').Where(p => p.Length > 0).ToArray();
+            if (parts.Length >= 3 && IsAppLabel(parts[^1], bundleId) && parts[0] == "-" && parts[1] != "0") return parts[1];
+        }
+        return null;
+    }
+
+    private static bool IsAppLabel(string label, string bundleId) =>
+        label.StartsWith("UIKitApplication:" + bundleId, StringComparison.Ordinal)
+        && (label.Length == "UIKitApplication:".Length + bundleId.Length || label["UIKitApplication:".Length + bundleId.Length] == '[');
+
+    /// <summary>
+    /// Fraction of sampled pixels that differ between two Simulator screenshots (BMP), ignoring the status bar (top 12 %,
+    /// its clock changes) and the home indicator (bottom 5 %). 0 when either image cannot be read or the sizes differ.
+    /// </summary>
+    internal static double ScreenDifference(string beforeBmp, string afterBmp)
+    {
+        if (ReadBmp(beforeBmp) is not { } a || ReadBmp(afterBmp) is not { } b || a.Width != b.Width || a.Height != b.Height) return 0;
+        int total = 0, differ = 0;
+        for (var y = (int)(a.Height * 0.12); y < (int)(a.Height * 0.95); y += 4)
+            for (var x = 0; x < a.Width; x += 4)
+            {
+                total++;
+                var (r1, g1, b1) = a.Pixel(x, y);
+                var (r2, g2, b2) = b.Pixel(x, y);
+                if (Math.Abs(r1 - r2) + Math.Abs(g1 - g2) + Math.Abs(b1 - b2) > 48) differ++;
+            }
+        return total == 0 ? 0 : (double)differ / total;
+    }
+
+    internal sealed record Bmp(int Width, int Height, int BytesPerPixel, int Stride, bool TopDown, int Offset, byte[] Data)
+    {
+        public (int R, int G, int B) Pixel(int x, int y)
+        {
+            var row = TopDown ? y : Height - 1 - y;
+            var i = Offset + row * Stride + x * BytesPerPixel;
+            return (Data[i + 2], Data[i + 1], Data[i]);
+        }
+    }
+
+    /// <summary>An uncompressed 24- or 32-bit BMP (what simctl io screenshot --type=bmp writes); null otherwise.</summary>
+    internal static Bmp? ReadBmp(string path)
+    {
+        try
+        {
+            var d = File.ReadAllBytes(path);
+            if (d.Length < 54 || d[0] != 'B' || d[1] != 'M') return null;
+            var offset = BitConverter.ToInt32(d, 10);
+            var width = BitConverter.ToInt32(d, 18);
+            var height = BitConverter.ToInt32(d, 22);
+            var bpp = BitConverter.ToInt16(d, 28);
+            var compression = BitConverter.ToInt32(d, 30);
+            if (bpp is not (24 or 32) || compression is not (0 or 3) || width <= 0 || height == 0) return null;
+            var bytes = bpp / 8;
+            var stride = (width * bytes + 3) & ~3;
+            var h = Math.Abs(height);
+            if (offset + (long)stride * h > d.Length) return null;
+            return new Bmp(width, h, bytes, stride, height < 0, offset, d);
+        }
+        catch (IOException) { return null; }
+    }
+
+    /// <summary>The device with this UDID from simctl list devices available --json (any runtime, any state).</summary>
+    internal static (string Udid, string Name, string Runtime, string State)? FindSimulator(string json, string udid)
+    {
+        using var doc = JsonDocument.Parse(json);
+        foreach (var runtime in doc.RootElement.GetProperty("devices").EnumerateObject())
+            foreach (var d in runtime.Value.EnumerateArray())
+            {
+                if (!string.Equals(d.GetProperty("udid").GetString(), udid, StringComparison.OrdinalIgnoreCase)) continue;
+                if (d.TryGetProperty("isAvailable", out var avail) && avail.ValueKind == JsonValueKind.False) return null;
+                var key = runtime.Name;
+                var marker = key.LastIndexOf(".iOS-", StringComparison.Ordinal);
+                var version = marker < 0 ? key : "iOS " + key[(marker + 5)..].Replace('-', '.');
+                return (d.GetProperty("udid").GetString()!, d.GetProperty("name").GetString() ?? "", version, d.GetProperty("state").GetString() ?? "");
+            }
+        return null;
     }
 
     internal static (string Udid, string Name, string Runtime, string State)? PickSimulator(string json)
