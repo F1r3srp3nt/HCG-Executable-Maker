@@ -13,7 +13,8 @@ public sealed class SqliteProjectRepository(SqliteDatabase db) : IProjectReposit
         cmd.CommandText = """
             INSERT INTO projects (id, name, source_kind, source_location, workspace_path, preserved_archive_path, imported_at, last_opened_at, analysis_json)
             VALUES ($id, $name, $kind, $src, $ws, $arch, $imp, $open, $analysis)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name, last_opened_at = excluded.last_opened_at, analysis_json = excluded.analysis_json
+            ON CONFLICT(id) DO UPDATE SET name = excluded.name, source_location = excluded.source_location, imported_at = excluded.imported_at,
+                last_opened_at = excluded.last_opened_at, analysis_json = excluded.analysis_json
             """;
         cmd.Parameters.AddWithValue("$id", project.Id.ToString());
         cmd.Parameters.AddWithValue("$name", project.Name);

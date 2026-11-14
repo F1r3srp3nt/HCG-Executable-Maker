@@ -18,13 +18,9 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
     private const int UnixDirectory = 0x4000;    // S_IFDIR
     private const int UnixRegular = 0x8000;      // S_IFREG
 
-    /// <summary>Directories never copied from a directory import (build outputs, VCS and IDE state).</summary>
-    public static readonly IReadOnlySet<string> ExcludedDirectoryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "bin", "obj", ".git", ".hg", ".svn", ".vs", ".idea", "node_modules", "TestResults",
-        // SwiftPM / Xcode generated state: build products, dependency checkouts, Xcode's package workspace.
-        ".build", ".swiftpm", "DerivedData",
-    };
+    /// <summary>Directories never copied from a directory import (build outputs, VCS and IDE state). Shared with <see cref="SourceSnapshot"/>,
+    /// which compares the copy with its original the same way.</summary>
+    public static readonly IReadOnlySet<string> ExcludedDirectoryNames = SourceSnapshot.ExcludedDirectoryNames;
 
     /// <summary>Generated folders also skipped inside ZIP archives (a zipped working copy may contain them).</summary>
     public static readonly IReadOnlySet<string> ExcludedArchiveDirectoryNames = new HashSet<string>(StringComparer.Ordinal)

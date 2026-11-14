@@ -122,6 +122,68 @@ public sealed class ProjectService(
     }
 
     /// <summary>
+    /// Refresh source: copies the project again from its original folder or ZIP (or from <paramref name="newLocation"/>,
+    /// same kind) with the same validation and limits as an import, then swaps it in for the old copy. The project keeps
+    /// its id, build history and per-project choices (scheme, signing), and is inspected again. The original is only read.
+    /// </summary>
+    public async Task<SourceRefreshResult> RefreshSourceAsync(ProjectRecord project, string? newLocation, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
+    {
+        if (project.SourceKind == ProjectSourceKind.Artifact)
+            throw new ImportRejectedException("An imported artifact has no source project to refresh. Import the artifact again instead.");
+        var location = Path.GetFullPath(newLocation ?? project.SourceLocation);
+        var zip = project.SourceKind == ProjectSourceKind.ZipArchive;
+        if (zip ? !File.Exists(location) : !Directory.Exists(location))
+            throw new ImportRejectedException(zip
+                ? $"The ZIP '{location}' does not exist. Choose the current ZIP with “Refresh from…”."
+                : $"The folder '{location}' does not exist. Choose the project's current folder with “Refresh from…”.");
+        if (zip != location.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && newLocation is not null)
+            throw new ImportRejectedException($"This project was imported from a {(zip ? "ZIP" : "folder")}; refresh it from a {(zip ? "ZIP" : "folder")}, or import the other one as a new project.");
+
+        var before = SourceSnapshot.Fingerprint(project.SourceDirectory, cancellationToken);
+        var limits = (await settings.LoadAsync(cancellationToken).ConfigureAwait(false)).ImportLimits;
+        var fresh = zip
+            ? await importer.ImportZipAsync(location, limits, progress, cancellationToken).ConfigureAwait(false)
+            : await importer.ImportDirectoryAsync(location, limits, progress, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ReplaceSourceAsync(project, fresh.Project.SourceDirectory, cancellationToken).ConfigureAwait(false);
+            if (zip && project.PreservedArchivePath is { } kept)
+                File.Copy(location, kept, overwrite: true);
+            project.SourceLocation = location;
+            project.ImportedAt = time.GetUtcNow();
+            await projects.UpsertAsync(project, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // The temporary import was never registered as a project; only its workspace folder exists.
+            var temp = Path.GetFullPath(fresh.Project.WorkspacePath);
+            if (PathGuard.IsWithin(paths.WorkspacesDirectory, temp) && Directory.Exists(temp))
+                try { Directory.Delete(temp, recursive: true); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { logger.LogWarning(ex, "Could not remove the temporary import {Temp}", temp); }
+        }
+        var after = SourceSnapshot.Fingerprint(project.SourceDirectory, cancellationToken);
+        logger.LogInformation("Refreshed the source of project {ProjectId} from {Location}: {Before} → {After}", project.Id, location, before.Sha256, after.Sha256);
+        return new SourceRefreshResult(location, before.Sha256, before.Files, after.Sha256, after.Files, SourceSnapshot.Git(location).Commit, fresh.Warnings);
+    }
+
+    /// <summary>Every saved Mobile Build Studio scheme choice (project id "N" format → scheme).</summary>
+    public async Task<IReadOnlyDictionary<string, string>> GetMobileSchemesAsync(CancellationToken cancellationToken = default) =>
+        (await settings.LoadAsync(cancellationToken).ConfigureAwait(false)).MobileSchemes;
+
+    /// <summary>The Xcode scheme chosen for this project in Mobile Build Studio (null: none chosen yet).</summary>
+    public async Task<string?> GetMobileSchemeAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        (await settings.LoadAsync(cancellationToken).ConfigureAwait(false)).MobileSchemes.GetValueOrDefault(projectId.ToString("N"));
+
+    public async Task SetMobileSchemeAsync(Guid projectId, string? scheme, CancellationToken cancellationToken = default)
+    {
+        var s = await settings.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var map = new Dictionary<string, string>(s.MobileSchemes, StringComparer.Ordinal);
+        if (scheme is null) map.Remove(projectId.ToString("N"));
+        else map[projectId.ToString("N")] = scheme;
+        await settings.SaveAsync(s with { MobileSchemes = map }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Deletes the HCG-owned workspace and the project record (with its build history). The user's original
     /// source (ZIP or directory) is never touched; deletion is refused if the workspace is not inside HCG's
     /// workspace directory.

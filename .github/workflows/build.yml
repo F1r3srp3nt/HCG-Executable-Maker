@@ -1030,7 +1030,7 @@ jobs:
     timeout-minutes: 90
     env:
       OUT: ${{ github.workspace }}/sentinel-out
-      SENTINEL_COMMIT: 810c6f99103a5e4f60e91a6fecda8259be01e0da
+      SENTINEL_COMMIT: 03bc6e55f0a75c32df0a05415d70b55e95f5ad9d  # HCG Sentinel main (was 810c6f9, 40 commits older)
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6

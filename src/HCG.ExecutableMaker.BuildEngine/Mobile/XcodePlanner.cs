@@ -20,9 +20,11 @@ public static class XcodePlanner
         var rel = o.Container ?? ios.WorkspacePath ?? ios.ProjectPath ?? throw new BuildValidationException("No .xcodeproj or .xcworkspace was found.");
         if (rel != ios.WorkspacePath && rel != ios.ProjectPath) throw new BuildValidationException($"'{rel}' is not this project's Xcode project or workspace.");
         var flag = rel.EndsWith(".xcworkspace", StringComparison.OrdinalIgnoreCase) ? "-workspace" : "-project";
-        var scheme = o.Scheme ?? ios.Schemes.FirstOrDefault(s => ios.AppTargets.Any(t => t.Name == s.Name))?.Name
-                     ?? ios.Schemes.FirstOrDefault()?.Name ?? ios.AppTargets.FirstOrDefault()?.Name
+        // The chosen scheme exactly as chosen; only when none was chosen, the same default the readiness checks use.
+        var scheme = o.Scheme ?? HCG.ExecutableMaker.ProjectInspection.Mobile.MobileReadiness.DefaultScheme(ios)
                      ?? throw new BuildValidationException("No scheme or application target was found.");
+        if (HCG.ExecutableMaker.ProjectInspection.Mobile.MobileReadiness.SchemeMissing(ios, o.Scheme))
+            throw new BuildValidationException($"Scheme {o.Scheme} is not in the imported copy of this project ({string.Join(", ", ios.Schemes.Select(s => s.Name))}). Refresh the source or choose another scheme.");
         MobileArgs.RequireToken(scheme, "scheme", out scheme);
         return new Container(flag, MobileArgs.Inside(input.SourceDirectory, rel), scheme);
     }

@@ -183,6 +183,11 @@ public static class MobileReadiness
                 items.Add(new("iOS app target", ReadinessState.SetupRequired, true, "No iOS application target was found in the Xcode project."));
             else if (ios.UsesCocoaPods && ios.WorkspacePath is null)
                 items.Add(new("CocoaPods workspace", ReadinessState.SetupRequired, true, "The project uses CocoaPods but has no .xcworkspace.", "Run `pod install` in the project, then re-import."));
+            if (m.Ios is { } si && si.AppTargets.Any() && SchemeMissing(si, o?.Scheme))
+                items.Add(new(SchemeTool, ReadinessState.SetupRequired, true,
+                    $"Scheme {o!.Scheme} is not in the imported copy of this project (it has: {(si.Schemes.Count == 0 ? "no shared schemes" : string.Join(", ", si.Schemes.Select(s => s.Name)))}). " +
+                    "HCG builds the copy it imported, so it may predate the project's current version.",
+                    "Use Refresh source to copy the project again from its original folder or ZIP (your scheme choice is kept), or choose one of the listed schemes."));
         }
         if (m.DotNetIos is { } dn)
         {
@@ -234,9 +239,9 @@ public static class MobileReadiness
     /// </summary>
     internal static void AddDeploymentRange(List<ReadinessItem> items, IosProjectInfo ios, MobileBuildOptions? o, XcodeStatus x, bool simulator)
     {
-        var scheme = ios.Schemes.FirstOrDefault(sc => sc.Name == o?.Scheme) ?? ios.Schemes.FirstOrDefault(sc => ios.AppTargets.Any(t => t.Name == sc.Name)) ?? ios.Schemes.FirstOrDefault();
-        var targetNames = scheme?.ArchiveTargets.Count > 0 ? scheme.ArchiveTargets : [scheme?.Name ?? ios.AppTargets.FirstOrDefault()?.Name ?? ""];
-        var targets = ios.AppTargets.Where(t => targetNames.Contains(t.Name)).ToList();
+        if (SchemeMissing(ios, o?.Scheme)) return; // reported as its own blocker; never judge another scheme in its place
+        var scheme = ResolveScheme(ios, o?.Scheme);
+        var targets = SchemeAppTargets(ios, scheme);
         if (targets.Count == 0) return;
         var range = x.IosDeploymentRange;
         var xcode = $"Xcode {x.VerifiedVersion} ({x.ActiveDeveloperDirectory})";
@@ -254,7 +259,7 @@ public static class MobileReadiness
             return;
         }
         var other = ios.Schemes.Where(sc => sc.Name != scheme?.Name)
-            .Select(sc => (Scheme: sc, Targets: ios.AppTargets.Where(t => (sc.ArchiveTargets.Count > 0 ? sc.ArchiveTargets : [sc.Name]).Contains(t.Name)).ToList()))
+            .Select(sc => (Scheme: sc, Targets: SchemeAppTargets(ios, sc)))
             .Where(c => c.Targets.Count > 0 && c.Targets.All(t => range.Contains(t.DeploymentTarget) == true)).ToList();
         var routes = new List<string> { $"Select an Xcode that supports iOS {outside[0].DeploymentTarget} in Toolchains › Xcode (HCG uses it for its own builds only; the system setting is unchanged)" };
         routes.AddRange(other.Select(c => $"or choose scheme {c.Scheme.Name} (iOS {string.Join(", ", c.Targets.Select(t => t.DeploymentTarget).Distinct())}; it does not install on older iOS versions)"));
@@ -264,6 +269,60 @@ public static class MobileReadiness
             $" ({(below ? "it is below the minimum" : "it is above the maximum")}). xcodebuild would stop with “The iOS deployment target 'IPHONEOS_DEPLOYMENT_TARGET' is set to {outside[0].DeploymentTarget}, but the range of supported deployment target versions is {range.Minimum} to {range.Maximum}”." +
             " HCG does not change the project's deployment target.",
             string.Join("; ", routes) + "."));
+    }
+
+    /// <summary>Readiness row name for a chosen scheme that the imported project does not contain.</summary>
+    public const string SchemeTool = "Scheme";
+    /// <summary>Readiness row name for the deployment-target preflight.</summary>
+    public const string DeploymentTool = "Deployment target";
+
+    /// <summary>
+    /// The scheme Maker builds when none is chosen — the same rule everywhere (readiness, Studio default, planner):
+    /// the first shared scheme named after an app target, else the first scheme, else the first app target's name.
+    /// </summary>
+    public static string? DefaultScheme(IosProjectInfo ios) =>
+        ios.Schemes.FirstOrDefault(sc => ios.AppTargets.Any(t => t.Name == sc.Name))?.Name ?? ios.Schemes.FirstOrDefault()?.Name ?? ios.AppTargets.FirstOrDefault()?.Name;
+
+    /// <summary>The requested scheme, or the default one when nothing was requested. Null when the request names no scheme of this project.</summary>
+    public static IosSchemeInfo? ResolveScheme(IosProjectInfo ios, string? requested) =>
+        requested is not null ? ios.Schemes.FirstOrDefault(sc => sc.Name == requested) : ios.Schemes.FirstOrDefault(sc => sc.Name == DefaultScheme(ios));
+
+    /// <summary>
+    /// True when a scheme was requested that this project copy does not have. A project without shared schemes is built
+    /// with an app target's name as scheme (xcodebuild's autocreated scheme), so such a name is not "missing".
+    /// </summary>
+    public static bool SchemeMissing(IosProjectInfo ios, string? requested) =>
+        requested is not null && ios.Schemes.All(sc => sc.Name != requested) && !(ios.Schemes.Count == 0 && ios.AppTargets.Any(t => t.Name == requested));
+
+    /// <summary>The app targets a scheme builds and archives (its BuildAction targets; the target of the same name when unknown).</summary>
+    public static IReadOnlyList<IosTargetInfo> SchemeAppTargets(IosProjectInfo ios, IosSchemeInfo? scheme)
+    {
+        IReadOnlyList<string> names = scheme?.ArchiveTargets.Count > 0 ? scheme.ArchiveTargets : [scheme?.Name ?? ios.AppTargets.FirstOrDefault()?.Name ?? ""];
+        return ios.AppTargets.Where(t => names.Contains(t.Name)).ToList();
+    }
+
+    /// <summary>
+    /// Every scheme with its app targets' deployment targets and whether the selected Xcode's iPhoneOS SDK accepts all of
+    /// them (null: the range or the targets are unknown). Used to label the scheme picker and to offer the compatible
+    /// scheme explicitly; nothing is ever selected for the user.
+    /// </summary>
+    public static IReadOnlyList<IosSchemeChoice> SchemeChoices(IosProjectInfo ios, ToolchainReport? report)
+    {
+        var range = report?.Xcode?.IosDeploymentRange;
+        var schemes = ios.Schemes.Count > 0 ? ios.Schemes : ios.AppTargets.Select(t => new IosSchemeInfo(t.Name, "", false) { ArchiveTargets = [t.Name] }).ToList();
+        return schemes.Select(sc =>
+        {
+            var targets = SchemeAppTargets(ios, sc);
+            bool? compatible = range is null || targets.Count == 0 || targets.Any(t => t.DeploymentTarget is null) ? null : targets.All(t => range.Contains(t.DeploymentTarget) == true);
+            var minimums = string.Join(", ", targets.Select(t => t.DeploymentTarget).Distinct().Select(v => "iOS " + (v ?? "?") + "+"));
+            var fit = compatible switch
+            {
+                true => $"supported by Xcode {report!.Xcode!.VerifiedVersion}",
+                false => $"outside Xcode {report!.Xcode!.VerifiedVersion}'s range iOS {range!.Minimum}–{range.Maximum}",
+                null => "range not checked",
+            };
+            return new IosSchemeChoice(sc.Name, targets, compatible, $"{sc.Name} — {(minimums.Length == 0 ? "no app target" : minimums)} · {fit}");
+        }).ToList();
     }
 
     /// <summary>The .NET iOS SDK refuses an unsigned archive (Xamarin.Shared.targets, CI run 78).</summary>

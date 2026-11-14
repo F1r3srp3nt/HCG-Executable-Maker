@@ -66,8 +66,20 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
         var diagnostics = new List<AnalysisDiagnostic>();
         var mobile = Analyze(index, diagnostics);
         var options = MobileCapabilities.Evaluate(mobile, toolchains);
-        var available = options.Where(o => o.IsAvailable).ToList();
+        // A native iOS project with several schemes is judged per scheme: an output is buildable when some scheme can
+        // build it (HCG Sentinel: the iOS 14.7 legacy scheme may be outside the selected Xcode while the 15.0 one is not).
+        var perScheme = mobile is { Framework: MobileFramework.NativeIos, Ios.Schemes.Count: > 1 }
+            ? mobile.Ios.Schemes.Select(s => (Scheme: s.Name, Options: MobileCapabilities.Evaluate(mobile, toolchains,
+                new MobileBuildOptions { Framework = mobile.Framework, Output = MobileOutput.IosSimulatorApp, Scheme = s.Name }))).ToList()
+            : null;
+        var available = perScheme is null ? options.Where(o => o.IsAvailable).ToList()
+            : perScheme.SelectMany(p => p.Options.Where(o => o.IsAvailable)).DistinctBy(o => o.Output).ToList();
+        var workingSchemes = perScheme?.Where(p => p.Options.Any(o => o.IsAvailable)).Select(p => p.Scheme).ToList() ?? [];
         var hostBlocked = options.Where(o => !o.IsAvailable && o.Reason?.Contains("require a Mac", StringComparison.Ordinal) == true).ToList();
+        // What blocks the default scheme, named precisely (a deployment target is not a missing toolchain).
+        var firstOutput = options.FirstOrDefault()?.Output;
+        var defaultState = firstOutput is { } fo && mobile.ArtifactPath is null
+            ? MobileBuildState.Classify(MobileReadiness.Evaluate(mobile, fo, null, toolchains), fo.DisplayName()) : null;
 
         var hasBuildable = mobile.Framework switch
         {
@@ -81,9 +93,16 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
                 ? $"{mobile.DotNetIos.ProjectPath} uses projects outside the imported folder ({string.Join(", ", mobile.DotNetIos.OutsideWorkspace.Take(2).Select(Path.GetFileName))}…). Import the repository root that contains them."
                 : $"{mobile.DotNetIos.ProjectPath} references projects that are missing: {string.Join("; ", mobile.DotNetIos.MissingReferences.Take(3))}.")
             : !hasBuildable ? (SupportLevel.RequiresConfiguration, "A mobile project structure was found, but no buildable application target or module.")
+            : available.Count > 0 && perScheme is not null && workingSchemes.Count < perScheme.Count
+                ? (SupportLevel.Supported, $"Buildable here: {string.Join(", ", available.Select(o => o.DisplayName))} with scheme {string.Join(" or ", workingSchemes)}. " +
+                    $"Not with scheme {string.Join(", ", perScheme.Select(p => p.Scheme).Except(workingSchemes))}" +
+                    (defaultState is { Tag: not MobileBuildState.Ready } ds && !workingSchemes.Contains(MobileReadiness.DefaultScheme(mobile.Ios!) ?? "") ? $" ({ds.Tag.ToLowerInvariant()})." : ".") +
+                    " Choose the scheme in Mobile Build Studio.")
             : available.Count > 0 ? (SupportLevel.Supported, $"Buildable here: {string.Join(", ", available.Select(o => o.DisplayName))}.")
             : hostBlocked.Count == options.Count ? (SupportLevel.RequiresDifferentHost, "iOS builds require a Mac with Xcode.")
-            : (SupportLevel.MissingToolchain, "Mobile project recognized, but required toolchains are missing on this computer.");
+            : defaultState is { Tag: MobileBuildState.ToolchainMissing } or null
+                ? (SupportLevel.MissingToolchain, "Mobile project recognized, but required toolchains are missing on this computer.")
+                : (SupportLevel.RequiresConfiguration, $"Mobile project recognized. {defaultState.Tag}: {defaultState.Detail}");
 
         var name = mobile.Capacitor?.AppName ?? mobile.Flutter?.Name ?? mobile.Maui?.ApplicationTitle ?? mobile.DotNetIos?.ApplicationTitle ?? Path.GetFileNameWithoutExtension(mobile.Maui?.ProjectPath)
                    ?? mobile.Android?.AppModules.FirstOrDefault()?.ApplicationId?.Split('.').Last()

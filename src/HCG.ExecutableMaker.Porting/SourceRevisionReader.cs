@@ -46,40 +46,6 @@ public static class SourceRevisionReader
     }
 
     /// <summary>The commit and branch of the Git working copy containing <paramref name="path"/> (null when none).</summary>
-    public static (string? Commit, string? Branch) Git(string path)
-    {
-        try
-        {
-            var dir = new DirectoryInfo(Path.GetFullPath(path));
-            while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, ".git")) && !File.Exists(Path.Combine(dir.FullName, ".git"))) dir = dir.Parent;
-            if (dir is null) return (null, null);
-            var gitDir = Path.Combine(dir.FullName, ".git");
-            if (File.Exists(gitDir))
-            {
-                // Worktree/submodule: ".git" is a file "gitdir: <path>".
-                var line = File.ReadAllText(gitDir).Trim();
-                if (!line.StartsWith("gitdir:", StringComparison.Ordinal)) return (null, null);
-                gitDir = Path.GetFullPath(Path.Combine(dir.FullName, line[7..].Trim()));
-            }
-            var head = File.ReadAllText(Path.Combine(gitDir, "HEAD")).Trim();
-            if (!head.StartsWith("ref:", StringComparison.Ordinal)) return (IsSha(head) ? head : null, null);
-            var refName = head[4..].Trim();
-            var branch = refName.StartsWith("refs/heads/", StringComparison.Ordinal) ? refName["refs/heads/".Length..] : refName;
-            var commonDir = File.Exists(Path.Combine(gitDir, "commondir"))
-                ? Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(Path.Combine(gitDir, "commondir")).Trim())) : gitDir;
-            foreach (var root in new[] { gitDir, commonDir }.Distinct())
-            {
-                var loose = Path.Combine(root, refName.Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(loose) && File.ReadAllText(loose).Trim() is var sha && IsSha(sha)) return (sha, branch);
-                var packed = Path.Combine(root, "packed-refs");
-                if (File.Exists(packed))
-                    foreach (var l in File.ReadLines(packed))
-                        if (l.EndsWith(" " + refName, StringComparison.Ordinal) && l.Split(' ')[0] is var p && IsSha(p)) return (p, branch);
-            }
-            return (null, branch); // a branch without commits yet
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (null, null); }
-    }
+    public static (string? Commit, string? Branch) Git(string path) => HCG.ExecutableMaker.Core.SourceSnapshot.Git(path);
 
-    private static bool IsSha(string s) => s.Length is 40 or 64 && s.All(Uri.IsHexDigit);
 }
