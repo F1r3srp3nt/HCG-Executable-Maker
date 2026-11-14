@@ -24,7 +24,16 @@ internal static partial class Program
         foreach (var row in studio.ProjectRows) Log($"  {row.Label}: {row.Value}");
         foreach (var d in studio.Diagnostics) Log($"  {d.Severity}: {d.Message}");
         studio.SelectedPlatform = studio.Platforms.First(p => p.Platform == TargetPlatform.IOS);
+        // The scheme is chosen first (it is offered even when the current scheme cannot be built), then the output.
+        if (Arg("scheme") is { } scheme)
+        {
+            Check(studio.Schemes.Contains(scheme), $"Scheme {scheme} offered ({string.Join(", ", studio.Schemes)})");
+            studio.SelectedScheme = scheme;
+            foreach (var row in studio.SchemeChecks) Log($"Scheme check {row.Label}: {row.Value}");
+            if (studio.HasSchemeSuggestion) Log($"Suggested: {studio.UseSuggestedSchemeLabel}");
+        }
         foreach (var o in studio.Outputs) Log($"Output {o.Name}: {(o.IsEnabled ? "available" : "unavailable — " + o.Reason)}");
+        Shot("mobile-scheme");
         var wanted = Arg("mobile-output", "sim") switch { "archive" => MobileOutput.IosArchive, "ipa" => MobileOutput.IosIpa, _ => MobileOutput.IosSimulatorApp };
         var item = studio.Outputs.FirstOrDefault(o => o.Option.Output == wanted);
         Check(item is not null, $"Output {wanted} offered");
@@ -40,11 +49,6 @@ internal static partial class Program
             return Failures.Count == 0 ? 0 : 1;
         }
         studio.SelectOutputCommand.Execute(item);
-        if (Arg("scheme") is { } scheme)
-        {
-            Check(studio.Schemes.Contains(scheme), $"Scheme {scheme} offered ({string.Join(", ", studio.Schemes)})");
-            studio.SelectedScheme = scheme;
-        }
         if (Arg("signing") is { } signing)
         {
             var mode = signing == "unsigned" ? MobileSigningMode.Unsigned : MobileSigningMode.ProjectDefault;

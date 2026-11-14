@@ -161,6 +161,8 @@ public sealed class MobileBuildService(
             Log(BuildLogKind.Warning, $"Isolation: {worker.Description}");
 
             var report = await toolchains.GetAsync(cancellationToken: overall.Token).ConfigureAwait(false);
+            build.Provenance = MobileBuildState.ProvenanceFor(request.Project, settings, report);
+            Log(BuildLogKind.Info, $"Inputs: {build.Provenance.Describe()}");
             build.ToolchainVersions["host"] = $"{report.Host.DisplayName} ({report.Host.OsDescription})";
             foreach (var id in RelevantToolchains(options))
                 if (report.Find(id) is { IsAvailable: true, Version: { } v }) build.ToolchainVersions[id] = v;
@@ -170,7 +172,8 @@ public sealed class MobileBuildService(
             if (!artifactInput)
             {
                 if (analysis is null) throw new BuildValidationException("This project was not recognized as a mobile project. Re-inspect it or import a supported Android/iOS/Flutter/.NET MAUI project.");
-                var option = MobileCapabilities.Evaluate(analysis, report).FirstOrDefault(x => x.Output == options.Output)
+                // Judged for the selected scheme and configuration, never the project's default scheme.
+                var option = MobileCapabilities.Evaluate(analysis, report, options).FirstOrDefault(x => x.Output == options.Output)
                              ?? throw new BuildValidationException($"{options.Output.DisplayName()} does not apply to this project.");
                 if (!option.IsAvailable) throw new BuildValidationException($"{options.Output.DisplayName()} is not available: {option.Reason}");
             }
@@ -283,7 +286,20 @@ public sealed class MobileBuildService(
                 var destination = Path.Combine(outputRoot, Path.GetFileName(source.TrimEnd(Path.DirectorySeparatorChar)));
                 var isDir = Directory.Exists(source);
                 if (isDir) CopyDirectory(source, destination); else File.Copy(source, destination, overwrite: true);
-                var (artifactReport, checks) = await verifier.VerifyAsync(destination, report, overall.Token).ConfigureAwait(false);
+                var (artifactReport, verified) = await verifier.VerifyAsync(destination, report, overall.Token).ConfigureAwait(false);
+                var checks = verified.ToList();
+                // Does the artifact match what the selection was meant to build? (Xcode projects: the scheme's app target,
+                // resolved for this configuration and SDK.) Artifact checks only — installation and runtime are not tested.
+                if (format is PackagingFormat.IosSimulatorApp or PackagingFormat.IosArchive or PackagingFormat.IosIpa && analysis?.Ios is { } builtIos
+                    && analysis.Framework is MobileFramework.NativeIos or MobileFramework.Capacitor)
+                {
+                    var simulator = options.Output == MobileOutput.IosSimulatorApp;
+                    var scheme = IosSchemeCompatibility.FindScheme(builtIos, options.Scheme);
+                    var configuration = options.Variant ?? IosSchemeCompatibility.DefaultConfiguration(builtIos, scheme, simulator);
+                    var appTarget = IosSchemeCompatibility.TargetsOf(builtIos, scheme, options.Scheme, configuration, simulator)
+                        .Select(t => builtIos.Targets.FirstOrDefault(x => x.Name == t.Target)).FirstOrDefault(t => t?.IsApplication == true);
+                    checks.AddRange(IosArtifactExpectations.Check(artifactReport, appTarget?.SettingsFor(configuration, IosSchemeCompatibility.SdkFor(simulator)), simulator, report.Host.Architecture));
+                }
                 string sha;
                 long size;
                 if (isDir)
@@ -325,6 +341,7 @@ public sealed class MobileBuildService(
                 return build;
             }
             build.Status = BuildStatus.Succeeded;
+            build.Provenance = build.Provenance is { } prov ? prov with { ArtifactPaths = build.Artifacts.Select(a => a.Path).ToList() } : null;
             Log(BuildLogKind.Success, $"Build succeeded: {build.Artifacts.Count} artifact(s), {build.WarningCount} warning(s). Nothing was uploaded or published.");
             return build;
         }

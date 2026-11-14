@@ -2,6 +2,34 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Mobile Build Studio: scheme workflow (HCG Sentinel)
+
+### Changed
+- Project/workspace, scheme, build configuration and Xcode are chosen before the outputs and stay usable when every output is unavailable.
+- One concise shared deployment-target message with a short line per SDK; outputs refer to it instead of repeating it.
+- "Use HCGSentinelModern (iOS 15.0 and later)" explains the minimum iOS and that the legacy scheme stays unchanged, before switching.
+- The selection is saved per project and restored on reopen, navigation and restart; re-inspection keeps it.
+- The summary shows the exact xcodebuild command from the planner's own resolution; an unset configuration resolves to the scheme's own in both the check and the build.
+- The project card shows the current state of the selection instead of the import-time toolchain state.
+- UI driver: `--scheme-workflow`, `--reopen-mobile`, `--simulate-xcode` (test-only); 5 new unit tests.
+
+## [Unreleased] — Mobile Build Studio: scheme selection and status (`fix/sentinel-build-selection`)
+
+### Fixed
+- Output availability is judged for the **selected** scheme and configuration (it used the project's default scheme, so a
+  legacy scheme an Xcode cannot build disabled every output); the build service re-checks the selected scheme too.
+- The scheme selector stays available when no output is; changing scheme, configuration or Xcode recomputes outputs,
+  readiness and signing; inspection results for another project are discarded.
+- Simulator builds are judged by the iPhoneSimulator SDK's own range, device builds by iPhoneOS.
+- "Selected toolchain incompatible" is distinct from "Required toolchain missing".
+- A result built with other settings is a "Previous build" (with what produced it), never the current state.
+
+### Added
+- Static effective Xcode build settings (.xcconfig with #include, SDK/configuration conditions, $(inherited), $(VAR) with
+  modifiers) and target dependencies; per-installation SDK ranges; "Use <scheme>" for a verified-compatible scheme; the
+  Xcodes verified to accept a legacy deployment target; immutable build provenance; IPA/app expectation checks (bundle id,
+  version, minimum iOS, platform, architectures) with installation and runtime reported as not tested.
+
 ## [Unreleased] — `feature/mobile-conversion`
 
 ### Added — desktop → mobile conversion workspace ([docs/MOBILE-CONVERSION.md](docs/MOBILE-CONVERSION.md))

@@ -50,3 +50,10 @@ public interface ISettingsStore
     Task<AppSettings> LoadAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Mobile Build Studio's per-project selection (project/workspace, scheme, configuration), restored when the project is reopened.</summary>
+public interface IMobileSelectionStore
+{
+    Task<MobileSelection?> LoadAsync(string projectId, CancellationToken cancellationToken = default);
+    Task SaveAsync(MobileSelection selection, CancellationToken cancellationToken = default);
+}

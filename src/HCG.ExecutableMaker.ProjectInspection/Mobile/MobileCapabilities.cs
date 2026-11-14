@@ -8,7 +8,12 @@ namespace HCG.ExecutableMaker.ProjectInspection.Mobile;
 /// </summary>
 public static class MobileCapabilities
 {
-    public static IReadOnlyList<MobileOutputOption> Evaluate(MobileAnalysis mobile, ToolchainReport? report)
+    /// <param name="context">
+    /// The current selection (scheme, configuration). Availability depends on it: a legacy scheme an Xcode cannot build makes
+    /// its outputs unavailable, while another scheme of the same project may be fine. Without it, the project's default scheme.
+    /// </param>
+    /// <param name="iosConfiguration">An iOS build configuration chosen for every iOS output (null = each output's scheme default).</param>
+    public static IReadOnlyList<MobileOutputOption> Evaluate(MobileAnalysis mobile, ToolchainReport? report, MobileBuildOptions? context = null, string? iosConfiguration = null)
     {
         var list = new List<MobileOutputOption>();
         if (mobile.ArtifactPath is { } artifact)
@@ -35,9 +40,15 @@ public static class MobileCapabilities
         // judged with "unsigned" allowed, since that option needs no certificate; the chosen signing is checked later.
         void Add(MobileOutput o, string desc, MobileSigningMode signing = MobileSigningMode.ProjectDefault, params string[] extra)
         {
-            var readiness = MobileReadiness.Evaluate(mobile, o, new MobileBuildOptions { Framework = mobile.Framework, Output = o, Signing = signing }, report);
+            // The configuration is the output's own default (Simulator: the scheme's Run configuration; archive: its Archive
+            // configuration) unless the caller passes one chosen for this output.
+            var readiness = MobileReadiness.Evaluate(mobile, o, new MobileBuildOptions
+            {
+                Framework = mobile.Framework, Output = o, Signing = signing, Scheme = context?.Scheme, Container = context?.Container,
+                Variant = o.Platform() == TargetPlatform.IOS && iosConfiguration is not null ? iosConfiguration : context?.Output == o ? context.Variant : null,
+            }, report);
             var reasons = readiness.Blockers.Select(b => b.Detail + (b.Fix is null ? "" : " " + b.Fix)).Concat(extra).ToList();
-            list.Add(new MobileOutputOption(o, reasons.Count == 0, desc, reasons.Count == 0 ? null : string.Join(" ", reasons)));
+            list.Add(new MobileOutputOption(o, reasons.Count == 0, desc, reasons.Count == 0 ? null : string.Join(" ", reasons)) { Blockers = readiness.Blockers.ToList() });
         }
         if (android)
         {

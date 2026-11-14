@@ -13,10 +13,15 @@ public static class XcodePlanner
 {
     public sealed record Container(string Flag, string Path, string Scheme);
 
-    public static Container ResolveContainer(MobilePlanInput input)
+    /// <summary>
+    /// The project/workspace, scheme, configuration and SDK one build uses — computed once, here, for both the command HCG
+    /// runs (<see cref="Plan"/>) and what Mobile Build Studio shows before building (<see cref="Preview"/>), so the two
+    /// cannot disagree. Unset choices fall back to the scheme's own (Launch configuration for Simulator, Archive for device).
+    /// </summary>
+    public sealed record Invocation(string Flag, string ContainerPath, string Scheme, string Configuration, IReadOnlyList<string> Destination, string Action);
+
+    public static Invocation Resolve(MobileBuildOptions o, IosProjectInfo ios)
     {
-        var o = input.Options;
-        var ios = input.Analysis.Ios ?? throw new BuildValidationException("This project has no Xcode project.");
         var rel = o.Container ?? ios.WorkspacePath ?? ios.ProjectPath ?? throw new BuildValidationException("No .xcodeproj or .xcworkspace was found.");
         if (rel != ios.WorkspacePath && rel != ios.ProjectPath) throw new BuildValidationException($"'{rel}' is not this project's Xcode project or workspace.");
         var flag = rel.EndsWith(".xcworkspace", StringComparison.OrdinalIgnoreCase) ? "-workspace" : "-project";
@@ -24,7 +29,28 @@ public static class XcodePlanner
                      ?? ios.Schemes.FirstOrDefault()?.Name ?? ios.AppTargets.FirstOrDefault()?.Name
                      ?? throw new BuildValidationException("No scheme or application target was found.");
         MobileArgs.RequireToken(scheme, "scheme", out scheme);
-        return new Container(flag, MobileArgs.Inside(input.SourceDirectory, rel), scheme);
+        var simulator = o.Output == MobileOutput.IosSimulatorApp;
+        var configuration = o.Variant ?? HCG.ExecutableMaker.ProjectInspection.Mobile.IosSchemeCompatibility.DefaultConfiguration(
+            ios, HCG.ExecutableMaker.ProjectInspection.Mobile.IosSchemeCompatibility.FindScheme(ios, scheme), simulator);
+        MobileArgs.RequireToken(configuration, "configuration", out configuration);
+        IReadOnlyList<string> destination = simulator ? ["-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator"] : ["-destination", "generic/platform=iOS"];
+        return new Invocation(flag, rel, scheme, configuration, destination, simulator ? "build" : "archive");
+    }
+
+    /// <summary>The xcodebuild command as it will run (paths relative to the project; HCG's work folders abbreviated).</summary>
+    public static string Preview(MobileBuildOptions o, IosProjectInfo ios)
+    {
+        var i = Resolve(o, ios);
+        string Q(string s) => s.Contains(' ') ? "\"" + s + "\"" : s;
+        return $"xcodebuild {i.Flag} {Q(i.ContainerPath)} -scheme {Q(i.Scheme)} -configuration {Q(i.Configuration)} {string.Join(' ', i.Destination.Select(Q))} … {i.Action}"
+               + (o.Output == MobileOutput.IosIpa ? " → xcodebuild -exportArchive" : "");
+    }
+
+    public static Container ResolveContainer(MobilePlanInput input)
+    {
+        var ios = input.Analysis.Ios ?? throw new BuildValidationException("This project has no Xcode project.");
+        var i = Resolve(input.Options, ios);
+        return new Container(i.Flag, MobileArgs.Inside(input.SourceDirectory, i.ContainerPath), i.Scheme);
     }
 
     public static string Xcodebuild(MobilePlanInput input) =>
@@ -42,15 +68,15 @@ public static class XcodePlanner
         var o = input.Options;
         var c = ResolveContainer(input);
         var derived = Path.Combine(input.WorkDirectory, "DerivedData");
-        var configuration = o.Variant ?? (o.Output == MobileOutput.IosSimulatorApp ? "Debug" : "Release");
-        MobileArgs.RequireToken(configuration, "configuration", out configuration);
+        var invocation = Resolve(o, input.Analysis.Ios!);
+        var configuration = invocation.Configuration;
         var common = new List<string> { c.Flag, c.Path, "-scheme", c.Scheme, "-configuration", configuration, "-derivedDataPath", derived };
 
         switch (o.Output)
         {
             case MobileOutput.IosSimulatorApp:
             {
-                var args = new List<string>(common) { "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator", "-resultBundlePath", ResultBundle(input, c.Scheme, "simulator"), "COMPILER_INDEX_STORE_ENABLE=NO", "build" };
+                var args = new List<string>(common.Concat(invocation.Destination)) { "-resultBundlePath", ResultBundle(input, c.Scheme, "simulator"), "COMPILER_INDEX_STORE_ENABLE=NO", "build" };
                 var products = Path.Combine(derived, "Build", "Products", configuration + "-iphonesimulator");
                 return new MobilePlan([Step(input, BuildStage.Compiling, $"xcodebuild build ({c.Scheme}, Simulator)", args)],
                     [new OutputRule(PackagingFormat.IosSimulatorApp, products, "*.app", IsDirectory: true, Recursive: false)])
@@ -62,7 +88,7 @@ public static class XcodePlanner
             case MobileOutput.IosIpa:
             {
                 var archive = ArchivePath(input, c.Scheme);
-                var args = new List<string>(common) { "-destination", "generic/platform=iOS", "-archivePath", archive, "-resultBundlePath", ResultBundle(input, c.Scheme, "archive"), "COMPILER_INDEX_STORE_ENABLE=NO" };
+                var args = new List<string>(common.Concat(invocation.Destination)) { "-archivePath", archive, "-resultBundlePath", ResultBundle(input, c.Scheme, "archive"), "COMPILER_INDEX_STORE_ENABLE=NO" };
                 var notes = new List<string>();
                 args.AddRange(SigningArguments(o, notes));
                 args.Add("archive");
