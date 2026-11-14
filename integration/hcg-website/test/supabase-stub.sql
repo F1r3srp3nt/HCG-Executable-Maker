@@ -1,9 +1,12 @@
 -- Minimal stand-in for the parts of a Supabase database this migration uses (auth + storage), so it can be tested on
 -- plain PostgreSQL. PostgREST sets `request.jwt.claims` from the verified token and switches to the token's role; the
 -- test harness does the same. Storage: buckets/objects with RLS, as on Supabase.
+-- Roles are cluster-wide and `node --test` runs the test files in parallel, each creating its own database: two files
+-- can both see "no role yet" and both create it (PR #6 CI: duplicate key in pg_authid_rolname_index). Losing that race
+-- is fine — the role exists either way.
 do $$ begin
-    if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
-    if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
+    begin create role anon nologin; exception when duplicate_object or unique_violation then null; end;
+    begin create role authenticated nologin; exception when duplicate_object or unique_violation then null; end;
 end $$;
 create schema if not exists auth;
 create table if not exists auth.users (id uuid primary key, email text, banned_until timestamptz, raw_user_meta_data jsonb not null default '{}');

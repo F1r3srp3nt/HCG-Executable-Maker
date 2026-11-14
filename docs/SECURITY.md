@@ -41,7 +41,13 @@ Before every build the user must tick *"I trust this project's source…"*. `Bui
 
 ## Signing and notarization
 
-Not implemented in M0.1 (planned M0.4). The Signing & Security page detects tool availability (signtool, MakeAppx,
+Apple signing assets are managed on Signing & Security › Apple Signing (see [SIGNING-VAULT.md](SIGNING-VAULT.md)):
+private keys go only into the macOS keychain; `.p12` passwords are checked and used in memory and never reach a command
+line, file, setting or log; no keychain access grants (`-A`/`-T`) are made; project settings hold references only;
+account backup records public metadata only, and the encrypted private-key vault is not available. The capability
+roadmap below predates that work.
+
+Originally not implemented in M0.1 (planned M0.4). The Signing & Security page detects tool availability (signtool, MakeAppx,
 codesign, notarytool, productbuild) and labels every capability *Not implemented*. Artifacts are reported as unsigned;
 macOS app hosts carry only the ad-hoc signature the .NET SDK applies (required for Apple Silicon), which the verifier
 reports as *not Developer ID signed and not notarized*. HCG never creates certificates or identities, and future signing

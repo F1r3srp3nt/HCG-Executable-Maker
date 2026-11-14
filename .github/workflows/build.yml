@@ -137,6 +137,17 @@ jobs:
           DOTNET_GCHeapHardLimit: "0xC0000000"
         run: .github/scripts/test-group.sh rest "FullyQualifiedName!~TheosTests&FullyQualifiedName!~AppleProjectRoutesTests&FullyQualifiedName!~ProcessAndToolchainTests&FullyQualifiedName!~ToolchainSetupTests&FullyQualifiedName!~XcodeDiscoveryTests&FullyQualifiedName!~NativeTests&FullyQualifiedName!~InspectionTests&FullyQualifiedName!~MobileBuildTests&FullyQualifiedName!~MobileArtifactTests&FullyQualifiedName!~MacDistributionTests&FullyQualifiedName!~Swift&FullyQualifiedName!~EndToEndTests&FullyQualifiedName!~ElectronBuildTests&FullyQualifiedName!~WindowsInstallerTests&FullyQualifiedName!~BuildEngineTests&FullyQualifiedName!~PackagingTests&FullyQualifiedName!~WebDesktopConversionTests"
 
+      # HCG Signing Vault: a synthetic identity (never a real developer certificate) is imported into the runner's login
+      # keychain through the same in-process API the app uses, listed with its private key, and deleted again.
+      - name: Test (signing — real keychain import and delete, synthetic identity, macOS)
+        if: runner.os == 'macOS' && (success() || failure())
+        timeout-minutes: 8
+        shell: bash
+        env:
+          DOTNET_GCHeapHardLimit: "0xC0000000"
+          HCG_KEYCHAIN_TESTS: "1"
+        run: .github/scripts/test-group.sh keychain "FullyQualifiedName~SigningKeychainIntegrationTests"
+
       - name: Processes left after the tests (evidence for a hang)
         if: failure() || cancelled()
         shell: bash
@@ -874,9 +885,9 @@ jobs:
           for i in $(seq 1 60); do [ -f "$RUNNER_TEMP/exm-contract.json" ] && break; sleep 0.5; done
           HCG_EXM_CONTRACT_SERVER_INFO="$RUNNER_TEMP/exm-contract.json" dotnet test tests/HCG.ExecutableMaker.Tests -c Release --no-build \
             --filter "FullyQualifiedName~HcgContractTests" --logger "console;verbosity=normal" | tee "$RUNNER_TEMP/contract.txt"
-          # Normal verbosity prints "Total tests: 3" and "     Passed: 3"; require exactly 3 run and 3 passed.
-          grep -Eq "^[[:space:]]*Total tests:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
-          grep -Eq "^[[:space:]]*Passed:[[:space:]]+3$" "$RUNNER_TEMP/contract.txt"
+          # Normal verbosity prints "Total tests: 4" and "     Passed: 4"; require exactly 4 run and 4 passed.
+          grep -Eq "^[[:space:]]*Total tests:[[:space:]]+4$" "$RUNNER_TEMP/contract.txt"
+          grep -Eq "^[[:space:]]*Passed:[[:space:]]+4$" "$RUNNER_TEMP/contract.txt"
 
   hcg-nexus-theos:
     name: HCG Nexus — Theos .deb (rootless + rootful + preview app) through the New Build wizard

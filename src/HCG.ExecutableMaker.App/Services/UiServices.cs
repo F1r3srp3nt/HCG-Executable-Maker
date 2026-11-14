@@ -18,6 +18,8 @@ public interface IDialogService
     Task<bool> ConfirmAsync(string title, string message, string confirmText = "Confirm", bool destructive = false);
     Task AlertAsync(string title, string message);
     Task ShowLogAsync(string title, string path);
+    /// <summary>Asks for a password (e.g. to open a .p12). Null when cancelled. Never stored.</summary>
+    Task<string?> PromptPasswordAsync(string title, string message);
 }
 
 public sealed class DialogService(MainWindowProvider owner) : IDialogService
@@ -33,6 +35,12 @@ public sealed class DialogService(MainWindowProvider owner) : IDialogService
     {
         if (owner.Window is null) return;
         await new ConfirmDialog(title, message, "OK", null, false).ShowDialog<bool>(owner.Window);
+    }
+
+    public async Task<string?> PromptPasswordAsync(string title, string message)
+    {
+        if (owner.Window is null) return null;
+        return await new PasswordDialog(title, message).ShowDialog<string?>(owner.Window);
     }
 
     public async Task ShowLogAsync(string title, string path)

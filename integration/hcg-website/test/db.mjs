@@ -26,7 +26,9 @@ export async function createTestDatabase({ erp = true } = {}) {
   const pool = new pg.Pool({ ...admin, database: name, max: 8 });
   await pool.query(read('supabase-stub.sql'));
   if (erp) await pool.query(read('erp-stub.sql'));
-  await pool.query(read('../supabase/migrations/20261108200000_executable_maker_support.sql'));
+  for (const migration of ['20261108200000_executable_maker_support.sql', '20261113230000_executable_maker_signing_metadata.sql']) {
+    await pool.query(read(`../supabase/migrations/${migration}`));
+  }
   await pool.query('insert into exm.clients (client_id, label) values ($1, $2)', [EXM_CLIENT, 'HCG Executable Maker (test)']);
   const tokens = new Map();
   const blobs = new Map();
