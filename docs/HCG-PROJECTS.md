@@ -163,6 +163,67 @@ generator, project and schemes are consistent. Its `docs/MAKER.md` already propo
 
 **Supported route.** Select an Xcode whose iPhoneOS SDK range includes 14.7 (verified in Sentinel's CI: 16.4, 26.0–26.6)
 in Toolchains › Xcode and archive scheme `HCGSentinel`; with only a newer Xcode, archive `HCGSentinelModern` (iOS 15+).
+**Up to 0.3.0 the second route could not be taken in Mobile Build Studio** — see the next section.
+
+## HCG Sentinel — scheme selection on an iOS 15 Xcode (fixed in 0.3.1)
+
+**Report.** Scheme HCGSentinel selected; deployment target iOS 14.7; the selected Xcode supports iOS 15.0 and later; Maker
+recommends HCGSentinelModern but every output stays unavailable; the state shows "Ready" and "Required toolchain missing"
+at once. Earlier changes did not alter this on the Mac.
+
+**Root cause (Maker).** The deployment preflight above was scheme-aware only when called with a scheme. The two callers
+that decide what the user can do called it without one:
+
+1. `MobileCapabilities.Evaluate` (which outputs are available) built its options without `Scheme`, so the preflight fell
+   back to the first scheme named after an app target: `HCGSentinel` (14.7). With a 15.0-minimum Xcode every iOS output
+   was unavailable, whatever scheme was chosen.
+2. Mobile Build Studio created the scheme list only after an output was selected (`RebuildConfiguration`), so with no
+   available output there was no scheme picker; there was no handler for a scheme change (readiness and summary kept the
+   old scheme); and every output change reset the scheme to the first one.
+3. `MobileBuildService` re-checked availability the same way before building, so even an explicit
+   `Scheme = HCGSentinelModern` was refused with HCGSentinel's reason (reproduced by
+   `SentinelSchemeSelectionTests.Engine_builds_the_modern_scheme_it_was_given_…` against the unfixed code:
+   “iOS Simulator build is not available: HCGSentinel (scheme HCGSentinel) needs iOS 14.7, …”).
+4. The no-output state used `forPlatform[0].Reason` under the fixed tag "Required toolchain missing", and the stage
+   heading defaulted to "Ready".
+
+The existing unit test passed because it called `MobileReadiness.Evaluate` directly with the scheme; CI's Sentinel job
+used hosted Xcodes, which all accept 14.7, and a Sentinel commit (810c6f9) 40 commits behind `main`. Sentinel itself is
+correct: at `main` (03bc6e5) `HCGSentinel` builds `HCGSentinel.app` at 14.7 (intended, for iOS 14.7 devices) and
+`HCGSentinelModern` builds `HCGSentinelModern.app` and `HCGSentinelModernTests` at 15.0; Sentinel's own CI builds both.
+
+**Fix (Maker 0.3.1).** The scheme is chosen first (section 2), labelled with what the selected Xcode accepts, saved per
+project, and used by output availability, readiness, the project summary, the engine gate, the build log and
+`xcodebuild -scheme`. "Use scheme HCGSentinelModern" is offered when the selected scheme is blocked by its deployment
+target — never applied automatically; deployment targets are never changed and the compatibility check is not bypassed.
+The state reads **Blocked — deployment target incompatible**; a missing toolchain, an installed but incompatible or
+unusable one, signing and configuration are named separately; a **Before you can build** list includes the trust
+checkbox; the previous build is reported separately from the current selection. The imported copy is compared with its
+original and can be refreshed in place; a diagnostic report establishes what is running and what would be built.
+
+### On your Mac
+
+1. **Install 0.3.1 or later** and check it is what runs: the sidebar footer or Settings › About shows the version and
+   commit, or in Terminal:
+   `"/Applications/HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" --version`.
+   An older copy elsewhere (Downloads, a DMG still mounted) may be the one Finder opens — the printed path tells which.
+2. **Collect the diagnostic report** (before changing anything, if you want a record of the current state):
+   Mobile Build Studio › select HCG Sentinel › *Copy diagnostic report*, or
+   `"/Applications/HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" --diagnose-mobile --reproduce`.
+   It lists the Maker build, HCG's selected Xcode and its iOS range, where the imported copy came from and whether the
+   original changed since, the SHA-256 of `project.pbxproj` and both schemes (compare with Sentinel's `docs/MAKER.md`),
+   each scheme's targets, the saved scheme, readiness per scheme × output, and — with `--reproduce` — xcodebuild run
+   directly on the same copy with the same Xcode. The file is saved in HCG's data folder under `diagnostics/`.
+3. **Bring the copy up to date:** if "Imported copy" says the original changed (or the hashes differ from Sentinel
+   `main`), update your Sentinel folder or download a fresh ZIP of `main`, then *Refresh source* (or *Refresh from…* for
+   a new location). The project, its history and the scheme choice are kept. Re-importing as a new project also works.
+4. **Choose scheme HCGSentinelModern** in section 2 (or press *Use scheme HCGSentinelModern*). The Simulator build and
+   unsigned archive become available; the IPA needs your Apple Development certificate and team (Signing).
+5. **Tick the trust checkbox** in section 5 (it is per build) and start. The build log's first lines name the scheme and
+   its targets, and the xcodebuild command shows `-scheme HCGSentinelModern`.
+
+`HCGSentinel` (iOS 14.7) remains for the iPhone X on iOS 14.7 and needs an Xcode that accepts 14.7 (selected for HCG in
+Toolchains › Xcode). The app from `HCGSentinelModern` does not install on iOS 14.
 
 ## Verification
 
