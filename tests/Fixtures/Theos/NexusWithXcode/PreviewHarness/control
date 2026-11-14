@@ -1,0 +1,8 @@
+Package: com.hakmicapitalgroup.hcgnexus.preview
+Name: HCG Nexus Preview
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: Standalone preview of the HCG Nexus panel UI. Not injected anywhere; results here do not verify the tweak.
+Maintainer: Hakmi Capital Group
+Author: Hakmi Capital Group
+Section: Development

@@ -41,6 +41,13 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ## [Unreleased] — HCG Nexus, HCG Mail iOS, HCG Sentinel ([docs/HCG-PROJECTS.md](docs/HCG-PROJECTS.md))
 
 ### Added
+- **Build route choice for a folder with an Xcode iOS app and a Theos project** (HCG Nexus with `HCGNexus.xcodeproj`
+  next to the tweak's Makefile): the inspection attaches the Theos projects to the Xcode-led analysis (instead of
+  "Also found files for: C / C++. These are not part of this build."), and New Build's Inspect step offers *iOS app
+  (IPA, Xcode)* (Mobile Build Studio, `XcodePlanner`) and *Jailbreak package (.deb, Theos)* (the Theos panel and
+  `TheosBuildPlanner`, unchanged). The routes never mix: Theos builds refuse IPA/archive formats and mobile options;
+  mobile builds refuse Theos options and the `.deb` format. Tests: `BuildRoutesTests` with the fixture
+  `tests/Fixtures/Theos/NexusWithXcode`; UI driver `--native --build-route theos-deb|xcode-ipa`.
 - **Theos jailbreak packages:** detection before generic Make (tweak, preference bundle, app, tool, library; subprojects;
   separately packaged projects), the configurations the Makefile defines (rootless / rootful, SDK and deployment target
   from TARGET, project refusals shown verbatim), per-item toolchain checks (Theos, SDK, GNU make 4+, ldid, perl, iOS

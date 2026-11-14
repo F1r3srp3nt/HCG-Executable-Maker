@@ -446,6 +446,8 @@ public sealed partial class BuildWizardViewModel
             if (result is { Succeeded: true, Project: { } configured })
             {
                 var updated = NativeProjectInspector.WithProject(Analysis, configured, _toolchains.Latest, DateTimeOffset.UtcNow);
+                // On a build route (an app project next to C/C++ projects) the stored inspection keeps its leading analysis.
+                if (_inspectedAnalysis is { } inspected && !ReferenceEquals(inspected, Analysis)) updated = inspected with { Native = updated.Native };
                 await _projectService.UpdateAnalysisAsync(project, updated);
                 var trustedBefore = NativeConfigureTrusted;
                 ApplyAnalysis(updated);

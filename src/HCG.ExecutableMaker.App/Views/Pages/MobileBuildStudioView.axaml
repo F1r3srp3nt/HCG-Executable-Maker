@@ -35,6 +35,18 @@
         </StackPanel>
       </Border>
 
+      <Border Classes="card" IsVisible="{Binding IsMacHost}">
+        <StackPanel Spacing="8">
+          <TextBlock Classes="h2" Text="Port a Mac app to iOS" />
+          <TextBlock Text="Create a separate iPhone and iPad Xcode project from a single-target Mac project. Starting with a .app also requires its source." TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8" IsEnabled="{Binding !IsImporting}">
+            <Button Content="From Xcode project…" Command="{Binding PortMacProjectCommand}" IsEnabled="{Binding !IsBuilding}" />
+            <Button Content="From Mac app…" Command="{Binding PortMacAppCommand}" IsEnabled="{Binding !IsBuilding}" />
+          </StackPanel>
+          <TextBlock Text="{Binding PortResult}" IsVisible="{Binding PortResult, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
       <!-- 1 · PROJECT -->
       <Border Classes="card">
         <StackPanel Spacing="12">
