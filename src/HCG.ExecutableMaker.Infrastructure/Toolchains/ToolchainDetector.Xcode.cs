@@ -70,10 +70,13 @@ public sealed partial class ToolchainDetector
         }
         var source = active is null ? DeveloperDirectorySource.None : DeveloperDirectorySelection.ProcessSource;
         var status = XcodeDiscovery.Diagnose(new XcodeDiscovery.ProbeResults(active, source, installed, versionExit, versionOut, versionErr, firstLaunch, sdks));
+        // Read from the selected Xcode's own SDKs (SDKSettings.json); nothing about Xcode versions is assumed.
+        var ranges = XcodeDiscovery.ReadRanges(active);
         return status with
         {
-            IosDeploymentRange = XcodeDiscovery.ReadIosDeploymentRange(active),
-            IosSimulatorDeploymentRange = XcodeDiscovery.ReadIosSimulatorDeploymentRange(active),
+            IosDeploymentRange = ranges.Device,
+            IosSimulatorDeploymentRange = ranges.Simulator,
+            RangeDiagnostics = ranges.Diagnostics,
         };
     }
 

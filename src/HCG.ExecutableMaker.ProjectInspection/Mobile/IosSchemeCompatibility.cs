@@ -15,7 +15,8 @@ public enum IosToolchainFit
 }
 
 /// <summary>One target the scheme builds, with its effective deployment target for the evaluated configuration and SDK.</summary>
-public sealed record IosTargetDeployment(string Target, string? DeploymentTarget, string? Source, bool IsDependency, IReadOnlyList<string> Unresolved);
+/// <remarks>With a build-only override, <see cref="DeploymentTarget"/> is the value the build uses and <see cref="ProjectDeploymentTarget"/> the project's own.</remarks>
+public sealed record IosTargetDeployment(string Target, string? DeploymentTarget, string? Source, bool IsDependency, IReadOnlyList<string> Unresolved, string? ProjectDeploymentTarget = null);
 
 public sealed record IosSchemeCompatibilityResult
 {
@@ -32,6 +33,13 @@ public sealed record IosSchemeCompatibilityResult
     public IReadOnlyList<string> CompatibleSchemes { get; init; } = [];
     /// <summary>Installed Xcodes whose own SDK range (read from disk) accepts every target of this scheme.</summary>
     public IReadOnlyList<XcodeInstallation> CompatibleXcodes { get; init; } = [];
+    /// <summary>The build-only minimum iOS this result was judged with (null = the project's own deployment targets).</summary>
+    public string? DeploymentOverride { get; init; }
+    /// <summary>
+    /// True when the result is not a confirmed fact about the project and the toolchain but a failure to inspect one of them
+    /// (an SDK range or a deployment target HCG could not read). Never reported as an incompatibility.
+    /// </summary>
+    public bool IsInspectionFailure => Fit == IosToolchainFit.NotVerifiable;
     public required string Detail { get; init; }
     public string? Fix { get; init; }
     public string SdkDisplay => Sdk == "iphonesimulator" ? "iPhoneSimulator" : "iPhoneOS";
@@ -43,7 +51,9 @@ public sealed record IosSchemeCompatibilityResult
 /// Is the selected Xcode able to build this scheme, for this configuration and SDK? Each target the scheme builds — the
 /// archive (device) or run (Simulator) entries and every target they depend on, such as embedded extensions — is checked
 /// with its own effective deployment target against the range of the SDK actually used. Device and Simulator are judged
-/// separately; a device-SDK result is never reused for a Simulator build. HCG never changes a deployment target.
+/// separately; a device-SDK result is never reused for a Simulator build. The ranges come from the selected Xcode's own
+/// SDKSettings.json — no Xcode version or range is assumed. HCG never edits a deployment target; a minimum iOS the user
+/// explicitly raised for one build (<see cref="IosDeploymentOverride"/>) is judged here exactly as xcodebuild will apply it.
 /// </summary>
 public static class IosSchemeCompatibility
 {
@@ -79,34 +89,51 @@ public static class IosSchemeCompatibility
         return result;
     }
 
-    public static IosSchemeCompatibilityResult Evaluate(IosProjectInfo ios, string? schemeName, string? configuration, bool simulator, XcodeStatus? x, bool includeAlternatives = true)
+    public static IosSchemeCompatibilityResult Evaluate(IosProjectInfo ios, string? schemeName, string? configuration, bool simulator, XcodeStatus? x,
+        bool includeAlternatives = true, string? deploymentOverride = null)
     {
         var scheme = FindScheme(ios, schemeName);
         var name = scheme?.Name ?? schemeName ?? ios.AppTargets.FirstOrDefault()?.Name ?? "?";
         var config = configuration is { Length: > 0 } c && ios.Configurations.Contains(c) ? c : DefaultConfiguration(ios, scheme, simulator);
         var sdk = SdkFor(simulator);
         var sdkName = simulator ? "iPhoneSimulator" : "iPhoneOS";
-        var targets = TargetsOf(ios, scheme, schemeName, config, simulator);
-        var listed = string.Join(", ", targets.Select(t => $"{t.Target}{(t.IsDependency ? " (dependency)" : "")}: iOS {t.DeploymentTarget ?? "not resolved"}"));
+        var projectTargets = TargetsOf(ios, scheme, schemeName, config, simulator);
+        var targets = projectTargets;
         IosSchemeCompatibilityResult Result(IosToolchainFit fit, string detail, string? fix = null, IosDeploymentRange? range = null, string? xcode = null) => new()
         {
             Fit = fit, Scheme = name, Configuration = config, Sdk = sdk, Targets = targets, Range = range, Xcode = xcode, Detail = detail, Fix = fix,
+            DeploymentOverride = deploymentOverride,
         };
 
         if (x is null || x.State is not (XcodeState.Ready or XcodeState.SdkMissing))
             return Result(IosToolchainFit.ToolchainMissing, x?.Diagnosis ?? "Xcode has not been detected yet.", x?.CorrectiveAction);
         var xcode = $"Xcode {x.VerifiedVersion} ({x.ActiveDeveloperDirectory})";
+        if (deploymentOverride is not null)
+        {
+            // Exactly what xcodebuild will do with IPHONEOS_DEPLOYMENT_TARGET=<value> on its command line: every target it
+            // builds for this scheme gets that value. Refused when the inspection found a reason not to apply it.
+            var plan = IosDeploymentOverride.Inspect(ios, name, configuration is { Length: > 0 } ? config : null, x, deploymentOverride);
+            if (!plan.Supported)
+                return Result(IosToolchainFit.Incompatible, $"The build-only minimum iOS {deploymentOverride} cannot be used for scheme {name}: {string.Join(" ", plan.Blockers)}",
+                    "Remove the override, or select another Xcode or scheme.", x.RangeFor(sdk), xcode);
+            targets = projectTargets.Select(t => t with
+            {
+                ProjectDeploymentTarget = t.DeploymentTarget, DeploymentTarget = deploymentOverride, Unresolved = [],
+                Source = $"build-only override {IosDeploymentOverride.Setting}={deploymentOverride} (project: iOS {t.DeploymentTarget ?? "not resolved"})",
+            }).ToList();
+        }
+        var listed = string.Join(", ", targets.Select(t => $"{t.Target}{(t.IsDependency ? " (dependency)" : "")}: iOS {t.DeploymentTarget ?? "not resolved"}"));
         if (targets.Count == 0)
             return Result(IosToolchainFit.NotVerifiable, $"Scheme {name} names no iOS target HCG can read; xcodebuild will check the deployment targets.", xcode: xcode);
         var range = x.RangeFor(sdk);
         if (range is null)
             return Result(IosToolchainFit.NotVerifiable,
-                $"{listed}. The {sdkName} SDK range of {xcode} could not be read (no SDKSettings.json); xcodebuild will check it.", xcode: xcode);
+                $"{listed}. The {sdkName} SDK range of {xcode} could not be read ({x.RangeDiagnostics.GetValueOrDefault(sdk) ?? "no SDKSettings.json"}); this is an inspection failure, not an incompatibility — xcodebuild will check it.", xcode: xcode);
 
         var outside = targets.Where(t => range.Contains(t.DeploymentTarget) == false).ToList();
         var unknown = targets.Where(t => range.Contains(t.DeploymentTarget) is null).ToList();
         var compatibleXcodes = x.Installed.Where(i => i.DeveloperDirectory != x.ActiveDeveloperDirectory
-                && (simulator ? i.SimulatorRange : i.IosRange) is { } r && targets.All(t => r.Contains(t.DeploymentTarget) == true))
+                && (simulator ? i.SimulatorRange : i.IosRange) is { } r && projectTargets.All(t => r.Contains(t.DeploymentTarget) == true))
             .GroupBy(i => i.Version).Select(g => g.First()).ToList();
         var alternatives = includeAlternatives
             ? ios.Schemes.Where(s => s.Name != name)

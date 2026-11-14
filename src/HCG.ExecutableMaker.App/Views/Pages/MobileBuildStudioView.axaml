@@ -124,7 +124,39 @@
               <TextBlock Classes="label" Text="2 · TARGET PLATFORM" />
               <TextBlock Classes="h2" Text="Platform, scheme and output" />
             </StackPanel>
-            <ComboBox ItemsSource="{Binding Platforms}" SelectedItem="{Binding SelectedPlatform}" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsBuilding}">
+            <!-- A folder with both an Xcode app and a Theos package (HCG Nexus): two distinct build targets, never switched silently. -->
+            <StackPanel Spacing="4" IsVisible="{Binding HasBuildTargets}" IsEnabled="{Binding !IsBuilding}">
+              <TextBlock Classes="formlabel" Text="BUILD TARGET" />
+              <ComboBox ItemsSource="{Binding BuildTargets}" SelectedItem="{Binding SelectedBuildTarget}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:BuildTargetChoice">
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                      <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Classes="warning" FontSize="12" Text="{Binding BuildTargetNotice}" TextWrapping="Wrap" IsVisible="{Binding BuildTargetNotice, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+            <Border Classes="inset" Padding="14,12" IsVisible="{Binding IsTheosTarget}">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="label" Text="THEOS PACKAGE · GNU MAKE → .DEB" />
+                <TextBlock Classes="secondary" FontSize="12" Text="{Binding TheosSummary}" TextWrapping="Wrap" />
+                <ItemsControl ItemsSource="{Binding TheosRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SummaryRow">
+                      <Grid ColumnDefinitions="180,*" Margin="0,0,0,4">
+                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12" TextWrapping="Wrap" />
+                        <SelectableTextBlock Grid.Column="1" Classes="secondary" FontSize="12" Text="{Binding Value}" TextWrapping="Wrap" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Classes="primary" Content="Build the .deb in New Build (Theos route)…" Command="{Binding BuildTheosPackageCommand}" HorizontalAlignment="Left" IsEnabled="{Binding !IsBuilding}" />
+              </StackPanel>
+            </Border>
+            <ComboBox ItemsSource="{Binding Platforms}" SelectedItem="{Binding SelectedPlatform}" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsBuilding}" IsVisible="{Binding IsXcodeTarget}">
               <ComboBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:PlatformChoice">
                   <StackPanel Spacing="1">
@@ -168,6 +200,11 @@
               <StackPanel Spacing="8">
                 <TextBlock Classes="label" Text="SCHEME COMPATIBILITY · SELECTED XCODE" />
                 <TextBlock Classes="warning" FontSize="13" FontWeight="SemiBold" Text="{Binding CompatibilityProblem}" TextWrapping="Wrap" IsVisible="{Binding HasCompatibilityProblem}" />
+                <TextBlock Classes="warning" FontSize="12" Text="{Binding OverrideNotice}" TextWrapping="Wrap" IsVisible="{Binding OverrideNotice, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                <StackPanel Spacing="6" IsVisible="{Binding HasActiveOverride}">
+                  <TextBlock Classes="secondary" FontSize="12" Text="{Binding ActiveOverrideText}" TextWrapping="Wrap" />
+                  <Button Content="Use the project's own minimum iOS" Command="{Binding RemoveOverrideCommand}" HorizontalAlignment="Left" IsEnabled="{Binding !IsBuilding}" />
+                </StackPanel>
                 <ItemsControl ItemsSource="{Binding SchemeChecks}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:SummaryRow">
@@ -178,14 +215,29 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <TextBlock Classes="secondary" FontSize="12" Text="{Binding ToolchainRouteText}" TextWrapping="Wrap" IsVisible="{Binding ToolchainRouteText, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                <StackPanel Spacing="6" IsVisible="{Binding HasSchemeSuggestion}">
-                  <TextBlock Classes="secondary" FontSize="12" Text="{Binding SchemeSuggestionText}" TextWrapping="Wrap" />
-                  <Button Classes="primary" Content="{Binding UseSuggestedSchemeLabel}" Command="{Binding UseSuggestedSchemeCommand}" HorizontalAlignment="Left" IsEnabled="{Binding !IsBuilding}" />
+                <ItemsControl ItemsSource="{Binding InspectionNotices}" IsVisible="{Binding HasInspectionNotices}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                      <SelectableTextBlock Classes="secondary" FontSize="12" Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,4" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <!-- The three ways out, each explicit: another Xcode, another existing scheme, or a build-only minimum iOS. -->
+                <StackPanel Spacing="8" IsVisible="{Binding HasCompatibilityProblem}">
+                  <TextBlock Classes="formlabel" Text="RESOLVE IT" />
+                  <TextBlock Classes="secondary" FontSize="12" Text="{Binding ToolchainRouteText}" TextWrapping="Wrap" IsVisible="{Binding ToolchainRouteText, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                  <StackPanel Spacing="6" IsVisible="{Binding HasSchemeSuggestion}">
+                    <TextBlock Classes="secondary" FontSize="12" Text="{Binding SchemeSuggestionText}" TextWrapping="Wrap" />
+                    <Button Classes="primary" Content="{Binding UseSuggestedSchemeLabel}" Command="{Binding UseSuggestedSchemeCommand}" HorizontalAlignment="Left" IsEnabled="{Binding !IsBuilding}" />
+                  </StackPanel>
+                  <StackPanel Spacing="6" IsVisible="{Binding HasRaiseOffer}">
+                    <TextBlock Classes="secondary" FontSize="12" Text="{Binding RaiseOfferText}" TextWrapping="Wrap" />
+                    <Button Content="{Binding RaiseOfferLabel}" Command="{Binding RaiseMinimumCommand}" HorizontalAlignment="Left" IsEnabled="{Binding RaiseOfferSupported}" />
+                  </StackPanel>
                 </StackPanel>
               </StackPanel>
             </Border>
-            <TextBlock Classes="label" Text="3 · BUILD OUTPUT" Margin="0,8,0,0" />
+            <TextBlock Classes="label" Text="3 · BUILD OUTPUT" Margin="0,8,0,0" IsVisible="{Binding IsXcodeTarget}" />
             <TextBlock Classes="muted" Text="Select a project to see the outputs it supports on this computer." IsVisible="{Binding !HasOutputs}" TextWrapping="Wrap" />
             <ItemsControl ItemsSource="{Binding Outputs}">
               <ItemsControl.ItemTemplate>

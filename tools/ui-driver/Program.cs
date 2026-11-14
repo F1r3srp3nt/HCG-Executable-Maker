@@ -55,7 +55,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("scheme-workflow") && !_args.ContainsKey("reopen-mobile")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("scheme-workflow") && !_args.ContainsKey("reopen-mobile") && !_args.ContainsKey("deployment-workflow")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -79,6 +79,12 @@ internal static partial class Program
                 // Test-only: decorate the real toolchain service so the compatibility workflow can be reproduced on any host.
                 services.AddSingleton<ToolchainService>();
                 services.AddSingleton<IToolchainService>(sp => new SimulatedXcodeToolchains(sp.GetRequiredService<ToolchainService>(), simulated));
+            }
+            else if (Arg("raise-xcode-minimum") is { } raised)
+            {
+                // Test-only: the real Xcode (real builds), reported as no longer accepting deployment targets below RAISED.
+                services.AddSingleton<ToolchainService>();
+                services.AddSingleton<IToolchainService>(sp => new RaisedMinimumToolchains(sp.GetRequiredService<ToolchainService>(), raised));
             }
         };
 
@@ -213,6 +219,7 @@ internal static partial class Program
         if (_args.ContainsKey("electron")) return await RunElectronAsync(wizard, host, output);
         if (_args.ContainsKey("native")) return await RunNativeAsync(wizard, host, output);
         if (_args.ContainsKey("scheme-workflow")) return await RunSchemeWorkflowAsync(main, wizard, output);
+        if (_args.ContainsKey("deployment-workflow")) return await RunDeploymentWorkflowAsync(main, wizard, output);
         if (_args.ContainsKey("mobile")) return await RunMobileAsync(main, wizard, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
 

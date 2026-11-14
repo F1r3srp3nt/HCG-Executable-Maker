@@ -211,8 +211,8 @@ Now, in **Platform, scheme and output**:
   scheme's Run configuration for Simulator and Archive configuration for device, or one chosen explicitly) and the Xcode
   used for HCG's builds (the installed Xcodes with the iOS minimum of each SDK; choosing one sets DEVELOPER_DIR for HCG
   only, as in Toolchains › Xcode). All stay usable when every output is unavailable.
-- **One shared message**, e.g. "HCGSentinel targets iOS 14.7; Xcode 27.0 builds iOS 15.0 and later (device and
-  Simulator).", with one short line per SDK. Outputs say only "Blocked by the deployment target (iPhoneOS SDK) — see
+- **One shared message**, e.g. "Project minimum: iOS 14.7. Selected toolchain minimum: iOS 15.0 (Xcode 27.0 · device
+  and Simulator SDKs).", with one short line per SDK. Outputs say only "Blocked by the deployment target (iPhoneOS SDK) — see
   Scheme compatibility above" (plus any blocker of their own, such as signing). Device and Simulator are judged with
   their own SDK range and configuration; the scheme's targets and their dependencies are checked, not every target.
 - **"Use HCGSentinelModern (iOS 15.0 and later)"** is offered only when that scheme is verified compatible with the
@@ -232,6 +232,65 @@ restart (5), `--expect-simulator-only` with a Simulator SDK that accepts iOS 14.
 `COMMAND /usr/bin/xcodebuild … -scheme HCGSentinelModern -configuration Release` in its build log and then stopped at
 "Executable not found" — there is no Xcode on Linux. Unit tests: `SchemeSelectionTests` (17). Not run here: a real
 Sentinel build with a real Xcode (the macOS CI job "HCG Sentinel — archive …" does that, and runs these driver checks).
+
+### Deployment-target workflow: HCG Nexus' Xcode app (iOS 14.0) with an Xcode whose SDKs start at iOS 15.0
+
+HCG Nexus now contains a standalone iPhone/iPad app, `HCGNexus.xcodeproj` (shared scheme HCGNexus, target HCGNexus,
+`IPHONEOS_DEPLOYMENT_TARGET = 14.0`), next to the Theos tweak package. The "iOS 14.0" Maker reported is the **Xcode app's**
+deployment target. It is not the Theos package's (rootless `TARGET iphone:clang:16.5:15.0`, rootful `…:14.5:14.0`). Before
+this change, Mobile Build Studio judged the Xcode app correctly but offered no way out beyond another Xcode, and the
+folder's Theos package was not visible there.
+
+**Build target.** When a folder holds both kinds of project, Mobile Build Studio lists them separately:
+- **iOS app (IPA, Xcode):** the scheme, configuration and Xcode selection, judged against the selected Xcode's SDKs.
+- **Jailbreak package (.deb, Theos):** its configurations with their own deployment targets and SDKs. Built with GNU Make
+  (`make package`), never an IPA, and not judged by Xcode's SDK range. "Build the .deb in New Build (Theos route)…" opens
+  New Build on that route.
+
+The choice is saved with the project's selection. A saved choice that no longer exists falls back to the Xcode app with a
+notice; HCG never switches between targets by itself.
+
+**Compatibility panel.**
+- One sentence: "Project minimum: iOS 14.0. Selected toolchain minimum: iOS 15.0 (Xcode 27.0 · device and Simulator SDKs)."
+- One line per SDK. Device and Simulator are judged separately, each with its own configuration and its own SDK range,
+  read from that Xcode's SDKSettings.json. No Xcode version or range is hard-coded.
+- Ranges or deployment targets that could not be read appear as **not verified**, with the reader's diagnostic. They
+  are never shown as an incompatibility.
+
+The resolutions:
+1. **Another installed Xcode** that accepts iOS 14.0, chosen in the Xcode list for HCG's builds only (`xcode-select` is
+   not changed). If none is installed, the panel says what is needed.
+2. **Another existing scheme** that is verified compatible with the failing SDKs (none in HCG Nexus; HCG Sentinel has
+   HCGSentinelModern).
+3. **Raise the minimum iOS for this build** (e.g. to iOS 15.0, the selected Xcode's minimum).
+   - Before you accept it, a dialog lists every target the scheme builds with its change, dependencies and extensions
+     included. It states that the app will no longer install on iPhones or iPads running an earlier iOS version, and
+     that the project is not edited.
+   - It is applied as `IPHONEOS_DEPLOYMENT_TARGET=15.0` on the xcodebuild command line, for this build only. The imported
+     copy, your original folder and the scheme keep iOS 14.0.
+   - It is refused when it would **lower** a target (for example an extension that already targets iOS 16.0), when the
+     value is outside either SDK's range, or when a range could not be read.
+   - Swift packages and CocoaPods built with it are named as a risk, because their declared platforms cannot be read
+     before building.
+
+**Same values for validation and the build.**
+- The accepted value appears in the build options, the readiness check, the *Command* line and the planned xcodebuild
+  arguments.
+- The build service re-inspects it with the toolchain it uses, and logs the effects before running.
+- The artifact must carry it: MinimumOSVersion in Info.plist, and LC_BUILD_VERSION minos of the executable (not read
+  inside an .ipa, which is reported as not verifiable).
+- It is part of the build's provenance, so a build made with it becomes a "Previous build" once it is removed.
+- It applies only to the scheme, project/workspace, configuration and Xcode it was accepted for. If any of them
+  changes, including during a re-inspection, it is dropped and a notice says why.
+- It is not saved across restarts; accept it again for each session.
+
+Verification:
+- Linux: `hcg-ui-driver --deployment-workflow` on the real HCG Nexus checkout (13416698) with a simulated Xcode 27.0
+  whose SDKs start at iOS 15.0: 38 checks.
+- Linux: `DeploymentTargetWorkflowTests` (13).
+- macOS CI job `hcg-nexus-deployment`: the same flow, then a REAL Simulator build and unsigned archive with the build-only
+  iOS 15.0. The runner's own Xcode builds; only its reported SDK minimum is raised, with `--raise-xcode-minimum 15.0`.
+  The job checks MinimumOSVersion and minos with plutil and vtool, and that the Nexus checkout is unchanged.
 
 ## Verification
 

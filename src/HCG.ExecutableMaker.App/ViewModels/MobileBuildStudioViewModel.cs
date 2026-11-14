@@ -40,6 +40,16 @@ public sealed class XcodeChoice(XcodeInstallation installation, bool active)
     public override string ToString() => Name;
 }
 
+/// <summary>One kind of project in a folder that holds several (HCG Nexus: the Xcode iOS app and the Theos jailbreak package).</summary>
+public sealed class BuildTargetChoice(HCG.ExecutableMaker.ProjectInspection.BuildRoute route, string detail)
+{
+    public HCG.ExecutableMaker.ProjectInspection.BuildRoute Route { get; } = route;
+    public string Id => Route.Id;
+    public string Name => Route.Label;
+    public string Detail { get; } = detail;
+    public override string ToString() => Name;
+}
+
 public sealed class PlatformChoice(TargetPlatform platform, bool supported, string? reason)
 {
     public TargetPlatform Platform { get; } = platform;
@@ -77,14 +87,17 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private bool _recomputing;
     private bool _suppressSchemeChange;
     private readonly IMobileSelectionStore _selections;
+    private readonly NavigationService _navigation;
     private readonly HCG.ExecutableMaker.Infrastructure.Toolchains.DeveloperDirectorySelection _developerDirectory;
     /// <summary>Saves of the selection run in order; a newer selection is never overwritten by an older save.</summary>
     private Task _saving = Task.CompletedTask;
 
     public MobileBuildStudioViewModel(ProjectService projectService, IProjectRepository projects, MobileBuildService builder, MobileArtifactVerifier verifier,
         IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell,
-        IMobileSelectionStore selections, HCG.ExecutableMaker.Infrastructure.Toolchains.DeveloperDirectorySelection developerDirectory)
+        IMobileSelectionStore selections, HCG.ExecutableMaker.Infrastructure.Toolchains.DeveloperDirectorySelection developerDirectory,
+        NavigationService navigation)
     {
+        _navigation = navigation;
         _selections = selections;
         _developerDirectory = developerDirectory;
         _projectService = projectService;
@@ -163,6 +176,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         ResultTag = new StatusTag("Not started", "neutral");
         ResultDetail = "";
         IsPreviousBuild = false;
+        // An accepted build-only minimum iOS belongs to the project and selection it was accepted for.
+        _acceptedOverride = null;
+        OverrideNotice = null;
         if (value is null) { ClearProject(); return; }
         _ = OpenProjectAsync(value);
     }
@@ -191,6 +207,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         Container = SelectedContainer,
         Scheme = SelectedScheme,
         Configuration = SelectedConfiguration?.Value,
+        BuildTarget = HasBuildTargets ? SelectedBuildTarget?.Id : null,
         SavedAt = DateTimeOffset.UtcNow,
     };
 
@@ -203,6 +220,82 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
 
     /// <summary>Waits for pending selection saves (tests and the UI driver).</summary>
     public Task SelectionSaved => _saving;
+
+    // ───────────── Build target: the Xcode app or the Theos package (folders that hold both) ─────────────
+
+    public ObservableCollection<BuildTargetChoice> BuildTargets { get; } = [];
+    public ObservableCollection<SummaryRow> TheosRows { get; } = [];
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(IsTheosTarget), nameof(IsXcodeTarget))] private BuildTargetChoice? _selectedBuildTarget;
+    public bool HasBuildTargets => BuildTargets.Count > 1;
+    /// <summary>The Theos jailbreak package is selected: it is built with GNU Make (make package) into a .deb, on New Build's Theos route.</summary>
+    public bool IsTheosTarget => SelectedBuildTarget?.Id == HCG.ExecutableMaker.ProjectInspection.BuildRoutes.TheosDeb;
+    public bool IsXcodeTarget => !IsTheosTarget;
+    [ObservableProperty] private string _theosSummary = "";
+
+    /// <summary>
+    /// Lists both kinds of project when the folder holds an Xcode app and a Theos package, and restores the one the user chose
+    /// last. Never switches between them by itself: a saved choice that no longer exists falls back to the Xcode app, and says so.
+    /// </summary>
+    private void ApplyBuildTargets(ProjectAnalysis a, MobileSelection? saved)
+    {
+        BuildTargets.Clear();
+        TheosRows.Clear();
+        var routes = HCG.ExecutableMaker.ProjectInspection.BuildRoutes.For(a);
+        if (routes.Count > 1 && a.Mobile?.Ios is { } ios)
+        {
+            var app = ios.AppTargets.FirstOrDefault();
+            var xcodeDetail = $"{ios.WorkspacePath ?? ios.ProjectPath} · {(ios.Schemes.Count > 0 ? "scheme " + string.Join(", ", ios.Schemes.Select(sc => sc.Name)) : "no shared scheme")}" +
+                              (app is null ? "" : $" · {app.Name} iOS {app.DeploymentTarget ?? "?"}") + " · xcodebuild: Simulator app, archive, IPA. Judged against the selected Xcode's SDKs.";
+            var theos = HCG.ExecutableMaker.ProjectInspection.BuildRoutes.TheosProjects(a.Native);
+            // Configurations the project accepts (not the ones its Makefile refuses with $(error …)), once each.
+            var schemes = theos.SelectMany(p => p.Theos!.Schemes).Where(sc => sc.ProjectError is null).DistinctBy(sc => sc.Label).ToList();
+            var theosDetail = $"{string.Join(", ", theos.Select(p => p.Theos!.PackageName ?? p.Name))} · GNU Make (make package) → .deb · " +
+                              (schemes.Count == 0 ? "Theos defaults" : string.Join("; ", schemes.Select(sc => $"{sc.Label}: iOS {sc.DeploymentTarget ?? "(Theos default)"}+, SDK {sc.SdkVersion ?? "latest"}"))) +
+                              " · Built with Theos' own SDKs: the selected Xcode's iOS SDK range does not apply.";
+            foreach (var r in routes) BuildTargets.Add(new BuildTargetChoice(r, r.Id == HCG.ExecutableMaker.ProjectInspection.BuildRoutes.TheosDeb ? theosDetail : xcodeDetail));
+            foreach (var p in theos)
+            {
+                var t = p.Theos!;
+                TheosRows.Add(new("Package", $"{t.PackageName ?? p.Name} ({t.PackageId ?? "no control file"}) {t.PackageVersion}".Trim()));
+                TheosRows.Add(new("Makefile", t.Makefile));
+                foreach (var sc in t.Schemes)
+                    TheosRows.Add(new("Configuration " + sc.Label, $"TARGET iphone:clang:{sc.SdkVersion ?? "latest"}:{sc.DeploymentTarget ?? "default"} → iOS {sc.DeploymentTarget ?? "(Theos default)"} and later · installs under {sc.InstallPrefix}" +
+                                                           (sc.ProjectError is { } err ? $" · the project refuses it: {err}" : "")));
+                TheosRows.Add(new("Products", string.Join(", ", t.Instances.Select(i => $"{i.Name} ({i.DisplayType})"))));
+            }
+            TheosSummary = "The Theos package is built with GNU Make (make package) and produces a .deb for jailbroken devices — never an IPA. " +
+                           "It is built on New Build's “Jailbreak package (.deb, Theos)” route, which uses the detected Theos, gmake and ldid.";
+        }
+        OnPropertyChanged(nameof(HasBuildTargets));
+        var wanted = saved?.BuildTarget;
+        var choice = BuildTargets.FirstOrDefault(b => b.Id == wanted) ?? BuildTargets.FirstOrDefault();
+        BuildTargetNotice = wanted is not null && BuildTargets.Count > 0 && choice?.Id != wanted
+            ? $"The build target saved for this project ({wanted}) is not in the project any more; showing {choice?.Name}." : null;
+        _applyingBuildTarget = true;
+        try { SelectedBuildTarget = choice; }
+        finally { _applyingBuildTarget = false; }
+    }
+
+    private bool _applyingBuildTarget;
+    [ObservableProperty] private string? _buildTargetNotice;
+
+    partial void OnSelectedBuildTargetChanged(BuildTargetChoice? value)
+    {
+        if (_applyingBuildTarget || Mobile is null) return;
+        BuildTargetNotice = null;
+        _selectionGeneration++;
+        if (SelectedPlatform is { } platform) OnSelectedPlatformChanged(platform);
+        RecomputeOutputs();
+        SaveSelection();
+    }
+
+    /// <summary>Opens New Build on the Theos route for this project (explicit: the user pressed the button).</summary>
+    [RelayCommand]
+    private void BuildTheosPackage()
+    {
+        if (SelectedProject is { } p && IsTheosTarget)
+            _navigation.Navigate("new-build", new BuildWizardViewModel.RouteRequest(p.Project, HCG.ExecutableMaker.ProjectInspection.BuildRoutes.TheosDeb));
+    }
 
     private void ClearProject()
     {
@@ -384,6 +477,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         }
         else { SelectedContainer = null; SelectedScheme = null; SelectedConfiguration = null; }
         ShowContainers = Containers.Count > 1;
+        ApplyBuildTargets(a, saved);
         _suppressSchemeChange = false;
         RebuildXcodeChoices();
 
@@ -413,11 +507,12 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     partial void OnSelectedPlatformChanged(PlatformChoice? value)
     {
         Outputs.Clear();
-        if (value is not null)
+        // The Theos package has no Xcode outputs: they belong to the other build target and are not offered for it.
+        if (value is not null && !IsTheosTarget)
             foreach (var o in _allOptions.Where(o => o.Platform == value.Platform)) Outputs.Add(new MobileOutputItem(o, IosBuildSelection.ShortReason(o)));
         OnPropertyChanged(nameof(HasOutputs));
         ShowSchemes = Schemes.Count > 0 && value?.Platform == TargetPlatform.IOS;
-        ShowIosSelection = value?.Platform == TargetPlatform.IOS && Mobile?.Ios is not null && Mobile.ArtifactPath is null;
+        ShowIosSelection = value?.Platform == TargetPlatform.IOS && Mobile?.Ios is not null && Mobile.ArtifactPath is null && !IsTheosTarget;
         SelectOutput(Outputs.FirstOrDefault(o => o.IsEnabled));
         UpdateSchemeCompatibility();
     }
@@ -430,6 +525,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         Scheme = SelectedScheme,
         Container = SelectedContainer,
         Variant = SelectedOutput is null || m.Ios is not null ? null : SelectedVariant,
+        DeploymentTargetOverride = ActiveOverrideValue,
     };
 
     /// <summary>
@@ -442,10 +538,11 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         _recomputing = true;
         try
         {
+            DropStaleOverride();
             _allOptions = MobileCapabilities.Evaluate(m, _report, SelectionContext(m), SelectedConfiguration?.Value);
             var keep = SelectedOutput?.Option.Output;
             Outputs.Clear();
-            if (SelectedPlatform is { } platform)
+            if (SelectedPlatform is { } platform && !IsTheosTarget)
                 foreach (var o in _allOptions.Where(o => o.Platform == platform.Platform)) Outputs.Add(new MobileOutputItem(o, IosBuildSelection.ShortReason(o)));
             OnPropertyChanged(nameof(HasOutputs));
             var same = Outputs.FirstOrDefault(o => o.Option.Output == keep && o.IsEnabled);
@@ -519,16 +616,23 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     /// <summary>Selects an installed Xcode for HCG's builds (DEVELOPER_DIR, as in Toolchains › Xcode), then re-detects; outputs are re-judged.</summary>
     private async Task SelectXcodeAsync(XcodeChoice choice)
     {
+        // Only the latest Xcode choice may apply its result: an earlier switch that finishes later is discarded.
+        var ticket = ++_xcodeTicket;
         try
         {
             var selected = await _developerDirectory.SelectAsync(choice.Installation.AppPath);
+            if (ticket != _xcodeTicket) return;
             XcodeMessage = $"HCG now builds with {selected.Display}. The system-wide xcode-select setting was not changed.";
         }
-        catch (InvalidOperationException ex) { XcodeMessage = ex.Message; RebuildXcodeChoices(); return; }
-        _report = await _toolchains.GetAsync(refresh: true);
+        catch (InvalidOperationException ex) { if (ticket == _xcodeTicket) { XcodeMessage = ex.Message; RebuildXcodeChoices(); } return; }
+        var report = await _toolchains.GetAsync(refresh: true);
+        if (ticket != _xcodeTicket) return;
+        _report = report;
         RebuildXcodeChoices();
         if (Mobile is not null) RecomputeOutputs();
     }
+
+    private int _xcodeTicket;
 
     // ───────────── Scheme compatibility (Simulator and device judged separately) ─────────────
 
@@ -548,6 +652,70 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     /// Switches to the scheme verified compatible — only on request, after explaining its minimum iOS. HCG never changes the
     /// scheme or any deployment target by itself, and the legacy scheme stays in the project.
     /// </summary>
+    // ───────────── Raise the minimum iOS for this build only (explicit, inspected, never written to the project) ─────────────
+
+    /// <summary>What the user accepted, and for exactly which selection: it never carries over to another scheme, project/workspace, configuration or Xcode.</summary>
+    private sealed record AcceptedOverride(string Value, string ProjectId, string? Container, string? Scheme, string? Configuration, string? DeveloperDirectory);
+    private AcceptedOverride? _acceptedOverride;
+    private IosDeploymentOverridePlan? _raiseOffer;
+
+    private bool Matches(AcceptedOverride a) =>
+        a.ProjectId == SelectedProject?.Project.Id.ToString() && a.Container == SelectedContainer && a.Scheme == SelectedScheme
+        && a.Configuration == SelectedConfiguration?.Value && a.DeveloperDirectory == _report?.Xcode?.ActiveDeveloperDirectory;
+
+    /// <summary>The build-only minimum iOS in force for the current selection (null = the project's own deployment targets).</summary>
+    public string? ActiveOverrideValue => !IsTheosTarget && _acceptedOverride is { } a && Matches(a) ? a.Value : null;
+
+    private void DropStaleOverride()
+    {
+        if (_acceptedOverride is not { } a || Matches(a)) return;
+        var what = a.Scheme != SelectedScheme ? "scheme" : a.Container != SelectedContainer ? "project or workspace" : a.Configuration != SelectedConfiguration?.Value ? "build configuration" : "selected Xcode";
+        _acceptedOverride = null;
+        OverrideNotice = $"The build-only minimum iOS {a.Value} you accepted for {a.Scheme} was removed because the {what} changed. " +
+                         "An accepted override never carries over to another selection; accept it again below if you still want it.";
+    }
+
+    [ObservableProperty] private string? _overrideNotice;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasRaiseOffer))] private string? _raiseOfferLabel;
+    [ObservableProperty] private string _raiseOfferText = "";
+    [ObservableProperty] private bool _raiseOfferSupported;
+    public bool HasRaiseOffer => RaiseOfferLabel is not null;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasActiveOverride))] private string? _activeOverrideText;
+    public bool HasActiveOverride => ActiveOverrideText is not null;
+    public ObservableCollection<string> InspectionNotices { get; } = [];
+    [ObservableProperty] private bool _hasInspectionNotices;
+
+    /// <summary>
+    /// Resolution 3: raise the minimum iOS to the selected Xcode's minimum for this build only — after showing what changes for
+    /// every target (dependencies and extensions included) and that the app will no longer install on older iOS versions.
+    /// </summary>
+    [RelayCommand]
+    private async Task RaiseMinimumAsync()
+    {
+        if (_raiseOffer is not { Supported: true } plan || SelectedProject is null || IsBuilding) return;
+        var offeredFor = (SelectedScheme, SelectedContainer, SelectedConfiguration?.Value, _report?.Xcode?.ActiveDeveloperDirectory);
+        if (!await _dialogs.ConfirmAsync($"Build {plan.Scheme} for iOS {plan.Value} and later?", plan.Describe(), $"Raise to iOS {plan.Value} for this build"))
+            return;
+        // The selection changed while the dialog was open: what was inspected is not what is selected now.
+        if (offeredFor != (SelectedScheme, SelectedContainer, SelectedConfiguration?.Value, _report?.Xcode?.ActiveDeveloperDirectory)) return;
+        _acceptedOverride = new AcceptedOverride(plan.Value, SelectedProject.Project.Id.ToString(), SelectedContainer, SelectedScheme, SelectedConfiguration?.Value,
+            _report?.Xcode?.ActiveDeveloperDirectory);
+        OverrideNotice = null;
+        _selectionGeneration++;
+        RecomputeOutputs();
+    }
+
+    /// <summary>Back to the project's own deployment targets.</summary>
+    [RelayCommand]
+    private void RemoveOverride()
+    {
+        if (_acceptedOverride is null || IsBuilding) return;
+        _acceptedOverride = null;
+        OverrideNotice = null;
+        _selectionGeneration++;
+        RecomputeOutputs();
+    }
+
     [RelayCommand]
     private async Task UseSuggestedSchemeAsync()
     {
@@ -564,6 +732,20 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         SchemeSuggestionText = "";
         ToolchainRouteText = null;
         CompatibilityProblem = null;
+        InspectionNotices.Clear();
+        HasInspectionNotices = false;
+        _raiseOffer = null;
+        RaiseOfferLabel = null;
+        RaiseOfferText = "";
+        RaiseOfferSupported = false;
+        ActiveOverrideText = null;
+        if (IsTheosTarget)
+        {
+            HasSchemeChecks = false;
+            SupportTag = new StatusTag("Theos package", "info");
+            SupportSummary = TheosSummary;
+            return;
+        }
         if (Mobile is not { Ios: { } ios, ArtifactPath: null } m || m.Framework is not (MobileFramework.NativeIos or MobileFramework.Capacitor)
             || SelectedPlatform?.Platform != TargetPlatform.IOS || _report?.Xcode is not { } x)
         {
@@ -572,11 +754,27 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         }
         // Device and Simulator are judged with their own SDK ranges and their own effective configuration; one shared
         // sentence states the problem, and each output only refers to it.
-        var summary = IosBuildSelection.Summarize(ios, SelectedScheme, SelectedConfiguration?.Value, x);
+        var summary = IosBuildSelection.Summarize(ios, SelectedScheme, SelectedConfiguration?.Value, x, ActiveOverrideValue);
         foreach (var (label, text, _) in summary.Lines) SchemeChecks.Add(new(label, text));
         HasSchemeChecks = true;
         CompatibilityProblem = summary.Problem;
         ToolchainRouteText = summary.KeepRoute;
+        foreach (var n in summary.InspectionNotices) InspectionNotices.Add(n);
+        HasInspectionNotices = InspectionNotices.Count > 0;
+        if (summary.ActiveOverride is { } active)
+            ActiveOverrideText = $"Build-only minimum iOS {active.Value} is applied ({active.BuildSetting} on the xcodebuild command line). " +
+                                 $"{active.Consequence} The project's files are unchanged.";
+        if (summary.RaiseOffer is { } offer)
+        {
+            _raiseOffer = offer;
+            RaiseOfferSupported = offer.Supported;
+            RaiseOfferLabel = $"Raise minimum to iOS {offer.Value} for this build…";
+            RaiseOfferText = offer.Supported
+                ? $"{offer.Consequence} Only this build changes: {offer.BuildSetting} is passed to xcodebuild; the project is not edited. " +
+                  $"Affects {string.Join(", ", offer.Effects.Where(e => e.Change == IosOverrideChange.Raised).Select(e => $"{e.Target} ({e.Kind})"))}." +
+                  (offer.Warnings.Count > 0 ? " " + string.Join(" ", offer.Warnings) : "")
+                : "Raising the minimum is not available for this scheme: " + string.Join(" ", offer.Blockers);
+        }
         if (summary.Alternative is { } alt)
         {
             SuggestedScheme = alt;
@@ -762,6 +960,8 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             DeviceSpecPath = DeviceSpecPath,
             InputArtifact = m.ArtifactPath,
             SigningIdentity = string.IsNullOrWhiteSpace(SigningIdentity) ? null : SigningIdentity.Trim(),
+            // The same value the compatibility check judged; the build re-inspects it before running xcodebuild.
+            DeploymentTargetOverride = m.Ios is not null && m.ArtifactPath is null && SelectedOutput.Option.Platform == TargetPlatform.IOS ? ActiveOverrideValue : null,
         };
     }
 
@@ -882,7 +1082,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
 
     /// <summary>The minimum iOS of what the build archives: the scheme's app target (Xcode) or SupportedOSPlatformVersion (.NET).</summary>
     private static string? DeviceMinimum(MobileAnalysis m, MobileBuildOptions o) =>
-        m.DotNetIos?.MinimumOS ?? m.Ios?.AppTargets.FirstOrDefault(t => t.Name == o.Scheme)?.DeploymentTarget ?? m.Ios?.AppTargets.FirstOrDefault()?.DeploymentTarget;
+        o.DeploymentTargetOverride ?? m.DotNetIos?.MinimumOS ?? m.Ios?.AppTargets.FirstOrDefault(t => t.Name == o.Scheme)?.DeploymentTarget ?? m.Ios?.AppTargets.FirstOrDefault()?.DeploymentTarget;
 
     private void UpdateReadiness(MobileBuildOptions? o)
     {
@@ -938,6 +1138,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         }));
         Summary.Add(new("Output type", o.Output.DisplayName()));
         if (o.Scheme is not null) Summary.Add(new("Scheme", o.Scheme));
+        if (o.DeploymentTargetOverride is { } raised) Summary.Add(new("Minimum iOS", $"iOS {raised} — build-only override accepted by you; the project keeps its own deployment targets"));
         if (o.Variant is not null) Summary.Add(new(o.Output.Platform() == TargetPlatform.Android ? "Variant" : "Configuration", o.Variant));
         if (o.Framework == MobileFramework.NativeIos && m.Ios is { } iosCmd)
         {

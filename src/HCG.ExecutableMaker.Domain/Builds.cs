@@ -126,6 +126,8 @@ public sealed record BuildProvenance
     /// <summary>e.g. "Xcode 26.6 (/Applications/Xcode.app/Contents/Developer)".</summary>
     public string? Toolchain { get; init; }
     public IReadOnlyList<string> ArtifactPaths { get; init; } = [];
+    /// <summary>A build-only minimum iOS the user accepted (IPHONEOS_DEPLOYMENT_TARGET passed to xcodebuild); null = the project's own.</summary>
+    public string? DeploymentTargetOverride { get; init; }
 
     /// <summary>Fields that differ from <paramref name="current"/>, as "Scheme: HCGSentinelModern (built) → HCGSentinel (now)". Artifact paths are not compared.</summary>
     public IReadOnlyList<string> DifferencesFrom(BuildProvenance current)
@@ -145,12 +147,14 @@ public sealed record BuildProvenance
         Compare("Signing", Signing, current.Signing);
         Compare("Export", ExportMethod, current.ExportMethod);
         Compare("Toolchain", Toolchain, current.Toolchain);
+        Compare("Minimum iOS override", DeploymentTargetOverride, current.DeploymentTargetOverride);
         return list;
     }
 
     public string Describe() => string.Join(" · ", new[]
     {
         Scheme is null ? null : "scheme " + Scheme, Configuration, Sdk is null ? null : "SDK " + Sdk, Destination, Signing is null ? null : "signing " + Signing,
-        ExportMethod is null ? null : "export " + ExportMethod, Toolchain, SourceRevision,
+        ExportMethod is null ? null : "export " + ExportMethod, Toolchain,
+        DeploymentTargetOverride is null ? null : $"minimum iOS raised to {DeploymentTargetOverride} for this build only", SourceRevision,
     }.Where(s => s is not null));
 }

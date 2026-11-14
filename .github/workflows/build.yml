@@ -27,6 +27,10 @@
 #                 wizard and Mobile Build Studio: Nexus' Theos .deb (rootless, rootful, preview app) checked by HCG and by
 #                 Nexus' own script; Mail's .NET for iOS head (Simulator build, unsigned device archive); Sentinel archived
 #                 with every installed Xcode, with the deployment-range preflight, full logs and .xcresult bundles kept.
+#   hcg-nexus-deployment — HCG Nexus' Xcode app (iOS 14.0) next to its Theos package: Mobile Build Studio's deployment-target
+#                 workflow with a simulated Xcode whose SDKs start at iOS 15.0, then a REAL Simulator build and unsigned
+#                 archive with the build-only minimum iOS 15.0; MinimumOSVersion and LC_BUILD_VERSION minos are checked by
+#                 HCG and again with plutil/vtool, and the project is verified unchanged.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -1081,6 +1085,86 @@ jobs:
             ${{ github.workspace }}/sentinel-out/*.driver.log
             ${{ github.workspace }}/sentinel-out/diagnostics
             ${{ github.workspace }}/sentinel-out/screens
+          if-no-files-found: warn
+          retention-days: 14
+
+  hcg-nexus-deployment:
+    name: HCG Nexus — Xcode app deployment target (iOS 14.0 vs an Xcode from iOS 15.0) and a real build-only minimum iOS
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/nexus-deployment-out
+      # HCG Nexus with HCGNexus.xcodeproj (shared scheme HCGNexus, iOS 14.0) next to the Theos package.
+      NEXUS_APP_COMMIT: 13416698ea72f814e9960c09ff17115c3f00cb4c
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: HCG Nexus at a pinned commit, in a path with spaces
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Nexus.git "$OUT/src/HCG Nexus"
+          git -C "$OUT/src/HCG Nexus" checkout --quiet "$NEXUS_APP_COMMIT"
+          grep -c "IPHONEOS_DEPLOYMENT_TARGET = 14.0;" "$OUT/src/HCG Nexus/HCGNexus.xcodeproj/project.pbxproj"
+      - name: Xcode — version and the iOS ranges of its SDKs (SDKSettings.json)
+        run: |
+          xcodebuild -version
+          for p in iPhoneOS iPhoneSimulator; do
+            s="$(xcode-select -p)/Platforms/$p.platform/Developer/SDKs/$p.sdk/SDKSettings.json"
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); k=sys.argv[2]; t=d["SupportedTargets"][k]; print(k, d["Version"], t["MinimumDeploymentTarget"], "to", t["MaximumDeploymentTarget"])' "$s" "$(echo $p | tr A-Z a-z)"
+          done
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      # The reported state: a selected Xcode whose SDKs start at iOS 15.0 (simulated — nothing is built with it). Checks: the
+      # Xcode app and the Theos package as two build targets (the Theos one handed to New Build's Theos route), one concise
+      # explanation, the three resolutions, the build-only minimum's inspected effects and confirmation, the same value in
+      # options/command/plan, and an accepted override dropped when the configuration changes during re-inspection.
+      - name: Deployment-target workflow (simulated Xcode 27.0, iOS 15.0 and later)
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --deployment-workflow --source "$OUT/src/HCG Nexus" \
+            --simulate-xcode 27.0:15.0:15.0 --output "$OUT/simulated" --screenshots "$OUT/screens" --prefix deployment-simulated
+      # A REAL build: this runner's Xcode, whose SDK minimum is reported as at least 15.0 so that the project's iOS 14.0 is
+      # out of range; the user accepts the build-only minimum iOS 15.0; xcodebuild builds the Simulator app and an unsigned
+      # archive with IPHONEOS_DEPLOYMENT_TARGET=15.0. HCG checks MinimumOSVersion and LC_BUILD_VERSION minos of each artifact.
+      - name: Real build with the build-only minimum iOS 15.0 (Simulator app + unsigned archive)
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --deployment-workflow --build --source "$OUT/src/HCG Nexus" \
+            --raise-xcode-minimum 15.0 --output "$OUT/real" --screenshots "$OUT/real-screens" --prefix deployment-real
+      - name: Independent check — MinimumOSVersion (plutil) and LC_BUILD_VERSION minos (vtool) are 15.0; the project is unchanged
+        run: |
+          set -e
+          n=0
+          while IFS= read -r a; do
+            case "$a" in *.xcarchive) app="$(ls -d "$a"/Products/Applications/*.app | head -1)";; *) app="$a";; esac
+            exe="$app/$(plutil -extract CFBundleExecutable raw -o - "$app/Info.plist")"
+            min="$(plutil -extract MinimumOSVersion raw -o - "$app/Info.plist")"
+            minos="$(xcrun vtool -show-build "$exe" | awk '/minos/ {print $2}' | sort -u | tr '\n' ' ')"
+            echo "$app · MinimumOSVersion $min · minos $minos" | tee -a "$OUT/minimum-os.txt"
+            [ "$min" = "15.0" ] && [ "$minos" = "15.0 " ] || { echo "unexpected minimum OS"; exit 1; }
+            n=$((n+1))
+          done < "$OUT/deployment-artifacts.txt"
+          [ "$n" -ge 2 ] || { echo "expected a Simulator app and an archive, found $n"; exit 1; }
+          test -z "$(git -C "$OUT/src/HCG Nexus" status --porcelain)"
+          grep -c "IPHONEOS_DEPLOYMENT_TARGET = 14.0;" "$OUT/src/HCG Nexus/HCGNexus.xcodeproj/project.pbxproj"
+          echo "### HCG Nexus — build-only minimum iOS 15.0" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/- /' "$OUT/minimum-os.txt" >> "$GITHUB_STEP_SUMMARY"
+      - name: Collect complete logs
+        if: always()
+        run: |
+          mkdir -p "$OUT/diagnostics"
+          find "$OUT" -path '*hcg-data/builds/*' -name build.log -exec sh -c 'cp "$1" "$OUT/diagnostics/$(basename "$(dirname "$1")").log"' _ {} \;
+          ls -la "$OUT/diagnostics"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-nexus-deployment
+          path: |
+            ${{ github.workspace }}/nexus-deployment-out/*.txt
+            ${{ github.workspace }}/nexus-deployment-out/*/*-ui-driver-report.txt
+            ${{ github.workspace }}/nexus-deployment-out/diagnostics
+            ${{ github.workspace }}/nexus-deployment-out/screens
+            ${{ github.workspace }}/nexus-deployment-out/real-screens
           if-no-files-found: warn
           retention-days: 14
 

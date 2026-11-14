@@ -71,7 +71,7 @@ internal static partial class Program
             // 8. The Simulator SDK accepts iOS 14.7 while the device SDK does not: judged separately.
             Check(sim.IsEnabled, "Simulator build available (its own SDK accepts iOS 14.7)");
             Check(!archive.IsEnabled, "Device archive unavailable (the iPhoneOS SDK does not)");
-            Check(studio.CompatibilityProblem?.Contains("(device)", StringComparison.Ordinal) == true, $"The shared message names the device SDK only: {studio.CompatibilityProblem}");
+            Check(studio.CompatibilityProblem?.EndsWith("device SDK).", StringComparison.Ordinal) == true, $"The shared message names the device SDK only: {studio.CompatibilityProblem}");
             Check(Source(project) == sourceHash, "Project files unchanged");
             return Failures.Count == 0 ? 0 : 1;
         }

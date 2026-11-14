@@ -119,6 +119,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (parameter == ImportZipRequest) { Reset(); await ImportZipAsync(); return; }
         if (parameter == ImportFolderRequest) { Reset(); await ImportFolderAsync(); return; }
         if (parameter is ProjectRecord project) { Reset(); await LoadProjectAsync(project); return; }
+        if (parameter is RouteRequest routed) { Reset(); _requestedRoute = routed.RouteId; await LoadProjectAsync(routed.Project); return; }
         if (parameter is BuildRecord previous) { Reset(); await LoadRepeatAsync(previous); }
     }
 
@@ -180,6 +181,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         Project = null;
         _inspectedAnalysis = null;
+        _requestedRoute = null;
         ClearBuildRoutes();
         Analysis = null;
         ImportError = null;
@@ -324,6 +326,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     /// <summary>The inspection result as stored with the project; <see cref="Analysis"/> is the chosen build route's view of it.</summary>
     private ProjectAnalysis? _inspectedAnalysis;
     private bool _applyingBuildRoutes;
+    /// <summary>A route the user chose elsewhere (Mobile Build Studio's “Build the .deb”), applied when the project's analysis is shown.</summary>
+    private string? _requestedRoute;
+
+    /// <summary>Opens a project on a named build route (e.g. the Theos .deb route), as the user chose it.</summary>
+    public sealed record RouteRequest(ProjectRecord Project, string RouteId);
     /// <summary>The build routes of a folder with more than one kind of project (e.g. "iOS app (IPA, Xcode)" and "Jailbreak package (.deb, Theos)").</summary>
     public ObservableCollection<HCG.ExecutableMaker.ProjectInspection.BuildRoute> BuildRouteOptions { get; } = [];
     [ObservableProperty, NotifyPropertyChangedFor(nameof(BuildRouteDescription))] private HCG.ExecutableMaker.ProjectInspection.BuildRoute? _selectedBuildRoute;
@@ -401,7 +408,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private void ApplyAnalysis(ProjectAnalysis a, string? routeId = null)
     {
         _inspectedAnalysis = a;
-        var keep = routeId ?? SelectedBuildRoute?.Id;
+        var keep = routeId ?? _requestedRoute ?? SelectedBuildRoute?.Id;
+        _requestedRoute = null;
         _applyingBuildRoutes = true;
         try
         {

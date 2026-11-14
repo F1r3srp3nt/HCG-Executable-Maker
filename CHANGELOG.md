@@ -2,6 +2,24 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Mobile Build Studio: deployment-target workflow (HCG Nexus)
+
+### Changed
+- A folder with an Xcode app and a Theos package (HCG Nexus) shows them as two **build targets**. The Xcode app is judged against the selected Xcode; the Theos package (GNU Make → .deb, its own SDKs) is handed to New Build's Theos route on request. The choice is saved per project and never switched silently.
+- The deployment-target explanation is one sentence: "Project minimum: iOS 14.0. Selected toolchain minimum: iOS 15.0 (Xcode 27.0 · device and Simulator SDKs)." It is followed by the resolutions: another installed Xcode, another existing compatible scheme, or a build-only minimum iOS.
+- An SDK range or deployment target HCG cannot read is reported as **not verified** with the reader's own diagnostic (missing file, unreadable, malformed JSON). It is never reported as an incompatibility and never blocks by itself.
+
+### Added
+- **Build-only minimum iOS** (explicit opt-in):
+  - Before it can be accepted, HCG inspects the effect on every target the scheme builds, dependencies and extensions included, and states that the app will no longer install on older iOS versions.
+  - It is applied as one xcodebuild setting (`IPHONEOS_DEPLOYMENT_TARGET=…`). The project's files are never edited.
+  - It is refused when it would lower any target or fall outside either SDK's range, and when a range cannot be read.
+  - It is tied to the scheme, project/workspace, configuration and Xcode it was accepted for, and dropped with a notice when any of them changes.
+  - The same value is used by validation, the command shown, the plan, the pre-build re-inspection, provenance ("Previous build" when it differs) and the artifact checks.
+- Artifact check "Minimum iOS in executable": the app executable's LC_BUILD_VERSION minos, next to MinimumOSVersion.
+- An Xcode switch that finishes after a newer one is discarded.
+- UI driver: `--deployment-workflow [--build]` and `--raise-xcode-minimum` (test-only). CI job `hcg-nexus-deployment` makes a real Simulator build and an unsigned archive with the override and checks them with plutil/vtool. 13 new unit tests.
+
 ## [Unreleased] — Mobile Build Studio: scheme workflow (HCG Sentinel)
 
 ### Changed

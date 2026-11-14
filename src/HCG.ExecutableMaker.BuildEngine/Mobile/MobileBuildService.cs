@@ -176,6 +176,17 @@ public sealed class MobileBuildService(
                 var option = MobileCapabilities.Evaluate(analysis, report, options).FirstOrDefault(x => x.Output == options.Output)
                              ?? throw new BuildValidationException($"{options.Output.DisplayName()} does not apply to this project.");
                 if (!option.IsAvailable) throw new BuildValidationException($"{options.Output.DisplayName()} is not available: {option.Reason}");
+                if (options.DeploymentTargetOverride is { } raised && analysis.Ios is { } overrideIos)
+                {
+                    // Re-inspected now, with the toolchain this build uses: the same plan the user accepted, or the build stops.
+                    var plan = IosDeploymentOverride.Inspect(overrideIos, options.Scheme, options.Variant, report.Xcode, raised);
+                    if (!plan.Supported) throw new BuildValidationException($"The build-only minimum iOS {raised} cannot be applied: {string.Join(" ", plan.Blockers)}");
+                    Log(BuildLogKind.Warning, $"Build-only override accepted by the user: {plan.BuildSetting}. {plan.Consequence}");
+                    Log(BuildLogKind.Info, plan.Scope);
+                    foreach (var e in plan.Effects)
+                        Log(BuildLogKind.Info, $"  {e.Target} ({e.Kind}{(e.IsDependency ? ", dependency" : "")}): iOS {e.From} → iOS {e.To} ({e.Change})");
+                    foreach (var w in plan.Warnings) Log(BuildLogKind.Warning, w);
+                }
             }
             else if (options.Output != MobileOutput.AndroidAabToApk)
                 throw new BuildValidationException("Only AAB → APK can start from an existing artifact.");
@@ -298,7 +309,10 @@ public sealed class MobileBuildService(
                     var configuration = options.Variant ?? IosSchemeCompatibility.DefaultConfiguration(builtIos, scheme, simulator);
                     var appTarget = IosSchemeCompatibility.TargetsOf(builtIos, scheme, options.Scheme, configuration, simulator)
                         .Select(t => builtIos.Targets.FirstOrDefault(x => x.Name == t.Target)).FirstOrDefault(t => t?.IsApplication == true);
-                    checks.AddRange(IosArtifactExpectations.Check(artifactReport, appTarget?.SettingsFor(configuration, IosSchemeCompatibility.SdkFor(simulator)), simulator, report.Host.Architecture));
+                    var expected = appTarget?.SettingsFor(configuration, IosSchemeCompatibility.SdkFor(simulator));
+                    // With a build-only minimum iOS, the artifact must carry that value (Info.plist and the executable's LC_BUILD_VERSION).
+                    if (options.DeploymentTargetOverride is { } raisedTo && expected is not null) expected = expected with { DeploymentTarget = raisedTo, DeploymentTargetSource = "build-only override" };
+                    checks.AddRange(IosArtifactExpectations.Check(artifactReport, expected, simulator, report.Host.Architecture, options.DeploymentTargetOverride));
                 }
                 string sha;
                 long size;

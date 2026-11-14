@@ -44,6 +44,8 @@ public sealed record MobileArtifactReport
     public string? VersionCode { get; init; }
     /// <summary>Android minSdk or iOS MinimumOSVersion.</summary>
     public string? MinimumOs { get; init; }
+    /// <summary>iOS: the minimum OS of each slice of the app's executable (LC_BUILD_VERSION / LC_VERSION_MIN_IPHONEOS); empty when not read.</summary>
+    public IReadOnlyList<string> BinaryMinimumOs { get; init; } = [];
     public string? TargetSdk { get; init; }
     public IReadOnlyList<string> Architectures { get; init; } = [];
     public MobileSigningState Signing { get; init; }
@@ -301,7 +303,13 @@ public static class MobileArtifactInspector
         var hasCodeResources = File.Exists(System.IO.Path.Combine(path, "_CodeSignature", "CodeResources"));
         var profilePath = System.IO.Path.Combine(path, "embedded.mobileprovision");
         var profile = ParseProvisioningProfile(File.Exists(profilePath) ? File.ReadAllBytes(profilePath) : null);
-        return IosReport(MobileArtifactKind.IosApp, path, DirectorySize(path), plist, archs, hasCodeResources, profile, checks);
+        IReadOnlyList<string> minos = [];
+        if (exePath is not null && File.Exists(exePath))
+        {
+            try { minos = HCG.ExecutableMaker.Packaging.Verification.AppleMachO.Read(exePath).Select(sl => sl.MinimumOS).OfType<string>().ToList(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or EndOfStreamException) { }
+        }
+        return IosReport(MobileArtifactKind.IosApp, path, DirectorySize(path), plist, archs, hasCodeResources, profile, checks) with { BinaryMinimumOs = minos };
     }
 
     public sealed record ProvisioningProfile(string? Name, string? TeamName, string? TeamId, DateTime? Expiration, bool HasDevices, bool AllDevices, bool GetTaskAllow);

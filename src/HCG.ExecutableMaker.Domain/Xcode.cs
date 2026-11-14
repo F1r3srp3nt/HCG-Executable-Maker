@@ -7,6 +7,8 @@ public sealed record XcodeInstallation(string AppPath, string DeveloperDirectory
     public IosDeploymentRange? IosRange { get; init; }
     /// <summary>Deployment range of this Xcode's iPhoneSimulator SDK (SDKSettings.json).</summary>
     public IosDeploymentRange? SimulatorRange { get; init; }
+    /// <summary>Why <see cref="IosRange"/> / <see cref="SimulatorRange"/> is null (the reader's own diagnostic), keyed by SDK.</summary>
+    public IReadOnlyDictionary<string, string> RangeDiagnostics { get; init; } = new Dictionary<string, string>();
     public string Display => $"Xcode {Version ?? "?"}{(BuildVersion is null ? "" : $" ({BuildVersion})")} — {AppPath}";
 }
 
@@ -68,5 +70,10 @@ public sealed record XcodeStatus
     public IosDeploymentRange? IosSimulatorDeploymentRange { get; init; }
     /// <summary>The range for an SDK ("iphoneos" or "iphonesimulator").</summary>
     public IosDeploymentRange? RangeFor(string sdk) => sdk == "iphonesimulator" ? IosSimulatorDeploymentRange : IosDeploymentRange;
+    /// <summary>
+    /// Why the range of an SDK could not be read (file missing, unreadable, malformed JSON …), as the reader reported it.
+    /// An unreadable range is an inspection failure, never a confirmed incompatibility.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RangeDiagnostics { get; init; } = new Dictionary<string, string>();
     public bool IsCommandLineToolsActive => ActiveDeveloperDirectory?.Contains("CommandLineTools", StringComparison.Ordinal) == true;
 }

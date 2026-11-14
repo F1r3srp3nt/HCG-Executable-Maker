@@ -18,7 +18,9 @@ public static class XcodePlanner
     /// runs (<see cref="Plan"/>) and what Mobile Build Studio shows before building (<see cref="Preview"/>), so the two
     /// cannot disagree. Unset choices fall back to the scheme's own (Launch configuration for Simulator, Archive for device).
     /// </summary>
-    public sealed record Invocation(string Flag, string ContainerPath, string Scheme, string Configuration, IReadOnlyList<string> Destination, string Action);
+    /// <param name="BuildSettings">Build settings passed on the command line, e.g. a build-only IPHONEOS_DEPLOYMENT_TARGET=15.0 the user accepted.</param>
+    public sealed record Invocation(string Flag, string ContainerPath, string Scheme, string Configuration, IReadOnlyList<string> Destination, string Action,
+        IReadOnlyList<string> BuildSettings);
 
     public static Invocation Resolve(MobileBuildOptions o, IosProjectInfo ios)
     {
@@ -34,7 +36,15 @@ public static class XcodePlanner
             ios, HCG.ExecutableMaker.ProjectInspection.Mobile.IosSchemeCompatibility.FindScheme(ios, scheme), simulator);
         MobileArgs.RequireToken(configuration, "configuration", out configuration);
         IReadOnlyList<string> destination = simulator ? ["-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator"] : ["-destination", "generic/platform=iOS"];
-        return new Invocation(flag, rel, scheme, configuration, destination, simulator ? "build" : "archive");
+        // A minimum iOS raised for this build only: one command-line build setting, so the project's files stay untouched.
+        var settings = new List<string>();
+        if (o.DeploymentTargetOverride is { } dt)
+        {
+            if (!HCG.ExecutableMaker.ProjectInspection.Mobile.IosDeploymentOverride.IsValidValue(dt))
+                throw new BuildValidationException($"“{dt}” is not an iOS version; the build-only minimum iOS must look like 15.0.");
+            settings.Add($"{HCG.ExecutableMaker.ProjectInspection.Mobile.IosDeploymentOverride.Setting}={dt}");
+        }
+        return new Invocation(flag, rel, scheme, configuration, destination, simulator ? "build" : "archive", settings);
     }
 
     /// <summary>The xcodebuild command as it will run (paths relative to the project; HCG's work folders abbreviated).</summary>
@@ -42,7 +52,8 @@ public static class XcodePlanner
     {
         var i = Resolve(o, ios);
         string Q(string s) => s.Contains(' ') ? "\"" + s + "\"" : s;
-        return $"xcodebuild {i.Flag} {Q(i.ContainerPath)} -scheme {Q(i.Scheme)} -configuration {Q(i.Configuration)} {string.Join(' ', i.Destination.Select(Q))} … {i.Action}"
+        return $"xcodebuild {i.Flag} {Q(i.ContainerPath)} -scheme {Q(i.Scheme)} -configuration {Q(i.Configuration)} {string.Join(' ', i.Destination.Select(Q))}"
+               + string.Concat(i.BuildSettings.Select(b => " " + Q(b))) + $" … {i.Action}"
                + (o.Output == MobileOutput.IosIpa ? " → xcodebuild -exportArchive" : "");
     }
 
@@ -76,12 +87,14 @@ public static class XcodePlanner
         {
             case MobileOutput.IosSimulatorApp:
             {
-                var args = new List<string>(common.Concat(invocation.Destination)) { "-resultBundlePath", ResultBundle(input, c.Scheme, "simulator"), "COMPILER_INDEX_STORE_ENABLE=NO", "build" };
+                var args = new List<string>(common.Concat(invocation.Destination)) { "-resultBundlePath", ResultBundle(input, c.Scheme, "simulator"), "COMPILER_INDEX_STORE_ENABLE=NO" };
+                args.AddRange(invocation.BuildSettings);
+                args.Add("build");
                 var products = Path.Combine(derived, "Build", "Products", configuration + "-iphonesimulator");
                 return new MobilePlan([Step(input, BuildStage.Compiling, $"xcodebuild build ({c.Scheme}, Simulator)", args)],
                     [new OutputRule(PackagingFormat.IosSimulatorApp, products, "*.app", IsDirectory: true, Recursive: false)])
                 {
-                    Notes = ["Simulator builds run only in the iOS Simulator. They are not installable on devices and not distributable."],
+                    Notes = ["Simulator builds run only in the iOS Simulator. They are not installable on devices and not distributable.", .. OverrideNotes(o)],
                 };
             }
             case MobileOutput.IosArchive:
@@ -89,8 +102,10 @@ public static class XcodePlanner
             {
                 var archive = ArchivePath(input, c.Scheme);
                 var args = new List<string>(common.Concat(invocation.Destination)) { "-archivePath", archive, "-resultBundlePath", ResultBundle(input, c.Scheme, "archive"), "COMPILER_INDEX_STORE_ENABLE=NO" };
+                args.AddRange(invocation.BuildSettings);
                 var notes = new List<string>();
                 args.AddRange(SigningArguments(o, notes));
+                notes.AddRange(OverrideNotes(o));
                 args.Add("archive");
                 var outputs = o.Output == MobileOutput.IosArchive
                     ? new List<OutputRule> { new(PackagingFormat.IosArchive, input.WorkDirectory, c.Scheme + ".xcarchive", IsDirectory: true, Recursive: false) }
@@ -101,6 +116,10 @@ public static class XcodePlanner
                 throw new BuildValidationException($"{o.Output.DisplayName()} is not an Xcode output.");
         }
     }
+
+    private static IEnumerable<string> OverrideNotes(MobileBuildOptions o) => o.DeploymentTargetOverride is { } dt
+        ? [$"Minimum iOS raised to {dt} for this build only ({HCG.ExecutableMaker.ProjectInspection.Mobile.IosDeploymentOverride.Setting}={dt} on the xcodebuild command line, accepted by the user). The project's files are unchanged; the app will not install on iOS versions earlier than {dt}."]
+        : [];
 
     /// <summary>Build-setting overrides for the chosen signing mode. Never invents identities or profiles.</summary>
     internal static List<string> SigningArguments(MobileBuildOptions o, List<string> notes)

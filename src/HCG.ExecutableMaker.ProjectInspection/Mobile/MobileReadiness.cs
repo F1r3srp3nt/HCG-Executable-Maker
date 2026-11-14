@@ -236,11 +236,12 @@ public static class MobileReadiness
     /// </summary>
     internal static void AddDeploymentRange(List<ReadinessItem> items, IosProjectInfo ios, MobileBuildOptions? o, XcodeStatus x, bool simulator)
     {
-        var c = IosSchemeCompatibility.Evaluate(ios, o?.Scheme, o?.Variant, simulator, x);
+        var c = IosSchemeCompatibility.Evaluate(ios, o?.Scheme, o?.Variant, simulator, x, deploymentOverride: o?.DeploymentTargetOverride);
         items.Add(c.Fit switch
         {
             IosToolchainFit.Compatible => new("Deployment target", ReadinessState.Ready, true, c.Detail),
             IosToolchainFit.Incompatible => new("Deployment target", ReadinessState.IncompatibleVersion, true, c.Detail, c.Fix),
+            // An SDK range or deployment target HCG could not read: a warning with the reader's own diagnostic, not a blocker.
             IosToolchainFit.NotVerifiable => new("Deployment target", ReadinessState.NotVerifiable, false, c.Detail),
             _ => new("Deployment target", ReadinessState.NotVerifiable, false, "Checked once Xcode is selected: " + c.Detail),
         });

@@ -234,7 +234,9 @@ public sealed class SchemeSelectionTests : IDisposable
     {
         var ios = Sentinel();
         var summary = IosBuildSelection.Summarize(ios, "HCGSentinel", null, Xcode());
-        Assert.Equal("HCGSentinel targets iOS 14.7; Xcode 27.0 builds iOS 15.0 and later (device and Simulator).", summary.Problem);
+        Assert.Equal("Project minimum: iOS 14.7. Selected toolchain minimum: iOS 15.0 (Xcode 27.0 · device and Simulator SDKs).", summary.Problem);
+        Assert.Equal("14.7", summary.ProjectMinimum);
+        Assert.Equal("15.0", summary.ToolchainMinimum);
         Assert.Equal(2, summary.Lines.Count);
         Assert.StartsWith("Device · iPhoneOS 27.0 · Release", summary.Lines[0].Label);
         Assert.StartsWith("Simulator · iPhoneSimulator 27.0 · Debug", summary.Lines[1].Label);
@@ -259,7 +261,7 @@ public sealed class SchemeSelectionTests : IDisposable
     public void Device_and_simulator_are_summarised_separately()
     {
         var summary = IosBuildSelection.Summarize(Sentinel(), "HCGSentinel", null, Xcode(deviceMin: "15.0", simulatorMin: "14.0"));
-        Assert.EndsWith("(device).", summary.Problem);
+        Assert.EndsWith("(Xcode 27.0 · device SDK).", summary.Problem);
         Assert.False(summary.DeviceFits);
         Assert.True(summary.SimulatorFits);
         Assert.Equal("HCGSentinelModern", summary.Alternative);
@@ -447,7 +449,9 @@ public sealed class SchemeSelectionTests : IDisposable
         var expected = new IosResolvedSettings { Configuration = "Release", Sdk = "iphoneos", DeploymentTarget = "15.0", BundleIdentifier = "com.hakmicapitalgroup.hcgsentinel", MarketingVersion = "1.4", BuildVersion = "12" };
         var good = new MobileArtifactReport { Kind = MobileArtifactKind.Ipa, Path = "x.ipa", PackageId = "com.hakmicapitalgroup.hcgsentinel", VersionName = "1.4", VersionCode = "12", MinimumOs = "15.0", Architectures = ["arm64"], Platform = "iphoneos" };
         var checks = IosArtifactExpectations.Check(good, expected, simulator: false, TargetArchitecture.Arm64);
-        Assert.All(checks.Where(c => c.Name != "Installation and runtime"), c => Assert.Equal(VerificationStatus.Passed, c.Status));
+        Assert.All(checks.Where(c => c.Name is not ("Installation and runtime" or "Minimum iOS in executable")), c => Assert.Equal(VerificationStatus.Passed, c.Status));
+        // The executable inside an .ipa is not read (no LC_BUILD_VERSION): said so, never a guessed pass.
+        Assert.Equal(VerificationStatus.NotVerifiable, checks.Single(c => c.Name == "Minimum iOS in executable").Status);
         Assert.Equal(VerificationStatus.NotVerifiable, checks.Single(c => c.Name == "Installation and runtime").Status);
 
         // An IPA left over from the legacy scheme (iOS 14.7) is not accepted as the modern scheme's output.

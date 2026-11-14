@@ -67,12 +67,14 @@ public static class XcodeDiscovery
         var version = ReadPlist(Path.Combine(appPath, "Contents", "version.plist"));
         // Xcode's Info.plist is a binary plist (not read here); version.plist is XML and carries the same version.
         // Each installation's own SDK ranges, read from disk: they name the Xcodes a deployment target actually needs.
+        var ranges = ReadRanges(dev);
         return new XcodeInstallation(appPath, dev,
             plist.GetValueOrDefault("CFBundleShortVersionString") ?? version.GetValueOrDefault("CFBundleShortVersionString"),
             version.GetValueOrDefault("ProductBuildVersion"))
         {
-            IosRange = ReadIosDeploymentRange(dev),
-            SimulatorRange = ReadIosSimulatorDeploymentRange(dev),
+            IosRange = ranges.Device,
+            SimulatorRange = ranges.Simulator,
+            RangeDiagnostics = ranges.Diagnostics,
         };
     }
 
@@ -114,31 +116,64 @@ public static class XcodeDiscovery
     public static IosDeploymentRange? ReadIosSimulatorDeploymentRange(string? developerDirectory) => ReadDeploymentRange(developerDirectory, "iphonesimulator");
 
     /// <summary>Reads the deployment range of an SDK ("iphoneos" or "iphonesimulator") from its SDKSettings.json. Nothing is run.</summary>
-    public static IosDeploymentRange? ReadDeploymentRange(string? developerDirectory, string sdk)
+    public static IosDeploymentRange? ReadDeploymentRange(string? developerDirectory, string sdk) => ReadDeploymentRange(developerDirectory, sdk, out _);
+
+    /// <summary>
+    /// As <see cref="ReadDeploymentRange(string?, string)"/>, and when the range cannot be read, why: the SDK folder or
+    /// SDKSettings.json is missing, the file could not be read, or it has no SupportedTargets entry for the SDK. That is an
+    /// inspection failure, reported as such — never as an incompatibility.
+    /// </summary>
+    public static IosDeploymentRange? ReadDeploymentRange(string? developerDirectory, string sdk, out string? diagnostic)
     {
-        if (developerDirectory is null) return null;
+        diagnostic = null;
+        if (developerDirectory is null) { diagnostic = "no developer directory is selected"; return null; }
         var platform = sdk == "iphonesimulator" ? "iPhoneSimulator" : "iPhoneOS";
         var sdks = Path.Combine(developerDirectory, "Platforms", platform + ".platform", "Developer", "SDKs");
+        if (!Directory.Exists(sdks)) { diagnostic = $"{sdks} does not exist (the {platform} platform is not installed in this Xcode)"; return null; }
         var settings = new[] { Path.Combine(sdks, platform + ".sdk", "SDKSettings.json") }
-            .Concat(Directory.Exists(sdks) ? Directory.GetDirectories(sdks, platform + "*.sdk").Select(d => Path.Combine(d, "SDKSettings.json")) : [])
+            .Concat(Directory.GetDirectories(sdks, platform + "*.sdk").Select(d => Path.Combine(d, "SDKSettings.json")))
             .FirstOrDefault(File.Exists);
-        try { return settings is null ? null : ParseIosDeploymentRange(File.ReadAllText(settings), sdk); }
-        catch (IOException) { return null; }
+        if (settings is null) { diagnostic = $"no {platform}*.sdk/SDKSettings.json in {sdks}"; return null; }
+        string json;
+        try { json = File.ReadAllText(settings); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { diagnostic = $"{settings} could not be read: {ex.Message}"; return null; }
+        var range = ParseIosDeploymentRange(json, sdk, out var parseError);
+        if (range is null) diagnostic = $"{settings}: {parseError}";
+        return range;
     }
 
-    public static IosDeploymentRange? ParseIosDeploymentRange(string json, string sdk = "iphoneos")
+    public static IosDeploymentRange? ParseIosDeploymentRange(string json, string sdk = "iphoneos") => ParseIosDeploymentRange(json, sdk, out _);
+
+    public static IosDeploymentRange? ParseIosDeploymentRange(string json, string sdk, out string? error)
     {
+        error = null;
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (!root.TryGetProperty("SupportedTargets", out var targets) || !targets.TryGetProperty(sdk, out var ios)) return null;
+            if (!root.TryGetProperty("SupportedTargets", out var targets) || !targets.TryGetProperty(sdk, out var ios))
+            {
+                error = $"no SupportedTargets.{sdk} entry";
+                return null;
+            }
             string? S(System.Text.Json.JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
             var min = S(ios, "MinimumDeploymentTarget");
             var max = S(ios, "MaximumDeploymentTarget");
+            if (min is null || max is null) error = $"SupportedTargets.{sdk} has no Minimum/MaximumDeploymentTarget";
             return min is null || max is null ? null : new IosDeploymentRange(min, max, S(ios, "RecommendedDeploymentTarget"), S(root, "Version"));
         }
-        catch (System.Text.Json.JsonException) { return null; }
+        catch (System.Text.Json.JsonException ex) { error = "not valid JSON: " + ex.Message; return null; }
+    }
+
+    /// <summary>Both SDK ranges of a developer directory, with the reader's diagnostic for each range it could not read.</summary>
+    public static (IosDeploymentRange? Device, IosDeploymentRange? Simulator, IReadOnlyDictionary<string, string> Diagnostics) ReadRanges(string? developerDirectory)
+    {
+        var diagnostics = new Dictionary<string, string>();
+        var device = ReadDeploymentRange(developerDirectory, "iphoneos", out var d);
+        if (d is not null) diagnostics["iphoneos"] = d;
+        var simulator = ReadDeploymentRange(developerDirectory, "iphonesimulator", out var s);
+        if (s is not null) diagnostics["iphonesimulator"] = s;
+        return (device, simulator, diagnostics);
     }
 
     public static XcodeStatus Diagnose(ProbeResults p)

@@ -40,6 +40,7 @@ public static class MobileBuildState
             Signing = o?.Signing.ToString(),
             ExportMethod = o?.ExportMethod?.ToString(),
             Toolchain = ios && x is { VerifiedVersion: { } v } ? $"Xcode {v} ({x.ActiveDeveloperDirectory})" : null,
+            DeploymentTargetOverride = ios ? o?.DeploymentTargetOverride : null,
         };
     }
 
@@ -142,7 +143,7 @@ public static class SourceRevision
 /// </summary>
 public static class IosArtifactExpectations
 {
-    public static IReadOnlyList<VerificationCheck> Check(MobileArtifactReport report, IosResolvedSettings? expected, bool simulator, TargetArchitecture host)
+    public static IReadOnlyList<VerificationCheck> Check(MobileArtifactReport report, IosResolvedSettings? expected, bool simulator, TargetArchitecture host, string? deploymentOverride = null)
     {
         var checks = new List<VerificationCheck>();
         void Compare(string name, string? actual, string? wanted, string what)
@@ -158,7 +159,20 @@ public static class IosArtifactExpectations
         var minOk = expected?.DeploymentTarget is { } dt && report.MinimumOs is { } mo && IosDeploymentRange.Parse(mo) == IosDeploymentRange.Parse(dt);
         if (expected?.DeploymentTarget is null) checks.Add(new("Minimum iOS (matches build)", VerificationStatus.NotVerifiable, $"MinimumOSVersion {report.MinimumOs ?? "—"}; the deployment target was not resolved statically."));
         else checks.Add(new("Minimum iOS (matches build)", minOk ? VerificationStatus.Passed : VerificationStatus.Failed,
-            minOk ? $"MinimumOSVersion {report.MinimumOs} = the deployment target {expected.DeploymentTarget}." : $"MinimumOSVersion {report.MinimumOs ?? "missing"}, but the deployment target is {expected.DeploymentTarget}."));
+            minOk ? $"MinimumOSVersion {report.MinimumOs} = the {(deploymentOverride is null ? "deployment target" : "build-only minimum iOS")} {expected.DeploymentTarget}."
+                  : $"MinimumOSVersion {report.MinimumOs ?? "missing"}, but the {(deploymentOverride is null ? "deployment target" : "build-only minimum iOS")} is {expected.DeploymentTarget}."));
+        // The executable's own load command (LC_BUILD_VERSION minos) is what the device's loader enforces.
+        if (expected?.DeploymentTarget is { } wantedMin)
+        {
+            if (report.BinaryMinimumOs.Count == 0)
+                checks.Add(new("Minimum iOS in executable", VerificationStatus.NotVerifiable, "The executable's LC_BUILD_VERSION was not read" + (report.Kind == MobileArtifactKind.Ipa ? " (not read inside an .ipa)." : ".")));
+            else
+            {
+                var all = report.BinaryMinimumOs.All(m => IosDeploymentRange.Parse(m) == IosDeploymentRange.Parse(wantedMin));
+                checks.Add(new("Minimum iOS in executable", all ? VerificationStatus.Passed : VerificationStatus.Failed,
+                    $"LC_BUILD_VERSION minos {string.Join(", ", report.BinaryMinimumOs.Distinct())}{(all ? " = " : ", expected ")}{wantedMin}."));
+            }
+        }
         var wantedPlatform = simulator ? "iphonesimulator" : "iphoneos";
         checks.Add(new("Platform (matches build)", report.Platform == wantedPlatform ? VerificationStatus.Passed : report.Platform is null ? VerificationStatus.NotVerifiable : VerificationStatus.Failed,
             $"Built for {report.Platform ?? "an unknown platform"}; the output requires {wantedPlatform}."));

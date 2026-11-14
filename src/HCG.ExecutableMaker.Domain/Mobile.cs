@@ -293,6 +293,12 @@ public sealed record MobileBuildOptions
     public string? InputArtifact { get; init; }
     /// <summary>.NET iOS: the code-signing identity (certificate name, e.g. "Apple Distribution: … (TEAMID)") for CodesignKey. Not a secret.</summary>
     public string? SigningIdentity { get; init; }
+    /// <summary>
+    /// Xcode projects: a minimum iOS version the user explicitly accepted for THIS build only (e.g. "15.0" when the selected
+    /// Xcode no longer accepts the project's iOS 14.0). Passed to xcodebuild as IPHONEOS_DEPLOYMENT_TARGET=…; the project's
+    /// files are never changed. Null = the project's own deployment targets.
+    /// </summary>
+    public string? DeploymentTargetOverride { get; init; }
 }
 
 public static class MobileNames
@@ -356,5 +362,10 @@ public sealed record MobileSelection
     public string? Container { get; init; }
     public string? Scheme { get; init; }
     public string? Configuration { get; init; }
+    /// <summary>
+    /// What the user builds when the folder holds both an Xcode app and a Theos package: "xcode-ipa" or "theos-deb"
+    /// (<c>BuildRoutes</c>). Null = the Xcode app. Never switched without the user.
+    /// </summary>
+    public string? BuildTarget { get; init; }
     public DateTimeOffset SavedAt { get; init; }
 }

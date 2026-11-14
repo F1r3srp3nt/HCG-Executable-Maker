@@ -45,6 +45,7 @@ public static class MobileCapabilities
             var readiness = MobileReadiness.Evaluate(mobile, o, new MobileBuildOptions
             {
                 Framework = mobile.Framework, Output = o, Signing = signing, Scheme = context?.Scheme, Container = context?.Container,
+                DeploymentTargetOverride = o.Platform() == TargetPlatform.IOS ? context?.DeploymentTargetOverride : null,
                 Variant = o.Platform() == TargetPlatform.IOS && iosConfiguration is not null ? iosConfiguration : context?.Output == o ? context.Variant : null,
             }, report);
             var reasons = readiness.Blockers.Select(b => b.Detail + (b.Fix is null ? "" : " " + b.Fix)).Concat(extra).ToList();
