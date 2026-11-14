@@ -27,6 +27,9 @@ public static partial class TheosBuildPlanner
         var scheme = o.TheosScheme ?? throw new BuildValidationException("Choose the package configuration (rootless / rootful) the project defines.");
         if (host.Platform is not (TargetPlatform.MacOS or TargetPlatform.Linux)) throw new BuildValidationException("Theos packages are built on macOS or Linux.");
         if (settings.Platform != TargetPlatform.IOS) throw new BuildValidationException("A Theos package targets jailbroken iOS devices; the target platform must be iOS.");
+        // The Theos route and the Xcode (IPA) route of a folder that holds both never mix.
+        if (settings.Mobile is not null || settings.PackagingFormats.Any(f => f != PackagingFormat.JailbreakDeb))
+            throw new BuildValidationException("A Theos build produces a Debian package (.deb) for jailbroken devices only. It never builds or exports an IPA: build the Xcode app on the “iOS app (IPA, Xcode)” route in Mobile Build Studio.");
         if (scheme.SelectorVariable is { } v && (!VariableRegex().IsMatch(v) || scheme.SelectorValue is null || !ValueRegex().IsMatch(scheme.SelectorValue)))
             throw new BuildValidationException($"'{v}={scheme.SelectorValue}' is not a valid make variable assignment.");
         if (scheme.PackageScheme is not ("rootless" or "rootful" or "roothide")) throw new BuildValidationException($"Unknown package scheme '{scheme.PackageScheme}'.");
