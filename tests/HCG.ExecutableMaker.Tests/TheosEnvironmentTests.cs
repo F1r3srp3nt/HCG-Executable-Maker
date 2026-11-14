@@ -15,6 +15,8 @@ namespace HCG.ExecutableMaker.Tests;
 public sealed class TheosEnvironmentTests : IDisposable
 {
     private const string FinderPath = "/usr/bin:/bin:/usr/sbin:/sbin";
+    /// <summary>The host's own Homebrew (e.g. lzma in /opt/homebrew/bin on macOS runners) must not change what these tests expect.</summary>
+    private static readonly IReadOnlyList<string> NoPackageManager = [];
     private readonly TempDir _t = new();
     public void Dispose() => _t.Dispose();
 
@@ -84,7 +86,7 @@ public sealed class TheosEnvironmentTests : IDisposable
     public async Task The_resolved_environment_lets_a_nested_recipe_run_the_detected_ldid_by_name_and_by_TARGET_CODESIGN()
     {
         var (ldid, calls) = FakeLdid();
-        var env = TheosBuildEnvironment.Resolve(Report(ldid), Sanitized())!;
+        var env = TheosBuildEnvironment.Resolve(Report(ldid), Sanitized(), NoPackageManager)!;
         Assert.StartsWith(FinderPath, env.Path);                          // the parent PATH is kept first …
         Assert.EndsWith(":" + Path.GetDirectoryName(ldid), env.Path);     // … and ldid's directory is appended
         Assert.Equal(ldid, env.Environment["TARGET_CODESIGN"]);
@@ -104,7 +106,7 @@ public sealed class TheosEnvironmentTests : IDisposable
     public async Task The_preflight_reports_a_tool_the_child_shell_cannot_find_before_anything_is_built()
     {
         var (ldid, _) = FakeLdid();
-        var env = TheosBuildEnvironment.Resolve(Report(ldid), Sanitized())!;
+        var env = TheosBuildEnvironment.Resolve(Report(ldid), Sanitized(), NoPackageManager)!;
         // The environment without ldid's directory — what the build got before this fix.
         var broken = env with { Environment = new Dictionary<string, string>(env.Environment) { ["PATH"] = FinderPath } };
         var problems = await broken.VerifyInChildShellAsync(new LocalProcessBuildWorker(new ProcessRunner()), CancellationToken.None);
@@ -149,7 +151,7 @@ public sealed class TheosEnvironmentTests : IDisposable
     public void The_build_step_runs_the_detected_make_with_the_resolved_environment()
     {
         var (ldid, _) = FakeLdid();
-        var env = TheosBuildEnvironment.Resolve(Report(ldid, make: "/usr/bin/make"), Sanitized())!;
+        var env = TheosBuildEnvironment.Resolve(Report(ldid, make: "/usr/bin/make"), Sanitized(), NoPackageManager)!;
         _t.Write("p/Makefile", "include $(THEOS)/makefiles/common.mk\n");
         var prepared = new TheosBuildPlanner.Prepared(_t.Path, _t.Combine("p"), _t.Combine("packages"), false);
         var settings = new BuildSettings
