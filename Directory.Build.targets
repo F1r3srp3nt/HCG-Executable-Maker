@@ -2,22 +2,31 @@
   <!--
     Build identity: the git commit (and whether the working tree had uncommitted changes) is embedded in
     HCG.ExecutableMaker.Core so the running app can show exactly which build it is (footer, Settings › About this build,
-    and `HCGExecutableMaker - -version`). HCG_SOURCE_REVISION overrides git (e.g. for builds from a source archive).
+    and `HCGExecutableMaker - -version`). HCG_SOURCE_REVISION, or a hcg-source-revision.txt beside this file, overrides git (builds from a copy or a source archive).
   -->
   <Target Name="HcgEmbedBuildIdentity" BeforeTargets="GetAssemblyAttributes" Condition="'$(MSBuildProjectName)' == 'HCG.ExecutableMaker.Core'">
+    <!-- Order: HCG_SOURCE_REVISION, then hcg-source-revision.txt next to this file (written by tools/self-package into the
+         copy it builds, which has no .git and whose build environment drops HCG_* variables), then git. -->
+    <PropertyGroup>
+      <HcgRevision>$(HCG_SOURCE_REVISION)</HcgRevision>
+      <HcgRevisionFile>$(MSBuildThisFileDirectory)hcg-source-revision.txt</HcgRevisionFile>
+    </PropertyGroup>
+    <ReadLinesFromFile File="$(HcgRevisionFile)" Condition="'$(HcgRevision)' == '' and Exists('$(HcgRevisionFile)')">
+      <Output TaskParameter="Lines" PropertyName="HcgRevision" />
+    </ReadLinesFromFile>
     <Exec Command="git rev-parse --short=12 HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low"
-          WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HCG_SOURCE_REVISION)' == ''">
+          WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HcgRevision)' == ''">
       <Output TaskParameter="ConsoleOutput" PropertyName="HcgCommit" />
       <Output TaskParameter="ExitCode" PropertyName="HcgGitExit" />
     </Exec>
     <Exec Command="git status --porcelain --untracked-files=no" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low"
-          WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' == '0'">
+          WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HcgRevision)' == '' and '$(HcgGitExit)' == '0'">
       <Output TaskParameter="ConsoleOutput" PropertyName="HcgGitStatus" />
     </Exec>
     <PropertyGroup>
-      <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' != ''">$(HCG_SOURCE_REVISION)</HcgCommit>
-      <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' != '0'">unknown</HcgCommit>
-      <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' == '0' and '$(HcgGitStatus)' != ''">$(HcgCommit)+uncommitted</HcgCommit>
+      <HcgCommit Condition="'$(HcgRevision)' != ''">$(HcgRevision)</HcgCommit>
+      <HcgCommit Condition="'$(HcgRevision)' == '' and '$(HcgGitExit)' != '0'">unknown</HcgCommit>
+      <HcgCommit Condition="'$(HcgRevision)' == '' and '$(HcgGitExit)' == '0' and '$(HcgGitStatus)' != ''">$(HcgCommit)+uncommitted</HcgCommit>
     </PropertyGroup>
     <ItemGroup>
       <AssemblyMetadata Include="HcgCommit" Value="$(HcgCommit)" />

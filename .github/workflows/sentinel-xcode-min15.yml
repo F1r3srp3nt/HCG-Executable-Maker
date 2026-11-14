@@ -26,6 +26,8 @@ on:
       - ".github/workflows/sentinel-xcode-min15.yml"
       - "src/**"
       - "tools/ui-driver/**"
+      - "tools/self-package/**"
+      - "Directory.Build.*"
   workflow_dispatch:
 
 permissions:
@@ -192,7 +194,7 @@ jobs:
             for r in after archive legacy ipa; do
               [ -f "$OUT/$r/$r-mobile.json" ] && { echo; echo "**$r** (Maker, this commit)"; echo '```json'; cat "$OUT/$r/$r-mobile.json"; echo '```'; }
             done
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()

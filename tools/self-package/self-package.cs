@@ -75,7 +75,12 @@ var builds = new BuildService(new LocalProcessBuildWorker(runner), toolchains, n
 
 var report = await toolchains.GetAsync();
 Console.WriteLine($"Host: {report.Host.DisplayName} · .NET SDK {report.Find(ToolchainIds.DotNetSdk)?.Version ?? "missing"}");
-var import = await projects.ImportDirectoryAsync(repo, null, CancellationToken.None);
+// The build runs in an imported copy without .git, and the build environment drops HCG_* variables: the revision travels
+// as a file in that copy (read by Directory.Build.targets), so the packaged app shows the commit it was built from.
+var revision = Environment.GetEnvironmentVariable("HCG_SOURCE_REVISION");
+var import = await projects.ImportDirectoryAsync(repo, null, CancellationToken.None,
+    copy => { if (!string.IsNullOrEmpty(revision)) File.WriteAllText(Path.Combine(copy, "hcg-source-revision.txt"), revision); });
+Console.WriteLine($"Source revision: {(string.IsNullOrEmpty(revision) ? "unknown (no git)" : revision)}");
 var analysis = import.Project.Analysis!;
 Console.WriteLine($"Imported {import.FileCount} files. Primary: {analysis.PrimaryProjectPath} ({analysis.ApplicationType}, {analysis.Support})");
 if (analysis.Support != SupportLevel.Supported || analysis.PrimaryProjectPath is null)
