@@ -343,8 +343,9 @@ public sealed class PortingService(IToolchainService toolchains, ProjectService 
     /// <param name="expectText">For apps (not console programs): text the launched screen must show (read through accessibility).</param>
     /// <param name="simulatorUdid">iOS: the Simulator to use, chosen explicitly (null = the first available iPhone).</param>
     /// <param name="progress">Each launch log line as it happens (stages, commands, exit codes).</param>
+    /// <param name="readiness">iOS: the first screen the app must report through its readiness signal (test fixtures).</param>
     public async Task<PortReport> LaunchAsync(PortReport port, bool trustAcknowledged, CancellationToken cancellationToken, string? expectText = null,
-        string? simulatorUdid = null, Action<string>? progress = null)
+        string? simulatorUdid = null, Action<string>? progress = null, DeviceLauncher.ReadinessExpectation? readiness = null)
     {
         if (!trustAcknowledged) throw new InvalidOperationException("Launching runs the ported app. Confirm trust first.");
         var compiled = port.Level(VerificationLevel.Compiled);
@@ -353,7 +354,7 @@ public sealed class PortingService(IToolchainService toolchains, ProjectService 
         var shot = Path.Combine(port.OutputDirectory, ReportFolder, $"launch-{time.GetUtcNow():yyyyMMdd-HHmmss}.png");
         if (port.Assessment.Target == MobileTarget.Ios)
         {
-            var r = await launcher.LaunchIosSimulatorAsync(compiled.Evidence, port.Options.AppId, shot, cancellationToken, simulatorUdid, progress).ConfigureAwait(false);
+            var r = await launcher.LaunchIosSimulatorAsync(compiled.Evidence, port.Options.AppId, shot, cancellationToken, simulatorUdid, progress, readiness: readiness).ConfigureAwait(false);
             SaveLog(port, r.Log);
             return Record(port, new VerificationEntry(r.Level, r.Status, r.Detail, time.GetUtcNow(), r.ScreenshotPath));
         }

@@ -455,6 +455,15 @@ internal static partial class Program
             foreach (var item in e.NewItems?.OfType<LogLineItem>() ?? []) { _lastOutput = item.Text; Console.WriteLine($"  | {item.Time} {item.Text}"); }
         };
         studio.SimulatorUdid = Arg("simulator-udid");
+        // The fixture apps report their first screen through a test-only readiness signal: --expect-ready SCREEN
+        // [--expect-ready-element id=value …]. That signal, not a screenshot, decides whether the launched app is ready.
+        if (Arg("expect-ready") is { } readyScreen)
+        {
+            var elements = _args.Where(x => x.Key.StartsWith("expect-ready-element", StringComparison.Ordinal)).Select(x => x.Value)
+                .ToDictionary(v => v[..v.IndexOf('=')], v => v[(v.IndexOf('=') + 1)..], StringComparer.Ordinal);
+            studio.Readiness = new HCG.ExecutableMaker.Porting.DeviceLauncher.ReadinessExpectation(readyScreen, elements);
+            Log($"Readiness signal expected: screen {readyScreen}{(elements.Count == 0 ? "" : " with " + string.Join(", ", elements.Select(e => $"{e.Key} = \"{e.Value}\"")))}");
+        }
         if (studio.SimulatorUdid is { } udid) Log("Simulator selected explicitly: " + udid);
         var source = _args["source"];
         var isZip = File.Exists(source) && source.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);

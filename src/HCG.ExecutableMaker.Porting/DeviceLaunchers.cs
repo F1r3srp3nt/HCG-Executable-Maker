@@ -13,14 +13,18 @@ public sealed record LaunchResult(VerificationLevel Level, LevelStatus Status, s
 /// </summary>
 public sealed class DeviceLauncher(IProcessRunner runner)
 {
+    /// <summary>Test seam: lets a scripted simctl drive the iOS flow on any host (production: a Mac with /usr/bin/xcrun).</summary>
+    internal Func<bool> IsSimulatorHost { get; init; } = () => OperatingSystem.IsMacOS() && File.Exists("/usr/bin/xcrun");
+
     private async Task<(ProcessResult Result, string Out, string Err)> Run(string exe, IReadOnlyList<string> args, List<string> log, CancellationToken ct, int timeoutSeconds = 120)
         => await Run(exe, args, log, ct, timeoutSeconds, null).ConfigureAwait(false);
 
-    private async Task<(ProcessResult Result, string Out, string Err)> Run(string exe, IReadOnlyList<string> args, List<string> log, CancellationToken ct, int timeoutSeconds, ProgressLog? progress)
+    private async Task<(ProcessResult Result, string Out, string Err)> Run(string exe, IReadOnlyList<string> args, List<string> log, CancellationToken ct, int timeoutSeconds, ProgressLog? progress,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         void Add(string line) { if (progress is not null) progress.Add(line); else log.Add(line); }
         Add($"$ {exe} {string.Join(' ', args.Select(a => a.Contains(' ') ? "\"" + a + "\"" : a))}   [{DateTimeOffset.UtcNow:HH:mm:ss}]");
-        var r = await runner.CaptureAsync(new ProcessSpec { Executable = exe, Arguments = [.. args], Timeout = TimeSpan.FromSeconds(timeoutSeconds) }, ct).ConfigureAwait(false);
+        var r = await runner.CaptureAsync(new ProcessSpec { Executable = exe, Arguments = [.. args], Timeout = TimeSpan.FromSeconds(timeoutSeconds), Environment = environment }, ct).ConfigureAwait(false);
         Add($"  exit {r.Result.ExitCode} after {r.Result.Duration.TotalSeconds:F1} s{(r.Result.TimedOut ? " (timed out)" : r.Result.Cancelled ? " (cancelled)" : "")}" +
             (r.Result.Succeeded ? "" : ": " + (r.StdErr + r.StdOut).Trim().Split('\n').LastOrDefault()));
         return r;
@@ -34,8 +38,8 @@ public sealed class DeviceLauncher(IProcessRunner runner)
         public TimeSpan Boot { get; init; } = TimeSpan.FromMinutes(10);
         public TimeSpan Install { get; init; } = TimeSpan.FromMinutes(5);
         public TimeSpan Launch { get; init; } = TimeSpan.FromMinutes(2);
-        /// <summary>Listed by launchd, the settle time, and the screenshots of the app and of the screen without it.</summary>
-        public TimeSpan Ready { get; init; } = TimeSpan.FromMinutes(4);
+        /// <summary>Listed by launchd, the readiness signal (when expected) and the settle time.</summary>
+        public TimeSpan Ready { get; init; } = TimeSpan.FromMinutes(3);
         /// <summary>How long the app must stay up, with the same process, after launchd first listed it.</summary>
         public TimeSpan Settle { get; init; } = TimeSpan.FromSeconds(5);
     }
@@ -43,28 +47,33 @@ public sealed class DeviceLauncher(IProcessRunner runner)
     /// <summary>
     /// Boot → install → launch → ready, each a timestamped stage with its own budget and exit codes logged.
     /// <para><b>Ready</b> means more than an accepted launch command: the process simctl launched (pid) is listed by the
-    /// Simulator's launchd as the app's UIKit process, the same process is still alive <see cref="SimulatorBudgets.Settle"/>
-    /// later, and the app's screen (below the status bar) differs from the screen left when it is terminated — it drew its
-    /// own UI.</para>
+    /// Simulator's launchd as the app's UIKit process, the app reported its first screen through the readiness signal for
+    /// this launch when one is expected (<paramref name="readiness"/>), and the same process is still alive
+    /// <see cref="SimulatorBudgets.Settle"/> later. Screenshots (the app's screen against the screen without it) are recorded
+    /// as diagnostics only; a screenshot that could not be captured is reported as a capture failure.</para>
     /// </summary>
     /// <param name="simulatorUdid">
     /// The Simulator to use, chosen explicitly (e.g. a device created for one CI job). Null = the first available iPhone,
     /// preferring one already booted.
     /// </param>
     /// <param name="progress">Each log line as it happens (stage starts/ends, commands, exit codes).</param>
+    /// <param name="readiness">
+    /// When set, the app must report its first screen through the readiness signal (see <see cref="ReadySignal"/>) for this
+    /// very launch — the decisive proof that it is ready. Without it, readiness is reported as not verified by the app.
+    /// </param>
     public async Task<LaunchResult> LaunchIosSimulatorAsync(string appBundle, string bundleId, string screenshotPath, CancellationToken ct,
-        string? simulatorUdid = null, Action<string>? progress = null, SimulatorBudgets? budgets = null)
+        string? simulatorUdid = null, Action<string>? progress = null, SimulatorBudgets? budgets = null, ReadinessExpectation? readiness = null)
     {
         budgets ??= new SimulatorBudgets();
         var log = new ProgressLog(progress);
         const string xcrun = "/usr/bin/xcrun";
         LaunchResult Fail(string why) { log.Add("RESULT failed: " + why); return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Failed, why, null, log.Lines); }
-        if (!OperatingSystem.IsMacOS() || !File.Exists(xcrun))
+        if (!IsSimulatorHost())
             return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.NotPossibleHere, "The iOS Simulator runs only on a Mac with Xcode.", null, log.Lines);
         if (!Directory.Exists(appBundle)) return Fail($"The Simulator app bundle was not found: {appBundle}");
 
-        Task<(ProcessResult Result, string Out, string Err)> Sim(IReadOnlyList<string> args, CancellationToken token, TimeSpan timeout) =>
-            Run(xcrun, ["simctl", .. args], log.Lines, token, (int)Math.Ceiling(timeout.TotalSeconds), log);
+        Task<(ProcessResult Result, string Out, string Err)> Sim(IReadOnlyList<string> args, CancellationToken token, TimeSpan timeout, IReadOnlyDictionary<string, string>? env = null) =>
+            Run(xcrun, ["simctl", .. args], log.Lines, token, (int)Math.Ceiling(timeout.TotalSeconds), log, env);
 
         var list = await Sim(["list", "devices", "available", "--json"], ct, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
         if (!list.Result.Succeeded) return Fail("simctl could not list simulators. Install an iOS Simulator runtime in Xcode › Settings › Components.");
@@ -97,10 +106,15 @@ public sealed class DeviceLauncher(IProcessRunner runner)
         if (installError is not null) return Fail(installError);
 
         // ── launch ──
+        // A nonce for this launch: the app's readiness signal must carry it (simctl passes SIMCTL_CHILD_* variables to the app).
+        var nonce = Guid.NewGuid().ToString("N");
+        var launchEnv = System.Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
+            .ToDictionary(e => (string)e.Key, e => (string?)e.Value ?? "", StringComparer.Ordinal);
+        launchEnv["SIMCTL_CHILD_" + ReadySignal.Variable] = nonce;
         string launchOut = "";
         var launchError = await Stage("launch", budgets.Launch, async token =>
         {
-            var l = await Sim(["launch", "--terminate-running-process", udid, bundleId], token, budgets.Launch).ConfigureAwait(false);
+            var l = await Sim(["launch", "--terminate-running-process", udid, bundleId], token, budgets.Launch, launchEnv).ConfigureAwait(false);
             launchOut = l.Out.Trim();
             return l.Result.Succeeded ? null : "simctl launch failed: " + FirstLine(l.Err + l.Out);
         }).ConfigureAwait(false);
@@ -110,62 +124,102 @@ public sealed class DeviceLauncher(IProcessRunner runner)
         if (pid is null) return Fail($"simctl launch did not report a process id for {bundleId} (\"{launchOut}\").");
 
         // ── ready ──
-        // 1. launchd lists the process simctl launched as the app's UIKit process (not a relaunch, not exited);
-        // 2. it is still the same process after the settle time;
-        // 3. the app's screen differs from the screen it leaves behind when it is terminated: the app drew its own UI.
-        // Both screenshots are taken once the app is up (a screenshot right after install stalled on a fresh Simulator).
-        double changed = 0;
-        string? screenshot = null;
-        var dir = Path.GetDirectoryName(screenshotPath)!;
-        var appBmp = Path.Combine(dir, Path.GetFileNameWithoutExtension(screenshotPath) + "-app.bmp");
-        var homeBmp = Path.Combine(dir, Path.GetFileNameWithoutExtension(screenshotPath) + "-home.bmp");
-        Directory.CreateDirectory(dir);
-        async Task<bool> Screenshot(string path, string type, CancellationToken token, int attempts)
-        {
-            for (var attempt = 1; attempt <= attempts; attempt++)
-            {
-                var r = await Sim(["io", udid, "screenshot", "--type=" + type, path], token, TimeSpan.FromSeconds(60)).ConfigureAwait(false);
-                if (r.Result.Succeeded && File.Exists(path)) return true;
-                if (attempt < attempts) log.Add($"  screenshot attempt {attempt} of {attempts} did not complete; trying once more");
-            }
-            return false;
-        }
+        // Decisive: (1) launchd lists the launched pid as the app's UIKit process; (2) when a readiness signal is expected,
+        // the app reported its first screen for THIS launch (nonce) with the expected screen and element values; (3) the
+        // same process is still alive after the settle time. Screenshots are diagnostics only (a loading or error screen also
+        // differs from the Home Screen), and a screenshot that could not be captured is reported as such.
+        ReadySignal? signal = null;
+        string? container = null;
         var readyError = await Stage("ready", budgets.Ready, async token =>
         {
             while (true)
             {
                 token.ThrowIfCancellationRequested();
                 var services = await Sim(["spawn", udid, "launchctl", "list"], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-                if (!services.Result.Succeeded) { await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false); continue; }
-                var current = AppPid(services.Out, bundleId);
-                if (current is not null && current != pid) return $"the app was relaunched (pid {pid} → {current}): it crashed and was started again";
-                if (current is null && ExitedWithStatus(services.Out, bundleId) is { } status) return $"the app exited (launchd status {status}) before it was ready";
-                if (current == pid) { log.Add($"  ready check: pid {pid} listed by launchd as UIKitApplication:{bundleId}"); break; }
-                log.Add($"  ready check: UIKitApplication:{bundleId} with pid {pid} not listed yet");
+                if (services.Result.Succeeded)
+                {
+                    var current = AppPid(services.Out, bundleId);
+                    if (current is not null && current != pid) return $"the app was relaunched (pid {pid} → {current}): it crashed and was started again";
+                    if (current is null && ExitedWithStatus(services.Out, bundleId) is { } status) return $"the app exited (launchd status {status}) before it was ready";
+                    if (current == pid)
+                    {
+                        container ??= await AppDataContainer(token).ConfigureAwait(false);
+                        signal = container is null ? null : ReadySignal.Read(Path.Combine(container, "Documents", ReadySignal.FileName), nonce);
+                        if (signal is not null) log.Add($"  ready check: pid {pid} listed; readiness signal for this launch: screen {signal.Screen}, {signal.Describe()}");
+                        else log.Add($"  ready check: pid {pid} listed by launchd as UIKitApplication:{bundleId}; no readiness signal for this launch yet");
+                        if (signal is not null || readiness is null) break;
+                    }
+                    else log.Add($"  ready check: UIKitApplication:{bundleId} with pid {pid} not listed yet");
+                }
                 await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
             }
+            if (readiness is not null && signal!.Mismatch(readiness) is { } mismatch) return "the readiness signal does not match: " + mismatch;
             await Task.Delay(budgets.Settle, token).ConfigureAwait(false);
             var again = await Sim(["spawn", udid, "launchctl", "list"], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             var still = AppPid(again.Out, bundleId);
-            if (still != pid) return $"the app did not stay up: pid {pid} {(still is null ? "is gone" : $"was replaced by {still}")} {budgets.Settle.TotalSeconds:F0} s after it was listed";
+            if (still != pid) return $"the app did not stay up: pid {pid} {(still is null ? "is gone" : $"was replaced by {still}")} {budgets.Settle.TotalSeconds:F0} s after it was ready";
             log.Add($"  ready check: still pid {pid} after {budgets.Settle.TotalSeconds:F0} s");
-            if (await Screenshot(screenshotPath, "png", token, 1).ConfigureAwait(false)) screenshot = screenshotPath;
-            if (!await Screenshot(appBmp, "bmp", token, 2).ConfigureAwait(false)) return "the app's screen could not be captured (simctl io screenshot)";
-            await Sim(["terminate", udid, bundleId], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-            await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
-            if (!await Screenshot(homeBmp, "bmp", token, 2).ConfigureAwait(false)) return "the screen after terminating the app could not be captured (simctl io screenshot)";
-            changed = ScreenDifference(appBmp, homeBmp);
-            log.Add($"  ready check: {changed:P1} of the screen below the status bar differs between the running app and the screen it leaves behind");
-            return changed >= 0.02 ? null : "the app's screen was the same as the screen without it: the app did not draw its own UI";
-        }, timeoutReason: $"the app did not reach a verified ready state within {budgets.Ready.TotalSeconds:F0} s").ConfigureAwait(false);
+            return null;
+        }, timeoutReason: readiness is null
+            ? $"the launched process was not listed by launchd as the app within {budgets.Ready.TotalSeconds:F0} s"
+            : $"the app did not report its first screen ({readiness.Screen}) through the readiness signal within {budgets.Ready.TotalSeconds:F0} s").ConfigureAwait(false);
 
+        // ── diagnostics: screenshots (never decisive) ──
+        string? screenshot = null;
+        var screen = readyError is null ? await CompareWithScreenWithoutApp(ct).ConfigureAwait(false) : "not compared (the app was not ready)";
+        if (readyError is null) log.Add("  diagnostic: " + screen);
         // Leave the Simulator as found: the app this check started is stopped (the Simulator itself belongs to the caller).
         await Sim(["terminate", udid, bundleId], ct, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
-        if (readyError is not null) return Fail(readyError) with { ScreenshotPath = screenshot };
+        if (readyError is not null)
+        {
+            if (await Screenshot(screenshotPath, "png", ct).ConfigureAwait(false) is null) screenshot = screenshotPath;
+            return Fail(readyError) with { ScreenshotPath = screenshot };
+        }
         log.Add("RESULT passed");
+        var readinessText = signal is not null
+            ? $"its first screen ({signal.Screen}: {signal.Describe()}) reported ready for this launch"
+            : "UI readiness not verified by the app (it emits no readiness signal)";
         return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Passed,
-            $"Installed, launched and ready in {device.Value.Name} ({device.Value.Runtime}): process {pid} listed by launchd as the app, the same process " +
-            $"{budgets.Settle.TotalSeconds:F0} s later, and its own screen drawn ({changed:P0} of the screen differs from the screen without the app).", screenshot, log.Lines);
+            $"Installed and launched in {device.Value.Name} ({device.Value.Runtime}): process {pid} listed by launchd as the app, {readinessText}, " +
+            $"still the same process {budgets.Settle.TotalSeconds:F0} s later. Screen (diagnostic): {screen}.", screenshot, log.Lines);
+
+        async Task<string?> AppDataContainer(CancellationToken token)
+        {
+            var r = await Sim(["get_app_container", udid, bundleId, "data"], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            var path = r.Out.Trim();
+            return r.Result.Succeeded && Directory.Exists(path) ? path : null;
+        }
+
+        // A screenshot, or why there is none (simctl failed or timed out, or no file was written). Null = captured.
+        async Task<string?> Screenshot(string path, string type, CancellationToken token)
+        {
+            var r = await Sim(["io", udid, "screenshot", "--type=" + type, path], token, TimeSpan.FromSeconds(60)).ConfigureAwait(false);
+            return r.Result.TimedOut ? $"simctl io screenshot timed out after {r.Result.Duration.TotalSeconds:F0} s"
+                : !r.Result.Succeeded ? $"simctl io screenshot exited with {r.Result.ExitCode}: {FirstLine(r.Err + r.Out)}"
+                : !File.Exists(path) ? "simctl io screenshot wrote no file"
+                : null;
+        }
+
+        // The running app's screen against the screen left when it is terminated (diagnostic; one bounded retry per capture).
+        async Task<string> CompareWithScreenWithoutApp(CancellationToken token)
+        {
+            var dir = Path.GetDirectoryName(screenshotPath)!;
+            Directory.CreateDirectory(dir);
+            var appBmp = Path.Combine(dir, Path.GetFileNameWithoutExtension(screenshotPath) + "-app.bmp");
+            var homeBmp = Path.Combine(dir, Path.GetFileNameWithoutExtension(screenshotPath) + "-home.bmp");
+            if (await Screenshot(screenshotPath, "png", token).ConfigureAwait(false) is null) screenshot = screenshotPath;
+            var appFailure = await Screenshot(appBmp, "bmp", token).ConfigureAwait(false);
+            if (appFailure is not null) appFailure = await Screenshot(appBmp, "bmp", token).ConfigureAwait(false);
+            await Sim(["terminate", udid, bundleId], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+            var homeFailure = await Screenshot(homeBmp, "bmp", token).ConfigureAwait(false);
+            if (homeFailure is not null) homeFailure = await Screenshot(homeBmp, "bmp", token).ConfigureAwait(false);
+            if (appFailure is not null) return "screenshot capture failed for the running app: " + appFailure;
+            if (homeFailure is not null) return "screenshot capture failed for the screen without the app: " + homeFailure;
+            return ScreenDifference(appBmp, homeBmp) is { } d
+                ? $"{d:P1} of the screen below the status bar differs from the screen without the app"
+                : "screenshot capture failed: a captured screenshot could not be read as a BMP of the same size";
+        }
 
         async Task<string?> Stage(string name, TimeSpan budget, Func<CancellationToken, Task<string?>> work, string? timeoutReason = null)
         {
@@ -181,6 +235,50 @@ public sealed class DeviceLauncher(IProcessRunner runner)
             }
             log.Add($"STAGE {name} end {DateTimeOffset.UtcNow:O} {(error is null ? "ok" : "failed")} after {sw.Elapsed.TotalSeconds:F1} s{(error is null ? "" : ": " + error)}");
             return error;
+        }
+    }
+
+    /// <summary>What the launched app must report through the readiness signal: its first screen and, optionally, element values.</summary>
+    public sealed record ReadinessExpectation(string Screen, IReadOnlyDictionary<string, string>? Elements = null);
+
+    /// <summary>
+    /// A test-only readiness signal written by an app HCG launched with HCG_READY_SIGNAL=&lt;nonce&gt;: Documents/hcg-ready.json in
+    /// the app's data container, {"nonce", "screen", "elements": {id: shown value}}, written once its first screen appeared.
+    /// The nonce ties it to one launch (a file left by an earlier launch never counts).
+    /// </summary>
+    public sealed record ReadySignal(string Screen, IReadOnlyDictionary<string, string> Elements)
+    {
+        public const string Variable = "HCG_READY_SIGNAL";
+        public const string FileName = "hcg-ready.json";
+
+        public string Describe() => Elements.Count == 0 ? "no elements" : string.Join(", ", Elements.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => $"{e.Key} = \"{e.Value}\""));
+
+        /// <summary>Why the signal does not satisfy the expectation (null = it does).</summary>
+        public string? Mismatch(ReadinessExpectation expected)
+        {
+            if (Screen != expected.Screen) return $"the app reported screen {Screen}, expected {expected.Screen}";
+            foreach (var (id, value) in expected.Elements ?? new Dictionary<string, string>())
+                if (!Elements.TryGetValue(id, out var shown)) return $"{expected.Screen} reported no element {id}";
+                else if (shown != value) return $"{expected.Screen} shows {id} = \"{shown}\", expected \"{value}\"";
+            return null;
+        }
+
+        /// <summary>The signal at <paramref name="path"/> if it was written for this launch (nonce); null otherwise.</summary>
+        public static ReadySignal? Read(string path, string nonce)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                using var doc = JsonDocument.Parse(File.ReadAllText(path));
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("nonce", out var n) || n.GetString() != nonce) return null;
+                var screen = root.TryGetProperty("screen", out var s) ? s.GetString() ?? "" : "";
+                var elements = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (root.TryGetProperty("elements", out var e) && e.ValueKind == JsonValueKind.Object)
+                    foreach (var p in e.EnumerateObject()) elements[p.Name] = p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.ToString();
+                return new ReadySignal(screen, elements);
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return null; }
         }
     }
 
@@ -234,11 +332,12 @@ public sealed class DeviceLauncher(IProcessRunner runner)
 
     /// <summary>
     /// Fraction of sampled pixels that differ between two Simulator screenshots (BMP), ignoring the status bar (top 12 %,
-    /// its clock changes) and the home indicator (bottom 5 %). 0 when either image cannot be read or the sizes differ.
+    /// its clock changes) and the home indicator (bottom 5 %). Null — never 0 — when either image is missing or unreadable
+    /// or the sizes differ: that is a capture failure, not a measurement.
     /// </summary>
-    internal static double ScreenDifference(string beforeBmp, string afterBmp)
+    internal static double? ScreenDifference(string beforeBmp, string afterBmp)
     {
-        if (ReadBmp(beforeBmp) is not { } a || ReadBmp(afterBmp) is not { } b || a.Width != b.Width || a.Height != b.Height) return 0;
+        if (ReadBmp(beforeBmp) is not { } a || ReadBmp(afterBmp) is not { } b || a.Width != b.Width || a.Height != b.Height) return null;
         int total = 0, differ = 0;
         for (var y = (int)(a.Height * 0.12); y < (int)(a.Height * 0.95); y += 4)
             for (var x = 0; x < a.Width; x += 4)
@@ -248,7 +347,7 @@ public sealed class DeviceLauncher(IProcessRunner runner)
                 var (r2, g2, b2) = b.Pixel(x, y);
                 if (Math.Abs(r1 - r2) + Math.Abs(g1 - g2) + Math.Abs(b1 - b2) > 48) differ++;
             }
-        return total == 0 ? 0 : (double)differ / total;
+        return total == 0 ? null : (double)differ / total;
     }
 
     internal sealed record Bmp(int Width, int Height, int BytesPerPixel, int Stride, bool TopDown, int Offset, byte[] Data)
@@ -264,6 +363,7 @@ public sealed class DeviceLauncher(IProcessRunner runner)
     /// <summary>An uncompressed 24- or 32-bit BMP (what simctl io screenshot --type=bmp writes); null otherwise.</summary>
     internal static Bmp? ReadBmp(string path)
     {
+        if (!File.Exists(path)) return null;
         try
         {
             var d = File.ReadAllBytes(path);

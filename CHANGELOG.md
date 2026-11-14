@@ -12,10 +12,13 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 
 ### Changed
 - **iOS Simulator launch** runs as timed stages (boot, install, launch, ready), each with its own budget, logged as it happens.
-- **"Ready" is verified:**
-  - the process simctl launched is the one launchd lists as the app;
-  - the screen below the status bar changed from what was shown before the launch (the app drew its own UI);
+- **"Ready" is decided by the app, not by a screenshot.** The launched app is ready when:
+  - the process simctl launched is the one launchd lists as the app (not a relaunch, not exited);
+  - when a readiness signal is expected, the app reported its first screen for **this** launch, with the expected screen and element values;
   - the same process is still alive 5 s later.
+- **Readiness signal (test-only).** The HelloMac and TallyPackage fixtures write `Documents/hcg-ready.json` from their first screen's `onAppear`, but only when launched with `HCG_READY_SIGNAL=<nonce>`. HCG passes that nonce through `SIMCTL_CHILD_` and reads the file from the app's data container. The code is part of the fixtures' own source, so it is ported and compiled with the generated app.
+- **Screenshots are diagnostics only.** The running app's screen is compared with the screen it leaves when terminated. A screenshot that is missing, unreadable or timed out is reported as a capture failure, never as "0 % changed".
+- **Apps without a signal** (e.g. the web port) are reported as "launched, UI readiness not verified by the app".
 - **The Simulator can be chosen explicitly** (by UDID). The app is terminated after the check.
 - **The UI driver's porting stages** (assessment, generation, validation, compilation, launch):
   - each runs within its own budget (`--budget-STAGE`);

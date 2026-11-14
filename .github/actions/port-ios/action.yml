@@ -41,6 +41,7 @@ runs:
         --name Tally --bundle-id com.hakmicapital.tally "--usage" "NSMicrophoneUsageDescription=Tally shows whether the microphone may be used for voice notes."
         --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
         --simulator-udid "$HCG_SIM_UDID" --on-stage-timeout tools/ci/diagnose.sh
+        --expect-ready ContentView --expect-ready-element1 "title=Tally" --expect-ready-element2 "total=0"
         --output "$OUT/tally" --screenshots "$OUT/screens" --prefix tally-ios --window-height 3600
 
     - name: macOS Xcode project (HelloMac) → iOS — assess, generate, compile, launch in Simulator
@@ -51,6 +52,7 @@ runs:
         --name "Hello HCG" --bundle-id com.hakmicapital.hellomac
         --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
         --simulator-udid "$HCG_SIM_UDID" --on-stage-timeout tools/ci/diagnose.sh
+        --expect-ready ContentView --expect-ready-element1 "title=Hello from HCG" --expect-ready-element2 "count=0"
         --output "$OUT/hellomac" --screenshots "$OUT/screens" --prefix hellomac-ios --window-height 3600
 
     - name: Web app (WebViteDesktop, Vite + React) → iOS with Capacitor — inspect, generate, validate, compile, launch in Simulator

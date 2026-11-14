@@ -1,3 +1,7 @@
+using IProcessRunner = HCG.ExecutableMaker.Core.IProcessRunner;
+using ProcessSpec = HCG.ExecutableMaker.Core.ProcessSpec;
+using ProcessResult = HCG.ExecutableMaker.Core.ProcessResult;
+using OutputStream = HCG.ExecutableMaker.Core.OutputStream;
 using System.Security.Cryptography;
 using HCG.ExecutableMaker.Domain;
 using HCG.ExecutableMaker.Porting;
@@ -434,6 +438,170 @@ public class PortingTests : IDisposable
         var app = Bmp("app.bmp", (x, y) => y > 30 ? ((byte)250, (byte)250, (byte)250) : ((byte)(x * 5), (byte)30, (byte)(y * 3)), bpp: 24);
         Assert.Equal(0, DeviceLauncher.ScreenDifference(home, clock));
         Assert.True(DeviceLauncher.ScreenDifference(home, app) > 0.5);
-        Assert.Equal(0, DeviceLauncher.ScreenDifference(home, t.Write("not.bmp", "PNG…")));   // unreadable: never "changed"
+        // A missing or unreadable screenshot is a capture failure (null), never a measured "0 % changed".
+        Assert.Null(DeviceLauncher.ScreenDifference(home, t.Write("not.bmp", "PNG…")));
+        Assert.Null(DeviceLauncher.ScreenDifference(t.Combine("never-written.bmp"), home));
+    }
+
+    [Fact]
+    public void The_readiness_signal_counts_only_for_this_launch_and_only_with_the_expected_screen_and_values()
+    {
+        using var t = new TempDir();
+        var path = t.Write("Documents/hcg-ready.json", """{"elements":{"count":"0","title":"Hello from HCG"},"nonce":"abc","screen":"ContentView"}""");
+        var expected = new DeviceLauncher.ReadinessExpectation("ContentView", new Dictionary<string, string> { ["title"] = "Hello from HCG", ["count"] = "0" });
+
+        var signal = DeviceLauncher.ReadySignal.Read(path, "abc")!;
+        Assert.Null(signal.Mismatch(expected));
+        Assert.Equal("count = \"0\", title = \"Hello from HCG\"", signal.Describe());
+        Assert.Null(DeviceLauncher.ReadySignal.Read(path, "an-earlier-launch"));           // another launch's signal never counts
+        Assert.Null(DeviceLauncher.ReadySignal.Read(t.Combine("missing.json"), "abc"));
+        Assert.Null(DeviceLauncher.ReadySignal.Read(t.Write("partial.json", "{\"nonce\":\"abc\""), "abc"));   // half-written
+        Assert.Equal("the app reported screen ErrorView, expected ContentView",
+            (signal with { Screen = "ErrorView" }).Mismatch(expected));
+        Assert.Equal("ContentView shows count = \"Loading…\", expected \"0\"",
+            (signal with { Elements = new Dictionary<string, string> { ["title"] = "Hello from HCG", ["count"] = "Loading…" } }).Mismatch(expected));
+        Assert.Equal("ContentView reported no element count",
+            (signal with { Elements = new Dictionary<string, string> { ["title"] = "Hello from HCG" } }).Mismatch(expected));
+    }
+
+    /// <summary>The fixtures' readiness signal is part of their own source, so it is ported and compiled with the app.</summary>
+    [Theory]
+    [InlineData("HelloMac/HelloMac/ContentView.swift", "\"title\": \"Hello from HCG\", \"count\":")]
+    [InlineData("TallyPackage/Sources/TallyApp/ContentView.swift", "\"title\": \"Tally\", \"total\":")]
+    public void The_fixture_apps_emit_their_readiness_signal_from_their_first_screen(string file, string elements)
+    {
+        var source = File.ReadAllText(Path.Combine(Fixtures.RepoRoot, "tests", "Fixtures", file));
+        Assert.Contains(".onAppear { ReadinessSignal.emit(screen: \"ContentView\", elements: [" + elements, source);
+        Assert.Contains("ProcessInfo.processInfo.environment[\"HCG_READY_SIGNAL\"]", source);   // only when HCG asks for it
+        Assert.Contains("appendingPathComponent(\"hcg-ready.json\")", source);
+        Assert.Equal(DeviceLauncher.ReadySignal.Variable, "HCG_READY_SIGNAL");
+        Assert.Equal(DeviceLauncher.ReadySignal.FileName, "hcg-ready.json");
+    }
+}
+
+/// <summary>
+/// The iOS Simulator launch flow, driven by a scripted simctl: boot → install → launch → ready → screenshot diagnostics.
+/// Covers the failures seen in CI run 96 (a screenshot that never completes) and the readiness rules: the app's own
+/// readiness signal for this launch decides; screenshots never do, and a failed capture is reported as one.
+/// </summary>
+public sealed class SimulatorLaunchFlowTests : IDisposable
+{
+    private readonly TempDir _t = new();
+    public void Dispose() => _t.Dispose();
+
+    private const string Bundle = "com.hakmicapital.hellomac";
+    private const string Udid = "JOB-UDID";
+
+    /// <summary>A Simulator as simctl reports it, with switches for the failures under test.</summary>
+    private sealed class FakeSimctl(string container) : IProcessRunner
+    {
+        public bool WriteSignal { get; init; } = true;
+        public string SignalScreen { get; init; } = "ContentView";
+        public bool SignalFromEarlierLaunch { get; init; }
+        public bool ScreenshotsTimeOut { get; init; }
+        public int? RelaunchPid { get; init; }
+        public List<string> Commands { get; } = [];
+        private int _listCalls;
+
+        public Task<ProcessResult> RunAsync(ProcessSpec spec, Action<OutputStream, string>? onOutput, CancellationToken ct)
+        {
+            var a = spec.Arguments.Skip(1).ToList();   // after "simctl"
+            Commands.Add(string.Join(' ', a));
+            void Out(string text) { foreach (var l in text.Split('\n')) onOutput?.Invoke(OutputStream.StdOut, l); }
+            ProcessResult Ok() => new(0, TimeSpan.FromMilliseconds(5), false, false);
+            switch (a[0])
+            {
+                case "list":
+                    Out("{\"devices\":{\"com.apple.CoreSimulator.SimRuntime.iOS-26-5\":[{\"udid\":\"" + Udid + "\",\"name\":\"hcg-ci\",\"state\":\"Booted\",\"isAvailable\":true}]}}");
+                    return Task.FromResult(Ok());
+                case "launch":
+                {
+                    var nonce = spec.Environment!["SIMCTL_CHILD_HCG_READY_SIGNAL"];
+                    if (WriteSignal)
+                    {
+                        Directory.CreateDirectory(Path.Combine(container, "Documents"));
+                        File.WriteAllText(Path.Combine(container, "Documents", "hcg-ready.json"),
+                            "{\"nonce\":\"" + (SignalFromEarlierLaunch ? "older-launch" : nonce) + "\",\"screen\":\"" + SignalScreen + "\",\"elements\":{\"title\":\"Hello from HCG\",\"count\":\"0\"}}");
+                    }
+                    Out($"{Bundle}: 4242");
+                    return Task.FromResult(Ok());
+                }
+                case "spawn":
+                    _listCalls++;
+                    var pid = RelaunchPid is { } r && _listCalls > 1 ? r : 4242;
+                    Out($"PID\tStatus\tLabel\n{pid}\t0\tUIKitApplication:{Bundle}[a1b2][rb-legacy]");
+                    return Task.FromResult(Ok());
+                case "get_app_container":
+                    Out(container);
+                    return Task.FromResult(Ok());
+                case "io":
+                    return Task.FromResult(ScreenshotsTimeOut ? new ProcessResult(137, TimeSpan.FromSeconds(60), false, TimedOut: true) : Ok());
+                default:
+                    return Task.FromResult(Ok());
+            }
+        }
+    }
+
+    private static readonly DeviceLauncher.ReadinessExpectation Expected =
+        new("ContentView", new Dictionary<string, string> { ["title"] = "Hello from HCG", ["count"] = "0" });
+
+    private static readonly DeviceLauncher.SimulatorBudgets Fast = new() { Ready = TimeSpan.FromSeconds(6), Settle = TimeSpan.FromMilliseconds(50) };
+
+    private async Task<(LaunchResult Result, FakeSimctl Simctl)> LaunchAsync(Func<string, FakeSimctl> simctl, DeviceLauncher.ReadinessExpectation? readiness = null)
+    {
+        var app = _t.Combine("HelloMac.app");
+        Directory.CreateDirectory(app);
+        var fake = simctl(_t.Combine("container"));
+        var launcher = new DeviceLauncher(fake) { IsSimulatorHost = () => true };
+        var result = await launcher.LaunchIosSimulatorAsync(app, Bundle, _t.Combine("shots", "launch.png"), CancellationToken.None, Udid, budgets: Fast, readiness: readiness ?? Expected);
+        return (result, fake);
+    }
+
+    [Fact]
+    public async Task Ready_is_decided_by_the_apps_signal_for_this_launch_and_a_failed_screenshot_is_reported_as_a_capture_failure()
+    {
+        // CI run 96: "simctl io screenshot" stalled and was killed after 61.8 s; it was then reported as "0.0 % differs".
+        var (r, simctl) = await LaunchAsync(c => new FakeSimctl(c) { ScreenshotsTimeOut = true });
+        Assert.Equal(LevelStatus.Passed, r.Status);
+        Assert.Contains("its first screen (ContentView: count = \"0\", title = \"Hello from HCG\") reported ready for this launch", r.Detail);
+        Assert.Contains("Screen (diagnostic): screenshot capture failed for the running app: simctl io screenshot timed out after 60 s", r.Detail);
+        Assert.DoesNotContain("0.0", r.Detail);
+        Assert.Contains(simctl.Commands, c => c.StartsWith("terminate " + Udid + " " + Bundle, StringComparison.Ordinal));   // left as found
+        Assert.Contains(r.Log, l => l.StartsWith("STAGE ready end", StringComparison.Ordinal) && l.Contains(" ok after", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Without_a_signal_for_this_launch_the_app_is_not_ready_even_though_its_process_is_up()
+    {
+        var (missing, _) = await LaunchAsync(c => new FakeSimctl(c) { WriteSignal = false });
+        Assert.Equal(LevelStatus.Failed, missing.Status);
+        Assert.Contains("did not report its first screen (ContentView) through the readiness signal within 6 s", missing.Detail);
+
+        var (stale, _) = await LaunchAsync(c => new FakeSimctl(c) { SignalFromEarlierLaunch = true });
+        Assert.Equal(LevelStatus.Failed, stale.Status);   // a file left by an earlier launch never counts
+
+        var (error, _) = await LaunchAsync(c => new FakeSimctl(c) { SignalScreen = "ErrorView" });
+        Assert.Equal(LevelStatus.Failed, error.Status);   // a screen that differs from the Home Screen, but the wrong one
+        Assert.Contains("the app reported screen ErrorView, expected ContentView", error.Detail);
+    }
+
+    [Fact]
+    public async Task A_relaunched_process_is_a_crash_not_a_ready_app()
+    {
+        var (r, _) = await LaunchAsync(c => new FakeSimctl(c) { RelaunchPid = 5151 });
+        Assert.Equal(LevelStatus.Failed, r.Status);
+        Assert.Contains("did not stay up: pid 4242 was replaced by 5151", r.Detail);
+    }
+
+    [Fact]
+    public async Task An_app_without_a_readiness_signal_is_reported_as_launched_with_readiness_not_verified()
+    {
+        var app = _t.Combine("Other.app");
+        Directory.CreateDirectory(app);
+        var fake = new FakeSimctl(_t.Combine("c2")) { WriteSignal = false };
+        var r = await new DeviceLauncher(fake) { IsSimulatorHost = () => true }
+            .LaunchIosSimulatorAsync(app, Bundle, _t.Combine("s2", "launch.png"), CancellationToken.None, Udid, budgets: Fast);
+        Assert.Equal(LevelStatus.Passed, r.Status);
+        Assert.Contains("UI readiness not verified by the app (it emits no readiness signal)", r.Detail);
     }
 }

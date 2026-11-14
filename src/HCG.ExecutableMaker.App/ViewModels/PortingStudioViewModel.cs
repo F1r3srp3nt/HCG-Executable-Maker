@@ -421,6 +421,9 @@ public sealed partial class PortingStudioViewModel : PageViewModel
     /// <summary>The iOS Simulator to launch in, chosen explicitly (UDID); null = the first available iPhone.</summary>
     public string? SimulatorUdid { get; set; }
 
+    /// <summary>iOS: the first screen the launched app must report through its readiness signal (null = not expected).</summary>
+    public HCG.ExecutableMaker.Porting.DeviceLauncher.ReadinessExpectation? Readiness { get; set; }
+
     [RelayCommand(CanExecute = nameof(CanLaunch))]
     private async Task LaunchAsync()
     {
@@ -432,7 +435,7 @@ public sealed partial class PortingStudioViewModel : PageViewModel
             line.StartsWith("STAGE", StringComparison.Ordinal) || line.StartsWith("RESULT", StringComparison.Ordinal) ? BuildLogKind.Info : BuildLogKind.Output, line));
         await RunAsync(report.Assessment.Target == MobileTarget.Ios ? "Launching in the iOS Simulator…" : "Installing and launching on the emulator/device…", async ct =>
             Report = await Task.Run(() => _porting.LaunchAsync(report, TrustAcknowledged, ct, string.IsNullOrWhiteSpace(ExpectText) ? null : ExpectText.Trim(),
-                SimulatorUdid, Progress), ct));
+                SimulatorUdid, Progress, Readiness), ct));
         timer.Stop();
         FlushLog();
         RefreshVerification();
