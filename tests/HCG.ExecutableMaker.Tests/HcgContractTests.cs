@@ -40,6 +40,46 @@ public class HcgContractTests
     }
 
     [ContractServerFact]
+    public async Task Signing_metadata_round_trips_through_the_handler_and_migration()
+    {
+        var info = Load();
+        var (api, _) = Client(info, "granted");
+        var signing = new HCG.ExecutableMaker.Account.Signing.SigningAccountService(api);
+        Assert.Equal(HCG.ExecutableMaker.Account.Signing.SigningAccountState.Available, await signing.RefreshAsync(CancellationToken.None));
+        using var cert = SigningFixtures.Distribution();
+        var certInfo = SigningFixtures.Info(cert);
+        var device = Guid.NewGuid().ToString();
+        var recorded = await signing.RecordCertificateAsync(certInfo, device, "Contract Mac", CancellationToken.None);
+        Assert.Equal(certInfo.Sha1, recorded.Sha1);
+        Assert.Equal(certInfo.Sha256, recorded.Sha256);
+        Assert.Equal("Contract Mac", recorded.DeviceLabel);
+        var profile = new HCG.ExecutableMaker.Domain.AppleProvisioningProfileInfo
+        {
+            Uuid = Guid.NewGuid().ToString().ToUpperInvariant(), Name = "Contract Profile", TeamIds = [SigningFixtures.Team], Kind = HCG.ExecutableMaker.Domain.AppleProfileKind.AppStore,
+            ApplicationIdentifier = SigningFixtures.Team + ".com.example.app", Platforms = ["iOS"], Expiration = DateTimeOffset.UtcNow.AddMonths(3),
+            ProvisionedDevices = ["00008110-000A1B2C3D4E5F60"],
+        };
+        var recordedProfile = await signing.RecordProfileAsync(profile, device, "Contract Mac", CancellationToken.None);
+        Assert.Equal("com.example.app", recordedProfile.BundleIdPattern);
+        await signing.RefreshAsync(CancellationToken.None);
+        Assert.Equal(2, signing.Records.Count(r => r.DeviceId == device));
+
+        var config = new HCG.ExecutableMaker.Domain.ProjectSigningConfiguration { ProjectId = "p", Mode = HCG.ExecutableMaker.Domain.ProjectSigningMode.Manual, Route = HCG.ExecutableMaker.Domain.SigningRoute.IosAppStore, TeamId = SigningFixtures.Team,
+            IdentitySha1 = certInfo.Sha1, ProfileUuid = profile.Uuid, IntendedDevices = ["00008110-000A1B2C3D4E5F60"] };
+        var saved = await signing.PutProjectAsync("com.example.app", config, CancellationToken.None);
+        Assert.Equal(certInfo.Sha1, saved!.IdentitySha1);
+        Assert.Equal(profile.Uuid, (await signing.GetProjectAsync("com.example.app", CancellationToken.None))!.ProfileUuid);
+
+        await signing.ForgetAsync(recorded.Id, CancellationToken.None);
+        await signing.RefreshAsync(CancellationToken.None);
+        Assert.DoesNotContain(signing.Records, r => r.Id == recorded.Id);
+
+        var (outsiderApi, _) = Client(info, "outsider", subject: "ignored");
+        var outsider = new HCG.ExecutableMaker.Account.Signing.SigningAccountService(outsiderApi);
+        Assert.NotEqual(HCG.ExecutableMaker.Account.Signing.SigningAccountState.Available, await outsider.RefreshAsync(CancellationToken.None));
+    }
+
+    [ContractServerFact]
     public async Task App_access_matches_the_servers_erp_decision()
     {
         var info = Load();

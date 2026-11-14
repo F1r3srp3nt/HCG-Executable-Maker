@@ -17,10 +17,13 @@ public sealed class SigningCapabilityItem(SigningCapability c)
     public StatusTag ToolStatus => !c.HostSupported ? new StatusTag("Other host", "neutral") : c.ToolsAvailable ? new StatusTag("Tools found", "success") : new StatusTag("Tools missing", "warning");
 }
 
-public sealed class SigningViewModel(IToolchainService toolchains, IBuildWorker worker) : PageViewModel
+public sealed class SigningViewModel(IToolchainService toolchains, IBuildWorker worker, AppleSigningViewModel apple) : PageViewModel
 {
     public override string Title => "Signing & Security";
-    public override string Subtitle => "Trust boundaries, secret handling and the code-signing roadmap.";
+    public override string Subtitle => "Apple signing identities and profiles, project signing, trust boundaries and secret handling.";
+
+    /// <summary>HCG Signing Vault: Apple signing on this Mac (and optional account metadata).</summary>
+    public AppleSigningViewModel Apple => apple;
 
     public ObservableCollection<SigningCapabilityItem> Capabilities { get; } = [];
     public string TrustTitle => TrustPolicy.TrustBoundaryTitle;
@@ -30,14 +33,15 @@ public sealed class SigningViewModel(IToolchainService toolchains, IBuildWorker 
     public string BlockedPrefixes => string.Join("  ", BuildEnvironmentPolicy.BlockedPrefixes.Select(p => p + "*"));
     public string BlockedFragments => string.Join("  ", BuildEnvironmentPolicy.SecretNameFragments.Select(p => "*" + p + "*"));
     public string SignatureStatement =>
-        "Every artifact produced by M0.1 is unsigned. macOS app hosts carry only the ad-hoc signature applied by the .NET SDK, " +
-        "which is not a Developer ID signature. Nothing is notarized. HCG never invents certificates or signing identities, " +
-        "never stores private keys or passwords, and never uploads artifacts or credentials anywhere.";
+        "Builds are signed only with identities that are in this Mac's keychain, for the route you choose. Signing, notarization, uploading and publishing " +
+        "are separate steps; HCG never notarizes, uploads or publishes on its own. HCG never invents certificates, never stores private keys or passwords " +
+        "outside the keychain, and never revokes certificates.";
 
     public override async Task OnNavigatedToAsync(object? parameter)
     {
         var report = await toolchains.GetAsync();
         Capabilities.Clear();
         foreach (var c in SigningCapabilityCatalog.Evaluate(report)) Capabilities.Add(new SigningCapabilityItem(c));
+        await apple.LoadAsync();
     }
 }

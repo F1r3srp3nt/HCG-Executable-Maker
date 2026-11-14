@@ -304,8 +304,10 @@ test('at most 10 requests per account per day (429), counted per account', async
 
 test('a support request never changes what the builder supports', async () => {
   // The package has no table or function that records project-type support; requests only hold text and files.
+  // (signing_assets / signing_project_preferences hold signing metadata only — see signing.test.mjs.)
   const { rows } = await db.pool.query("select table_name from information_schema.tables where table_schema = 'exm' order by 1");
-  assert.deepEqual(rows.map((r) => r.table_name), ['attachments', 'audit', 'clients', 'messages', 'requests', 'settings']);
+  assert.deepEqual(rows.map((r) => r.table_name),
+    ['attachments', 'audit', 'clients', 'messages', 'requests', 'settings', 'signing_assets', 'signing_project_preferences']);
 });
 
 test('zip inspector: limits, traversal variants, duplicates, compression ratio', () => {

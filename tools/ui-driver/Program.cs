@@ -55,7 +55,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -260,6 +260,7 @@ internal static partial class Program
         if (_args.ContainsKey("native")) return await RunNativeAsync(wizard, host, output);
         if (_args.ContainsKey("mobile")) return await RunMobileAsync(main, wizard, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
+        if (_args.ContainsKey("signing")) return await RunSigningAsync(main);
 
         // 2. Inspect: packages listed, none auto-selected when there are several.
         Check(wizard.IsSwiftProject, $"Recognized as Swift project ({wizard.Analysis?.Framework}; support {wizard.Analysis?.Support})");
@@ -609,5 +610,12 @@ internal static partial class Program
         }
 
         public Task ShowLogAsync(string title, string path) => Task.CompletedTask;
+
+        // The UI driver never types passwords: a password prompt counts as cancelled.
+        public Task<string?> PromptPasswordAsync(string title, string message)
+        {
+            Log($"Dialog (password, cancelled) {title}");
+            return Task.FromResult<string?>(null);
+        }
     }
 }
