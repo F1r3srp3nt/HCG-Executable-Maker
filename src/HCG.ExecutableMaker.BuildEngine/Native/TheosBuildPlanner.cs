@@ -66,15 +66,20 @@ public static partial class TheosBuildPlanner
         return new Prepared(root, Path.Combine(src, projectRel), packages, temporary);
     }
 
-    public static BuildStep Plan(BuildSettings settings, Prepared prepared, Tools tools, IReadOnlyDictionary<string, string> environment)
+    /// <summary>
+    /// <c>gmake package</c> with the one resolved toolchain environment (<see cref="TheosBuildEnvironment"/>): the same
+    /// make, Theos, ldid and perl the inspection showed, and a PATH/TARGET_CODESIGN with which every recipe shell gmake
+    /// starts can run them — also when HCG was launched from Finder with launchd's minimal PATH.
+    /// </summary>
+    public static BuildStep Plan(BuildSettings settings, Prepared prepared, TheosBuildEnvironment toolchain)
     {
         var scheme = settings.Native!.TheosScheme!;
         var args = new List<string> { "-C", prepared.ProjectDirectory, "package", "FINALPACKAGE=1", "THEOS_PACKAGE_DIR=" + prepared.PackageDirectory, "messages=yes" };
         if (scheme.SelectorVariable is { } v) args.Add($"{v}={scheme.SelectorValue}");
-        var env = new Dictionary<string, string>(environment) { ["THEOS"] = tools.Theos };
         return new BuildStep(BuildStage.Compiling, $"Theos: make package ({scheme.Label})", new ProcessSpec
         {
-            Executable = tools.Make, Arguments = args, WorkingDirectory = prepared.ProjectDirectory, Environment = env,
+            Executable = toolchain.Make, Arguments = args, WorkingDirectory = prepared.ProjectDirectory,
+            Environment = new Dictionary<string, string>(toolchain.Environment),
         });
     }
 

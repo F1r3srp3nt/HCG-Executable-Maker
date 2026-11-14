@@ -288,6 +288,7 @@ public sealed class BuildService(
             Native.NativeBuildPlanner.Prepared? nativePrepared = null;
             Native.NativeBuildPlanner.PlanInput? nativeInput = null;
             Native.TheosBuildPlanner.Prepared? theosPrepared = null;
+            Native.TheosBuildEnvironment? theosEnvironment = null;
             if (isTheos)
             {
                 observer.OnStage(BuildStage.Preparing, "Copying the project into the build folder for this configuration");
@@ -295,6 +296,22 @@ public sealed class BuildService(
                 Log(BuildLogKind.Info, $"Theos build folder ({settings.Native!.TheosScheme!.Label}): {theosPrepared.WorkRoot}" +
                                        (theosProject.Theos.UsesParentDirectory ? " — the whole repository was copied, because the Makefiles use paths outside the project folder." : "") +
                                        (theosPrepared.IsTemporary ? " — a private temporary folder, because HCG's build folder path contains a space, which Theos' makefiles cannot handle." : ""));
+
+                // One resolved toolchain for inspection and execution: the tools shown above, and an environment in which
+                // gmake's recipe shells can run them (Finder/Dock launches get launchd's PATH without /opt/homebrew/bin).
+                theosEnvironment = Native.TheosBuildEnvironment.Resolve(report, scrub.Environment)
+                                   ?? throw new BuildValidationException("The Theos tools were not all detected; refresh the toolchains and check the readiness list.");
+                Log(BuildLogKind.Info, $"Build environment for gmake and its recipes: PATH={theosEnvironment.Path} · THEOS={theosEnvironment.Theos} · TARGET_CODESIGN={theosEnvironment.Ldid}");
+                var problems = await theosEnvironment.VerifyInChildShellAsync(worker, overall.Token).ConfigureAwait(false);
+                if (problems.Count > 0)
+                {
+                    foreach (var p in problems) Log(BuildLogKind.Error, p);
+                    Fail(BuildStatus.Failed, "The build environment cannot run the detected tools: " + string.Join(" ", problems));
+                    return build;
+                }
+                foreach (var (command, expected) in theosEnvironment.RecipeCommands)
+                    Log(BuildLogKind.Success, $"✓ {command} resolves to {expected} in the build's shell (checked with the exact environment gmake gets).");
+                foreach (var w in theosEnvironment.Warnings) Log(BuildLogKind.Warning, w);
             }
             if (isNative)
             {
@@ -340,7 +357,7 @@ public sealed class BuildService(
                 prebuild.AddRange(SwiftContractPlanner.PlanPrebuild(contract, sourceDir, helpersDir, tools, scrub.Environment, _executables));
             }
             var steps = isTheos
-                ? [Native.TheosBuildPlanner.Plan(settings, theosPrepared!, theosTools!, scrub.Environment)]
+                ? [Native.TheosBuildPlanner.Plan(settings, theosPrepared!, theosEnvironment!)]
                 : isNative
                 ? Native.NativeBuildPlanner.Plan(nativeInput!, nativePrepared!)
                 : isElectron
@@ -366,6 +383,8 @@ public sealed class BuildService(
                     return build;
                 }
                 ProcessResult result = null!;
+                int messagesAtStepStart;
+                lock (build.Messages) messagesAtStepStart = build.Messages.Count;
                 for (var attempt = 1; attempt <= 1 + MaxTransientRetries; attempt++)
                 {
                     var attemptParser = parser.Clone();
@@ -408,6 +427,22 @@ public sealed class BuildService(
                     overall.Token.ThrowIfCancellationRequested();
                 if (result.ExitCode != 0)
                 {
+                    if (isNative || isTheos)
+                    {
+                        // Cause first: the first real error, then make's follow-on "*** … Error N" lines grouped as its consequences.
+                        List<BuildMessage> stepMessages;
+                        lock (build.Messages) stepMessages = build.Messages.Skip(messagesAtStepStart).ToList();
+                        var summary = Native.NativeFailureSummary.Describe(step.Title, result.ExitCode, stepMessages);
+                        if (summary.Primary is { } primary)
+                        {
+                            Log(BuildLogKind.Error, "Primary error: " + primary.Text);
+                            if (summary.Consequences.Count > 0)
+                                Log(BuildLogKind.Info, $"Consequences ({summary.Consequences.Count}): make stopped because of the primary error — " +
+                                                       string.Join(" · ", summary.Consequences.Select(c => c.Text)));
+                        }
+                        Fail(BuildStatus.Failed, summary.Reason);
+                        return build;
+                    }
                     Fail(BuildStatus.Failed, $"{step.Title} failed with exit code {result.ExitCode}.");
                     return build;
                 }

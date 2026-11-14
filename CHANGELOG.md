@@ -2,6 +2,17 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Theos builds: one resolved toolchain environment
+
+### Fixed
+- **Signing failed in Finder-launched builds.** HCG Nexus builds started from Finder or the Dock failed at signing with `/bin/bash: ldid: command not found` (Error 127), although ldid had been detected in /opt/homebrew/bin.
+  - gmake and its recipe shells now get a PATH that reaches the detected ldid, perl and the .deb compressor (lzma), appended after the parent PATH and the system directories.
+  - `TARGET_CODESIGN` is set to the detected ldid.
+  - A preflight in the exact child environment checks every tool before the build starts.
+  - Environment sanitization is unchanged.
+- **Make-driven build failures (C/C++ Make, Theos) report the cause first.** A command not found, or a compiler, linker or Theos error, comes first; make's follow-on `*** … Error N` lines are grouped as its consequences.
+- **Linker and compiler warnings are no longer logged as ERROR.** `ld: warning:` and `clang: warning:` lines on stderr are classified as warnings. Genuine linker errors stay errors.
+
 ## [Unreleased] — `feature/mobile-conversion`
 
 ### Added — desktop → mobile conversion workspace ([docs/MOBILE-CONVERSION.md](docs/MOBILE-CONVERSION.md))

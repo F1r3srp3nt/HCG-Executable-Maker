@@ -187,7 +187,7 @@ public class BuildRoutesTests : IDisposable
             try
             {
                 Assert.True(File.Exists(Path.Combine(prep.ProjectDirectory, "Prefs", "Makefile")));
-                var step = TheosBuildPlanner.Plan(settings, prep, new TheosBuildPlanner.Tools("/opt/theos", "/opt/homebrew/bin/gmake"), new Dictionary<string, string>());
+                var step = TheosBuildPlanner.Plan(settings, prep, new TheosBuildEnvironment("/opt/theos", "/opt/homebrew/bin/gmake", "/opt/homebrew/bin/ldid", "/usr/bin/perl", new Dictionary<string, string> { ["THEOS"] = "/opt/theos" }));
                 Assert.Equal("/opt/homebrew/bin/gmake", step.Process.Executable);
                 Assert.Contains("package", step.Process.Arguments);
                 Assert.Contains("HCG_ENV=" + selector, step.Process.Arguments);
@@ -270,15 +270,38 @@ public class BuildRoutesTests : IDisposable
         Assert.Equal("mobile", project.Analysis.InspectorId);                       // stored as inspected: the Xcode app leads
         await new SqliteProjectRepository(db).UpsertAsync(project);
 
-        // The worker records the processes the build starts; make produces nothing, so the build stops after it.
-        var worker = new ScriptedMobileWorker((_, _, _) => ScriptedMobileWorker.Exit(0));
+        // The worker records the processes the build starts; make produces nothing, so the build stops after it. The first
+        // process is the preflight in the exact child environment (bash answers where ldid and perl resolve).
+        var worker = new ScriptedMobileWorker((spec, output, _) =>
+        {
+            if (spec.Executable is "/bin/bash" or "/bin/sh")
+            {
+                Assert.Contains("/opt/homebrew/bin", spec.Environment!["PATH"].Split(':'));
+                // Answer like the shell would for this PATH; ldid and perl are the report's (they do not exist on this host).
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(spec.Arguments[1], @"command -v (\w+)"))
+                {
+                    var name = m.Groups[1].Value;
+                    output(OutputStream.StdOut, name + "=" + (name switch
+                    {
+                        "ldid" => "/opt/homebrew/bin/ldid",
+                        "perl" => "/usr/bin/perl",
+                        _ => TheosBuildEnvironment.Which(name, spec.Environment["PATH"]) ?? "",
+                    }));
+                }
+            }
+            return ScriptedMobileWorker.Exit(0);
+        });
         var service = new BuildService(worker, new FixedToolchains(report), new SqliteBuildRepository(db), new PackagingRegistry([]), paths, TimeProvider.System);
         var root = project.Analysis.Native!.Projects.Single(p => p.Directory == "");
         var build = await service.RunAsync(new BuildRequest { Project = project, Settings = TheosSettings(root, "rootful", _t.Combine("out")), TrustAcknowledged = true }, new Observer(), CancellationToken.None);
 
         Assert.DoesNotContain("not in the workspace's inspection", build.FailureReason ?? "");
-        var make = Assert.Single(worker.Calls);
+        Assert.Equal(2, worker.Calls.Count);
+        Assert.Equal("/bin/bash", worker.Calls[0].Executable);
+        var make = worker.Calls[1];
         Assert.Equal("/opt/homebrew/bin/gmake", make.Executable);
+        Assert.Equal(worker.Calls[0].Environment, make.Environment);              // checked and run with the same environment
+        Assert.Equal("/opt/homebrew/bin/ldid", make.Environment!["TARGET_CODESIGN"]);
         Assert.Contains("package", make.Arguments);
         Assert.Contains("HCG_ENV=rootful", make.Arguments);
         Assert.DoesNotContain(worker.Calls, c => c.Executable.EndsWith("xcodebuild", StringComparison.Ordinal));
