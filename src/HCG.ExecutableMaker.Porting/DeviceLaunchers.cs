@@ -34,16 +34,18 @@ public sealed class DeviceLauncher(IProcessRunner runner)
         public TimeSpan Boot { get; init; } = TimeSpan.FromMinutes(10);
         public TimeSpan Install { get; init; } = TimeSpan.FromMinutes(5);
         public TimeSpan Launch { get; init; } = TimeSpan.FromMinutes(2);
-        public TimeSpan Ready { get; init; } = TimeSpan.FromMinutes(1);
-        /// <summary>How long the app must stay up, with the same process, after it first drew its own screen.</summary>
+        /// <summary>Listed by launchd, the settle time, and the screenshots of the app and of the screen without it.</summary>
+        public TimeSpan Ready { get; init; } = TimeSpan.FromMinutes(4);
+        /// <summary>How long the app must stay up, with the same process, after launchd first listed it.</summary>
         public TimeSpan Settle { get; init; } = TimeSpan.FromSeconds(5);
     }
 
     /// <summary>
     /// Boot → install → launch → ready, each a timestamped stage with its own budget and exit codes logged.
     /// <para><b>Ready</b> means more than an accepted launch command: the process simctl launched (pid) is listed by the
-    /// Simulator's launchd as the app's UIKit process, the screen below the status bar is no longer the screen shown before
-    /// the launch (the app drew its own UI), and the same process is still alive <see cref="SimulatorBudgets.Settle"/> later.</para>
+    /// Simulator's launchd as the app's UIKit process, the same process is still alive <see cref="SimulatorBudgets.Settle"/>
+    /// later, and the app's screen (below the status bar) differs from the screen left when it is terminated — it drew its
+    /// own UI.</para>
     /// </summary>
     /// <param name="simulatorUdid">
     /// The Simulator to use, chosen explicitly (e.g. a device created for one CI job). Null = the first available iPhone,
@@ -94,11 +96,6 @@ public sealed class DeviceLauncher(IProcessRunner runner)
         }).ConfigureAwait(false);
         if (installError is not null) return Fail(installError);
 
-        // The screen before the launch, to tell the app's own screen from what was shown before.
-        var before = Path.Combine(Path.GetDirectoryName(screenshotPath)!, Path.GetFileNameWithoutExtension(screenshotPath) + "-before.bmp");
-        Directory.CreateDirectory(Path.GetDirectoryName(screenshotPath)!);
-        await Sim(["io", udid, "screenshot", "--type=bmp", before], ct, TimeSpan.FromMinutes(1)).ConfigureAwait(false);
-
         // ── launch ──
         string launchOut = "";
         var launchError = await Stage("launch", budgets.Launch, async token =>
@@ -113,46 +110,62 @@ public sealed class DeviceLauncher(IProcessRunner runner)
         if (pid is null) return Fail($"simctl launch did not report a process id for {bundleId} (\"{launchOut}\").");
 
         // ── ready ──
+        // 1. launchd lists the process simctl launched as the app's UIKit process (not a relaunch, not exited);
+        // 2. it is still the same process after the settle time;
+        // 3. the app's screen differs from the screen it leaves behind when it is terminated: the app drew its own UI.
+        // Both screenshots are taken once the app is up (a screenshot right after install stalled on a fresh Simulator).
         double changed = 0;
-        string? readyError = await Stage("ready", budgets.Ready + budgets.Settle, async token =>
+        string? screenshot = null;
+        var dir = Path.GetDirectoryName(screenshotPath)!;
+        var appBmp = Path.Combine(dir, Path.GetFileNameWithoutExtension(screenshotPath) + "-app.bmp");
+        var homeBmp = Path.Combine(dir, Path.GetFileNameWithoutExtension(screenshotPath) + "-home.bmp");
+        Directory.CreateDirectory(dir);
+        async Task<bool> Screenshot(string path, string type, CancellationToken token, int attempts)
         {
-            var after = Path.Combine(Path.GetDirectoryName(screenshotPath)!, Path.GetFileNameWithoutExtension(screenshotPath) + "-after.bmp");
-            var listed = false;
+            for (var attempt = 1; attempt <= attempts; attempt++)
+            {
+                var r = await Sim(["io", udid, "screenshot", "--type=" + type, path], token, TimeSpan.FromSeconds(60)).ConfigureAwait(false);
+                if (r.Result.Succeeded && File.Exists(path)) return true;
+                if (attempt < attempts) log.Add($"  screenshot attempt {attempt} of {attempts} did not complete; trying once more");
+            }
+            return false;
+        }
+        var readyError = await Stage("ready", budgets.Ready, async token =>
+        {
             while (true)
             {
                 token.ThrowIfCancellationRequested();
                 var services = await Sim(["spawn", udid, "launchctl", "list"], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                if (!services.Result.Succeeded) { await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false); continue; }
                 var current = AppPid(services.Out, bundleId);
-                if (current is not null && current != pid)
-                    return $"the app was relaunched (pid {pid} → {current}): it crashed and was started again";
-                listed = current == pid;
-                if (!listed && current is null && services.Result.Succeeded && ExitedWithStatus(services.Out, bundleId) is { } status)
-                    return $"the app exited (launchd status {status}) before it was ready";
-                if (listed)
-                {
-                    var shot = await Sim(["io", udid, "screenshot", "--type=bmp", after], token, TimeSpan.FromMinutes(1)).ConfigureAwait(false);
-                    changed = shot.Result.Succeeded ? ScreenDifference(before, after) : 0;
-                    log.Add($"  ready check: pid {pid} listed as UIKitApplication:{bundleId}; {changed:P1} of the screen below the status bar differs from before the launch");
-                    if (changed >= 0.02) break;
-                }
-                else log.Add($"  ready check: UIKitApplication:{bundleId} with pid {pid} not listed yet");
+                if (current is not null && current != pid) return $"the app was relaunched (pid {pid} → {current}): it crashed and was started again";
+                if (current is null && ExitedWithStatus(services.Out, bundleId) is { } status) return $"the app exited (launchd status {status}) before it was ready";
+                if (current == pid) { log.Add($"  ready check: pid {pid} listed by launchd as UIKitApplication:{bundleId}"); break; }
+                log.Add($"  ready check: UIKitApplication:{bundleId} with pid {pid} not listed yet");
                 await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
             }
             await Task.Delay(budgets.Settle, token).ConfigureAwait(false);
             var again = await Sim(["spawn", udid, "launchctl", "list"], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             var still = AppPid(again.Out, bundleId);
-            return still == pid ? null : $"the app did not stay up: pid {pid} {(still is null ? "is gone" : $"was replaced by {still}")} {budgets.Settle.TotalSeconds:F0} s after it drew its screen";
-        }, timeoutReason: $"the app did not reach a ready state within {(budgets.Ready + budgets.Settle).TotalSeconds:F0} s (its process listed by launchd and its own screen drawn)").ConfigureAwait(false);
+            if (still != pid) return $"the app did not stay up: pid {pid} {(still is null ? "is gone" : $"was replaced by {still}")} {budgets.Settle.TotalSeconds:F0} s after it was listed";
+            log.Add($"  ready check: still pid {pid} after {budgets.Settle.TotalSeconds:F0} s");
+            if (await Screenshot(screenshotPath, "png", token, 1).ConfigureAwait(false)) screenshot = screenshotPath;
+            if (!await Screenshot(appBmp, "bmp", token, 2).ConfigureAwait(false)) return "the app's screen could not be captured (simctl io screenshot)";
+            await Sim(["terminate", udid, bundleId], token, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+            if (!await Screenshot(homeBmp, "bmp", token, 2).ConfigureAwait(false)) return "the screen after terminating the app could not be captured (simctl io screenshot)";
+            changed = ScreenDifference(appBmp, homeBmp);
+            log.Add($"  ready check: {changed:P1} of the screen below the status bar differs between the running app and the screen it leaves behind");
+            return changed >= 0.02 ? null : "the app's screen was the same as the screen without it: the app did not draw its own UI";
+        }, timeoutReason: $"the app did not reach a verified ready state within {budgets.Ready.TotalSeconds:F0} s").ConfigureAwait(false);
 
-        var shotResult = await Sim(["io", udid, "screenshot", screenshotPath], ct, TimeSpan.FromMinutes(1)).ConfigureAwait(false);
-        var screenshot = shotResult.Result.Succeeded && File.Exists(screenshotPath) ? screenshotPath : null;
         // Leave the Simulator as found: the app this check started is stopped (the Simulator itself belongs to the caller).
         await Sim(["terminate", udid, bundleId], ct, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
         if (readyError is not null) return Fail(readyError) with { ScreenshotPath = screenshot };
         log.Add("RESULT passed");
         return new(VerificationLevel.LaunchedInSimulatorOrEmulator, LevelStatus.Passed,
-            $"Installed, launched and ready in {device.Value.Name} ({device.Value.Runtime}): process {pid} listed by launchd as the app, its own screen drawn " +
-            $"({changed:P0} of the screen changed), still the same process {budgets.Settle.TotalSeconds:F0} s later.", screenshot, log.Lines);
+            $"Installed, launched and ready in {device.Value.Name} ({device.Value.Runtime}): process {pid} listed by launchd as the app, the same process " +
+            $"{budgets.Settle.TotalSeconds:F0} s later, and its own screen drawn ({changed:P0} of the screen differs from the screen without the app).", screenshot, log.Lines);
 
         async Task<string?> Stage(string name, TimeSpan budget, Func<CancellationToken, Task<string?>> work, string? timeoutReason = null)
         {

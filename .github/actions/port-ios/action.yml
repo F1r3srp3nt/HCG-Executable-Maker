@@ -36,7 +36,7 @@ runs:
     - name: Swift package app (TallyPackage) → iOS — assess, generate, compile, launch in Simulator
       shell: bash
       run: >
-        tools/ci/run-stage.sh "TallyPackage → iOS" 1500 --
+        tools/ci/run-stage.sh "TallyPackage → iOS" 1800 --
         dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/TallyPackage --port "swiftpm::TallyApp"
         --name Tally --bundle-id com.hakmicapital.tally "--usage" "NSMicrophoneUsageDescription=Tally shows whether the microphone may be used for voice notes."
         --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
@@ -46,7 +46,7 @@ runs:
     - name: macOS Xcode project (HelloMac) → iOS — assess, generate, compile, launch in Simulator
       shell: bash
       run: >
-        tools/ci/run-stage.sh "HelloMac → iOS" 1500 --
+        tools/ci/run-stage.sh "HelloMac → iOS" 1800 --
         dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/HelloMac --port "xcode:HelloMac.xcodeproj"
         --name "Hello HCG" --bundle-id com.hakmicapital.hellomac
         --expect-capability GenerateTarget --compile --expect-compile Passed --launch --expect-launch Passed
@@ -56,7 +56,7 @@ runs:
     - name: Web app (WebViteDesktop, Vite + React) → iOS with Capacitor — inspect, generate, validate, compile, launch in Simulator
       shell: bash
       run: >
-        tools/ci/run-stage.sh "WebViteDesktop → iOS" 1500 --
+        tools/ci/run-stage.sh "WebViteDesktop → iOS" 1800 --
         dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source tests/Fixtures/WebViteDesktop --port "web:" --path WebToIOS
         --name "Field Notes" --bundle-id com.hakmicapital.fieldnotes --expect-capability GenerateTarget
         --validate --expect-validate Passed --compile --expect-compile Passed --launch --expect-launch Passed

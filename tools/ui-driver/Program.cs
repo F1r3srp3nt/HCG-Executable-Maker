@@ -547,7 +547,7 @@ internal static partial class Program
         if (_args.ContainsKey("launch") && studio.Report!.Level(HCG.ExecutableMaker.Domain.VerificationLevel.Compiled).Status == HCG.ExecutableMaker.Domain.LevelStatus.Passed)
         {
             // Boot, install, launch and ready are stages of their own inside (each bounded; see the "STAGE" lines).
-            if (!await PortStageAsync(studio, "launch", Budget("launch", 20), () => studio.LaunchCommand.ExecuteAsync(null))) return 1;
+            if (!await PortStageAsync(studio, "launch", Budget("launch", 25), () => studio.LaunchCommand.ExecuteAsync(null))) return 1;
         }
         report = studio.Report!;
         foreach (var v in report.Verification.OrderBy(v => v.Level)) Log($"VERIFY {v.Level}: {v.Status} — {v.Detail}{(v.Evidence is null ? "" : " [" + v.Evidence + "]")}");
