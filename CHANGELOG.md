@@ -10,6 +10,10 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - If the output stays open, it says so in the log and uses the command's real exit code.
   - A command that really hangs still times out and is killed.
 
+- **A timed-out command's process tree could be left stopped.** .NET's `Process.Kill(entireProcessTree: true)` sends each process SIGSTOP and then SIGKILL (confirmed with strace), so a tree kill that fails part-way leaves processes stopped.
+  - CI run 101 (repeat 2): after a toolchain probe timed out, four `bash` processes stayed stopped under launchd in the UI driver's process group, and the driver died of SIGHUP two seconds later.
+  - HCG now collects the tree first and sends only SIGKILL (`ProcessTree`). The step wrapper reports a signal death and any stopped processes.
+
 ### Changed
 - **iOS Simulator launch** runs as timed stages (boot, install, launch, ready), each with its own budget, logged as it happens.
 - **"Ready" is decided by the app, not by a screenshot.** The launched app is ready when:

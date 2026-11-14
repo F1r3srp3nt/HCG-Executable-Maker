@@ -104,15 +104,9 @@ public sealed class ProcessRunner(ILogger<ProcessRunner>? logger = null, TimeSpa
 
     private void KillTree(Process process)
     {
-        try
-        {
-            if (!process.HasExited)
-                process.Kill(entireProcessTree: true);
-            process.WaitForExit(10_000);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            _logger.LogWarning(ex, "Failed to kill process tree");
-        }
+        // Never Process.Kill(entireProcessTree: true) on Unix: it SIGSTOPs processes and can leave them stopped (see ProcessTree).
+        ProcessTree.Kill(process);
+        try { process.WaitForExit(10_000); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { _logger.LogWarning(ex, "Failed to wait for the killed process"); }
     }
 }

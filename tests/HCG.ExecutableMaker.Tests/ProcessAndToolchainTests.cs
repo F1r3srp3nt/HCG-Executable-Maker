@@ -82,6 +82,33 @@ public class ProcessRunnerTests
         }
     }
 
+    /// <summary>
+    /// CI run 101 (port-ios, repeat 2): a probe timed out, its tree kill left processes STOPPED (state T, re-parented to
+    /// launchd) and the UI driver in the same process group died of SIGHUP. .NET's Process.Kill(entireProcessTree: true)
+    /// sends SIGSTOP then SIGKILL to each process (strace); HCG's tree kill sends only SIGKILL, to the whole tree collected
+    /// first. After a timeout, nothing of the tree is left alive — stopped or running.
+    /// </summary>
+    [LinuxFact]
+    public async Task A_timed_out_command_and_everything_it_started_are_killed_and_nothing_is_left_stopped()
+    {
+        var marker = "7" + Random.Shared.Next(100000, 999999);   // a unique sleep duration identifies this tree's processes
+        var r = await _runner.RunAsync(new ProcessSpec
+        {
+            Executable = "/bin/sh", Arguments = ["-c", $"sh -c 'sleep {marker}; :' & sh -c 'sleep {marker}; :' & sleep {marker}"], Timeout = TimeSpan.FromSeconds(1),
+        }, null, CancellationToken.None);
+        Assert.True(r.TimedOut);
+        await Task.Delay(500);
+        var alive = Directory.GetDirectories("/proc").Select(d => Path.GetFileName(d)).Where(n => n.All(char.IsDigit))
+            .Select(pid => (Cmd: Read($"/proc/{pid}/cmdline").Replace('\0', ' '), State: Read($"/proc/{pid}/stat")))
+            .Where(p => p.Cmd.Contains(marker, StringComparison.Ordinal))
+            .Select(p => (p.Cmd, State: p.State.Length > 0 ? p.State[(p.State.LastIndexOf(')') + 2)..].Split(' ')[0] : "?"))
+            .Where(p => p.State != "Z")   // zombies are dead (killed, waiting to be reaped)
+            .ToList();
+        Assert.True(alive.Count == 0, "left alive: " + string.Join("; ", alive.Select(a => $"{a.State} {a.Cmd}")));
+
+        static string Read(string path) { try { return File.ReadAllText(path); } catch (IOException) { return ""; } catch (UnauthorizedAccessException) { return ""; } }
+    }
+
     [UnixFact]
     public async Task A_command_that_really_hangs_still_times_out_and_is_killed()
     {

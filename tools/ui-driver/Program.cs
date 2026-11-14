@@ -168,7 +168,7 @@ internal static partial class Program
                 {
                     // Diagnostics while the stalled processes still exist (process tree, stacks, open pipes, Simulator state).
                     using var diag = Process.Start(new ProcessStartInfo(script) { ArgumentList = { stage }, UseShellExecute = false });
-                    if (diag is not null && !diag.WaitForExit(TimeSpan.FromMinutes(3))) diag.Kill(entireProcessTree: true);
+                    if (diag is not null && !diag.WaitForExit(TimeSpan.FromMinutes(3))) HCG.ExecutableMaker.Infrastructure.Processes.ProcessTree.Kill(diag);
                 }
                 studio.CancelCommand.Execute(null);
                 var cancelled = Stopwatch.StartNew();

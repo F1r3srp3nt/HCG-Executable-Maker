@@ -63,5 +63,10 @@ else
   wait "$pgid"; code=$?
 fi
 sleep 1; kill "$tailpid" 2>/dev/null
+if [ "$code" -gt 128 ] && [ "$code" -lt 160 ] && [ -z "$status" ]; then
+  # Killed by a signal: say which, and show processes of the group left STOPPED (they can bring SIGHUP to the group).
+  echo "STEP $label: the command was terminated by signal $((code - 128)) (SIG$(kill -l $((code - 128)) 2>/dev/null || echo ?))"
+  ps -axo pid=,ppid=,pgid=,stat=,etime=,command= 2>/dev/null | awk -v g="$pgid" '$3 == g && $4 ~ /^T/ { print "STEP   stopped: " $0 }' | cut -c1-220
+fi
 echo "STEP $label end $(utc) exit=$code after $(( $(date +%s) - start )) s"
 exit "$code"
