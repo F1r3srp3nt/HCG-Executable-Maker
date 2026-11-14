@@ -11,6 +11,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - A saved scheme that the imported copy does not contain is reported as its own blocker, never replaced by another scheme.
 - **Status contradicted itself** ("Ready" heading next to "Required toolchain missing"). The current state now comes only from the current selection's readiness: "Blocked — deployment target incompatible", "Blocked — scheme not in imported copy", "Required toolchain missing" (not installed) vs. "Toolchain installed but incompatible / unusable / setup required", "Signing required", "Configuration required". The previous build is shown separately; the stage heading no longer says "Ready".
 - The project summary no longer reports missing toolchains when the real blocker is a deployment target, and names the scheme that builds.
+- **Self-packaged apps showed "commit unknown"** (also apps from `tools/build-local-mac.sh`): the build runs in an imported copy without `.git`, and the build environment drops `HCG_*` variables, so `HCG_SOURCE_REVISION` never arrived. The revision now travels as `hcg-source-revision.txt` in that copy; the packaged app shows its commit in the footer, Settings › About and `--version`.
 
 ### Added
 - **Before you can build** list: every remaining prerequisite with its fix, including the per-build trust confirmation.

@@ -222,6 +222,26 @@ original and can be refreshed in place; a diagnostic report establishes what is 
 5. **Tick the trust checkbox** in section 5 (it is per build) and start. The build log's first lines name the scheme and
    its targets, and the xcodebuild command shows `-scheme HCGSentinelModern`.
 
+### Verified (CI run 43629669974, macOS 26, Xcode 26.6 with its iOS SDK minimum edited to 15.0 on the disposable runner)
+
+Hosted Xcodes all accept 14.7, so the runner's iPhoneOS/iPhoneSimulator `SDKSettings` minimum was set to 15.0 (the
+reported Mac's minimum). Xcode 26.6 itself kept treating 14.7 as acceptable (both schemes build outside Maker with
+`** BUILD SUCCEEDED **` and no deployment diagnostic), so this shows Maker's behaviour against that range, not Xcode's
+own refusal, which only a newer Xcode produces.
+
+| Step | Result |
+| --- | --- |
+| Maker before the fix (c1c587a), Sentinel 810c6f9 | Every output unavailable with HCGSentinel's 14.7 reason; scheme list empty (`FAIL Scheme HCGSentinelModern offered ()`); state `[Required toolchain missing]` — the reported screen. |
+| Outside Maker, Sentinel 03bc6e5 | Schemes HCGSentinel, HCGSentinelModern (+ SentinelCore). Only target `HCGSentinel` resolves to 14.7 (Debug/Release × Simulator/device); `HCGSentinelModern` 15.0 everywhere. Simulator builds of both schemes succeed with plain xcodebuild. |
+| Maker after the fix (UI driver) | Arrival: `[Blocked — deployment target incompatible]`, “Use scheme HCGSentinelModern” offered, not selected. Original moved to 03bc6e5 → copy reported as changed → Refresh source → same project, copy matches 03bc6e5. Use scheme → Simulator available, `[Ready to build]`, only the trust prerequisite left; scheme kept after leaving/reopening; build `[Artifact verified]` (`HCGSentinelModern.app`), log shows `-scheme HCGSentinelModern`; previous build reported separately. |
+| Unsigned device archive, HCGSentinelModern | `[Artifact verified]`, `HCGSentinelModern.xcarchive`, `com.hcg.sentinel 0.1.0 (1)`. |
+| Legacy HCGSentinel | Archive unavailable, “needs iOS 14.7”, `[Blocked — deployment target incompatible]`; nothing changed or bypassed. |
+| IPA, HCGSentinelModern | Unavailable: “No Apple Development certificate in the keychain” (CI has no signing identity). Not attempted. |
+| Packaged app (self-packaged `.app`, osx-arm64) | `HCG Executable Maker 0.3.1 (commit ee27fa87b8f1, …)`; `--diagnose-mobile --reproduce` on the UI run's data: saved scheme HCGSentinelModern, revision 03bc6e5, copy matches original, hashes equal Sentinel `main`, outside-Maker Simulator build of HCGSentinelModern exit 0. |
+
+The first run (43628150245) failed at the packaged-app step: self-packaged apps reported `commit unknown` (fixed in
+the same release, see CHANGELOG).
+
 `HCGSentinel` (iOS 14.7) remains for the iPhone X on iOS 14.7 and needs an Xcode that accepts 14.7 (selected for HCG in
 Toolchains › Xcode). The app from `HCGSentinelModern` does not install on iOS 14.
 
