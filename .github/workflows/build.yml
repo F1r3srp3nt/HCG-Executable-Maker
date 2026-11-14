@@ -899,9 +899,13 @@ jobs:
           git -C "$OUT/src/HCG Nexus" checkout --quiet "$NEXUS_COMMIT"
       - name: Build HCG and the UI driver
         run: dotnet build tools/ui-driver -c Release
-      - name: Rootless (the project's default, iOS 15.0+, /var/jb) — roothide is refused by the project itself
+      # Rootless and the preview app run with the environment an app started from Finder/Dock gets: launchd's PATH
+      # (/usr/bin:/bin:/usr/sbin:/sbin — no /opt/homebrew/bin, where ldid and gmake are). Before the fix the preview app
+      # compiled and linked, then Theos' signing recipe failed with "/bin/bash: ldid: command not found" (Error 127).
+      - name: Rootless (the project's default, iOS 15.0+, /var/jb) — roothide is refused by the project itself — launched like Finder (minimal PATH)
         run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          env -i HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" PATH=/usr/bin:/bin:/usr/sbin:/sbin THEOS="$THEOS" DOTNET_ROOT="$DOTNET_ROOT"
+          "$(command -v dotnet)" tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
           --project Makefile --theos-scheme rootless --expect-refused roothide
           --output "$OUT/rootless" --screenshots "$OUT/screens" --prefix nexus-rootless
       - name: Rootful (iOS 14.0+, /), built in its own folder
@@ -909,9 +913,10 @@ jobs:
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
           --project Makefile --theos-scheme rootful
           --output "$OUT/rootful" --screenshots "$OUT/screens" --prefix nexus-rootful
-      - name: Preview app (separate package, packaged as a .deb — not an IPA)
+      - name: Preview app (separate package, packaged as a .deb — not an IPA) — launched like Finder (minimal PATH)
         run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
+          env -i HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" PATH=/usr/bin:/bin:/usr/sbin:/sbin THEOS="$THEOS" DOTNET_ROOT="$DOTNET_ROOT"
+          "$(command -v dotnet)" tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --native --source "$OUT/src/HCG Nexus"
           --project PreviewHarness/Makefile --theos-scheme rootless
           --output "$OUT/preview" --screenshots "$OUT/screens" --prefix nexus-preview
       - name: HCG Nexus' own package check agrees with HCG's (new arm64e ABI required)

@@ -353,10 +353,17 @@ public sealed partial class NativeOutputParser : IBuildOutputParser
         else if (CMakeRegex().Match(line) is { Success: true } c)
             m = new BuildMessage(c.Groups["sev"].Value.Contains("Warning", StringComparison.Ordinal) ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error,
                 c.Value.Trim(), "CMake", c.Groups["file"].Value, int.Parse(c.Groups["line"].Value, System.Globalization.CultureInfo.InvariantCulture));
+        else if (ToolDiagnosticRegex().Match(line) is { Success: true } td)
+            // "ld: warning: -multiply_defined is obsolete" is a warning even though the linker writes it to stderr;
+            // "ld: error: …" / "clang: error: linker command failed …" stay errors.
+            m = new BuildMessage(Severity(td.Groups["sev"].Value), $"{td.Groups["tool"].Value}: {td.Groups["sev"].Value}: {td.Groups["msg"].Value.Trim()}", td.Groups["tool"].Value);
+        else if (CommandNotFoundRegex().Match(line) is { Success: true } nf)
+            // A recipe started a program its shell cannot find (exit 127): the cause, not one more make error.
+            m = new BuildMessage(DiagnosticSeverity.Error, $"{nf.Groups["cmd"].Value.Trim()}: command not found", CommandNotFoundCode);
         else if (LinkerRegex().Match(line) is { Success: true } l)
             m = new BuildMessage(DiagnosticSeverity.Error, l.Value.Trim(), "linker");
         else if (MakeRegex().Match(line) is { Success: true } mk)
-            m = new BuildMessage(DiagnosticSeverity.Error, mk.Value.Trim(), "make");
+            m = new BuildMessage(DiagnosticSeverity.Error, mk.Value.Trim(), MakeCode);
         else if (TheosErrorRegex().Match(line) is { Success: true } th)
             m = new BuildMessage(DiagnosticSeverity.Error, th.Groups["msg"].Value.Trim(), "Theos");
         else if (MakefileErrorRegex().Match(line) is { Success: true } me)
@@ -365,6 +372,14 @@ public sealed partial class NativeOutputParser : IBuildOutputParser
         return _seen.Add($"{m.Severity}|{m.File}|{m.Line}|{m.Text}") ? m : null;
     }
 
+    public const string CommandNotFoundCode = "command-not-found";
+    public const string MakeCode = "make";
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?<tool>ld|ld64|ld64\.lld|ld\.lld|clang|clang\+\+|cc|c\+\+|gcc|g\+\+|libtool|lipo|ar|ranlib|codesign|ldid|strip)(?:\[\d+\])?: (?<sev>warning|error|fatal error): (?<msg>.+)$")]
+    private static partial System.Text.RegularExpressions.Regex ToolDiagnosticRegex();
+    // bash/sh "…: ldid: command not found" (also "line 1:" forms) and make's own exec failure "gmake[2]: ldid: No such file or directory".
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?:(?:/(?:usr/)?bin/)?(?:ba|z|da)?sh(?:: line \d+)?|(?:g?make)(?:\[\d+\])?): (?<cmd>[^:/][^:]*|/[^:]+): (?:command not found|No such file or directory)$")]
+    private static partial System.Text.RegularExpressions.Regex CommandNotFoundRegex();
     [System.Text.RegularExpressions.GeneratedRegex(@"==> (?:Error|ERROR):\s*(?<msg>.+)$")] private static partial System.Text.RegularExpressions.Regex TheosErrorRegex();
     [System.Text.RegularExpressions.GeneratedRegex(@"^(?<file>(?:[^:\s][^:]*/)?(?:GNU)?[Mm]akefile):(?<line>\d+): \*\*\* (?<msg>.+)$")] private static partial System.Text.RegularExpressions.Regex MakefileErrorRegex();
 
@@ -376,8 +391,40 @@ public sealed partial class NativeOutputParser : IBuildOutputParser
     private static partial Regex MsvcRegex();
     [GeneratedRegex(@"^CMake (?<sev>Error|Warning(?: \(dev\))?) at (?<file>[^:]+):(?<line>\d+)")]
     private static partial Regex CMakeRegex();
-    [GeneratedRegex(@"(?:undefined reference to|Undefined symbols for architecture|unresolved external symbol|ld: (?:library|framework) not found|cannot find -l\S+).*")]
+    [GeneratedRegex(@"(?:undefined reference to|Undefined symbols for architecture|unresolved external symbol|ld: (?:library|framework) not found|ld: symbol\(s\) not found|cannot find -l\S+).*")]
     private static partial Regex LinkerRegex();
     [GeneratedRegex(@"^(?:g?make|mingw32-make)(?:\[\d+\])?: \*\*\* .+$")]
     private static partial Regex MakeRegex();
+}
+
+
+/// <summary>
+/// Why a make-driven build (C/C++ Make, Theos) failed, in cause-then-consequence order: the first real error (a command
+/// not found, a compiler or linker error, a Theos error) is the primary error; the "make: *** … Error N" lines that
+/// follow are only make stopping because of it and are grouped as consequences.
+/// </summary>
+public static class NativeFailureSummary
+{
+    public sealed record Summary(BuildMessage? Primary, IReadOnlyList<BuildMessage> Consequences, string Reason);
+
+    public static Summary Describe(string stepTitle, int exitCode, IReadOnlyList<BuildMessage> messages)
+    {
+        var errors = messages.Where(m => m.Severity == DiagnosticSeverity.Error).ToList();
+        var primary = errors.FirstOrDefault(m => m.Code != NativeOutputParser.MakeCode) ?? errors.FirstOrDefault();
+        var consequences = errors.Where(m => m.Code == NativeOutputParser.MakeCode && m != primary).ToList();
+        string reason;
+        if (primary is null)
+            reason = $"{stepTitle} failed with exit code {exitCode}.";
+        else
+        {
+            var cause = primary.Code == NativeOutputParser.CommandNotFoundCode
+                ? $"{primary.Text} — a build recipe started a program that its shell could not find on PATH (exit 127)."
+                : primary.Code == NativeOutputParser.MakeCode && primary.Text.EndsWith("Error 127", StringComparison.Ordinal)
+                    ? $"{primary.Text} — a recipe command was not found (exit 127)."
+                    : primary.Text + (primary.File is { } f ? $" ({f}{(primary.Line is { } l ? ":" + l : "")})" : "");
+            reason = $"{stepTitle} failed: {cause}" +
+                     (consequences.Count > 0 ? $" Then make stopped ({consequences.Count} follow-on error(s), consequences of the first: {string.Join(" · ", consequences.Take(3).Select(c => c.Text))})." : "");
+        }
+        return new Summary(primary, consequences, reason);
+    }
 }

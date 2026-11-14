@@ -158,7 +158,7 @@ public class TheosTests : IDisposable
             Assert.DoesNotContain(' ', prep.WorkRoot);
             Assert.True(File.Exists(Path.Combine(prep.ProjectDirectory, "Makefile")));
             Assert.True(File.Exists(Path.Combine(prep.ProjectDirectory, "..", "Sources", "Core", "HCGCore.m")));   // ../Sources still resolves
-            var step = TheosBuildPlanner.Plan(rootless, prep, new TheosBuildPlanner.Tools("/opt/theos", "/usr/bin/make"), new Dictionary<string, string>());
+            var step = TheosBuildPlanner.Plan(rootless, prep, new TheosBuildEnvironment("/opt/theos", "/usr/bin/make", "/opt/homebrew/bin/ldid", "/usr/bin/perl", new Dictionary<string, string> { ["THEOS"] = "/opt/theos" }));
             Assert.Equal("/usr/bin/make", step.Process.Executable);
             Assert.Equal(["-C", prep.ProjectDirectory, "package", "FINALPACKAGE=1", "THEOS_PACKAGE_DIR=" + prep.PackageDirectory, "messages=yes", "HCG_ENV=rootless"], step.Process.Arguments);
             Assert.DoesNotContain(step.Process.Arguments, a => a is "install" or "do" || a.StartsWith("THEOS_DEVICE", StringComparison.Ordinal));

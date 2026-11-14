@@ -83,6 +83,51 @@ TARGET; maintainer scripts are flagged. The result is *Jailbreak package (.deb, 
 **Obtaining the package.** The output folder holds the `.deb`, `INSTALL.txt` (copy to the device; install with Sileo,
 Zebra, Filza or `dpkg -i`; respring yourself) and `PACKAGE-REPORT.txt` (control fields, payload, binary slices).
 
+### Build environment: the tools detection shows are the tools the recipes run
+
+**Reported failure (PreviewHarness, Theos master @ 8167f59de02f).**
+- Inspection showed `ldid: /opt/homebrew/bin/ldid`.
+- gmake 4.4.1 ran from `/opt/homebrew/bin/gmake`, and compiling and linking succeeded.
+- Then Theos' signing recipe `CODESIGN_ALLOCATE=… ldid -S …` failed with `/bin/bash: ldid: command not found` and Error 127, followed by make's follow-on errors.
+
+**Cause.**
+- Detection looks for gmake and ldid in `/opt/homebrew/bin` explicitly.
+- The build passed gmake the sanitized parent environment. For an app started from Finder or the Dock, that is launchd's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`).
+- gmake itself started by absolute path, but its recipe shells look tools up on PATH. Theos only uses PATH for ldid when `TARGET_CODESIGN` is empty (`makefiles/targets/_common/darwin_head.mk`).
+- CI never saw it, because the runner's PATH contains `/opt/homebrew/bin`.
+
+**Fix: `TheosBuildEnvironment`, one resolved configuration for inspection and execution.**
+- **Same report.** It is built from the same toolchain report the readiness list shows: Theos, gmake, ldid and perl, each by absolute path.
+- **PATH for gmake and every recipe shell,** in this order:
+  - the sanitized parent PATH first, in its original order;
+  - then `/usr/bin:/bin:/usr/sbin:/sbin`;
+  - then the directory of each detected tool that is not reachable by name otherwise.
+  Directories are appended, never prepended, so no copy the parent PATH already resolves is shadowed. Relative entries are dropped.
+- **`TARGET_CODESIGN`** is set to the detected ldid. It goes in the environment, not on the make command line: Theos exports it, and a project's own Makefile assignment still wins. Signing is not skipped or changed.
+- **The .deb compressor.**
+  - Theos' packer (`dm.pl`) runs `lzma -c` by name, and lzma is Theos' default compression. macOS has no `lzma` command; Homebrew's `xz` provides one.
+  - The system copy is used when there is one. Otherwise the copy in `/opt/homebrew/bin` or `/usr/local/bin` is found and its directory added.
+  - When none exists, a warning names the problem before the build starts.
+- **Sanitization is unchanged:** secret-like variables are still removed before this step.
+- **Preflight in the exact child environment.** Before gmake starts, `/bin/bash -c 'command -v ldid; command -v perl; command -v lzma'` runs with the very environment gmake gets.
+  - Each tool must resolve to the executable detection showed; otherwise the build stops before compiling, naming the tool, the expected path and the PATH.
+  - The log records the PATH, THEOS and TARGET_CODESIGN used.
+
+**Error reporting (C/C++ Make and Theos).**
+- **Cause first.** The first real error is reported first: a command not found, a compiler or linker error, or a Theos error. The `make: *** … Error N` lines after it are grouped as its consequences.
+  - The failure now reads, for example: *"Theos: make package (HCG_ENV=rootless (rootless)) failed: ldid: command not found — a build recipe started a program that its shell could not find on PATH (exit 127). Then make stopped (3 follow-on error(s) …)."*
+- **Warnings classified correctly.** `ld: warning: …` and `clang: warning: …` (written to stderr) are classified as warnings instead of being logged as ERROR. `ld: error:`, `clang: error: linker command failed`, `ld: symbol(s) not found` and undefined symbols stay errors.
+
+**Verification.**
+- **Automated (`TheosEnvironmentTests`, real bash, make and process runner):**
+  - with Finder's minimal PATH and an ldid stand-in in a separate directory, the old environment reproduces `ldid: command not found` and the summary names it first;
+  - the resolved environment lets a nested recipe (make → make → make) run the detected ldid both by name and through `TARGET_CODESIGN`;
+  - the preflight reports a tool the child shell cannot find;
+  - the compressor is found and checked;
+  - the user's log lines are classified correctly.
+- **CI:** the HCG Nexus job now builds the rootless package and the preview app with launchd's minimal PATH (`env -i … PATH=/usr/bin:/bin:/usr/sbin:/sbin`), which is the reported failure on a real Mac with real Theos, Xcode and ldid.
+- **Not run locally:** a real Theos/Nexus build. This computer is Linux without Theos' toolchain, and installing it was not done.
+
 ## HCG Mail — iOS (`iOS App Store Submission/`)
 
 **What it is.** A real .NET for iOS application: `src/HCG.Mail.iOS/HCG.Mail.iOS.csproj` (`net10.0-ios`,

@@ -491,7 +491,9 @@ public class NativeTests : IDisposable
         var h = await CreateAsync(("BrokenC", "broken"));
         var build = await BuildAsync(h, new NativeBuildOptions { ProjectDirectory = "broken", Kind = NativeProjectKind.CMake, Target = "broken" });
         Assert.Equal(BuildStatus.Failed, build.Status);
-        Assert.StartsWith("Build target broken (Release) failed with exit code", build.FailureReason);
+        // The compiler's own message is the reason (cause first), with its location; make's follow-on lines are consequences.
+        Assert.StartsWith("Build target broken (Release) failed: ", build.FailureReason);
+        Assert.Contains("main.c:4)", build.FailureReason);
         var error = Assert.Single(build.Messages, m => m.Severity == DiagnosticSeverity.Error && m.File?.EndsWith("main.c", StringComparison.Ordinal) == true && m.Line == 4);
         Assert.Contains("expected", error.Text);
         Assert.Empty(build.Artifacts);
