@@ -171,7 +171,18 @@ public sealed class MobileBuildService(
             if (!artifactInput)
             {
                 if (analysis is null) throw new BuildValidationException("This project was not recognized as a mobile project. Re-inspect it or import a supported Android/iOS/Flutter/.NET MAUI project.");
-                var option = MobileCapabilities.Evaluate(analysis, report).FirstOrDefault(x => x.Output == options.Output)
+                if (analysis.Ios is { } ios && options.Output.Platform() == TargetPlatform.IOS && analysis.Framework == MobileFramework.NativeIos)
+                {
+                    // State the scheme this build uses and what it targets, so the log shows the same scheme the checks judged.
+                    var scheme = options.Scheme ?? MobileReadiness.DefaultScheme(ios);
+                    var resolved = MobileReadiness.ResolveScheme(ios, scheme);
+                    var targets = MobileReadiness.SchemeAppTargets(ios, resolved);
+                    Log(BuildLogKind.Info, $"Scheme: {scheme}{(options.Scheme is null ? " (project default; none chosen)" : "")} · builds " +
+                        (targets.Count == 0 ? "no known app target" : string.Join(", ", targets.Select(t => $"{t.Name} (iOS {t.DeploymentTarget ?? "?"}+)"))) +
+                        (report.Xcode?.IosDeploymentRange is { } r ? $" · selected Xcode {report.Xcode.VerifiedVersion} accepts iOS {r.Minimum}–{r.Maximum}" : ""));
+                }
+                // Availability for the scheme and configuration being built — the same evaluation Mobile Build Studio shows.
+                var option = MobileCapabilities.Evaluate(analysis, report, options).FirstOrDefault(x => x.Output == options.Output)
                              ?? throw new BuildValidationException($"{options.Output.DisplayName()} does not apply to this project.");
                 if (!option.IsAvailable) throw new BuildValidationException($"{options.Output.DisplayName()} is not available: {option.Reason}");
                 // Apple signing: validate what this Mac can check before xcodebuild starts (keychain, verified profiles,

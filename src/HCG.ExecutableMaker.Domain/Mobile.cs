@@ -108,6 +108,9 @@ public sealed record IosSchemeInfo(string Name, string File, bool Shared)
 /// The iOS deployment targets an Xcode's iPhoneOS SDK supports, read from its SDKSettings.json (SupportedTargets.iphoneos).
 /// Xcode reports targets outside this range as an error or warning when it builds.
 /// </summary>
+/// <summary>A scheme as the Studio offers it: the app targets it builds, and whether the selected Xcode accepts them (null: unknown).</summary>
+public sealed record IosSchemeChoice(string Name, IReadOnlyList<IosTargetInfo> AppTargets, bool? Compatible, string Label);
+
 public sealed record IosDeploymentRange(string Minimum, string Maximum, string? Recommended, string? SdkVersion)
 {
     public static Version? Parse(string? v) => v is null ? null : Version.TryParse(v.Contains('.') ? v : v + ".0", out var p) ? p : null;

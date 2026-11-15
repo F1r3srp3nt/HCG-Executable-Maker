@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
              xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:d="using:HCG.ExecutableMaker.Domain"
              x:Class="HCG.ExecutableMaker.App.Views.Pages.MobileBuildStudioView"
              x:DataType="vm:MobileBuildStudioViewModel">
   <UserControl.Styles>
@@ -113,6 +114,33 @@
               </ItemsControl>
             </StackPanel>
           </Grid>
+          <!-- What HCG builds is the copy taken at import: show whether it still matches the original, and refresh it. -->
+          <Border Classes="inset" Padding="14,10" IsVisible="{Binding HasProject}">
+            <StackPanel Spacing="8">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Spacing="2">
+                  <TextBlock Classes="label" Text="IMPORTED COPY" />
+                  <SelectableTextBlock FontSize="12.5" Text="{Binding SnapshotStatus}" TextWrapping="Wrap"
+                                       Classes.warning="{Binding SnapshotStale}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top" Margin="12,0,0,0"
+                            IsEnabled="{Binding !IsBuilding}" IsVisible="{Binding !IsArtifactProject}">
+                  <Button Classes="small" Content="Refresh source" Command="{Binding RefreshSourceCommand}"
+                          ToolTip.Tip="Copy the project again from its original folder or ZIP. Keeps the project's history and your scheme choice." />
+                  <Button Classes="small ghost" Content="Refresh from…" Command="{Binding RefreshSourceFromCommand}"
+                          ToolTip.Tip="Refresh from the project's current location if it moved" />
+                </StackPanel>
+              </Grid>
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRefreshingSource}" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="small ghost" Content="Copy diagnostic report" Command="{Binding CopyDiagnosticReportCommand}"
+                        ToolTip.Tip="Maker build, selected Xcode, imported copy and revision, schemes and readiness per scheme" />
+                <Button Classes="small ghost" Content="Save diagnostic report" Command="{Binding SaveDiagnosticReportCommand}" />
+              </StackPanel>
+              <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding RefreshResult}" TextWrapping="Wrap"
+                                   IsVisible="{Binding RefreshResult, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+          </Border>
         </StackPanel>
       </Border>
 
@@ -134,6 +162,20 @@
                 </DataTemplate>
               </ComboBox.ItemTemplate>
             </ComboBox>
+            <!-- The scheme decides which outputs exist, so it is chosen before them (and saved for this project). -->
+            <StackPanel IsVisible="{Binding ShowSchemes}" Spacing="6" Margin="0,4,0,0">
+              <TextBlock Classes="formlabel" Text="XCODE SCHEME" />
+              <ComboBox ItemsSource="{Binding SchemeChoices}" SelectedItem="{Binding SelectedSchemeChoice}" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsBuilding}">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="d:IosSchemeChoice">
+                    <TextBlock Text="{Binding Label}" TextWrapping="Wrap" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Outputs below are judged for this scheme. Your choice is saved for this project. HCG never changes a scheme's deployment target." />
+              <Button Classes="small" Content="{Binding RecommendedSchemeLabel}" Command="{Binding UseRecommendedSchemeCommand}" IsVisible="{Binding HasRecommendedScheme}" />
+            </StackPanel>
             <TextBlock Classes="label" Text="3 · BUILD OUTPUT" Margin="0,8,0,0" />
             <TextBlock Classes="muted" Text="Select a project to see the outputs it supports on this computer." IsVisible="{Binding !HasOutputs}" TextWrapping="Wrap" />
             <ItemsControl ItemsSource="{Binding Outputs}">
@@ -167,10 +209,6 @@
             <StackPanel IsVisible="{Binding ShowModules}">
               <TextBlock Classes="formlabel" Text="APP MODULE" />
               <ComboBox ItemsSource="{Binding Modules}" SelectedItem="{Binding SelectedModule}" HorizontalAlignment="Stretch" />
-            </StackPanel>
-            <StackPanel IsVisible="{Binding ShowSchemes}">
-              <TextBlock Classes="formlabel" Text="SCHEME" />
-              <ComboBox ItemsSource="{Binding Schemes}" SelectedItem="{Binding SelectedScheme}" HorizontalAlignment="Stretch" />
             </StackPanel>
             <StackPanel IsVisible="{Binding ShowVariants}">
               <TextBlock Classes="formlabel" Text="VARIANT / CONFIGURATION" />
@@ -252,9 +290,11 @@
           </Grid>
           <Border Classes="inset" Padding="16,12" IsVisible="{Binding HasProject}">
             <Grid ColumnDefinitions="*,Auto">
-              <StackPanel Spacing="2">
-                <TextBlock Classes="label" Text="STATE" />
+              <StackPanel Spacing="6">
+                <TextBlock Classes="label" Text="CURRENT STATE (THIS SCHEME AND OUTPUT)" />
                 <SelectableTextBlock FontSize="12.5" Text="{Binding BuildStateDetail}" TextWrapping="Wrap" />
+                <Button Classes="small" HorizontalAlignment="Left" Content="{Binding RecommendedSchemeLabel}" Command="{Binding UseRecommendedSchemeCommand}" IsVisible="{Binding HasRecommendedScheme}" />
+                <TextBlock Classes="muted" FontSize="12" Text="{Binding PreviousBuildSummary}" TextWrapping="Wrap" IsVisible="{Binding HasPreviousBuild}" />
               </StackPanel>
               <c:StatusChip Grid.Column="1" Status="{Binding BuildStateTag}" VerticalAlignment="Top" Margin="10,0,0,0" />
             </Grid>
@@ -321,6 +361,18 @@
               <CheckBox IsChecked="{Binding TrustAcknowledged}">
                 <TextBlock Text="I trust this project and want to run its build scripts on this computer." TextWrapping="Wrap" FontWeight="SemiBold" />
               </CheckBox>
+            </StackPanel>
+          </Border>
+          <Border Classes="inset" Padding="14,10" IsVisible="{Binding HasPrerequisites}">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="label" Text="BEFORE YOU CAN BUILD" />
+              <ItemsControl ItemsSource="{Binding Prerequisites}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String">
+                    <TextBlock FontSize="12.5" TextWrapping="Wrap" Margin="0,2" Text="{Binding StringFormat='• {0}'}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
             </StackPanel>
           </Border>
           <StackPanel Orientation="Horizontal" Spacing="10">

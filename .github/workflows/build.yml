@@ -1030,7 +1030,7 @@ jobs:
     timeout-minutes: 90
     env:
       OUT: ${{ github.workspace }}/sentinel-out
-      SENTINEL_COMMIT: 810c6f99103a5e4f60e91a6fecda8259be01e0da
+      SENTINEL_COMMIT: 03bc6e55f0a75c32df0a05415d70b55e95f5ad9d  # HCG Sentinel main (was 810c6f9, 40 commits older)
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -1062,7 +1062,8 @@ jobs:
               DEVELOPER_DIR="$x/Contents/Developer" dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Sentinel" \
                 --mobile-output archive --scheme "$scheme" --signing unsigned --record-only \
                 --output "$OUT/$name-$scheme" --screenshots "$OUT/screens" --prefix "sentinel-$name-$scheme" > "$OUT/$name-$scheme.driver.log" 2>&1 || true
-              state="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["state"], "|", (d.get("firstError") or d.get("detail") or "")[:400])' "$OUT/$name-$scheme/sentinel-$name-$scheme-mobile.json" 2>/dev/null \
+              # "result" is the build's outcome (Artifact verified / Failed / Not started); "state" is the selection's current readiness.
+              state="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d.get("result") or d["state"]; print(r, "| now:", d["state"], "|", (d.get("firstError") or ("" if r == "Artifact verified" else d.get("detail")) or "")[:400])' "$OUT/$name-$scheme/sentinel-$name-$scheme-mobile.json" 2>/dev/null \
                        || grep -E 'State: \[' "$OUT/$name-$scheme.driver.log" | tail -1)"
               echo "$name · $scheme · $state" | tee -a "$OUT/results.txt"
             done

@@ -2,6 +2,26 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.1] — Mobile Build Studio: the chosen Xcode scheme is the one judged and built
+
+### Fixed
+- **HCG Sentinel stayed blocked on an Xcode that starts at iOS 15.0 although its compatible scheme was recommended.** Output availability (`MobileCapabilities`) and the build engine's pre-build gate evaluated readiness without the scheme, so the deployment-target preflight judged the project's first scheme (`HCGSentinel`, iOS 14.7). Every output was unavailable; the scheme picker only appeared once an output was selected; a scheme change refreshed nothing and every output change reset it; the engine would have refused `HCGSentinelModern` for `HCGSentinel`'s reason. Reproduced by `SentinelSchemeSelectionTests` and on macOS by `sentinel-xcode-min15.yml`.
+  - The scheme is chosen first (section 2), labelled with what the selected Xcode accepts, saved per project, and passed to output availability, readiness, the engine gate, the log ("Scheme: … · builds … · selected Xcode … accepts …") and `xcodebuild -scheme`. One default-scheme rule for all of them.
+  - "Use scheme X" is offered when the selected scheme is blocked by its deployment target; nothing is selected for the user, and no deployment target is ever changed.
+  - A saved scheme that the imported copy does not contain is reported as its own blocker, never replaced by another scheme.
+- **Status contradicted itself** ("Ready" heading next to "Required toolchain missing"). The current state now comes only from the current selection's readiness: "Blocked — deployment target incompatible", "Blocked — scheme not in imported copy", "Required toolchain missing" (not installed) vs. "Toolchain installed but incompatible / unusable / setup required", "Signing required", "Configuration required". The previous build is shown separately; the stage heading no longer says "Ready".
+- The project summary no longer reports missing toolchains when the real blocker is a deployment target, and names the scheme that builds.
+- **Self-packaged apps showed "commit unknown"** (also apps from `tools/build-local-mac.sh`): the build runs in an imported copy without `.git`, and the build environment drops `HCG_*` variables, so `HCG_SOURCE_REVISION` never arrived. The revision now travels as `hcg-source-revision.txt` in that copy; the packaged app shows its commit in the footer, Settings › About and `--version`.
+
+### Added
+- **Before you can build** list: every remaining prerequisite with its fix, including the per-build trust confirmation.
+- **Imported copy** panel: whether HCG's copy still matches the original folder (content fingerprint, Git commit read from `.git`) or ZIP (SHA-256); **Refresh source** / **Refresh from…** copy it again in place, keeping the project id, build history and scheme choice.
+- **Diagnostic report** (Copy / Save in Mobile Build Studio; `HCGExecutableMaker --diagnose-mobile [--project ID|NAME] [--scheme S] [--reproduce]`): Maker build identity and executable, HCG's selected Xcode and its iOS range, the imported copy and its revision, hashes of the project and scheme files, every scheme with its targets, readiness per scheme × output, and the exact commands to reproduce outside Maker; `--reproduce` runs them.
+- CI: `sentinel-xcode-min15.yml` (macOS, Xcode 26.6 with its iOS SDK minimum raised to 15.0 on the disposable runner): Maker before the fix, xcodebuild outside Maker, Maker after the fix through the UI driver (stale copy → refresh → use scheme → persisted → Simulator build), unsigned archive, legacy and IPA refusals, and the packaged app's `--version` / `--diagnose-mobile --reproduce`.
+
+### Changed
+- Version 0.3.1. The Sentinel test fixture and the `hcg-sentinel-archive` CI pin move from Sentinel 810c6f9 to `main` 03bc6e5.
+
 ## [Unreleased] — HCG Signing Vault ([docs/SIGNING-VAULT.md](docs/SIGNING-VAULT.md))
 
 ### Added

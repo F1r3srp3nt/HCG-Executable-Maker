@@ -1,0 +1,212 @@
+name: Sentinel on an Xcode that starts at iOS 15
+
+# Reproduces the reported HCG Sentinel blocker on a real Mac and proves the fix end to end.
+#
+# The reporting Mac's Xcode supports iOS 15.0 and later; every hosted Xcode accepts Sentinel's legacy iOS 14.7 target, so
+# on this DISPOSABLE runner the iPhoneOS and iPhoneSimulator SDK settings of Xcode 26.6 are edited to a minimum of 15.0
+# (MinimumDeploymentTarget in SDKSettings.json / .plist; values before and after are printed). Nothing else changes.
+#
+#   1. Maker BEFORE the fix (base commit), driven like a user: the default scheme blocks every output, the modern scheme
+#      cannot be used — the reported state.
+#   2. Outside Maker: xcodebuild directly on the same Sentinel files with the same Xcode (schemes, every target's
+#      deployment target per configuration and destination, Simulator builds of both schemes, first meaningful error).
+#   3. Maker AFTER the fix, driven like a user (Avalonia headless, the real Mobile Build Studio): import Sentinel at an
+#      older commit, see "Blocked — deployment target incompatible" and the offered scheme, move the original to main and
+#      see the copy reported as older, Refresh source, Use scheme HCGSentinelModern, leave and reopen the page, confirm
+#      trust, build for the Simulator; the build log must show -scheme HCGSentinelModern.
+#   4. Unsigned device archive of HCGSentinelModern through Maker (separately); the legacy archive stays blocked with
+#      the deployment reason; the IPA is refused for the missing certificate (CI has no signing identity).
+#   5. The PACKAGED app (self-packaged .app): --version, and --diagnose-mobile --reproduce on the data of step 3.
+# Logs, JSON results, screenshots and reports are uploaded. Nothing is signed, uploaded or published.
+
+on:
+  push:
+    branches: ["claude/**"]
+    paths:
+      - ".github/workflows/sentinel-xcode-min15.yml"
+      - "src/**"
+      - "tools/ui-driver/**"
+      - "tools/self-package/**"
+      - "Directory.Build.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentinel-min15-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+  SENTINEL_OLD: 810c6f99103a5e4f60e91a6fecda8259be01e0da   # the commit Maker's CI pinned before this change
+  SENTINEL_MAIN: 03bc6e55f0a75c32df0a05415d70b55e95f5ad9d  # HCG Sentinel main: HCGSentinelModern with its own product and tests
+
+jobs:
+  sentinel:
+    name: HCG Sentinel · Xcode 26.6 with iOS 15.0 minimum · before/outside/after/packaged
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      XCODE: /Applications/Xcode_26.6.app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Sentinel sources (paths with spaces)
+        run: |
+          echo "OUT=$RUNNER_TEMP/sentinel min15 out" >> "$GITHUB_ENV"
+          OUT="$RUNNER_TEMP/sentinel min15 out"
+          mkdir -p "$OUT"
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Sentinel.git "$OUT/sentinel main"
+          git -C "$OUT/sentinel main" checkout --quiet "$SENTINEL_MAIN"
+          for d in before after; do git clone --quiet "$OUT/sentinel main" "$OUT/sentinel $d"; git -C "$OUT/sentinel $d" checkout --quiet "$SENTINEL_OLD"; done
+          git -C "$OUT/sentinel main" log -1 --format='Sentinel main: %H %s'
+
+      - name: Xcode 26.6 with its iOS SDK minimum raised to 15.0 (disposable runner only)
+        run: |
+          test -d "$XCODE" || { ls -d /Applications/Xcode*.app; exit 1; }
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$XCODE/Contents/Developer"
+          xcodebuild -version
+          sudo python3 - "$DEVELOPER_DIR" <<'PY'
+          import json, plistlib, sys, glob, os
+          dev = sys.argv[1]
+          for plat, key in (("iPhoneOS", "iphoneos"), ("iPhoneSimulator", "iphonesimulator")):
+              for sdk in glob.glob(f"{dev}/Platforms/{plat}.platform/Developer/SDKs/{plat}*.sdk"):
+                  if os.path.islink(sdk): continue
+                  j = f"{sdk}/SDKSettings.json"
+                  if os.path.exists(j):
+                      d = json.load(open(j)); t = d["SupportedTargets"][key]
+                      print(f"{j}: MinimumDeploymentTarget {t['MinimumDeploymentTarget']} -> 15.0 (max {t['MaximumDeploymentTarget']})")
+                      t["MinimumDeploymentTarget"] = "15.0"; json.dump(d, open(j, "w"), indent=1)
+                  p = f"{sdk}/SDKSettings.plist"
+                  if os.path.exists(p):
+                      d = plistlib.load(open(p, "rb")); t = d.get("SupportedTargets", {}).get(key)
+                      if t:
+                          print(f"{p}: MinimumDeploymentTarget {t.get('MinimumDeploymentTarget')} -> 15.0")
+                          t["MinimumDeploymentTarget"] = "15.0"; plistlib.dump(d, open(p, "wb"))
+          PY
+          python3 -c 'import json,sys; t=json.load(open(sys.argv[1]))["SupportedTargets"]["iphoneos"]; print("iPhoneOS range now", t["MinimumDeploymentTarget"], "to", t["MaximumDeploymentTarget"])' \
+            "$DEVELOPER_DIR/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/SDKSettings.json" | tee "$OUT/xcode.txt"
+
+      - name: 1 · Maker BEFORE the fix (merge base with main), driven like a user
+        continue-on-error: true
+        run: |
+          base="$(git merge-base HEAD origin/main)"
+          echo "Maker base commit: $base" | tee "$OUT/before.txt"
+          git worktree add --quiet "$OUT/maker before" "$base"
+          dotnet build "$OUT/maker before/tools/ui-driver" -c Release -v quiet -nologo > "$OUT/before-build.log" 2>&1 || { tail -30 "$OUT/before-build.log"; exit 1; }
+          dotnet "$OUT/maker before/tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll" --mobile --source "$OUT/sentinel before" \
+            --mobile-output sim --scheme HCGSentinelModern --record-only --output "$OUT/before" --screenshots "$OUT/screens" --prefix before \
+            > "$OUT/before.driver.log" 2>&1 || true
+          grep -E "^Output |^State:|Scheme |Readiness \[.*Deployment" "$OUT/before.driver.log" | tee -a "$OUT/before.txt"
+
+      - name: 2 · Outside Maker — xcodebuild on the same Sentinel files and the same Xcode
+        run: |
+          cd "$OUT/sentinel main"
+          { echo "Sentinel $(git rev-parse HEAD)"; xcodebuild -version | head -1; xcodebuild -list -project HCGSentinel.xcodeproj; } | tee "$OUT/outside.txt"
+          for scheme in HCGSentinel HCGSentinelModern; do
+            for cfg in Debug Release; do
+              for dest in "generic/platform=iOS Simulator" "generic/platform=iOS"; do
+                xcodebuild -project HCGSentinel.xcodeproj -scheme "$scheme" -configuration "$cfg" -destination "$dest" -showBuildSettings 2>/dev/null \
+                  | awk -v s="$scheme" -v c="$cfg" -v d="$dest" '/^Build settings for action/{t=$NF; sub(":$","",t)} /^ *IPHONEOS_DEPLOYMENT_TARGET = /{print s" · "c" · "d" · "t" → "$3}' \
+                  | sort -u | tee -a "$OUT/outside.txt"
+              done
+            done
+          done
+          for scheme in HCGSentinelModern HCGSentinel; do
+            cmd=(xcodebuild build -project HCGSentinel.xcodeproj -scheme "$scheme" -configuration Debug -sdk iphonesimulator
+                 -destination "generic/platform=iOS Simulator" -derivedDataPath "$RUNNER_TEMP/outside-$scheme" CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO)
+            echo "\$ ${cmd[*]}" | tee -a "$OUT/outside.txt"
+            set +e; "${cmd[@]}" > "$OUT/outside-$scheme.log" 2>&1; code=$?; set -e
+            echo "  exit $code · $(grep -E '\*\* BUILD (SUCCEEDED|FAILED)' "$OUT/outside-$scheme.log" | tail -1)" | tee -a "$OUT/outside.txt"
+            echo "  first error: $(grep -m1 -E 'error:' "$OUT/outside-$scheme.log" | cut -c1-400 || true)" | tee -a "$OUT/outside.txt"
+            grep -iE "deployment target" "$OUT/outside-$scheme.log" | sort -u | head -5 | cut -c1-400 | sed 's/^/  deployment diagnostic: /' | tee -a "$OUT/outside.txt" || true
+          done
+          grep -q "BUILD SUCCEEDED" "$OUT/outside-HCGSentinelModern.log"
+
+      - name: Build Maker (this commit) and the UI driver
+        run: dotnet build tools/ui-driver -c Release -v quiet -nologo
+
+      - name: 3 · Maker AFTER the fix — stale copy, refresh, use the compatible scheme, persist, build for the Simulator
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/sentinel after" \
+            --then-checkout "$SENTINEL_MAIN" \
+            --expect-default-state "Blocked — deployment target incompatible" --expect-recommended HCGSentinelModern \
+            --use-recommended --expect-persisted --mobile-output sim \
+            --output "$OUT/after" --screenshots "$OUT/screens" --prefix after | tee "$OUT/after.driver.log"
+          grep -q "UI DRIVER: PASSED" "$OUT/after.driver.log"
+
+      - name: 4a · Unsigned device archive of HCGSentinelModern through Maker
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/sentinel main" \
+            --scheme HCGSentinelModern --mobile-output archive --signing unsigned \
+            --output "$OUT/archive" --screenshots "$OUT/screens" --prefix archive | tee "$OUT/archive.driver.log"
+          grep -q "UI DRIVER: PASSED" "$OUT/archive.driver.log"
+
+      - name: 4b · Legacy HCGSentinel stays blocked by its deployment target (not changed, not bypassed)
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/sentinel main" \
+            --scheme HCGSentinel --mobile-output archive --expect-unavailable-reason "needs iOS 14.7" \
+            --expect-state "Blocked — deployment target incompatible" \
+            --output "$OUT/legacy" --screenshots "$OUT/screens" --prefix legacy | tee "$OUT/legacy.driver.log"
+          grep -q "UI DRIVER: PASSED" "$OUT/legacy.driver.log"
+
+      - name: 4c · IPA of HCGSentinelModern is refused for signing (no certificate on CI), not for the deployment target
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/sentinel main" \
+            --scheme HCGSentinelModern --mobile-output ipa --expect-unavailable-reason "certificate" \
+            --output "$OUT/ipa" --screenshots "$OUT/screens" --prefix ipa | tee "$OUT/ipa.driver.log"
+          grep -q "UI DRIVER: PASSED" "$OUT/ipa.driver.log"
+
+      - name: 5 · The packaged app — build identity and diagnostic report with outside-Maker reproduction
+        run: |
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -1)-ci.${GITHUB_RUN_NUMBER}"
+          dotnet run --no-cache tools/self-package/self-package.cs -- . "$RUNNER_TEMP/selfpack" --targets osx-arm64 --version "$version" --dist "$RUNNER_TEMP/dist" > "$OUT/selfpack.log" 2>&1 \
+            || { tail -40 "$OUT/selfpack.log"; exit 1; }
+          app="$(find "$RUNNER_TEMP/selfpack" -maxdepth 8 -name '*.app' -type d | head -1)"
+          exe="$app/Contents/MacOS/$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")"
+          echo "Packaged app: $app" | tee "$OUT/packaged.txt"
+          "$exe" --version | tee -a "$OUT/packaged.txt"
+          grep -q "commit $(git rev-parse --short=12 HEAD)" "$OUT/packaged.txt"
+          HCG_EXECUTABLE_MAKER_HOME="$OUT/after/hcg-data" "$exe" --diagnose-mobile --reproduce | tee "$OUT/packaged-diagnose.txt"
+          grep -q "Selected scheme: HCGSentinelModern" "$OUT/packaged-diagnose.txt"
+          grep -q "Original Git revision: $SENTINEL_MAIN" "$OUT/packaged-diagnose.txt"
+          grep -q "matches the original" "$OUT/packaged-diagnose.txt"
+          grep -q "HCGSentinel · iOS Simulator build: \[Blocked — deployment target incompatible\]" "$OUT/packaged-diagnose.txt"
+          grep -q "\* HCGSentinelModern · iOS Simulator build: \[Ready to build\]" "$OUT/packaged-diagnose.txt"
+          grep -q "Simulator build of scheme HCGSentinelModern: exit 0" "$OUT/packaged-diagnose.txt"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### HCG Sentinel on Xcode 26.6 with an iOS 15.0 minimum"
+            for f in xcode before outside packaged; do [ -f "$OUT/$f.txt" ] && { echo; echo "**$f**"; echo '```'; cat "$OUT/$f.txt"; echo '```'; }; done
+            for r in after archive legacy ipa; do
+              [ -f "$OUT/$r/$r-mobile.json" ] && { echo; echo "**$r** (Maker, this commit)"; echo '```json'; cat "$OUT/$r/$r-mobile.json"; echo '```'; }
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sentinel-xcode-min15
+          path: |
+            ${{ runner.temp }}/sentinel min15 out/*.txt
+            ${{ runner.temp }}/sentinel min15 out/*.log
+            ${{ runner.temp }}/sentinel min15 out/*/*.json
+            ${{ runner.temp }}/sentinel min15 out/*/*-build.log
+            ${{ runner.temp }}/sentinel min15 out/*/*ui-driver-report.txt
+            ${{ runner.temp }}/sentinel min15 out/screens
+            ${{ runner.temp }}/sentinel min15 out/after/hcg-data/diagnostics
+          if-no-files-found: warn
+          retention-days: 14

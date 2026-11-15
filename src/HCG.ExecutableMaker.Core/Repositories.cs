@@ -43,6 +43,8 @@ public sealed record AppSettings
     /// <summary>App Store Connect API key ID (for altool --validate-app). The .p8 key stays in ~/.appstoreconnect/private_keys.</summary>
     public string? AppStoreConnectKeyId { get; init; }
     public string? AppStoreConnectIssuerId { get; init; }
+    /// <summary>Mobile Build Studio: the Xcode scheme chosen for each project (project id → scheme). Kept across restarts and source refreshes.</summary>
+    public Dictionary<string, string> MobileSchemes { get; init; } = new(StringComparer.Ordinal);
 }
 
 public interface ISettingsStore

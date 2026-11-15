@@ -8,7 +8,13 @@ namespace HCG.ExecutableMaker.ProjectInspection.Mobile;
 /// </summary>
 public static class MobileCapabilities
 {
-    public static IReadOnlyList<MobileOutputOption> Evaluate(MobileAnalysis mobile, ToolchainReport? report)
+    /// <summary>
+    /// The outputs this project offers on this host. <paramref name="selection"/> carries the user's scheme (and
+    /// configuration): availability is judged for the scheme that will actually be built, never for a default one —
+    /// otherwise a project whose first scheme is out of the selected Xcode's range (HCG Sentinel's iOS 14.7 legacy
+    /// scheme on an Xcode that starts at iOS 15.0) shows every output unavailable even with its compatible scheme chosen.
+    /// </summary>
+    public static IReadOnlyList<MobileOutputOption> Evaluate(MobileAnalysis mobile, ToolchainReport? report, MobileBuildOptions? selection = null)
     {
         var list = new List<MobileOutputOption>();
         if (mobile.ArtifactPath is { } artifact)
@@ -35,7 +41,10 @@ public static class MobileCapabilities
         // judged with "unsigned" allowed, since that option needs no certificate; the chosen signing is checked later.
         void Add(MobileOutput o, string desc, MobileSigningMode signing = MobileSigningMode.ProjectDefault, params string[] extra)
         {
-            var readiness = MobileReadiness.Evaluate(mobile, o, new MobileBuildOptions { Framework = mobile.Framework, Output = o, Signing = signing }, report);
+            var readiness = MobileReadiness.Evaluate(mobile, o, new MobileBuildOptions
+            {
+                Framework = mobile.Framework, Output = o, Signing = signing, Scheme = selection?.Scheme, Variant = selection?.Variant,
+            }, report);
             var reasons = readiness.Blockers.Select(b => b.Detail + (b.Fix is null ? "" : " " + b.Fix)).Concat(extra).ToList();
             list.Add(new MobileOutputOption(o, reasons.Count == 0, desc, reasons.Count == 0 ? null : string.Join(" ", reasons)));
         }
@@ -57,6 +66,7 @@ public static class MobileCapabilities
     }
 
     /// <summary>Required-but-missing reasons for building this project for a platform (kept for callers that list them).</summary>
-    public static IReadOnlyList<string> Blockers(MobileAnalysis mobile, MobileOutput output, ToolchainReport? report) =>
-        MobileReadiness.Evaluate(mobile, output, null, report).Blockers.Select(b => b.Detail).ToList();
+    public static IReadOnlyList<string> Blockers(MobileAnalysis mobile, MobileOutput output, ToolchainReport? report, string? scheme = null) =>
+        MobileReadiness.Evaluate(mobile, output, scheme is null ? null : new MobileBuildOptions { Framework = mobile.Framework, Output = output, Scheme = scheme }, report)
+            .Blockers.Select(b => b.Detail).ToList();
 }

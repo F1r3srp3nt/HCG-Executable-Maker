@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "8776530F491B39AE81E90336"
-               BuildableName = "HCGSentinel.app"
+               BuildableName = "HCGSentinelModern.app"
                BlueprintName = "HCGSentinelModern"
                ReferencedContainer = "container:HCGSentinel.xcodeproj">
             </BuildableReference>
@@ -28,6 +28,26 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "B349C814CB8D6C962B143ECF"
+               BuildableName = "HCGSentinelModernTests.xctest"
+               BlueprintName = "HCGSentinelModernTests"
+               ReferencedContainer = "container:HCGSentinel.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "SentinelCoreTests"
+               BuildableName = "SentinelCoreTests"
+               BlueprintName = "SentinelCoreTests"
+               ReferencedContainer = "container:SentinelCore">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
@@ -45,7 +65,7 @@
          <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "8776530F491B39AE81E90336"
-               BuildableName = "HCGSentinel.app"
+               BuildableName = "HCGSentinelModern.app"
                BlueprintName = "HCGSentinelModern"
                ReferencedContainer = "container:HCGSentinel.xcodeproj">
             </BuildableReference>
@@ -62,7 +82,7 @@
          <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "8776530F491B39AE81E90336"
-               BuildableName = "HCGSentinel.app"
+               BuildableName = "HCGSentinelModern.app"
                BlueprintName = "HCGSentinelModern"
                ReferencedContainer = "container:HCGSentinel.xcodeproj">
             </BuildableReference>

@@ -15,8 +15,9 @@ public sealed class ProjectRecord
     public required string Name { get; set; }
     public required ProjectSourceKind SourceKind { get; init; }
 
-    /// <summary>Where the user's original ZIP or directory lives. Never modified or deleted by HCG.</summary>
-    public required string SourceLocation { get; init; }
+    /// <summary>Where the user's original ZIP or directory lives. Never modified or deleted by HCG. Changes only when the
+    /// user refreshes the source from another location.</summary>
+    public required string SourceLocation { get; set; }
 
     /// <summary>Isolated workspace root owned by HCG (contains <c>source/</c> and, for ZIP imports, <c>original/</c>).</summary>
     public required string WorkspacePath { get; init; }
@@ -24,7 +25,8 @@ public sealed class ProjectRecord
     /// <summary>Copy of the original archive preserved inside the workspace, if any.</summary>
     public string? PreservedArchivePath { get; init; }
 
-    public required DateTimeOffset ImportedAt { get; init; }
+    /// <summary>When the current copy in <see cref="SourceDirectory"/> was taken (import, or the latest Refresh source).</summary>
+    public required DateTimeOffset ImportedAt { get; set; }
     public DateTimeOffset? LastOpenedAt { get; set; }
 
     /// <summary>Most recent analysis, serialized as JSON by the persistence layer.</summary>
