@@ -48,6 +48,8 @@
                           Command="{Binding $parent[UserControl].((vm:ArtifactsViewModel)DataContext).CopyChecksumCommand}" CommandParameter="{Binding}" />
                   <Button Classes="small primary" HorizontalAlignment="Stretch" Content="Export…" IsEnabled="{Binding Exists}"
                           Command="{Binding $parent[UserControl].((vm:ArtifactsViewModel)DataContext).ExportCommand}" CommandParameter="{Binding}" />
+                  <Button Classes="small" HorizontalAlignment="Stretch" Content="Ship to Store…" IsEnabled="{Binding Exists}"
+                          Command="{Binding $parent[UserControl].((vm:ArtifactsViewModel)DataContext).ShipToStoreCommand}" CommandParameter="{Binding}" />
                 </StackPanel>
               </Grid>
             </Border>

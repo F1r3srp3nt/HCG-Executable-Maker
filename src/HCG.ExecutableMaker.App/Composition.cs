@@ -138,6 +138,8 @@ public static class Composition
         services.AddSingleton<ProjectsViewModel>();
         services.AddSingleton<BuildHistoryViewModel>();
         services.AddSingleton<ArtifactsViewModel>();
+        services.AddSingleton<StoreClientFactory>();
+        services.AddSingleton<ShipToStoreViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();

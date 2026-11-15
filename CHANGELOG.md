@@ -2,6 +2,13 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Ship to Store (HCG Store release publishing)
+
+### Added
+- **Ship to Store** page (sidebar) and "Ship to Store…" on every artifact: product (or draft product), edition, version, build number, notes, compatibility, distribution, requested eligibility, HCG Repo delivery for `.deb`; one file per platform (Windows EXE/MSI/MSIX/ZIP, macOS app ZIP/DMG/PKG, iOS/iPadOS IPA, Linux DEB/RPM/AppImage, jailbreak DEB) detected from content, SHA-256, minimum OS, package fields, and local signature/notarisation checks (codesign, spctl, stapler, pkgutil; Authenticode on Windows).
+- Uploads to Store-issued, file-scoped URLs with resume, bounded retries, confirmed-bytes progress, server-side SHA-256 and format verification, Retry on the same draft, submit for manual review, review link. The app never approves or publishes.
+- `HCGExecutableMaker --ship-to-store` (same code) and `tools/ci/ship-to-store-e2e.sh` (TEST Store + mock HCG Connect, 16 checks). UI driver `--ship-page`. 11 unit tests. See docs/SHIP-TO-STORE.md.
+
 ## [Unreleased] — HCG Signing Vault ([docs/SIGNING-VAULT.md](docs/SIGNING-VAULT.md))
 
 ### Added
