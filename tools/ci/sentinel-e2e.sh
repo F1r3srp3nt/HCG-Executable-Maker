@@ -39,7 +39,7 @@ for rev in $PRE_MODERN $FIRST_MODERN $CURRENT; do
       set -- $pair
       line=$( (cd "$dir" && xcodebuild -showBuildSettings -project HCGSentinel.xcodeproj -scheme "$s" -configuration "$1" -sdk "$2" \
                  -derivedDataPath "$OUT/dd-show" 2>&1) \
-             | awk '/^ *TARGET_NAME =/ {n=$3} /^ *IPHONEOS_DEPLOYMENT_TARGET =/ {printf "%s=%s ", n, $3}')
+             | awk '/^Build settings for action .* and target / {n=$NF; sub(/:$/, "", n)} /^ *IPHONEOS_DEPLOYMENT_TARGET =/ {printf "%s=%s ", n, $3}')
       echo "  $s · $1 · $2: ${line:-(no settings)}" | tee -a "$RESULTS"
     done
   done

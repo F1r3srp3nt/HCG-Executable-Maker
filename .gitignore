@@ -19,3 +19,4 @@ tests/Fixtures/**/DerivedData/
 *.xcuserstate
 xcuserdata/
 mobile-out/
+hcg-source-revision.txt

@@ -61,11 +61,20 @@ public sealed record SourceDrift
     public bool IsCurrent => OriginAvailable && Added.Count == 0 && Removed.Count == 0 && Changed.Count == 0;
     public int DifferenceCount => Added.Count + Removed.Count + Changed.Count;
 
+    public static bool IsProjectDefinition(string path) =>
+        path.Contains(".xcodeproj/", StringComparison.Ordinal) || path.Contains(".xcworkspace/", StringComparison.Ordinal) ||
+        path.EndsWith("Package.swift", StringComparison.Ordinal) || path.EndsWith(".csproj", StringComparison.Ordinal) ||
+        path.EndsWith(".gradle", StringComparison.Ordinal) || path.EndsWith(".gradle.kts", StringComparison.Ordinal) ||
+        path.EndsWith("Podfile", StringComparison.Ordinal) || path.EndsWith(".xcconfig", StringComparison.Ordinal) ||
+        path.EndsWith("Makefile", StringComparison.Ordinal) || path.EndsWith("package.json", StringComparison.Ordinal);
+
     public string Describe(int max = 8)
     {
         if (!OriginAvailable) return $"The original cannot be compared: {OriginProblem}";
         if (IsCurrent) return "HCG's copy matches the original's current files.";
-        var sample = Changed.Select(f => "changed " + f).Concat(Added.Select(f => "new " + f)).Concat(Removed.Select(f => "removed " + f)).Take(max);
+        // Files that define what is built (schemes, project files, manifests) are named first, then everything else.
+        var all = Added.Select(f => (f, "new ")).Concat(Removed.Select(f => (f, "removed "))).Concat(Changed.Select(f => (f, "changed ")));
+        var sample = all.OrderBy(x => IsProjectDefinition(x.f) ? 0 : 1).Select(x => x.Item2 + x.f).Take(max);
         return $"The original changed since HCG copied it: {Changed.Count} changed, {Added.Count} new, {Removed.Count} removed ({string.Join(", ", sample)}{(DifferenceCount > max ? ", …" : "")}).";
     }
 }

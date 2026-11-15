@@ -36,6 +36,11 @@ exec > >(tee "$OUT") 2>&1
 section() { printf '\n== %s ==\n' "$1"; }
 sha() { [ -f "$1" ] && shasum -a 256 "$1" | cut -c1-16 || echo "(missing)"; }
 plist() { /usr/libexec/PlistBuddy -c "Print :$2" "$1" 2>/dev/null; }
+# .NET stores string literals as UTF-16: search the app's binaries for an option name in UTF-16LE (and plain ASCII).
+has_option() {
+  local opt="$1"; shift
+  perl -0777 -e 'my $o = shift; (my $w = $o) =~ s/(.)/$1\0/gs; for my $f (@ARGV) { open(my $h, "<:raw", $f) or next; local $/; my $d = <$h>; exit 0 if index($d, $w) >= 0 || index($d, $o) >= 0 } exit 1' -- "$opt" "$@"
+}
 
 echo "HCG Executable Maker — Mobile Build Studio report (script, read-only$([ $DO_BUILD = 1 ] && echo '; --build requested'))"
 echo "Generated: $(date -u '+%Y-%m-%d %H:%M:%S') UTC · macOS $(sw_vers -productVersion) ($(uname -m))"
@@ -52,12 +57,12 @@ for app in /Applications/*.app "$HOME"/Applications/*.app "$HOME"/Downloads/*.ap
   echo "  CFBundleShortVersionString: $(plist "$app/Contents/Info.plist" CFBundleShortVersionString) · CFBundleVersion: $(plist "$app/Contents/Info.plist" CFBundleVersion)"
   echo "  Modified: $(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$exe")"
   # --version exists since 0.3.0; older builds would open the UI instead, so only ask builds that know the option.
-  if grep -aqs -- "--toolchain-report" "$app"/Contents/MacOS/*.dll "$exe"; then
+  if has_option "--toolchain-report" "$app"/Contents/MacOS/*.dll "$exe"; then
     "$exe" --version 2>/dev/null | sed 's/^/  /' | head -3
   else
     echo "  (this build predates --version; its commit is shown in the sidebar under the logo)"
   fi
-  if grep -aqs -- "--mobile-diagnostics" "$app"/Contents/MacOS/*.dll "$exe"; then
+  if has_option "--mobile-diagnostics" "$app"/Contents/MacOS/*.dll "$exe"; then
     echo "  This build has --mobile-diagnostics and Export diagnostics."
   else
     echo "  This build has NO Refresh from source / Export diagnostics / deployment-target status fixes (older than the Sentinel end-to-end fix)."
@@ -142,7 +147,7 @@ while IFS=$'\t' read -r id name kind src ws imported rev refreshed; do
       set -- $pair
       echo "Effective settings: scheme $s · $1 · $2"
       (cd "$copy" && DEVELOPER_DIR="$DEV" xcodebuild -showBuildSettings -project "$proj" -scheme "$s" -configuration "$1" -sdk "$2" \
-         -derivedDataPath "$TMP/dd-show" 2>&1) | awk '/^Build settings for action/ {t=$0} /^ *TARGET_NAME =/ {n=$3} /^ *IPHONEOS_DEPLOYMENT_TARGET =/ {print "  " n ": IPHONEOS_DEPLOYMENT_TARGET = " $3} /error:/ {print "  " $0}' | sort -u
+         -derivedDataPath "$TMP/dd-show" 2>&1) | awk '/^Build settings for action .* and target / {n=$NF; sub(/:$/, "", n)} /^ *IPHONEOS_DEPLOYMENT_TARGET =/ {print "  " n ": IPHONEOS_DEPLOYMENT_TARGET = " $3} /error:/ {print "  " $0}' | sort -u
     done
   done
 

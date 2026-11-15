@@ -5,6 +5,11 @@
     and `HCGExecutableMaker - -version`). HCG_SOURCE_REVISION overrides git (e.g. for builds from a source archive).
   -->
   <Target Name="HcgEmbedBuildIdentity" BeforeTargets="GetAssemblyAttributes" Condition="'$(MSBuildProjectName)' == 'HCG.ExecutableMaker.Core'">
+    <!-- A copy without .git (self-package builds an imported copy) carries the commit in hcg-source-revision.txt. -->
+    <ReadLinesFromFile File="$(MSBuildThisFileDirectory)hcg-source-revision.txt"
+                       Condition="'$(HCG_SOURCE_REVISION)' == '' and Exists('$(MSBuildThisFileDirectory)hcg-source-revision.txt')">
+      <Output TaskParameter="Lines" PropertyName="HCG_SOURCE_REVISION" />
+    </ReadLinesFromFile>
     <Exec Command="git rev-parse --short=12 HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low"
           WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HCG_SOURCE_REVISION)' == ''">
       <Output TaskParameter="ConsoleOutput" PropertyName="HcgCommit" />

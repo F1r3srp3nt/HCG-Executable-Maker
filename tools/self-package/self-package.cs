@@ -76,6 +76,10 @@ var builds = new BuildService(new LocalProcessBuildWorker(runner), toolchains, n
 var report = await toolchains.GetAsync();
 Console.WriteLine($"Host: {report.Host.DisplayName} · .NET SDK {report.Find(ToolchainIds.DotNetSdk)?.Version ?? "missing"}");
 var import = await projects.ImportDirectoryAsync(repo, null, CancellationToken.None);
+// The copy has no .git and the build gets a scrubbed environment: hand the commit over in a file the build reads
+// (Directory.Build.targets), so the packaged app shows exactly which build it is.
+if (Environment.GetEnvironmentVariable("HCG_SOURCE_REVISION") is { Length: > 0 } revision)
+    File.WriteAllText(Path.Combine(import.Project.SourceDirectory, "hcg-source-revision.txt"), revision + "\n");
 var analysis = import.Project.Analysis!;
 Console.WriteLine($"Imported {import.FileCount} files. Primary: {analysis.PrimaryProjectPath} ({analysis.ApplicationType}, {analysis.Support})");
 if (analysis.Support != SupportLevel.Supported || analysis.PrimaryProjectPath is null)
