@@ -33,7 +33,8 @@ public sealed class MobileBuildService(
     MobileArtifactVerifier verifier,
     IAppPaths paths,
     TimeProvider time,
-    ILogger<MobileBuildService>? logger = null)
+    ILogger<MobileBuildService>? logger = null,
+    HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck? signingCheck = null)
 {
     private readonly ILogger _logger = logger ?? NullLogger<MobileBuildService>.Instance;
 
@@ -186,6 +187,16 @@ public sealed class MobileBuildService(
                     foreach (var e in plan.Effects)
                         Log(BuildLogKind.Info, $"  {e.Target} ({e.Kind}{(e.IsDependency ? ", dependency" : "")}): iOS {e.From} → iOS {e.To} ({e.Change})");
                     foreach (var w in plan.Warnings) Log(BuildLogKind.Warning, w);
+                }
+                // Apple signing: validate what this Mac can check before xcodebuild starts (keychain, verified profiles,
+                // team, bundle IDs, entitlements, devices). Checks that need Apple's services are logged as not verified.
+                if (signingCheck is not null
+                    && await signingCheck.CheckIosAsync(request.Project, options, analysis, PathGuard.GetRealPath(request.Project.SourceDirectory), report, overall.Token).ConfigureAwait(false) is { } signing)
+                {
+                    foreach (var (kind, text) in HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck.Describe(signing)) Log(kind, text);
+                    if (signing.HasFailures)
+                        throw new BuildValidationException("Signing is not ready: " + string.Join(" ", signing.Failures.Select(f =>
+                            $"{f.Title}{(f.Target is { } t ? $" ({t})" : "")}: {f.Detail}{(f.Remedy is { } r ? " Fix: " + r : "")}")));
                 }
             }
             else if (options.Output != MobileOutput.AndroidAabToApk)

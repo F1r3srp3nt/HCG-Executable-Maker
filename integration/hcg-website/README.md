@@ -19,7 +19,8 @@ It follows the LifeOS package's pattern (`hcg-lifeos/integration/hcg-website`).
 | `src/lib/executable-maker/supabase.ts` | PostgREST and Storage calls **with the caller's own token** and the public key. No service-role key. |
 | `src/routes/api/public/executable-maker/v1/$.ts` | Server route that passes requests to the handler. |
 | `src/routes/erp_.executable-maker-support.tsx` | ERP support desk at `/erp/executable-maker-support`. |
-| `test/` | Supabase, ERP App Access, PostgREST and Storage stand-ins on real PostgreSQL. `support.test.mjs` (16 tests) covers access boundaries, upload validation, staff actions, audit and retention. `contract-server.mjs` is for the app's cross-language test. |
+| `supabase/migrations/20261113230000_executable_maker_signing_metadata.sql` | Signing metadata for the HCG Signing Vault: certificate fingerprints, profile UUIDs, team, type, expiry and project preferences — **never** private keys, passwords, profile files or device lists. Per-account rows, RLS on with no grants, `SECURITY DEFINER` functions. See [docs/SIGNING-VAULT.md](../../docs/SIGNING-VAULT.md). |
+| `test/` | Supabase, ERP App Access, PostgREST and Storage stand-ins on real PostgreSQL. `support.test.mjs` (16 tests) covers access boundaries, upload validation, staff actions, audit and retention. `signing.test.mjs` (5 tests) covers signing-metadata isolation, App Access, refusal of secret fields and preferences. `contract-server.mjs` is for the app's cross-language test. |
 
 ## Endpoints
 
@@ -38,6 +39,11 @@ Base `https://beta.hakmicapitalgroup.com/api/public/executable-maker/v1`. Every 
 | `POST …/submit` | `exm_support_submit` | Only when every attachment was accepted. |
 | `POST …/messages` | `exm_support_reply` | 1–4000 characters. |
 | `POST …/withdraw` | `exm_support_withdraw` | Closes the request and deletes its attachments now. |
+| `GET /signing/assets` | `exm_signing_list` | The caller's own signing-metadata records. |
+| `POST /signing/assets` | `exm_signing_record` | Records public metadata, idempotent per fingerprint/UUID and device. Any other field (key, password, file, device list) is refused. |
+| `DELETE /signing/assets/{id}` | `exm_signing_forget` | Removes HCG's record only (keychain, other Macs and Apple unaffected). |
+| `GET /signing/projects/{key}` | `exm_signing_project_get` | The caller's signing preferences for a project (bundle ID or project ID). |
+| `PUT /signing/projects/{key}` | `exm_signing_project_put` | References only: team, mode, route, certificate SHA-1, profile UUIDs, target names. |
 | `POST …/attachments/{aid}/download` | `exm_support_download_target` | Owner's 5-minute signed link. |
 
 **Staff routes** (website session plus the ERP App Access product `executable-maker-support-desk`):

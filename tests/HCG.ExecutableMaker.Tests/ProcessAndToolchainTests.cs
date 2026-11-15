@@ -56,6 +56,69 @@ public class ProcessRunnerTests
         Assert.Equal(["ONLY_ME=1"], lines);
     }
 
+    /// <summary>
+    /// CI (port-ios, runs 90 and 92): the HelloMac port's compile stage went silent and the job died ~45 min after compile
+    /// started — the Simulator build's 45-minute timeout. Process.WaitForExitAsync waits for the output PIPES to close, so a
+    /// command that finished but left a background process holding them (xcodebuild's build service) was held until its
+    /// timeout and reported as timed out. Reproduced here with a real shell whose background child keeps stdout open.
+    /// </summary>
+    [UnixFact]
+    public async Task A_finished_command_whose_background_child_keeps_the_output_open_is_not_held_until_its_timeout()
+    {
+        var runner = new ProcessRunner(outputGrace: TimeSpan.FromSeconds(2));
+        {
+            var lines = new List<string>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = await runner.RunAsync(new ProcessSpec
+            {
+                Executable = "/bin/sh", Arguments = ["-c", "sleep 30 & echo built; exit 0"], Timeout = TimeSpan.FromMinutes(5),
+            }, (_, l) => { lock (lines) lines.Add(l); }, CancellationToken.None);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"held for {sw.Elapsed}");
+            Assert.True(r.Succeeded, r.ToString());
+            Assert.False(r.TimedOut);
+            Assert.True(r.OutputLeftOpen);
+            Assert.Contains("built", lines);
+            Assert.Contains(lines, l => l.StartsWith("HCG: sh exited with code 0", StringComparison.Ordinal) && l.Contains("still holds its output open", StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// CI run 101 (port-ios, repeat 2): a probe timed out, its tree kill left processes STOPPED (state T, re-parented to
+    /// launchd) and the UI driver in the same process group died of SIGHUP. .NET's Process.Kill(entireProcessTree: true)
+    /// sends SIGSTOP then SIGKILL to each process (strace); HCG's tree kill sends only SIGKILL, to the whole tree collected
+    /// first. After a timeout, nothing of the tree is left alive — stopped or running.
+    /// </summary>
+    [LinuxFact]
+    public async Task A_timed_out_command_and_everything_it_started_are_killed_and_nothing_is_left_stopped()
+    {
+        var marker = "7" + Random.Shared.Next(100000, 999999);   // a unique sleep duration identifies this tree's processes
+        var r = await _runner.RunAsync(new ProcessSpec
+        {
+            Executable = "/bin/sh", Arguments = ["-c", $"sh -c 'sleep {marker}; :' & sh -c 'sleep {marker}; :' & sleep {marker}"], Timeout = TimeSpan.FromSeconds(1),
+        }, null, CancellationToken.None);
+        Assert.True(r.TimedOut);
+        await Task.Delay(500);
+        var alive = Directory.GetDirectories("/proc").Select(d => Path.GetFileName(d)).Where(n => n.All(char.IsDigit))
+            .Select(pid => (Cmd: Read($"/proc/{pid}/cmdline").Replace('\0', ' '), State: Read($"/proc/{pid}/stat")))
+            .Where(p => p.Cmd.Contains(marker, StringComparison.Ordinal))
+            .Select(p => (p.Cmd, State: p.State.Length > 0 ? p.State[(p.State.LastIndexOf(')') + 2)..].Split(' ')[0] : "?"))
+            .Where(p => p.State != "Z")   // zombies are dead (killed, waiting to be reaped)
+            .ToList();
+        Assert.True(alive.Count == 0, "left alive: " + string.Join("; ", alive.Select(a => $"{a.State} {a.Cmd}")));
+
+        static string Read(string path) { try { return File.ReadAllText(path); } catch (IOException) { return ""; } catch (UnauthorizedAccessException) { return ""; } }
+    }
+
+    [UnixFact]
+    public async Task A_command_that_really_hangs_still_times_out_and_is_killed()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var r = await _runner.RunAsync(new ProcessSpec { Executable = "/bin/sh", Arguments = ["-c", "sleep 60"], Timeout = TimeSpan.FromSeconds(2) }, null, CancellationToken.None);
+        Assert.True(r.TimedOut);
+        Assert.False(r.Succeeded);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"took {sw.Elapsed}");
+    }
+
     [Fact]
     public async Task Rejects_relative_or_missing_executables()
     {
