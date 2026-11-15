@@ -53,6 +53,26 @@ public sealed class ProjectService(
         return result;
     }
 
+    /// <summary>
+    /// "Refresh from source": replaces HCG's copy with the original folder's (or ZIP's) current files, then re-inspects.
+    /// The project keeps its id, so its scheme/configuration/Xcode selection, signing settings and build history stay.
+    /// </summary>
+    public async Task<(ImportResult Result, SourceDrift Before)> RefreshFromSourceAsync(ProjectRecord project, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
+    {
+        var limits = (await settings.LoadAsync(cancellationToken).ConfigureAwait(false)).ImportLimits;
+        var before = await Task.Run(() => importer.Compare(project, limits, cancellationToken), cancellationToken).ConfigureAwait(false);
+        var result = await importer.RefreshAsync(project, limits, progress, cancellationToken).ConfigureAwait(false);
+        await FinishImportAsync(result, progress, cancellationToken).ConfigureAwait(false);
+        return (result, before);
+    }
+
+    /// <summary>Compares HCG's copy with the original's current files (hashes every file; runs off the caller's thread).</summary>
+    public async Task<SourceDrift> CompareWithSourceAsync(ProjectRecord project, CancellationToken cancellationToken)
+    {
+        var limits = (await settings.LoadAsync(cancellationToken).ConfigureAwait(false)).ImportLimits;
+        return await Task.Run(() => importer.Compare(project, limits, cancellationToken), cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<ProjectAnalysis> InspectAsync(ProjectRecord project, CancellationToken cancellationToken)
     {
         var report = await toolchains.GetAsync(cancellationToken: cancellationToken).ConfigureAwait(false);

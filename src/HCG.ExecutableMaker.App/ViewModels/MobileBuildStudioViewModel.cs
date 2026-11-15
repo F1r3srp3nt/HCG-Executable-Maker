@@ -204,6 +204,102 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         if (!_projectGate.IsCurrent(ticket) || SelectedProject != item) return;
         ApplyProject(item.Project, saved);
         SelectionRestored?.Invoke(this, EventArgs.Empty);
+        _ = CheckSourceAsync(item, ticket);
+    }
+
+    // ───────────── HCG's copy vs the original folder ─────────────
+
+    /// <summary>Where the project was imported from, its recorded revision and when HCG copied it.</summary>
+    [ObservableProperty] private string _sourceText = "";
+    /// <summary>Set when the original's current files differ from HCG's copy (Maker builds the copy).</summary>
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSourceDrift))] private string? _sourceDriftText;
+    public bool HasSourceDrift => SourceDriftText is not null;
+    [ObservableProperty] private bool _isRefreshingSource;
+    private SourceDrift? _drift;
+
+    private static string DescribeSource(ProjectRecord p) =>
+        $"Built from HCG's copy of {p.SourceLocation} · {p.SourceRevision ?? "revision not recorded (imported by an earlier Maker)"} · " +
+        $"copied {(p.RefreshedAt ?? p.ImportedAt).UtcDateTime:yyyy-MM-dd HH:mm} UTC" + (p.SourceFingerprint is { } fp ? $" · {fp}" : "");
+
+    /// <summary>Compares HCG's copy with the original in the background; a result for a project no longer shown is dropped.</summary>
+    private async Task CheckSourceAsync(ProjectItem item, long ticket)
+    {
+        SourceText = DescribeSource(item.Project);
+        SourceDriftText = null;
+        _drift = null;
+        try
+        {
+            var drift = await _projectService.CompareWithSourceAsync(item.Project, CancellationToken.None);
+            if (!_projectGate.IsCurrent(ticket) || SelectedProject != item) return;
+            _drift = drift;
+            SourceDriftText = drift.IsCurrent ? null
+                : drift.OriginAvailable ? drift.Describe() + " Maker builds its copy, not the folder: press Refresh from source to build the current files."
+                : drift.Describe();
+            SourceChecked?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (_projectGate.IsCurrent(ticket)) SourceDriftText = "The original could not be compared: " + ex.Message;
+        }
+    }
+
+    /// <summary>Raised when the copy/original comparison has finished (used by the UI driver).</summary>
+    public event EventHandler? SourceChecked;
+
+    /// <summary>
+    /// Replaces HCG's copy with the original's current files and re-inspects. The project keeps its id, so the saved
+    /// scheme, configuration, Xcode choice, signing settings and build history stay; earlier builds keep the revision they used.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshFromSourceAsync()
+    {
+        if (SelectedProject is not { } item || IsBuilding) return;
+        var p = item.Project;
+        if (!await _dialogs.ConfirmAsync($"Refresh {p.Name} from its source?",
+                $"HCG replaces its copy with the current files of\n{p.SourceLocation}\n\n" +
+                (_drift is { } d ? d.Describe() + "\n\n" : "") +
+                "Kept: the selected project/workspace, scheme, configuration and Xcode, signing settings, and build history (earlier builds stay labelled with the revision they used). " +
+                "The original is not modified. The new files are copied and checked like an import; if that fails, the current copy stays.",
+                "Refresh from source")) return;
+        IsRefreshingSource = true;
+        var keep = CurrentSelection();
+        try
+        {
+            var (result, _) = await Task.Run(() => _projectService.RefreshFromSourceAsync(p, null, CancellationToken.None));
+            await LoadProjectsAsync(result.Project);
+            if (SelectedProject?.Project.Id == p.Id)
+            {
+                ApplyProject(SelectedProject.Project, keep);
+                _ = CheckSourceAsync(SelectedProject, _projectGate.Current);
+            }
+        }
+        catch (Exception ex) when (ex is ImportRejectedException or IOException or UnauthorizedAccessException)
+        {
+            await _dialogs.AlertAsync("Refresh from source failed", ex.Message + "\n\nHCG's previous copy is unchanged.");
+        }
+        finally { IsRefreshingSource = false; }
+    }
+
+    /// <summary>The diagnostics report for the current project and selection (same generator as --mobile-diagnostics).</summary>
+    public string? DiagnosticsReport()
+    {
+        if (SelectedProject?.Project is not { } p) return null;
+        return MobileDiagnostics.Create(new MobileDiagnosticsInput
+        {
+            MakerBuild = HostInfo.BuildIdentity, MakerExecutable = HostInfo.ExecutablePath, MakerAppBundle = HostInfo.AppBundlePath,
+            Project = p, Drift = _drift, Toolchains = _report, Selection = CurrentSelection(), DeploymentOverride = ActiveOverrideValue,
+            ShownState = $"{BuildStateTag.Text} — {BuildStateDetail}", LastBuild = _lastResult,
+        });
+    }
+
+    [RelayCommand]
+    private async Task ExportDiagnosticsAsync()
+    {
+        if (DiagnosticsReport() is not { } text) return;
+        if (await _shell.PickFolderAsync("Save the Mobile Build Studio diagnostics report") is not { } dir) return;
+        var file = Path.Combine(dir, $"hcg-mobile-diagnostics-{DateTime.UtcNow:yyyyMMdd-HHmmss}.txt");
+        await File.WriteAllTextAsync(file, text);
+        await _dialogs.AlertAsync("Diagnostics exported", $"{file}\n\nIt lists the Maker build, the project's source and revision, the selected Xcode and SDK ranges, the selection and command per output, and each scheme's deployment targets. It contains no passwords, keys or tokens.");
     }
 
     /// <summary>Raised when a project's saved selection has been applied (used by the UI driver to wait for it).</summary>
@@ -823,7 +919,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         // The project card shows the current state of the selection, not the toolchains seen at import time.
         if (summary.Problem is not null)
         {
-            SupportTag = new StatusTag("Selected toolchain incompatible", "warning");
+            SupportTag = new StatusTag(MobileBuildState.DeploymentBlockedTag, "error");
             SupportSummary = summary.Problem;
         }
         else if (Outputs.Any(o => o.IsEnabled))
@@ -1008,22 +1104,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public MobileBuildOptions? CurrentOptions => CreateOptions();
     public ToolchainReport? CurrentToolchains => _report;
 
-    private BuildSettings CreateSettings(MobileBuildOptions o) => new()
-    {
-        ProjectRelativePath = Mobile?.Android?.Root ?? o.Container ?? Mobile?.Ios?.WorkspacePath ?? Mobile?.Ios?.ProjectPath ?? Mobile?.Flutter?.Root ?? Mobile?.Maui?.ProjectPath ?? Mobile?.DotNetIos?.ProjectPath ?? Mobile?.ArtifactPath ?? "",
-        Platform = o.Output.Platform(),
-        Architecture = TargetArchitecture.Universal,
-        Configuration = o.Output is MobileOutput.AndroidDebugApk or MobileOutput.IosSimulatorApp ? BuildConfigurationKind.Debug : BuildConfigurationKind.Release,
-        OutputDirectory = OutputDirectory,
-        Timeout = TimeSpan.FromMinutes(60),
-        Identity = new AppIdentity
-        {
-            ApplicationName = string.IsNullOrWhiteSpace(AppName) ? "App" : AppName.Trim(),
-            Version = string.IsNullOrWhiteSpace(AppVersion) ? "1.0.0" : AppVersion.Trim(),
-            ApplicationId = Mobile?.ApplicationIds.FirstOrDefault() ?? "app",
-        },
-        Mobile = o,
-    };
+    private BuildSettings CreateSettings(MobileBuildOptions o) => MobileBuildPlanning.Settings(Mobile, o, OutputDirectory, AppName, AppVersion);
 
     // ───────────── Build status ─────────────
 
@@ -1036,8 +1117,27 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public ObservableCollection<LogLineItem> LogLines { get; } = [];
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand))] private bool _trustAcknowledged;
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand), nameof(CancelBuildCommand))] private bool _isBuilding;
+
+    partial void OnTrustAcknowledgedChanged(bool value) => UpdatePrerequisites();
+    partial void OnIsBuildingChanged(bool value) => UpdatePrerequisites();
+
+    /// <summary>Everything "Start Mobile Build" waits for, met or not, with what to do (output, readiness items, project trust).</summary>
+    public ObservableCollection<PrerequisiteRow> BuildPrerequisites { get; } = [];
+    [ObservableProperty] private string _prerequisitesSummary = "";
+    private BuildReadiness? _lastReadiness;
+
+    private void UpdatePrerequisites()
+    {
+        BuildPrerequisites.Clear();
+        if (SelectedProject?.Project.Analysis?.Mobile is null) { PrerequisitesSummary = ""; return; }
+        var forPlatform = _allOptions.Where(o => SelectedPlatform is null || o.Platform == SelectedPlatform.Platform).ToList();
+        var rows = MobileBuildState.Prerequisites(SelectedOutput?.Option, forPlatform, SelectedOutput is null ? null : _lastReadiness, TrustAcknowledged, IsBuilding);
+        foreach (var r in rows) BuildPrerequisites.Add(new PrerequisiteRow(r));
+        var open = rows.Count(r => !r.Met);
+        PrerequisitesSummary = open == 0 ? "All met: Start Mobile Build is enabled." : $"{open} of {rows.Count} not met: Start Mobile Build stays disabled until they are.";
+    }
     [ObservableProperty] private bool _hasBuildStarted;
-    [ObservableProperty] private string _currentStage = "Ready";
+    [ObservableProperty] private string _currentStage = "Not started";
     [ObservableProperty] private string _elapsed = "0.0s";
     [ObservableProperty] private int _liveWarnings;
     [ObservableProperty] private int _liveErrors;
@@ -1085,7 +1185,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         var forPlatform = _allOptions.Where(o => SelectedPlatform is null || o.Platform == SelectedPlatform.Platform).ToList();
         var view = MobileBuildState.Describe(a, m, forPlatform, SelectedOutput?.Option, readiness, _lastResult, current);
         (BuildStateTag, BuildStateDetail) = (new StatusTag(view.Tag, view.Tone), view.Detail);
+        _lastReadiness = readiness;
         UpdateResultView(current);
+        UpdatePrerequisites();
     }
 
     /// <summary>What building with the current selection would record as its inputs (null when no output is selected).</summary>
@@ -1097,7 +1199,15 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
 
     private void UpdateResultView(BuildProvenance? current)
     {
-        if (_lastResult is not { } r || IsBuilding) { IsPreviousBuild = false; return; }
+        if (IsBuilding) { IsPreviousBuild = false; return; }
+        if (_lastResult is not { } r)
+        {
+            // No build of this project yet: the stage never reads "Ready" or "Completed"; readiness is the STATE below.
+            IsPreviousBuild = false;
+            CurrentStage = "Not started";
+            ResultTag = new StatusTag("No build yet", "neutral");
+            return;
+        }
         var view = MobileBuildState.DescribeResult(r, current);
         IsPreviousBuild = !view.IsCurrent;
         if (view.IsCurrent)

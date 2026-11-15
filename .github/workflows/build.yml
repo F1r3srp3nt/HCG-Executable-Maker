@@ -49,6 +49,11 @@ on:
         type: choice
         default: "no"
         options: ["no", "[1,2,3]", "[1,2,3,4,5,6]"]
+      sentinel_e2e_only:
+        description: "Run ONLY the HCG Sentinel end-to-end job (real Xcode, packaged app); everything else is skipped"
+        type: choice
+        default: "no"
+        options: ["no", "yes"]
 
 permissions:
   contents: read
@@ -66,7 +71,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     # A port_ios_repeat dispatch runs only port-ios-repeat; every other job needs this one and is skipped with it.
-    if: github.event_name != 'workflow_dispatch' || inputs.port_ios_repeat == 'no' || inputs.port_ios_repeat == ''
+    if: github.event_name != 'workflow_dispatch' || ((inputs.port_ios_repeat == 'no' || inputs.port_ios_repeat == '') && inputs.sentinel_e2e_only != 'yes')
     strategy:
       fail-fast: false
       matrix:
@@ -1022,6 +1027,62 @@ jobs:
             ${{ github.workspace }}/mail-out/*/*.log
           if-no-files-found: warn
           retention-days: 7
+
+  # HCG Sentinel end to end on a real Mac (the default Xcode, its own iOS platforms): schemes and effective deployment
+  # targets at three Sentinel revisions and direct unsigned builds outside Maker; then the PACKAGED Maker app imports
+  # an old revision, reports its copy stale after Sentinel moves on, refreshes from source, builds HCGSentinelModern
+  # for the Simulator and archives it in a new process (selection restored), and the read-only Mac report script runs
+  # against the same data. Also the page itself (UI driver): stale copy → Refresh from source → Use HCGSentinelModern.
+  # Not gated on `test` so `sentinel_e2e_only` runs it alone. Uploads the packaged .app (unsigned) with the evidence.
+  sentinel-e2e:
+    name: HCG Sentinel end to end — real Xcode outside Maker, packaged Maker app (stale import, refresh, Simulator build, archive)
+    if: github.event_name != 'workflow_dispatch' || ((inputs.port_ios_repeat == 'no' || inputs.port_ios_repeat == '') )
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/sentinel-e2e
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Package HCG Executable Maker for this Mac (self-package, osx-arm64 .app)
+        run: |
+          mkdir -p "$OUT/screens"
+          dotnet run --no-cache tools/self-package/self-package.cs -- . "$RUNNER_TEMP/selfpack" --targets osx-arm64
+          app=$(find "$RUNNER_TEMP/selfpack" -maxdepth 8 -type d -name "*.app" | head -1)
+          test -n "$app"
+          echo "APP=$app" >> "$GITHUB_ENV"
+          "$app/Contents/MacOS/HCGExecutableMaker" --version
+      - name: Sentinel outside Maker and through the packaged app
+        timeout-minutes: 50
+        run: bash tools/ci/sentinel-e2e.sh "$APP" "$OUT"
+      - name: The page itself — stale copy, Refresh from source, Use HCGSentinelModern (selected Xcode simulated at iOS 15.0)
+        if: always()
+        run: |
+          dotnet build tools/ui-driver -c Release
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --refresh-source --source "$OUT/rev-03bc6e5" --simulate-xcode 27.0:15.0:15.0 \
+            --output "$OUT/ui-refresh" --screenshots "$OUT/screens" --prefix refresh
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --scheme-workflow --source "$OUT/rev-03bc6e5" --simulate-xcode 27.0:15.0:15.0 \
+            --output "$OUT/ui-scheme" --screenshots "$OUT/screens" --prefix scheme
+      - name: Zip the packaged app (unsigned; for manual installation)
+        if: always()
+        run: |
+          [ -n "${APP:-}" ] && ditto -c -k --keepParent "$APP" "$OUT/HCG-Executable-Maker-osx-arm64-${GITHUB_SHA::12}.zip" || true
+          rm -rf "$OUT"/dd-* "$OUT"/sentinel.git-cache "$OUT"/direct-*.xcarchive "$OUT"/maker-out "$OUT"/maker-data/workspaces "$OUT"/maker-data/builds \
+                 "$OUT"/rev-*/ "$OUT"/src "$OUT"/ui-*/hcg-data/workspaces "$OUT"/ui-*/hcg-data/builds "$OUT"/ui-*/origin "$OUT"/ui-*/plan-work
+      - name: Upload evidence and the packaged app
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sentinel-e2e-${{ github.sha }}
+          path: |
+            ${{ env.OUT }}/**/*.txt
+            ${{ env.OUT }}/**/*.log
+            ${{ env.OUT }}/**/*.json
+            ${{ env.OUT }}/screens/**
+            ${{ env.OUT }}/*.zip
+          retention-days: 14
 
   hcg-sentinel-archive:
     name: HCG Sentinel — archive through Mobile Build Studio with every installed Xcode (reproduction, full logs and .xcresult kept)

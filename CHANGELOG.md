@@ -2,6 +2,19 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Mobile Build Studio: Sentinel end to end (status, stale copies, diagnostics)
+
+### Fixed
+- An installed Xcode whose SDK rejects the selection's minimum iOS is reported as "Blocked — deployment target incompatible", not "Required toolchain missing" or "Selected toolchain incompatible"; the stage line no longer reads "Ready" before any build.
+
+### Added
+- "Before you can build": every unmet condition (output, deployment target, toolchain, signing, project trust) with what to do.
+- Import records the original's git commit (or ZIP hash) and a file fingerprint (schema migration 3). The project card shows them and warns when the folder changed since import, naming the files.
+- "Refresh from source…": replaces Maker's copy with the folder's current files, validated like an import; the project, its selection, signing settings and history are kept.
+- "Export diagnostics…" and `HCGExecutableMaker --mobile-diagnostics [--import|--project] [--refresh] [--scheme] [--build simulator|archive --trust]`.
+- `tools/diagnostics/hcg-mobile-mac-report.sh`: read-only report for any installed Maker (app version/commit, imported projects, copy vs original, Xcode SDK ranges, xcodebuild effective deployment targets; optional direct unsigned builds).
+- CI job `sentinel-e2e` (dispatch input `sentinel_e2e_only`): real Xcode outside Maker at three Sentinel revisions and the packaged app (stale import → refresh → HCGSentinelModern Simulator build → archive in a new process); uploads the packaged .app.
+
 ## [Unreleased] — Mobile Build Studio: compatibility resolution (HCG Sentinel)
 
 ### Changed

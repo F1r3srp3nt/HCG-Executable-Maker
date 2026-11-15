@@ -71,5 +71,10 @@ public static class Migrations
             CREATE INDEX ix_messages_build ON build_messages(build_id);
             CREATE INDEX ix_artifacts_build ON artifacts(build_id);
             """),
+        new(3, "Project origin: revision and fingerprint of the copied files, refresh time", """
+            ALTER TABLE projects ADD COLUMN source_revision TEXT NULL;
+            ALTER TABLE projects ADD COLUMN source_fingerprint TEXT NULL;
+            ALTER TABLE projects ADD COLUMN refreshed_at TEXT NULL;
+            """),
     ];
 }

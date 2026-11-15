@@ -84,7 +84,18 @@ internal static partial class Program
         Check(studio.Outputs.All(o => o.Reason?.Contains("xcodebuild would stop", StringComparison.Ordinal) != true), "The long paragraph is not repeated per output");
         Check(studio.SchemeChecks.Count == 2 && studio.SchemeChecks.Any(r => r.Label.StartsWith("Simulator")) && studio.SchemeChecks.Any(r => r.Label.StartsWith("Device")),
             "Simulator and device are listed with their own SDK");
-        Check(studio.SupportTag.Text == "Selected toolchain incompatible", $"Project state is current: {studio.SupportTag.Text}");
+        Check(studio.SupportTag.Text == MobileBuildState.DeploymentBlockedTag, $"Project state is current: {studio.SupportTag.Text}");
+        // Status: blocked by the deployment target (an installed Xcode), never "Required toolchain missing"; no idle "Ready".
+        Log($"State: [{studio.BuildStateTag.Text}] {studio.BuildStateDetail}");
+        Check(studio.BuildStateTag.Text == MobileBuildState.DeploymentBlockedTag, $"Build status: {studio.BuildStateTag.Text}");
+        Check(studio.CurrentStage != "Ready" && studio.CurrentStage != "Completed", $"The stage line does not claim readiness: {studio.CurrentStage}");
+        foreach (var r in studio.BuildPrerequisites) Log($"  Prerequisite [{(r.Met ? "met" : "NOT MET")}] {r.Title}: {r.Detail}");
+        Check(studio.BuildPrerequisites.Any(r => r is { Title: "Deployment target", Met: false }) && studio.BuildPrerequisites.Any(r => r is { Title: "Project trust", Met: false }),
+            "Before you can build lists the deployment target and the project-trust confirmation");
+        var blockedReport = studio.DiagnosticsReport() ?? "";
+        File.WriteAllText(Path.Combine(output, "diagnostics-legacy.txt"), blockedReport);
+        Check(blockedReport.Contains($"Scheme: {Legacy}") && blockedReport.Contains(MobileBuildState.DeploymentBlockedTag) && blockedReport.Contains("HCGSentinel: iOS 14.7"),
+            "The diagnostics report names the scheme, its deployment target and the state");
 
         // The panel: current scheme with its effective minimum per SDK, every compatible scheme (each its own "Use" action).
         Log("Current scheme: " + studio.CurrentSchemeText);
@@ -114,6 +125,19 @@ internal static partial class Program
         Check(studio.SupportTag.Text == "Supported", $"Project state updated: {studio.SupportTag.Text} — {studio.SupportSummary}");
         Check(studio.CurrentSchemeText?.StartsWith($"{Modern} — minimum iOS 15.0", StringComparison.Ordinal) == true && studio.CompatibleSchemeChoices.Count == 0,
             $"After switching: {studio.CurrentSchemeText}");
+
+        // With an output chosen, only the per-build trust confirmation remains; ticking it enables Start Mobile Build.
+        studio.SelectOutputCommand.Execute(studio.Outputs.First(o => o.Option.Output == MobileOutput.IosSimulatorApp));
+        foreach (var r in studio.BuildPrerequisites) Log($"  Prerequisite [{(r.Met ? "met" : "NOT MET")}] {r.Title}: {r.Detail}");
+        Check(studio.BuildPrerequisites.Where(r => !r.Met).Select(r => r.Title).SequenceEqual(["Project trust"]), "Only the project-trust confirmation is left");
+        Check(!studio.StartBuildCommand.CanExecute(null), "Start Mobile Build stays disabled until trust is confirmed");
+        studio.TrustAcknowledged = true;
+        Check(studio.BuildPrerequisites.All(r => r.Met) && studio.StartBuildCommand.CanExecute(null), "Confirming trust enables Start Mobile Build");
+        studio.TrustAcknowledged = false;
+        var modernReport = studio.DiagnosticsReport() ?? "";
+        File.WriteAllText(Path.Combine(output, "diagnostics-modern.txt"), modernReport);
+        var commands = modernReport.Split('\n').Where(l => l.TrimStart().StartsWith("Command:", StringComparison.Ordinal)).ToList();
+        Check(commands.Count == 3 && commands.All(c => c.Contains($"-scheme {Modern} ")), "Every command in the diagnostics report names HCGSentinelModern");
 
         // Configuration chosen before the output, applied to it.
         studio.SelectedConfiguration = studio.Configurations.First(c => c.Value == "Debug");
@@ -206,6 +230,83 @@ internal static partial class Program
         studio.SelectOutputCommand.Execute(studio.Outputs.First(o => o.Option.Output == MobileOutput.IosArchive));
         await ExpectSchemeAgreementAsync(studio, project, Modern, output);
         Shot("reopened");
+        return Failures.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>A copy of --source without its modern scheme: the project as it was before Sentinel added HCGSentinelModern.</summary>
+    private static string PrepareStaleOrigin(string source, string output)
+    {
+        var origin = Path.Combine(output, "origin", "HCG Sentinel");
+        if (Directory.Exists(origin)) Directory.Delete(origin, recursive: true);
+        CopyTree(source, origin);
+        var modern = Directory.GetFiles(origin, Modern + ".xcscheme", SearchOption.AllDirectories);
+        foreach (var f in modern) { File.Move(f, Path.Combine(output, "origin", Path.GetFileName(f))); }
+        return origin;
+
+        static void CopyTree(string from, string to)
+        {
+            Directory.CreateDirectory(to);
+            foreach (var d in Directory.GetDirectories(from, "*", SearchOption.AllDirectories))
+                if (!d.Split(Path.DirectorySeparatorChar).Contains(".git")) Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, d)));
+            foreach (var f in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
+                if (!f.Split(Path.DirectorySeparatorChar).Contains(".git")) File.Copy(f, Path.Combine(to, Path.GetRelativePath(from, f)));
+        }
+    }
+
+    /// <summary>
+    /// The stale-copy case, through the page: a project imported before its modern scheme existed is blocked; the folder
+    /// gains the scheme; the page reports that its copy is out of date; Refresh from source brings the scheme while keeping
+    /// the selection; the compatible scheme is then offered and used.
+    /// </summary>
+    private static async Task<int> RunRefreshSourceAsync(MainWindowViewModel main, BuildWizardViewModel wizard, string output)
+    {
+        var project = wizard.Project ?? throw new InvalidOperationException("Nothing was imported.");
+        var origin = project.SourceLocation;
+        wizard.OpenInMobileStudioCommand.Execute(null);
+        await WaitUntil(() => main.CurrentPage is MobileBuildStudioViewModel, TimeSpan.FromSeconds(10), "Mobile Build Studio");
+        var studio = await OpenStudioAsync(main, project);
+        studio.SelectedPlatform = studio.Platforms.First(p => p.Platform == TargetPlatform.IOS);
+        await WaitUntil(() => studio.SourceText.Length > 0, TimeSpan.FromSeconds(10), "source line");
+        await Task.Delay(500);
+        LogSelection(studio, "stale copy");
+        Log("Source: " + studio.SourceText);
+        Check(studio.Schemes.SequenceEqual([Legacy]), $"The old copy has only {string.Join(", ", studio.Schemes)}");
+        Check(studio.BuildStateTag.Text == MobileBuildState.DeploymentBlockedTag && studio.CompatibleSchemeChoices.Count == 0,
+            $"Blocked with no compatible scheme in this copy: {studio.BuildStateTag.Text}");
+        Check(!studio.HasSourceDrift, "The copy matches the folder it came from");
+        Shot("refresh-stale");
+
+        // Sentinel adds its modern scheme; Maker's copy does not change by itself.
+        foreach (var f in Directory.GetFiles(Path.Combine(output, "origin"), "*.xcscheme"))
+            File.Move(f, Path.Combine(origin, "HCGSentinel.xcodeproj", "xcshareddata", "xcschemes", Path.GetFileName(f)));
+        var item = studio.SelectedProject!;
+        var checkedSource = new TaskCompletionSource();
+        studio.SourceChecked += (_, _) => checkedSource.TrySetResult();
+        studio.SelectedProject = null;
+        studio.SelectedProject = item;
+        await checkedSource.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Log("Drift: " + studio.SourceDriftText);
+        Check(studio.HasSourceDrift && studio.SourceDriftText!.Contains(Modern + ".xcscheme"), "The page reports that the folder changed since import, naming the new scheme");
+        Check(studio.Schemes.SequenceEqual([Legacy]), "…and keeps building its copy until it is refreshed");
+        Shot("refresh-drift");
+
+        await studio.RefreshFromSourceCommand.ExecuteAsync(null);
+        await WaitUntil(() => studio.Schemes.Contains(Modern), TimeSpan.FromSeconds(30), "refreshed schemes");
+        await Task.Delay(800);
+        LogSelection(studio, "after refresh");
+        Log("Source: " + studio.SourceText);
+        Check(Report.Any(l => l.StartsWith("Dialog (confirmed) Refresh", StringComparison.Ordinal)), "Refresh from source explained what it replaces and keeps first");
+        Check(studio.SelectedProject?.Project.Id == project.Id, "Same project (id kept)");
+        Check(studio.SelectedScheme == Legacy, $"The selection is kept ({studio.SelectedScheme})");
+        Check(!studio.HasSourceDrift, "The copy now matches the folder");
+        Check(studio.CompatibleSchemeChoices.Select(c => c.Scheme).SequenceEqual([Modern]), "The compatible scheme is now discovered and offered");
+        await studio.UseSchemeCommand.ExecuteAsync(studio.CompatibleSchemeChoices[0]);
+        await studio.SelectionSaved;
+        Check(studio.SelectedScheme == Modern && studio.Outputs.First(o => o.Option.Output == MobileOutput.IosSimulatorApp).IsEnabled, "HCGSentinelModern selected; Simulator build available");
+        studio.SelectOutputCommand.Execute(studio.Outputs.First(o => o.Option.Output == MobileOutput.IosSimulatorApp));
+        await ExpectSchemeAgreementAsync(studio, studio.SelectedProject!.Project, Modern, output);
+        File.WriteAllText(Path.Combine(output, "diagnostics-refreshed.txt"), studio.DiagnosticsReport());
+        Shot("refresh-done");
         return Failures.Count == 0 ? 0 : 1;
     }
 }

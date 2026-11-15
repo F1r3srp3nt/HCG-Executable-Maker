@@ -44,9 +44,9 @@ public class PersistenceTests : IDisposable
     [Fact]
     public async Task Migrations_apply_once_in_order()
     {
-        Assert.Equal([1, 2], await _db.MigrateAsync());
+        Assert.Equal([1, 2, 3], await _db.MigrateAsync());
         Assert.Empty(await _db.MigrateAsync());
-        Assert.Equal(2, await _db.GetSchemaVersionAsync());
+        Assert.Equal(3, await _db.GetSchemaVersionAsync());
         var reopened = new SqliteDatabase(_db.DatabasePath);
         Assert.Empty(await reopened.MigrateAsync());
     }

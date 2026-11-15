@@ -266,6 +266,50 @@ Verification: unit tests in `CompatibilityResolutionTests` (fixture refreshed fr
 `--expect-simulator-only` (10). Real-Xcode archives of both schemes run in the macOS CI job "HCG Sentinel — archive …",
 now pinned to 03bc6e5.
 
+### Sentinel end to end: what runs, which files are built, and how to refresh them
+
+Why earlier fixes did not change the Mac (established from the repositories and CI, not from the Mac itself):
+- **The fixes were never in an installed build.** The scheme selection, per-SDK compatibility, "Use HCGSentinelModern" and
+  status fixes were on unmerged branches (`fix/sentinel-build-selection`, `mobile/deployment-target-workflow`,
+  `mobile/ios-compatibility-resolution`); `main` and the v0.3.0 pre-release contain none of them. That build shows exactly
+  the reported screen: the idle stage label "Ready" next to "Required toolchain missing" (its fallback when every output is
+  unavailable), a reason text that says "choose scheme HCGSentinelModern" while the scheme selector is hidden.
+- **Maker builds a copy.** Import Folder copies the project into Maker's workspace (without `.git`); later Sentinel commits
+  never reach that copy. Sentinel gained HCGSentinelModern in `da4ed46` (12 Nov) and lost its last implicit iOS 14.7 (project
+  default and test target) in `ff36b31` (14 Nov); a copy taken before either still has them.
+- **Sentinel itself is correct at `03bc6e5`:** HCGSentinel (app 14.7) and HCGSentinelModern (app and tests 15.0, project
+  default 15.0) — no Sentinel change is needed.
+- On GitHub's macOS runners every installed Xcode (26.0.1–26.6) reports iOS 12.0 as the SDK minimum; the "15.0" on the Mac
+  must come from that Mac's selected Xcode, which the report below records (SDKSettings.json path and values).
+
+What changed in Maker:
+- **Status.** An installed Xcode whose SDK rejects the selection's minimum iOS is **Blocked — deployment target
+  incompatible** (error). **Required toolchain missing** is only for a tool that is not there; **Selected toolchain
+  incompatible** for an installed tool unusable for another reason. The stage line reads "Not started" until a build of the
+  current project runs (never "Ready"); previous results stay labelled "Previous build".
+- **Before you can build** lists every unmet condition with what to do: an output, each required readiness item (deployment
+  target, toolchain, signing for archive/IPA) and the per-build project-trust checkbox.
+- **Source line and stale-copy warning.** The project card shows the folder the copy came from, its git commit (or ZIP hash)
+  recorded at import, when it was copied and a file fingerprint; when the folder's current files differ, it says so and
+  names the files.
+- **Refresh from source…** replaces Maker's copy with the folder's current files (copied and validated like an import;
+  on failure the old copy stays). The project id stays, so the scheme/configuration/Xcode selection, signing settings and
+  build history are kept; earlier builds stay labelled with the revision they used.
+- **Export diagnostics…** and `HCGExecutableMaker --mobile-diagnostics`: the running build (version, commit, path), the
+  project's origin and revision, copy vs original, the selected Xcode and every installed Xcode with both SDK ranges, the
+  selection, the command per output (from the build's own planner) and every scheme's targets with their effective deployment
+  targets. No credentials.
+
+On the Mac — collect, install, refresh:
+1. With the Maker you have now (any version): `bash tools/diagnostics/hcg-mobile-mac-report.sh` (read-only; report on the
+   Desktop). Add `--build --scheme HCGSentinelModern` for a direct unsigned Simulator build and archive outside Maker on a
+   temporary copy of the Sentinel folder.
+2. Install the build from the CI artifact `sentinel-e2e-<commit>` (HCG-Executable-Maker-osx-arm64-<commit>.zip): quit
+   Maker, replace `/Applications/HCG Executable Maker.app`, open it once with right-click › Open (unsigned build). Check
+   the commit in the sidebar or with `"/Applications/HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" --version`.
+3. Mobile Build Studio › HCGSentinel › **Refresh from source…** (or re-import the folder), then use the compatible
+   scheme or Xcode the panel offers; **Export diagnostics…** if anything still looks wrong.
+
 ### Deployment-target workflow: HCG Nexus' Xcode app (iOS 14.0) with an Xcode whose SDKs start at iOS 15.0
 
 HCG Nexus now contains a standalone iPhone/iPad app, `HCGNexus.xcodeproj` (shared scheme HCGNexus, target HCGNexus,

@@ -136,3 +136,12 @@ public sealed class RequirementItem(ToolchainRequirement r)
     public string Detail => r.Detail ?? "";
     public StatusTag Status => r.IsSatisfied ? new StatusTag("Satisfied", "success") : new StatusTag("Missing", "warning");
 }
+
+/// <summary>One condition "Start Mobile Build" waits for (see <see cref="HCG.ExecutableMaker.BuildEngine.Mobile.MobileBuildState.Prerequisites"/>).</summary>
+public sealed class PrerequisiteRow(HCG.ExecutableMaker.BuildEngine.Mobile.BuildPrerequisite p)
+{
+    public string Title => p.Title;
+    public string Detail => p.Detail;
+    public bool Met => p.Met;
+    public StatusTag Status => p.Met ? new("Met", "success") : new("Not met", "error");
+}

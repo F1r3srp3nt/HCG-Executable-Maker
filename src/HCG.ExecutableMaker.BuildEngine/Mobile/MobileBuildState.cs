@@ -7,6 +7,9 @@ namespace HCG.ExecutableMaker.BuildEngine.Mobile;
 /// <summary>The state line Mobile Build Studio shows for the current selection.</summary>
 public sealed record MobileStateView(string Tag, string Tone, string Detail);
 
+/// <summary>One condition "Start Mobile Build" waits for.</summary>
+public sealed record BuildPrerequisite(string Title, bool Met, string Detail);
+
 /// <summary>A finished build seen from the current selection: current, or a previous build made with other inputs.</summary>
 public sealed record BuildResultView(bool IsCurrent, string Tag, string Tone, string Detail, IReadOnlyList<string> Differences);
 
@@ -30,7 +33,7 @@ public static class MobileBuildState
         var x = report?.Xcode;
         return new BuildProvenance
         {
-            SourceRevision = SourceRevision.Of(project.SourceDirectory, project.ImportedAt),
+            SourceRevision = SourceRevision.Of(project),
             Output = o?.Output.DisplayName() ?? settings.Platform.DisplayName(),
             ProjectPath = settings.ProjectRelativePath,
             Scheme = scheme,
@@ -97,6 +100,38 @@ public static class MobileBuildState
         return blockers.Count == 0 ? new("Ready to build", "success", $"{selected.DisplayName} can be built on this computer.") : Classify(blockers, null);
     }
 
+    public const string DeploymentBlockedTag = "Blocked — deployment target incompatible";
+
+    /// <summary>
+    /// Everything "Start Mobile Build" waits for, in order, each met or not with what to do: a buildable output, every
+    /// required readiness item (toolchain, deployment target, signing) and the per-build project-trust confirmation.
+    /// </summary>
+    public static IReadOnlyList<BuildPrerequisite> Prerequisites(MobileOutputOption? selected, IReadOnlyList<MobileOutputOption> forPlatform,
+        BuildReadiness? readiness, bool trustAcknowledged, bool isBuilding)
+    {
+        var list = new List<BuildPrerequisite>();
+        if (selected is null)
+            list.Add(new("Output", false, forPlatform.Any(o => o.IsAvailable)
+                ? "Choose an output under Platform, scheme and output."
+                : "No output can be built with the current selection; the blockers are listed under Scheme compatibility and STATE."));
+        else if (!selected.IsAvailable)
+            list.Add(new("Output", false, $"{selected.DisplayName} is not available: {selected.Reason}"));
+        else
+            list.Add(new("Output", true, selected.DisplayName));
+        // With no output chosen, what blocks every output (toolchain, deployment target); an output's own requirements, such
+        // as the IPA's signing certificate, are listed once that output is chosen.
+        var blockers = (readiness?.Blockers ?? (selected is null ? forPlatform.SelectMany(o => o.Blockers).Where(b => !IsSigning(b)) : [])).DistinctBy(b => (b.Tool, b.Detail)).ToList();
+        foreach (var b in blockers)
+            list.Add(new(b.Tool, false, b.Detail + (b.Fix is { Length: > 0 } f ? " " + f : "")));
+        if (readiness is not null && blockers.Count == 0)
+            list.Add(new("Toolchain, deployment target and signing", true, "Every required item in Readiness for this build is met."));
+        list.Add(trustAcknowledged
+            ? new("Project trust", true, "Confirmed for the next build.")
+            : new("Project trust", false, "Tick “I trust this project and want to run its build scripts on this computer.” xcodebuild runs the project's build phases, scripts and package plugins; HCG asks before every build and clears the tick afterwards."));
+        if (isBuilding) list.Add(new("No build running", false, "A build is in progress."));
+        return list;
+    }
+
     private static bool IsSigning(ReadinessItem b) =>
         b.Tool is "Provisioning profile" or "Code-signing identity" or "Code signing" || b.Tool.Contains("certificate", StringComparison.OrdinalIgnoreCase);
 
@@ -104,38 +139,34 @@ public static class MobileBuildState
     {
         var tools = blockers.Where(b => !IsSigning(b)).ToList();
         var missing = tools.Where(b => b.State is ReadinessState.NotFound or ReadinessState.OtherHost or ReadinessState.InvalidPath).ToList();
-        var incompatible = tools.Where(b => b.State == ReadinessState.IncompatibleVersion).ToList();
+        // The selected Xcode is installed and works, but its SDK does not accept the selection's deployment target:
+        // a property of the selection (scheme, configuration, Xcode), not a missing tool.
+        var deployment = tools.Where(b => b.State == ReadinessState.IncompatibleVersion && b.Tool == IosBuildSelection.DeploymentTargetItem).ToList();
+        var incompatible = tools.Where(b => b.State == ReadinessState.IncompatibleVersion && b.Tool != IosBuildSelection.DeploymentTargetItem).ToList();
         string Join(IEnumerable<ReadinessItem> items) => string.Join(" ", items.Select(b => $"{b.Tool}: {b.Detail}"));
         if (missing.Count > 0) return new("Required toolchain missing", "warning", Join(missing));
-        if (incompatible.Count > 0) return new("Selected toolchain incompatible", "warning", Join(incompatible));
+        if (deployment.Count > 0)
+            return new(DeploymentBlockedTag, "error",
+                "The selected Xcode is installed, but its SDK does not accept this selection's minimum iOS. " + Join(deployment.DistinctBy(b => b.Detail)) +
+                " Resolve it under Scheme compatibility: a compatible scheme, another installed Xcode, or a project change.");
+        if (incompatible.Count > 0) return new("Selected toolchain incompatible", "warning", "Installed, but not usable for this build. " + Join(incompatible));
         return new("Configuration required", "warning", blockers.Count > 0 ? Join(blockers) : fallback ?? "");
     }
 }
 
-/// <summary>The revision of an imported source folder: its git commit when it is a checkout, otherwise the import time.</summary>
+/// <summary>
+/// The revision a build used: the original's git commit (or ZIP hash) recorded when HCG copied it, the copy's
+/// fingerprint and when it was copied. HCG's copy has no .git, so the revision is never read from the copy itself.
+/// </summary>
 public static class SourceRevision
 {
-    public static string Of(string directory, DateTimeOffset importedAt)
+    public static string Of(ProjectRecord project)
     {
-        try
-        {
-            for (var dir = new DirectoryInfo(directory); dir is not null; dir = dir.Parent)
-            {
-                var git = Path.Combine(dir.FullName, ".git");
-                if (File.Exists(git) && File.ReadAllText(git).Trim() is { } pointer && pointer.StartsWith("gitdir:", StringComparison.Ordinal))
-                    git = Path.GetFullPath(Path.Combine(dir.FullName, pointer[7..].Trim()));
-                if (!Directory.Exists(git)) { if (dir.FullName == Path.GetFullPath(directory)) continue; break; }
-                var head = File.ReadAllText(Path.Combine(git, "HEAD")).Trim();
-                if (!head.StartsWith("ref: ", StringComparison.Ordinal)) return $"git {head[..Math.Min(12, head.Length)]} (detached)";
-                var refName = head[5..];
-                var refFile = Path.Combine(git, refName);
-                var sha = File.Exists(refFile) ? File.ReadAllText(refFile).Trim()
-                    : File.Exists(Path.Combine(git, "packed-refs")) ? File.ReadLines(Path.Combine(git, "packed-refs")).Select(l => l.Split(' ')).FirstOrDefault(p => p.Length == 2 && p[1] == refName)?[0] : null;
-                return sha is null ? $"git {refName.Replace("refs/heads/", "")}" : $"git {sha[..Math.Min(12, sha.Length)]} ({refName.Replace("refs/heads/", "")})";
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return $"import of {importedAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC";
+        var copied = (project.RefreshedAt ?? project.ImportedAt).UtcDateTime.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        var what = project.SourceRevision ?? Core.GitRevision.Read(project.SourceDirectory);
+        return what is null
+            ? $"copy of {copied} UTC (revision not recorded: imported before HCG recorded it; use Refresh from source)"
+            : $"{what}, copied {copied} UTC" + (project.SourceFingerprint is { } fp ? $" ({fp})" : "");
     }
 }
 

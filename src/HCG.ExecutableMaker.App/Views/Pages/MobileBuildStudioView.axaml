@@ -92,6 +92,19 @@
                 <c:StatusChip Status="{Binding SupportTag}" />
               </StackPanel>
               <TextBlock Classes="muted" Text="{Binding SupportSummary}" TextWrapping="Wrap" />
+              <SelectableTextBlock Classes="muted" FontSize="11.5" Text="{Binding SourceText}" TextWrapping="Wrap" IsVisible="{Binding HasProject}" Margin="0,4,0,0" />
+              <Border Classes="callout warning" Padding="12" IsVisible="{Binding HasSourceDrift}" Margin="0,6,0,0">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="label" Text="HCG'S COPY IS NOT THE CURRENT SOURCE" />
+                  <SelectableTextBlock FontSize="12" Text="{Binding SourceDriftText}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+              <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0" IsVisible="{Binding HasProject}">
+                <Button Classes="small" Content="Refresh from source…" Command="{Binding RefreshFromSourceCommand}" IsEnabled="{Binding !IsBuilding}"
+                        ToolTip.Tip="Replace HCG's copy with the original folder's current files; the selection and build history are kept" />
+                <Button Classes="small ghost" Content="Export diagnostics…" Command="{Binding ExportDiagnosticsCommand}"
+                        ToolTip.Tip="Save a report of the Maker build, project source and revision, Xcode, selection, commands and deployment targets" />
+              </StackPanel>
             </StackPanel>
             <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="4" IsVisible="{Binding HasProject}">
               <ItemsControl ItemsSource="{Binding ProjectRows}">
@@ -429,6 +442,23 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          <Border Classes="inset" Padding="16,14" IsVisible="{Binding HasProject}">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="h3" Text="Before you can build" />
+              <TextBlock Classes="muted" FontSize="12" Text="{Binding PrerequisitesSummary}" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding BuildPrerequisites}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PrerequisiteRow">
+                    <Grid ColumnDefinitions="180,*,Auto" Margin="0,3">
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12.5" TextWrapping="Wrap" />
+                      <TextBlock Grid.Column="1" Margin="8,0" Text="{Binding Detail}" FontSize="12" TextWrapping="Wrap" />
+                      <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
           <Border Classes="callout warning" Padding="16" IsVisible="{Binding !IsBuilding}">
             <StackPanel Spacing="8">
               <TextBlock Classes="h3" Text="{Binding TrustTitle}" />

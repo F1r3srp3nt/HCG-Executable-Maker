@@ -11,9 +11,11 @@ public sealed class SqliteProjectRepository(SqliteDatabase db) : IProjectReposit
         await using var c = await db.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var cmd = c.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO projects (id, name, source_kind, source_location, workspace_path, preserved_archive_path, imported_at, last_opened_at, analysis_json)
-            VALUES ($id, $name, $kind, $src, $ws, $arch, $imp, $open, $analysis)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name, last_opened_at = excluded.last_opened_at, analysis_json = excluded.analysis_json
+            INSERT INTO projects (id, name, source_kind, source_location, workspace_path, preserved_archive_path, imported_at, last_opened_at, analysis_json,
+                                  source_revision, source_fingerprint, refreshed_at)
+            VALUES ($id, $name, $kind, $src, $ws, $arch, $imp, $open, $analysis, $rev, $fp, $refreshed)
+            ON CONFLICT(id) DO UPDATE SET name = excluded.name, last_opened_at = excluded.last_opened_at, analysis_json = excluded.analysis_json,
+                                          source_revision = excluded.source_revision, source_fingerprint = excluded.source_fingerprint, refreshed_at = excluded.refreshed_at
             """;
         cmd.Parameters.AddWithValue("$id", project.Id.ToString());
         cmd.Parameters.AddWithValue("$name", project.Name);
@@ -24,6 +26,9 @@ public sealed class SqliteProjectRepository(SqliteDatabase db) : IProjectReposit
         cmd.Parameters.AddWithValue("$imp", project.ImportedAt.ToString("O"));
         cmd.Parameters.AddWithValue("$open", (object?)project.LastOpenedAt?.ToString("O") ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$analysis", project.Analysis is null ? DBNull.Value : HcgJson.Serialize(project.Analysis));
+        cmd.Parameters.AddWithValue("$rev", (object?)project.SourceRevision ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$fp", (object?)project.SourceFingerprint ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$refreshed", (object?)project.RefreshedAt?.ToString("O") ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -49,7 +54,7 @@ public sealed class SqliteProjectRepository(SqliteDatabase db) : IProjectReposit
     {
         await using var c = await db.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id, name, source_kind, source_location, workspace_path, preserved_archive_path, imported_at, last_opened_at, analysis_json FROM projects " + tail;
+        cmd.CommandText = "SELECT id, name, source_kind, source_location, workspace_path, preserved_archive_path, imported_at, last_opened_at, analysis_json, source_revision, source_fingerprint, refreshed_at FROM projects " + tail;
         bind?.Invoke(cmd);
         var result = new List<ProjectRecord>();
         await using var r = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -72,6 +77,9 @@ public sealed class SqliteProjectRepository(SqliteDatabase db) : IProjectReposit
                 ImportedAt = DateTimeOffset.Parse(r.GetString(6), System.Globalization.CultureInfo.InvariantCulture),
                 LastOpenedAt = r.IsDBNull(7) ? null : DateTimeOffset.Parse(r.GetString(7), System.Globalization.CultureInfo.InvariantCulture),
                 Analysis = analysis,
+                SourceRevision = r.IsDBNull(9) ? null : r.GetString(9),
+                SourceFingerprint = r.IsDBNull(10) ? null : r.GetString(10),
+                RefreshedAt = r.IsDBNull(11) ? null : DateTimeOffset.Parse(r.GetString(11), System.Globalization.CultureInfo.InvariantCulture),
             });
         }
         return result;

@@ -9,6 +9,10 @@ public interface IProjectImporter
     Task<ImportResult> ImportDirectoryAsync(string directory, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken);
     /// <summary>Copies a single mobile artifact (.apk/.aab/.apks/.ipa) into a workspace without extracting it.</summary>
     Task<ImportResult> ImportArtifactAsync(string file, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken);
+    /// <summary>Replaces the project's copy with the original's current files (validated like an import); id, settings and history are kept.</summary>
+    Task<ImportResult> RefreshAsync(ProjectRecord project, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken);
+    /// <summary>Compares the project's copy with the original's current files.</summary>
+    SourceDrift Compare(ProjectRecord project, ImportLimits limits, CancellationToken cancellationToken);
 }
 
 /// <summary>Static analysis of a workspace. Must never execute imported code.</summary>

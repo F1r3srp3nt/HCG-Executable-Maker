@@ -342,7 +342,9 @@ public sealed class SchemeSelectionTests : IDisposable
         var m = Mobile(Sentinel());
         var options = MobileCapabilities.Evaluate(m, Report(Xcode()), new MobileBuildOptions { Framework = m.Framework, Output = MobileOutput.IosSimulatorApp, Scheme = "HCGSentinel" });
         var incompatible = MobileBuildState.Describe(Analysis(m), m, options, null, null, null, null);
-        Assert.Equal("Selected toolchain incompatible", incompatible.Tag);
+        Assert.Equal(MobileBuildState.DeploymentBlockedTag, incompatible.Tag);
+        Assert.Equal("error", incompatible.Tone);
+        Assert.Contains("The selected Xcode is installed", incompatible.Detail);
         Assert.Contains("needs iOS 14.7", incompatible.Detail);
 
         var noXcode = MobileCapabilities.Evaluate(m, Report(new XcodeStatus { State = XcodeState.NotInstalled, Diagnosis = "No Xcode application was found." }));
@@ -405,7 +407,7 @@ public sealed class SchemeSelectionTests : IDisposable
         var project = Project(m);
         var report = Report(Xcode());
         var built = MobileBuildState.ProvenanceFor(project, Settings("HCGSentinelModern"), report) with { ArtifactPaths = ["/tmp/out/HCGSentinel.ipa"] };
-        Assert.Equal("import of 2026-11-13 09:00 UTC", built.SourceRevision);
+        Assert.StartsWith("copy of 2026-11-13 09:00 UTC (revision not recorded", built.SourceRevision);
         Assert.Equal("HCGSentinelModern", built.Scheme);
         Assert.Equal("Release", built.Configuration);
         Assert.Equal("iphoneos", built.Sdk);
@@ -431,7 +433,7 @@ public sealed class SchemeSelectionTests : IDisposable
         Assert.Contains("Scheme: HCGSentinelModern (built) → HCGSentinel (now)", previous.Differences);
         Assert.Contains("scheme HCGSentinelModern", previous.Detail);
         var options = MobileCapabilities.Evaluate(m, report, new MobileBuildOptions { Framework = m.Framework, Output = MobileOutput.IosIpa, Scheme = "HCGSentinel" });
-        Assert.Equal("Selected toolchain incompatible", MobileBuildState.Describe(Analysis(m), m, options, null, null, last, now).Tag);
+        Assert.Equal(MobileBuildState.DeploymentBlockedTag, MobileBuildState.Describe(Analysis(m), m, options, null, null, last, now).Tag);
         Assert.Equal(["/tmp/out/HCGSentinel.ipa"], last.Provenance!.ArtifactPaths);
 
         // Configuration or toolchain changes count as well; with nothing buildable the old result is still not "current".

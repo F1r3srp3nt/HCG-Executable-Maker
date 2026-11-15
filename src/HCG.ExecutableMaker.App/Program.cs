@@ -19,6 +19,10 @@ internal static class Program
         // e.g. to compare a Finder launch with a Terminal launch. Read-only; applies HCG's saved Xcode choice like the app.
         if (args.Contains("--toolchain-report"))
             return ToolchainReportCommand.Run();
+        // `HCGExecutableMaker --mobile-diagnostics [--project …] [--import …] [--refresh] [--scheme …] [--build simulator|archive --trust]`:
+        // Mobile Build Studio's report (and optionally its build) without the UI, from the app's own data and selection.
+        if (args.Contains("--mobile-diagnostics"))
+            return MobileCommand.Run(args);
         // `HCGExecutableMaker --hcg-session status|sign-in|sign-out`: the HCG account services without the UI (no tokens printed).
         if (args.Contains("--hcg-session"))
             return HcgSessionCommand.Run(args);

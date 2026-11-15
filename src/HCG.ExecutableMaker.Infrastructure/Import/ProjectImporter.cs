@@ -100,6 +100,7 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
             var preservedName = PathGuard.SanitizeFileName(Path.GetFileName(zipPath), "archive.zip");
             File.Copy(zipPath, Path.Combine(originalDir, preservedName), overwrite: false);
 
+            var fingerprint = SourceSnapshot.Fingerprint(SourceSnapshot.HashTree(Path.Combine(staging, "source"), cancellationToken));
             var workspace = Commit(staging, id);
             var name = GuessName(Path.Combine(workspace, "source"), Path.GetFileNameWithoutExtension(zipPath));
             var project = new ProjectRecord
@@ -111,6 +112,8 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
                 WorkspacePath = workspace,
                 PreservedArchivePath = Path.Combine(workspace, "original", preservedName),
                 ImportedAt = time.GetUtcNow(),
+                SourceRevision = SourceSnapshot.ZipRevision(zipPath),
+                SourceFingerprint = fingerprint,
             };
             _logger.LogInformation("Extracted {Count} files ({Bytes} bytes) from {Zip}", fileCount, totalBytes, zipPath);
             return new ImportResult(project, fileCount, totalBytes, warnings);
@@ -119,6 +122,82 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
         {
             TryDelete(staging);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Replaces the project's copy with the current files of the folder or ZIP it was imported from. The new files are
+    /// copied (or extracted) and validated exactly like an import, into a separate workspace; only then is the old copy
+    /// swapped out, so a failed refresh leaves the project as it was. The project id, settings, scheme selection and
+    /// build history are kept; the original is never modified.
+    /// </summary>
+    public async Task<ImportResult> RefreshAsync(ProjectRecord project, ImportLimits limits, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
+    {
+        var fresh = project.SourceKind switch
+        {
+            ProjectSourceKind.Directory when Directory.Exists(project.SourceLocation) => await ImportDirectoryAsync(project.SourceLocation, limits, progress, cancellationToken).ConfigureAwait(false),
+            ProjectSourceKind.ZipArchive when File.Exists(project.SourceLocation) => await ImportZipAsync(project.SourceLocation, limits, progress, cancellationToken).ConfigureAwait(false),
+            ProjectSourceKind.Directory or ProjectSourceKind.ZipArchive => throw new ImportRejectedException($"The original “{project.SourceLocation}” no longer exists. Import the project from its new location instead."),
+            _ => throw new ImportRejectedException("Only projects imported from a folder or a ZIP archive can be refreshed."),
+        };
+        var oldSource = project.SourceDirectory;
+        var parked = Path.Combine(project.WorkspacePath, $"source.replaced-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.Move(oldSource, parked);
+            try { Directory.Move(fresh.Project.SourceDirectory, oldSource); }
+            catch { Directory.Move(parked, oldSource); throw; }
+            if (fresh.Project.PreservedArchivePath is { } archive && project.PreservedArchivePath is { } keep)
+                File.Copy(archive, keep, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(fresh.Project.WorkspacePath);
+        }
+        TryDelete(parked);
+        project.SourceRevision = fresh.Project.SourceRevision;
+        project.SourceFingerprint = fresh.Project.SourceFingerprint;
+        project.RefreshedAt = time.GetUtcNow();
+        _logger.LogInformation("Refreshed project {ProjectId} from {Source}: {Revision}, {Files} files", project.Id, project.SourceLocation, project.SourceRevision, fresh.FileCount);
+        return fresh with { Project = project };
+    }
+
+    /// <summary>Compares the project's copy with its original's current files (same exclusions as the import).</summary>
+    public SourceDrift Compare(ProjectRecord project, ImportLimits limits, CancellationToken cancellationToken)
+    {
+        var snapshot = SourceSnapshot.HashTree(project.SourceDirectory, cancellationToken);
+        var snapshotFingerprint = SourceSnapshot.Fingerprint(snapshot);
+        try
+        {
+            IReadOnlyDictionary<string, string> origin;
+            string? revision;
+            switch (project.SourceKind)
+            {
+                case ProjectSourceKind.Directory when Directory.Exists(project.SourceLocation):
+                    origin = SourceSnapshot.HashFiles(PlanDirectoryCopy(project.SourceLocation, limits, [], cancellationToken), cancellationToken);
+                    revision = GitRevision.Read(project.SourceLocation) ?? "not a git checkout";
+                    break;
+                case ProjectSourceKind.ZipArchive when File.Exists(project.SourceLocation):
+                    revision = SourceSnapshot.ZipRevision(project.SourceLocation);
+                    if (revision == project.SourceRevision)
+                        return new SourceDrift { OriginAvailable = true, OriginRevision = revision, OriginFingerprint = snapshotFingerprint, SnapshotFingerprint = snapshotFingerprint };
+                    return new SourceDrift { OriginAvailable = true, OriginRevision = revision, SnapshotFingerprint = snapshotFingerprint, Changed = ["(the ZIP file itself: " + Path.GetFileName(project.SourceLocation) + ")"] };
+                case ProjectSourceKind.Directory or ProjectSourceKind.ZipArchive:
+                    return new SourceDrift { OriginAvailable = false, OriginProblem = $"“{project.SourceLocation}” no longer exists.", SnapshotFingerprint = snapshotFingerprint };
+                default:
+                    return new SourceDrift { OriginAvailable = false, OriginProblem = "this project was not imported from a folder or ZIP.", SnapshotFingerprint = snapshotFingerprint };
+            }
+            return new SourceDrift
+            {
+                OriginAvailable = true, OriginRevision = revision, OriginFingerprint = SourceSnapshot.Fingerprint(origin), SnapshotFingerprint = snapshotFingerprint,
+                Added = origin.Keys.Except(snapshot.Keys).Order(StringComparer.Ordinal).ToList(),
+                Removed = snapshot.Keys.Except(origin.Keys).Order(StringComparer.Ordinal).ToList(),
+                Changed = origin.Where(kv => snapshot.TryGetValue(kv.Key, out var h) && h != kv.Value).Select(kv => kv.Key).Order(StringComparer.Ordinal).ToList(),
+            };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ImportRejectedException)
+        {
+            return new SourceDrift { OriginAvailable = false, OriginProblem = ex.Message, SnapshotFingerprint = snapshotFingerprint };
         }
     }
 
@@ -274,6 +353,7 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
                 progress?.Report(new ImportProgress("Copying", processed, plan.Count, total, rel));
             }
 
+            var fingerprint = SourceSnapshot.Fingerprint(SourceSnapshot.HashFiles(plan.Select(p => (Path.Combine(sourceDir, p.Relative), p.Relative)), cancellationToken));
             var workspace = Commit(staging, id);
             var project = new ProjectRecord
             {
@@ -283,6 +363,8 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
                 SourceLocation = directory,
                 WorkspacePath = workspace,
                 ImportedAt = time.GetUtcNow(),
+                SourceRevision = GitRevision.Read(directory) ?? "not a git checkout",
+                SourceFingerprint = fingerprint,
             };
             return new ImportResult(project, plan.Count, total, warnings);
         }
@@ -293,7 +375,7 @@ public sealed class ProjectImporter(IAppPaths paths, TimeProvider time, ILogger<
         }
     }
 
-    private static List<(string From, string Relative)> PlanDirectoryCopy(string root, ImportLimits limits, List<string> warnings, CancellationToken ct)
+    internal static List<(string From, string Relative)> PlanDirectoryCopy(string root, ImportLimits limits, List<string> warnings, CancellationToken ct)
     {
         var files = new List<(string, string)>();
         var excluded = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
