@@ -66,8 +66,9 @@ internal static class ShipToStoreCommand
             {
                 var c = StoreArtifacts.DetectAsync(Path.GetFullPath(f)).GetAwaiter().GetResult();
                 c = c with { Signing = StoreArtifacts.CheckSigningAsync(c, runner).GetAwaiter().GetResult() };
-                Console.WriteLine($"File {c.FileName}: {c.Label}, {c.SizeBytes:N0} bytes, SHA-256 {c.Sha256}, signature {c.Signing.Status}" +
+                Console.WriteLine($"File {c.FileName}: {c.Label} · {c.KindName}, {c.SizeBytes:N0} bytes, SHA-256 {c.Sha256}, signature {ShipToStoreService.DeclaredSigning(c).Status}" +
                                   (c.MinimumOs is null ? "" : $", minimum OS {c.MinimumOs}") + (c.Package is { } pk ? $", package {pk.Id} {pk.Version} {pk.Architecture}" : "") +
+                                  $"\n  install: {c.Readiness.Label}" +
                                   string.Concat(c.Problems.Select(x => "\n  PROBLEM " + x)) + string.Concat(c.Notes.Select(x => "\n  note " + x)));
                 files.Add(c);
             }
@@ -87,8 +88,11 @@ internal static class ShipToStoreCommand
                 new Progress<ShipItemProgress>(p => { if (p.State != ShipItemState.Uploading || p.Detail is not null || p.Received == p.Total) Console.WriteLine($"  {p.FileName}: {p.State} {p.Received:N0}/{p.Total:N0} {p.Detail}"); }),
                 CancellationToken.None).GetAwaiter().GetResult();
             var r = result.Release;
+            if (result.ContinuedExistingDraft) Console.WriteLine($"Continued the existing draft {r.Id} (same version, build and details): no second release was created.");
             Console.WriteLine($"Release {r.Id}: {r.ProductTitle ?? r.ProductId} {r.Version} build {r.Build} — {r.Status}; requested {r.RequestedEligibility}; distribution {r.Distribution}");
-            foreach (var a in r.Artifacts) Console.WriteLine($"  {a.FileName}: {a.Status} · SHA-256 {a.Sha256 ?? a.DeclaredSha256}");
+            foreach (var a in r.Artifacts) Console.WriteLine($"  {a.FileName}: {a.Status} · SHA-256 {a.Sha256 ?? a.DeclaredSha256}" +
+                                                             (a.Kind is null ? "" : $" · {StoreArtifacts.KindName(a.Kind)}{(a.KindCheckedByStore ? " (checked by HCG Store)" : "")}") +
+                                                             (a.Readiness is { } rd ? $"\n    HCG Store: {rd.Label}" : ""));
             Console.WriteLine($"Review in HCG Store: {r.ReviewUrl}");
             var ok = result.AllVerified;
             if (args.Contains("--verify-download"))

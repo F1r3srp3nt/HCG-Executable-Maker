@@ -4,6 +4,7 @@
 # Store repository. Nothing is deployed and no real HCG system is contacted.
 #
 # Usage: tools/ci/ship-to-store-e2e.sh <HCG Store web-hcg-store dir> <out dir> [HCGExecutableMaker.dll]
+# Set SHIP_REAL_BUILD=0 to skip the real build (section 9: New Build → "Ship to Store…" in the app, headless).
 set -u
 STORE_DIR="$(cd "$1" && pwd)"; OUT="$(mkdir -p "$2" && cd "$2" && pwd)"
 MAKER="${3:-src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll}"
@@ -23,6 +24,17 @@ cat > "$S/ipa/Payload/HCGSample.app/Info.plist" <<'EOF'
 <key>MinimumOSVersion</key><string>15.0</string><key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array></dict></plist>
 EOF
 echo "sample" > "$S/ipa/Payload/HCGSample.app/_CodeSignature/CodeResources"
+# An ad hoc provisioning profile as Apple ships one (a CMS envelope around a plist), signed by a throwaway test key.
+cat > "$S/profile.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>AppIDName</key><string>HCG Sample</string><key>Name</key><string>HCG Sample Ad Hoc (TEST)</string>
+<key>UUID</key><string>6F1C0E2A-9C55-4B7A-8F59-3A2B1C0D9E8F</string><key>TeamIdentifier</key><array><string>ABCDE12345</string></array>
+<key>ExpirationDate</key><date>$(date -u -d '+180 days' +%Y-%m-%dT%H:%M:%SZ)</date><key>Platform</key><array><string>iOS</string></array>
+<key>Entitlements</key><dict><key>application-identifier</key><string>ABCDE12345.com.example.hcg.sample</string><key>get-task-allow</key><false/></dict>
+<key>ProvisionedDevices</key><array><string>00008110-000000000000001E</string></array></dict></plist>
+EOF
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$S/profile-key.pem" -out "$S/profile-cert.pem" -days 2 -subj "/CN=HCG TEST profile signer" 2>/dev/null
+openssl cms -sign -binary -nodetach -outform DER -in "$S/profile.plist" -signer "$S/profile-cert.pem" -inkey "$S/profile-key.pem" -out "$S/ipa/Payload/HCGSample.app/embedded.mobileprovision"
 head -c 3000000 /dev/urandom > "$S/ipa/Payload/HCGSample.app/HCGSample"   # incompressible, so the upload spans 3 chunks
 (cd "$S/ipa" && zip -qr ../HCGSample-1.3.0.ipa Payload)
 printf 'MZ' > "$S/win/hello.exe"; echo "echo hello" > "$S/win/README.txt"
@@ -71,6 +83,18 @@ CAROL=$(ctl token '{"sub":"e2e-carol"}' | jq -r .token)
 dl() { curl -s -o /dev/null -w '%{http_code}' -X POST ${1:+-H "authorization: Bearer $1"} "$STORE/api/v1/publishing/artifacts/$IPA_ID/download-url"; }
 check "7a Signed-out download refused (401)" '[ "$(dl "")" = 401 ]'
 check "7b Another HCG account without permission refused before approval (403)" '[ "$(dl "$CAROL")" = 403 ]'
+# Unauthorised uploads: carol (no publishing permission from HCG) through Maker, and straight at the API.
+curl -s -X POST "${ISS%/auth/v1}/__test/next-user/e2e-carol" >/dev/null
+dotnet "$MAKER" --ship-to-store --sign-in --store "$STORE" --product fixture-quasar-shell --edition standard --release-version 9.9.9 --build-number 1 \
+  --distribution paid --eligibility private --file "$S/HCGSample-1.3.0-windows.zip" > "$OUT/ship-carol.log" 2>&1; rc=$?
+check "7e Upload by an account HCG has not allowed to publish is refused (Maker exit $rc, HCG Store 403), and no release is created" \
+  '[ $rc = 4 ] && grep -q "HTTP 403" "$OUT/ship-carol.log" && [ "$(curl -s -H "authorization: Bearer $(ctl token "{\"sub\":\"e2e-alice\"}" | jq -r .token)" "$STORE/api/v1/publishing/releases?productId=fixture-quasar-shell" | jq "[.releases[] | select(.version==\"9.9.9\")] | length")" = 0 ]'
+sed 's/^/    /' "$OUT/ship-carol.log" | grep -E "HCG Store:|signed in" | tee -a "$RESULTS"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "authorization: Bearer $CAROL" -H 'content-type: application/json' "$STORE/api/v1/publishing/releases/$REL/artifacts" \
+  -d '{"fileName":"evil.zip","platform":"windows","format":"zip","sizeBytes":10,"sha256":"'"$(printf x | sha256sum | cut -c1-64)"'"}')
+check "7f Adding a file to someone else's draft without permission is refused ($code)" '[ "$code" = 403 ]'
+code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-range: bytes 0-0/1' --data-binary x "$STORE/publishing-upload/v1/forged.token")
+check "7g A forged upload URL is refused ($code)" '[ "$code" = 403 ] || [ "$code" = 400 ]'
 
 # Submit (Maker), then 5: a person reviews and approves in the Store (web session, other person, typed version).
 as_alice; dotnet "$MAKER" --ship-to-store --sign-in --store "$STORE" --product fixture-quasar-shell --edition standard --release-version 1.3.0 --build-number 7 --release "$REL" \
@@ -82,6 +106,8 @@ ctl approve "{\"releaseId\":\"$REL\",\"eligibility\":\"public\",\"confirm\":\"1.
 jq -r .reviewPage "$OUT/approve.json" > "$OUT/review.html"
 check "5 The Store's review page shows the release metadata (version, build, notes, all three SHA-256)" \
   'grep -q "1.3.0" "$OUT/review.html" && grep -q "build 7" "$OUT/review.html" && grep -q "Harmless Ship to Store sample." "$OUT/review.html" && for f in "$S"/HCGSample-1.3.0.ipa "$S"/HCGSample-1.3.0-windows.zip "$S"/hcg-sample_1.3.0_amd64.deb; do grep -q "$(sha256sum "$f" | cut -c1-64)" "$OUT/review.html" || exit 1; done'
+check "5b Each file's kind and install label, from Maker and from HCG Store: ad hoc IPA (registered devices only), Windows ZIP (signature not checked), Linux package; only the Linux package is marked installable as is" \
+  'grep -q "install: Ad hoc-signed: installs only on the devices listed" "$OUT/ship-1.log" && grep -q "Ad hoc-signed: installs only on the devices listed" "$OUT/review.html" && grep -q "Signature not checked" "$OUT/review.html" && grep -q "Linux package: no platform signature" "$OUT/review.html" && [ "$(grep -o "class=\"ok\"" "$OUT/review.html" | wc -l)" = 1 ]'
 check "Approved for public by a different person in a browser session" '[ "$(jq -r .result.approvedEligibility "$OUT/approve.json")" = public ]'
 
 # 6/7 after approval: paid → entitlement required.
@@ -97,7 +123,7 @@ as_alice; dotnet "$MAKER" --ship-to-store --sign-in --store "$STORE" --release "
 check "8a Rollback: the withdrawn release stops delivering an already-issued link (410)" '[ "$(curl -s -o /dev/null -w "%{http_code}" "$URL")" = 410 ] && grep -q "withdrawn" "$OUT/withdraw.log"'
 head -c 6000000 /dev/urandom > "$S/ipa/Payload/HCGSample.app/HCGSample"; rm -f "$S/HCGSample-1.3.1.ipa"
 (cd "$S/ipa" && zip -qr ../HCGSample-1.3.1.ipa Payload)
-SHIP2=(dotnet "$MAKER" --ship-to-store --sign-in --store "$STORE" --product fixture-quasar-shell --edition standard --release-version 1.3.1 --build-number 8 --distribution paid --eligibility private --file "$S/HCGSample-1.3.1.ipa")
+SHIP2=(dotnet "$MAKER" --ship-to-store --sign-in --store "$STORE" --product fixture-quasar-shell --edition standard --release-version 1.3.1 --build-number 8 --distribution paid --eligibility private --note "Recovery test." --file "$S/HCGSample-1.3.1.ipa")
 # Start the upload, and kill Maker (SIGKILL) as soon as HCG Store has confirmed part of the file but not all of it.
 as_alice; "${SHIP2[@]}" > "$OUT/ship-3-killed.log" 2>&1 &
 UP=$!
@@ -111,9 +137,41 @@ for _ in $(seq 1 600); do
 done
 wait $UP 2>/dev/null
 note "Upload killed mid-way: release $REL2 has $RECV of $(stat -c %s "$S/HCGSample-1.3.1.ipa") bytes"
-as_alice; "${SHIP2[@]}" --release "$REL2" --verify-download > "$OUT/ship-3-resumed.log" 2>&1
-check "8b Failed-upload recovery: the rerun resumed the interrupted upload and the file verified" 'grep -q "Resuming at byte" "$OUT/ship-3-resumed.log" && grep -q "— matches" "$OUT/ship-3-resumed.log"'
+# The rerun is the same command, without the release ID: HCG Store hands back the same draft (no duplicate release).
+as_alice; "${SHIP2[@]}" --verify-download > "$OUT/ship-3-resumed.log" 2>&1
+check "8b Failed-upload recovery: the same command again continued draft $REL2, resumed the interrupted upload and the file verified" \
+  'grep -q "Continued the existing draft $REL2" "$OUT/ship-3-resumed.log" && grep -q "Resuming at byte" "$OUT/ship-3-resumed.log" && grep -q "— matches" "$OUT/ship-3-resumed.log"'
+check "8c No duplicate release was created for 1.3.1 build 8" \
+  '[ "$(curl -s -H "authorization: Bearer $TOK" "$STORE/api/v1/publishing/releases?productId=fixture-quasar-shell" | jq "[.releases[] | select(.version==\"1.3.1\")] | length")" = 1 ]'
+
+# Simulator builds are refused before any byte is sent, with the reason.
+mkdir -p "$S/sim/Payload/HCGSample.app"
+printf '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.hcg.sample</string><key>DTPlatformName</key><string>iphonesimulator</string><key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array></dict></plist>' > "$S/sim/Payload/HCGSample.app/Info.plist"
+echo x > "$S/sim/Payload/HCGSample.app/HCGSample"; rm -f "$S/HCGSample-sim.ipa"; (cd "$S/sim" && zip -qr ../HCGSample-sim.ipa Payload)
+as_alice; dotnet "$MAKER" --ship-to-store --sign-in --store "$STORE" --product fixture-quasar-shell --edition standard --release-version 1.3.2 --build-number 9 \
+  --distribution paid --eligibility private --file "$S/HCGSample-sim.ipa" > "$OUT/ship-sim.log" 2>&1; rc=$?
+check "8d An iOS Simulator build is refused with the reason (exit $rc), never uploaded" '[ $rc = 2 ] && grep -q "iOS Simulator build" "$OUT/ship-sim.log" && grep -q "cannot be installed on an iPhone or iPad" "$OUT/ship-sim.log"'
 AUDIT=$(curl -s -H "authorization: Bearer $TOK" "$STORE/api/v1/publishing/releases/$REL")
 check "Audit log intact and complete for the release" '[ "$(echo "$AUDIT" | jq -r .auditIntact)" = true ] && echo "$AUDIT" | jq -r ".audit[].action" | tr "\n" " " | grep -q "release.draft-created.*artifact.verified.*release.submitted.*release.approved.*artifact.downloaded.*release.withdrawn"'
 echo "$AUDIT" | jq -r '.audit[] | "    audit: \(.action) by \(.actor)"' | tee -a "$RESULTS"
+
+# ── 9. A REAL build: New Build (HelloAvalonia, .NET, cross-built for Windows x64) → "Ship to Store…" on the result →
+#       HCG Connect sign-in → private draft; then an approver reviews the draft in HCG Store and downloads the bytes. ──
+if [ "${SHIP_REAL_BUILD:-1}" = 1 ]; then
+  as_alice
+  dotnet run --project tools/ui-driver --no-build -- --ship-build --source tests/Fixtures/HelloAvalonia --ship-store "$INFO" --ship-build-number 10 \
+    --output "$OUT/real-build" --screenshots "$OUT/real-build/screenshots" --prefix ship-build > "$OUT/real-build.log" 2>&1; rc=$?
+  grep -E "^(PASS|FAIL)|^Artifact|^File|^Not offered|^Release:" "$OUT/real-build.log" | sed 's/^/    /' | tee -a "$RESULTS"
+  check "9a Real build → Ship to Store from the build result → authorised upload → DRAFT release (UI driver exit $rc)" '[ $rc = 0 ] && grep -q "UI DRIVER: PASSED" "$OUT/real-build.log"'
+  RB_REL=$(jq -r .releaseId "$OUT/real-build/ship-build.json" 2>/dev/null); RB_SHA=$(jq -r .sha256 "$OUT/real-build/ship-build.json" 2>/dev/null)
+  ctl review "{\"releaseId\":\"$RB_REL\",\"reviewer\":\"e2e-bob\"}" > "$OUT/review-real.json"
+  check "9b The draft is visible in HCG Store to HCG's approver (review page: draft, portable app, unsigned label)" \
+    '[ "$(jq -r .reviewPageStatus "$OUT/review-real.json")" = 200 ] && jq -r .reviewPage "$OUT/review-real.json" | grep -q "Status: <b>draft</b>" && jq -r .reviewPage "$OUT/review-real.json" | grep -q "Unsigned: Windows SmartScreen"'
+  check "9c Draft review download (approver, browser session) returns the build's exact bytes (SHA-256 $RB_SHA)" \
+    '[ "$(jq -r ".downloads[0].sha256" "$OUT/review-real.json")" = "$RB_SHA" ] && [ "$(jq -r ".downloads[0].basis" "$OUT/review-real.json")" = approver-review ]'
+  check "9d The draft is not visible to a customer (404) or anonymously (401)" \
+    '[ "$(ctl review "{\"releaseId\":\"$RB_REL\",\"reviewer\":\"e2e-carol\"}" | jq -r .reviewPageStatus)" = 404 ] && [ "$(curl -s -o /dev/null -w "%{http_code}" "$STORE/publishing/releases/$RB_REL")" = 401 ]'
+else
+  note "Real build skipped (SHIP_REAL_BUILD=0)"
+fi
 exit $fail

@@ -6,6 +6,7 @@ using HCG.ExecutableMaker.Account.Store;
 using HCG.ExecutableMaker.App.Services;
 using HCG.ExecutableMaker.BuildEngine.Distribution;
 using HCG.ExecutableMaker.Core;
+using HCG.ExecutableMaker.Domain;
 
 namespace HCG.ExecutableMaker.App.ViewModels;
 
@@ -32,9 +33,14 @@ public sealed partial class ShipFileItem(StoreArtifactCandidate candidate) : Obs
         _ => "Signature not checked on this computer",
     };
     public string? SigningEvidence => Candidate.Signing.Evidence;
+    public string Kind => Candidate.KindName;
+    /// <summary>How it installs; never "ready" for unsigned, Simulator-only or jailbreak-only files.</summary>
+    public StatusTag Install => new(Candidate.Readiness.OrdinaryInstall ? "Installable" : Candidate.Kind == "simulator-build" ? "Simulator only" : Candidate.Kind == "jailbreak-package" ? "Jailbroken devices only" : "Not ready for ordinary installation",
+        Candidate.Readiness.OrdinaryInstall ? "success" : Candidate.Kind is "simulator-build" ? "error" : "warning");
+    public string InstallDetail => Candidate.Readiness.Label + (Candidate.Ios is { ProfileName: { } pn } i ? $" Profile: {pn}{(i.ProfileVerified ? " (Apple signature verified)" : "")}{(i.ProfileExpires is { } e ? $", expires {e:yyyy-MM-dd}" : "")}." : "");
     partial void OnCandidateChanged(StoreArtifactCandidate value)
     {
-        OnPropertyChanged(nameof(Platform)); OnPropertyChanged(nameof(Problems)); OnPropertyChanged(nameof(HasProblems)); OnPropertyChanged(nameof(Signing)); OnPropertyChanged(nameof(SigningEvidence));
+        foreach (var n in new[] { nameof(Platform), nameof(Problems), nameof(HasProblems), nameof(Signing), nameof(SigningEvidence), nameof(Kind), nameof(Install), nameof(InstallDetail) }) OnPropertyChanged(n);
     }
 }
 
@@ -89,6 +95,10 @@ public sealed partial class ShipToStoreViewModel(
     [ObservableProperty] private string _releaseStatus = "";
     [ObservableProperty] private bool _canSubmit;
     [ObservableProperty] private string? _summary;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasBuildOrigin))] private string? _buildOrigin;
+    public bool HasBuildOrigin => BuildOrigin is not null;
+    public ObservableCollection<string> NotOffered { get; } = [];
+    [ObservableProperty] private bool _hasNotOffered;
     private CancellationTokenSource? _cts;
 
     public override async Task OnNavigatedToAsync(object? parameter)
@@ -98,8 +108,20 @@ public sealed partial class ShipToStoreViewModel(
         Channel ??= Channels[0];
         var configured = (await settings.LoadAsync()).HcgStoreUrl;
         if (StoreOrigin.Parse(configured) is { } o) StoreUrl = o.ToString();
-        // From the Artifacts page or a build result: the files to ship.
-        if (parameter is IEnumerable<string> paths) foreach (var p in paths) await AddFileAsync(p);
+        // From a successful build: a new release with that build's verified files (not added to an earlier list).
+        if (parameter is ShipFromBuild fromBuild && !IsShipping)
+        {
+            NewRelease();
+            Files.Clear();
+            NotOffered.Clear();
+            BuildOrigin = $"From build: {fromBuild.Origin}. {fromBuild.Files.Count} verified file(s) offered.";
+            foreach (var n in fromBuild.NotOffered) NotOffered.Add(n);
+            HasNotOffered = NotOffered.Count > 0;
+            if (fromBuild.Version is { Length: > 0 } v && SemVer().IsMatch(v)) Version = v;
+            foreach (var p in fromBuild.Files) await AddFileAsync(p);
+        }
+        // From the Artifacts page: the files to ship.
+        else if (parameter is IEnumerable<string> paths) foreach (var p in paths) await AddFileAsync(p);
         else if (parameter is string one) await AddFileAsync(one);
         await ConnectAsync();
     }
@@ -202,7 +224,11 @@ public sealed partial class ShipToStoreViewModel(
             await dialogs.AlertAsync("Not ready", "Choose a product, enter the version and build number, and add at least one file.");
             return;
         }
-        if (Files.FirstOrDefault(f => !f.Candidate.IsSupported) is { } bad) { await dialogs.AlertAsync("Unsupported file", $"{bad.FileName}: {bad.Problems}"); return; }
+        if (Files.FirstOrDefault(f => !f.Candidate.IsSupported) is { } bad) { await dialogs.AlertAsync("Unsupported file", $"{bad.FileName}: {bad.Problems}\n\nRemove it from the list to ship the other files."); return; }
+        // Public release of a file that cannot be installed on ordinary devices: say so before anything is uploaded.
+        if (Eligibility?.Value == "public" && Files.Where(f => !f.Candidate.Readiness.OrdinaryInstall).ToList() is { Count: > 0 } limited
+            && !await dialogs.ConfirmAsync("Not ready for ordinary installation", string.Join("\n", limited.Select(f => $"• {f.FileName}: {f.Candidate.Readiness.Label}")) +
+                "\n\nYou asked for a public release. HCG Store shows these labels to approvers and customers, and refuses public approval of unsigned iOS device builds. Upload the draft anyway?", "Upload draft")) return;
         if (Client() is not { } client) return;
         IsShipping = true;
         _cts = new CancellationTokenSource();
@@ -228,9 +254,9 @@ public sealed partial class ShipToStoreViewModel(
         {
             var result = await service.ShipAsync(Request(), Files.Select(f => f.Candidate).ToList(), ReleaseId, progress, _cts.Token);
             ShowRelease(result.Release);
-            Summary = result.AllVerified
+            Summary = (result.ContinuedExistingDraft ? "Continued your existing draft for this version and build (no second release was created). " : "") + (result.AllVerified
                 ? $"All {result.Items.Count} file(s) are in HCG Store, verified by SHA-256. The release is a private draft until you submit it and an approver approves it in HCG Store."
-                : "Some files did not make it. Fix the problem and press Retry: verified files are kept, interrupted uploads resume.";
+                : "Some files did not make it. Fix the problem and press Retry: verified files are kept, interrupted uploads resume.");
         }
         catch (HcgStoreException ex) { Summary = ex.Message; await dialogs.AlertAsync("Ship to Store stopped", ex.Message); }
         catch (OperationCanceledException) { Summary = "Cancelled. Press Retry to resume; the bytes HCG Store confirmed are kept."; }
@@ -270,4 +296,7 @@ public sealed partial class ShipToStoreViewModel(
     }
 
     [RelayCommand] private void OpenAccount() => navigation.Navigate("account");
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")]
+    private static partial System.Text.RegularExpressions.Regex SemVer();
 }

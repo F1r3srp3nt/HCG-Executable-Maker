@@ -89,7 +89,17 @@
             <TextBlock Classes="label" Text="4 · FILES (ONE PER PLATFORM)" VerticalAlignment="Center" />
             <Button Grid.Column="1" Classes="small" Content="Add files…" Command="{Binding AddFilesCommand}" IsEnabled="{Binding !IsShipping}" />
           </Grid>
-          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Windows .exe .msi .msix .zip · macOS .zip (app) .dmg .pkg · iOS/iPadOS .ipa · Linux .deb .rpm .AppImage · jailbroken iOS .deb. Platform, SHA-256, minimum OS and signatures are checked on this computer first; HCG Store checks the hash and the format again." />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Windows .exe .msi .msix .zip · macOS .zip (app) .dmg .pkg · iOS/iPadOS .ipa (device builds) · Linux .deb .rpm .AppImage · jailbroken iOS .deb. iOS Simulator builds are not accepted. Platform, kind, SHA-256, minimum OS and signatures are checked on this computer first; HCG Store checks the hash, the format and the kind again." />
+          <Border Classes="inset" Padding="10" IsVisible="{Binding HasBuildOrigin}">
+            <StackPanel Spacing="4">
+              <TextBlock FontSize="12.5" Text="{Binding BuildOrigin}" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding NotOffered}" IsVisible="{Binding HasNotOffered}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String"><TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding StringFormat='Not offered: {0}'}" /></DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
           <ItemsControl ItemsSource="{Binding Files}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:ShipFileItem">
@@ -98,6 +108,11 @@
                     <StackPanel Spacing="3">
                       <TextBlock FontWeight="SemiBold"><Run Text="{Binding FileName}" /><Run Text="  ·  " /><Run Text="{Binding Platform}" /><Run Text="  ·  " /><Run Text="{Binding Size}" /></TextBlock>
                       <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding Sha256, StringFormat='SHA-256  {0}'}" TextWrapping="Wrap" />
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock FontSize="12" FontWeight="SemiBold" Text="{Binding Kind}" VerticalAlignment="Center" />
+                        <c:StatusChip Status="{Binding Install}" />
+                      </StackPanel>
+                      <TextBlock FontSize="12" Text="{Binding InstallDetail}" TextWrapping="Wrap" />
                       <TextBlock FontSize="12" Text="{Binding Signing}" ToolTip.Tip="{Binding SigningEvidence}" />
                       <TextBlock Classes="warning" FontSize="12" Text="{Binding Problems}" IsVisible="{Binding HasProblems}" TextWrapping="Wrap" />
                       <ProgressBar Value="{Binding Progress}" Maximum="100" Height="6" Margin="0,4,0,0" />

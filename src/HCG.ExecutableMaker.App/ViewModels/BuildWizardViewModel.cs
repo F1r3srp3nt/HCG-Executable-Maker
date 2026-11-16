@@ -1,3 +1,4 @@
+using HCG.ExecutableMaker.BuildEngine.Distribution;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -1085,6 +1086,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [ObservableProperty] private bool _resultSucceeded;
     [ObservableProperty] private bool _hasResultMessages;
     [ObservableProperty] private bool _hasResultArtifacts;
+    /// <summary>A successful build with at least one verified output file: "Ship to Store" is offered.</summary>
+    [ObservableProperty] private bool _canShipToStore;
     public ObservableCollection<ArtifactItem> ResultArtifacts { get; } = [];
     public ObservableCollection<MessageItem> ResultMessages { get; } = [];
 
@@ -1122,6 +1125,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         ResultArtifacts.Clear();
         foreach (var a in build.Artifacts) ResultArtifacts.Add(new ArtifactItem(a, build));
         HasResultArtifacts = ResultArtifacts.Count > 0;
+        CanShipToStore = ShipFromBuild.From(build) is { Files.Count: > 0 };
         ResultMessages.Clear();
         foreach (var m in build.Messages.OrderByDescending(m => m.Severity).Take(200)) ResultMessages.Add(new MessageItem(m));
         HasResultMessages = ResultMessages.Count > 0;
@@ -1136,6 +1140,13 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var target = Result.Artifacts.Count > 0 ? BuildService.OutputRootFor(Result.Settings) : Result.Settings.OutputDirectory;
         if (!await _shell.OpenFolderAsync(target))
             await _dialogs.AlertAsync("Folder not found", $"The output folder does not exist:\n{target}");
+    }
+
+    /// <summary>Ship to Store with this build's verified files: a private draft in HCG Store, nothing public.</summary>
+    [RelayCommand]
+    private void ShipToStore()
+    {
+        if (Result is { } build && ShipFromBuild.From(build) is { Files.Count: > 0 } ship) _navigation.Navigate("ship", ship);
     }
 
     [RelayCommand] private async Task CopyArtifactPathAsync(ArtifactItem item) => await _shell.CopyAsync(item.Path);

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using HCG.ExecutableMaker.Account.Store;
 using HCG.ExecutableMaker.BuildEngine.Distribution;
+using HCG.ExecutableMaker.Domain;
 
 namespace HCG.ExecutableMaker.Tests;
 
@@ -175,5 +176,165 @@ public sealed class ShipToStoreTests : IDisposable
     private sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);
+    }
+    // ───────────── Ship to Shop: kinds, signing and install labels ─────────────
+
+    private string ZipBytes(string name, params (string Path, byte[] Data)[] entries)
+    {
+        var file = _t.Combine(name);
+        using var z = ZipFile.Open(file, ZipArchiveMode.Create);
+        foreach (var (p, data) in entries) { using var w = z.CreateEntry(p).Open(); w.Write(data); }
+        return file;
+    }
+
+    private const string DevicePlist = """<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string><key>DTPlatformName</key><string>iphoneos</string><key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array><key>MinimumOSVersion</key><string>15.0</string></dict></plist>""";
+    private const string SimulatorPlist = """<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.app</string><key>DTPlatformName</key><string>iphonesimulator</string><key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array></dict></plist>""";
+
+    private string Ipa(string name, string plist = DevicePlist, bool signed = true, byte[]? profile = null)
+    {
+        var entries = new List<(string, byte[])> { ("Payload/App.app/Info.plist", Encoding.UTF8.GetBytes(plist)), ("Payload/App.app/App", "bin"u8.ToArray()) };
+        if (signed) entries.Add(("Payload/App.app/_CodeSignature/CodeResources", "x"u8.ToArray()));
+        if (profile is not null) entries.Add(("Payload/App.app/embedded.mobileprovision", profile));
+        return ZipBytes(name, [.. entries]);
+    }
+
+    [Fact]
+    public async Task Simulator_builds_are_recognised_in_every_form_and_never_offered_as_installable()
+    {
+        var ipa = await StoreArtifacts.DetectAsync(Ipa("Sim.ipa", SimulatorPlist));
+        Assert.False(ipa.IsSupported);
+        Assert.Equal(("simulator-build", "simulator-only", false), (ipa.Kind, ipa.Readiness.Status, ipa.Readiness.OrdinaryInstall));
+        Assert.Contains("cannot be installed on an iPhone or iPad", ipa.Problems[0]);
+        Assert.Contains("Simulator", ipa.Label);
+
+        var zipped = await StoreArtifacts.DetectAsync(ZipBytes("Sim.zip", ("App.app/Info.plist", Encoding.UTF8.GetBytes(SimulatorPlist)), ("App.app/App", "x"u8.ToArray())));
+        Assert.Equal("simulator-build", zipped.Kind); // an iOS .app (flat Info.plist) is not taken for a macOS app
+        Assert.Contains("Simulator", zipped.Problems[0]);
+
+        var folder = Directory.CreateDirectory(_t.Combine("App.app")).FullName;
+        File.WriteAllText(Path.Combine(folder, "Info.plist"), SimulatorPlist);
+        var dir = await StoreArtifacts.DetectAsync(folder);
+        Assert.Equal(("simulator-build", false), (dir.Kind, dir.IsSupported));
+        Assert.Contains("does not accept", dir.Problems[0]);
+        Assert.Contains("Export IPA", (await StoreArtifacts.DetectAsync(Directory.CreateDirectory(_t.Combine("App.xcarchive")).FullName)).Problems[0]);
+    }
+
+    [Fact]
+    public async Task Device_builds_are_labelled_by_their_signature_and_provisioning_profile()
+    {
+        var unsigned = await StoreArtifacts.DetectAsync(Ipa("Unsigned.ipa", signed: false));
+        Assert.True(unsigned.IsSupported);
+        Assert.Equal(("device-build", "absent", "unsigned", false), (unsigned.Kind, unsigned.SignatureStructure, unsigned.Readiness.Status, unsigned.Readiness.OrdinaryInstall));
+        Assert.Equal("unsigned", ShipToStoreService.DeclaredSigning(unsigned).Status); // a fact from the file, reported as such
+
+        StoreArtifactCandidate With(string name, SigningFixtures.ProfileSpec spec) => StoreArtifacts.DetectAsync(Ipa(name, profile: SigningFixtures.Profile(spec))).GetAwaiter().GetResult();
+        var adHoc = With("AdHoc.ipa", new() { Devices = ["00008110-000000000000001E"] });
+        Assert.Equal(("ad-hoc", "registered-devices-only", false), (adHoc.Ios!.Provisioning, adHoc.Readiness.Status, adHoc.Readiness.OrdinaryInstall));
+        Assert.Equal("Synthetic Test Profile", adHoc.Ios.ProfileName);
+        Assert.False(adHoc.Ios.ProfileVerified); // synthetic signer: intact but not Apple's
+        Assert.Equal("development", With("Dev.ipa", new() { Devices = ["x"], GetTaskAllow = true }).Ios!.Provisioning);
+        Assert.Equal("enterprise-devices-only", With("Ent.ipa", new() { AllDevices = true }).Readiness.Status);
+        Assert.Equal("app-store-profile", With("Store.ipa", new()).Readiness.Status);
+        Assert.Equal("profile-expired", With("Old.ipa", new() { Devices = ["x"], Expires = DateTimeOffset.UtcNow.AddDays(-1) }).Readiness.Status);
+        Assert.Equal("not-installable", (await StoreArtifacts.DetectAsync(Ipa("NoProfile.ipa"))).Readiness.Status);
+        var garbage = await StoreArtifacts.DetectAsync(Ipa("Garbage.ipa", profile: "not a profile"u8.ToArray()));
+        Assert.Equal(("unreadable", "signature-not-verified"), (garbage.Ios!.Provisioning, garbage.Readiness.Status));
+    }
+
+    private static byte[] Pe(bool signed)
+    {
+        var b = new byte[1024];
+        b[0] = (byte)'M'; b[1] = (byte)'Z';
+        BitConverter.GetBytes(128).CopyTo(b, 60);
+        "PE\0\0"u8.CopyTo(b.AsSpan(128));
+        BitConverter.GetBytes((ushort)0x20b).CopyTo(b, 128 + 24);
+        if (signed) BitConverter.GetBytes(4096u).CopyTo(b, 128 + 24 + 112 + 32 + 4);
+        return b;
+    }
+
+    [Fact]
+    public async Task Installers_portable_apps_and_jailbreak_packages_get_their_own_kind_and_honest_labels()
+    {
+        // As .NET publishes it: the app's own unsigned Tool.exe next to Microsoft's signed createdump.exe.
+        var unsignedZip = await StoreArtifacts.DetectAsync(ZipBytes("Tool-win-x64.zip", ("Tool.exe", Pe(false)), ("createdump.exe", Pe(true)), ("Tool.dll", "x"u8.ToArray())));
+        Assert.Equal(("windows", "portable-app", "absent", "unsigned"), (unsignedZip.Platform, unsignedZip.Kind, unsignedZip.SignatureStructure, unsignedZip.Readiness.Status));
+        Assert.Contains("SmartScreen", unsignedZip.Readiness.Label);
+        var signedExe = _t.Combine("setup.exe");
+        File.WriteAllBytes(signedExe, Pe(true));
+        var setup = await StoreArtifacts.DetectAsync(signedExe);
+        Assert.Equal(("installer", "present"), (setup.Kind, setup.SignatureStructure));
+        Assert.Equal("signature-not-verified", setup.Readiness.Status); // present is not valid: only Windows can check it
+        Assert.Equal("ready", (setup with { Signing = new("signed", "Valid", "Get-AuthenticodeSignature") }).Readiness.Status);
+
+        var mac = await StoreArtifacts.DetectAsync(Zip("Tool.zip", ("Tool.app/Contents/Info.plist", Plist), ("Tool.app/Contents/MacOS/Tool", "x")));
+        Assert.Equal(("portable-app", "unsigned"), (mac.Kind, mac.Readiness.Status));
+        Assert.Contains("Gatekeeper", mac.Readiness.Label);
+        Assert.Equal("not-notarized", (mac with { SignatureStructure = "present", Signing = new("signed", null, "codesign") }).Readiness.Status);
+        Assert.True((mac with { SignatureStructure = "present", Signing = new("notarized", null, "codesign") }).Readiness.OrdinaryInstall);
+
+        var apk = await StoreArtifacts.DetectAsync(_t.Write("app.apk", "PK"));
+        Assert.Contains("Android packages are not distributed through HCG Store", apk.Problems[0]);
+        Assert.Contains("HCG Store accepts:", apk.Problems[0]);
+        Assert.Contains("Linux apps ship as .deb", (await StoreArtifacts.DetectAsync(_t.Write("tool.tar.gz", "x"))).Problems[0]);
+    }
+
+    [Fact]
+    public void Ship_from_build_offers_only_verified_files_and_says_why_the_rest_are_not_offered()
+    {
+        var ok = _t.Write("Tool-1.2.0.zip", "zip");
+        var record = new BuildRecord
+        {
+            Id = Guid.NewGuid(), ProjectId = Guid.NewGuid(), ProjectName = "Tool", StartedAt = DateTimeOffset.UtcNow, Status = BuildStatus.Succeeded,
+            Settings = new BuildSettings { Identity = new AppIdentity { ApplicationName = "Tool", Version = "1.2.0", ApplicationId = "com.example.tool" }, ProjectRelativePath = ".", OutputDirectory = "/y", Platform = TargetPlatform.Linux, Architecture = TargetArchitecture.X64 },
+        };
+        ArtifactRecord Art(string path, ArtifactKind kind, VerificationStatus v) => new() { Id = Guid.NewGuid(), BuildId = record.Id, Path = path, Kind = kind, Format = PackagingFormat.PortableZip, SizeBytes = 3, Sha256 = "", Verification = v, CreatedAt = DateTimeOffset.UtcNow };
+        record.Artifacts.Add(Art(ok, ArtifactKind.File, VerificationStatus.Passed));
+        record.Artifacts.Add(Art(_t.Combine("Tool"), ArtifactKind.Directory, VerificationStatus.Passed));
+        record.Artifacts.Add(Art(_t.Write("broken.zip", "x"), ArtifactKind.File, VerificationStatus.Failed));
+        var ship = ShipFromBuild.From(record)!;
+        Assert.Equal([ok], ship.Files);
+        Assert.Equal("1.2.0", ship.Version);
+        Assert.Equal(2, ship.NotOffered.Count);
+        Assert.Contains(ship.NotOffered, n => n.Contains("folder"));
+        Assert.Contains(ship.NotOffered, n => n.Contains("not verified"));
+        record.Status = BuildStatus.Failed;
+        Assert.Null(ShipFromBuild.From(record)); // only after a successful build
+    }
+
+    /// <summary>A Store whose create-release answer is lost once (connection reset after the server created it).</summary>
+    private sealed class LostAnswerStore : HttpMessageHandler
+    {
+        public int Creates;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+        {
+            var path = r.RequestUri!.AbsolutePath;
+            HttpResponseMessage J(int s, object b) => new((HttpStatusCode)s) { Content = new StringContent(JsonSerializer.Serialize(b), Encoding.UTF8, "application/json") };
+            if (path == "/api/v1/publishing/releases" && r.Method == HttpMethod.Post) Creates++;
+            var release = new { id = "rel-0123456789abcdef", productId = "p", version = "1.0.0", build = "1", status = "draft", reused = Creates > 1, artifacts = Array.Empty<object>() };
+            if (path == "/api/v1/publishing/releases" && r.Method == HttpMethod.Post)
+            {
+                if (Creates == 1) throw new HttpRequestException("connection reset by peer");
+                return Task.FromResult(J(200, release));
+            }
+            if (path == "/api/v1/publishing/releases/rel-0123456789abcdef") return Task.FromResult(J(200, release));
+            return Task.FromResult(J(404, new { error = new { code = "not_found", message = "Not found." } }));
+        }
+    }
+
+    [Fact]
+    public async Task A_lost_create_answer_is_retried_and_the_same_draft_is_continued_not_duplicated()
+    {
+        var store = new LostAnswerStore();
+        var client = new HcgStoreClient(new HttpClient(store), new Uri("https://store.test/"), _ => Task.FromResult<string?>("t"));
+        var file = await StoreArtifacts.DetectAsync(_t.Write("x.deb", "not a deb")); // unsupported → refused before any request
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new ShipToStoreService(client).ShipAsync(Req(), [file], null, null, CancellationToken.None));
+        Assert.Equal(0, store.Creates);
+        var ok = await StoreArtifacts.DetectAsync(Zip("Tool-win.zip", ("tool.exe", "MZ")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new ShipToStoreService(client).ShipAsync(Req(), [ok, ok], null, null, CancellationToken.None));
+        var result = await new ShipToStoreService(client) { RetryDelay = TimeSpan.Zero }.ShipAsync(Req(), [ok with { Path = "/nonexistent" }], null, null, CancellationToken.None);
+        Assert.Equal(2, store.Creates);
+        Assert.True(result.ContinuedExistingDraft);
+        Assert.Equal("rel-0123456789abcdef", result.Release.Id);
+        static StoreReleaseRequest Req() => new() { ProductId = "p", Version = "1.0.0", Build = "1", Distribution = "free", Eligibility = "private" };
     }
 }

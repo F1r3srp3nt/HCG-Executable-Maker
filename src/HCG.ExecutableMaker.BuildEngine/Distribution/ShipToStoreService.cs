@@ -8,6 +8,8 @@ public sealed record ShipItemProgress(string FileName, ShipItemState State, long
 
 public sealed record ShipResult(StoreRelease Release, IReadOnlyList<ShipItemProgress> Items)
 {
+    /// <summary>The draft already existed (an earlier, interrupted attempt with the same details) and was continued.</summary>
+    public bool ContinuedExistingDraft { get; init; }
     public bool AllVerified => Items.Count > 0 && Items.All(i => i.State is ShipItemState.Verified or ShipItemState.Skipped);
 }
 
@@ -24,9 +26,22 @@ public sealed class ShipToStoreService(HcgStoreClient client)
     {
         if (files.Count == 0) throw new InvalidOperationException("Add at least one file.");
         if (files.FirstOrDefault(f => !f.IsSupported) is { } bad) throw new InvalidOperationException($"{bad.FileName}: {string.Join(" ", bad.Problems)}");
-        var release = existingReleaseId is null
-            ? await client.CreateReleaseAsync(request, ct).ConfigureAwait(false)
-            : await client.ReleaseAsync(existingReleaseId, ct).ConfigureAwait(false);
+        if (files.GroupBy(f => f.FileName, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1) is { } twice)
+            throw new InvalidOperationException($"Two files are named {twice.Key}; a release holds each file name once.");
+        StoreRelease release;
+        if (existingReleaseId is not null) release = await client.ReleaseAsync(existingReleaseId, ct).ConfigureAwait(false);
+        else
+        {
+            // Creating a draft is idempotent in HCG Store: the same person asking again for the same product, edition,
+            // version, build and details gets the existing draft back. So a lost answer is retried once, and a rerun
+            // after a crash continues the same draft instead of creating a second release.
+            try { release = await client.CreateReleaseAsync(request, ct).ConfigureAwait(false); }
+            catch (HcgStoreException ex) when (ex.Status == 0)
+            {
+                await Task.Delay(RetryDelay, ct).ConfigureAwait(false);
+                release = await client.CreateReleaseAsync(request, ct).ConfigureAwait(false);
+            }
+        }
         if (release.Status != "draft") throw new HcgStoreException("release_locked", $"Release {release.Version} ({release.Build}) is {release.Status}; files can be added only to a draft.", 409);
         var items = new List<ShipItemProgress>();
         foreach (var f in files)
@@ -63,7 +78,7 @@ public sealed class ShipToStoreService(HcgStoreClient client)
                     var declared = await client.DeclareArtifactAsync(release.Id, new StoreArtifactRequest
                     {
                         FileName = f.FileName, Platform = f.Platform!, Format = f.Format!, SizeBytes = f.SizeBytes, Sha256 = f.Sha256,
-                        Architectures = f.Architectures, MinimumOs = f.MinimumOs, Signing = f.Signing, Package = f.Package,
+                        Architectures = f.Architectures, MinimumOs = f.MinimumOs, Signing = DeclaredSigning(f), Package = f.Package, Kind = f.Kind,
                     }, ct).ConfigureAwait(false);
                     artifactId = declared.Artifact.Id;
                     url = declared.Upload;
@@ -84,6 +99,15 @@ public sealed class ShipToStoreService(HcgStoreClient client)
                 items.Add(failed); Report(failed);
             }
         }
-        return new ShipResult(await client.ReleaseAsync(release.Id, ct).ConfigureAwait(false), items);
+        return new ShipResult(await client.ReleaseAsync(release.Id, ct).ConfigureAwait(false), items) { ContinuedExistingDraft = release.Reused == true || existingReleaseId is not null };
     }
+
+    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>What is reported to HCG Store about signing: the platform tool's result, or "unsigned" when the file
+    /// carries no signature structure at all (a fact, not an assumption). Never upgraded beyond what was checked.</summary>
+    public static StoreSigningReport DeclaredSigning(StoreArtifactCandidate f) =>
+        f.Signing.Status == "not-checked" && f.SignatureStructure == "absent"
+            ? new("unsigned", "No signature structure in the file (checked by HCG Executable Maker).", "HCG Executable Maker")
+            : f.Signing;
 }

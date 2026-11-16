@@ -240,7 +240,14 @@ public sealed record StoreArtifactRequest
     public string? MinimumOs { get; init; }
     public StoreSigningReport Signing { get; init; } = new("not-checked", null, null);
     public StorePackage? Package { get; init; }
+    /// <summary>installer · portable-app · device-build · simulator-build · jailbreak-package. HCG Store decides the kind
+    /// from the file's content and refuses a declaration that contradicts it.</summary>
+    public string? Kind { get; init; }
 }
+
+/// <summary>How a file installs, as HCG Store (or this computer, before upload) judges it. <see cref="OrdinaryInstall"/> is
+/// true only when it installs on an ordinary device of its platform as it is.</summary>
+public sealed record StoreReadiness(string Status, string Label, bool OrdinaryInstall);
 
 public sealed record StoreSigningReport(string Status, string? Evidence, string? Tool);
 public sealed record StorePackage(string Id, string Version, string Architecture);
@@ -265,6 +272,8 @@ public sealed record StoreRelease
     public string? WithdrawnReason { get; init; }
     public IReadOnlyList<StoreArtifact> Artifacts { get; init; } = [];
     public bool? AuditIntact { get; init; }
+    /// <summary>True when HCG Store returned an existing draft for the same request (a retry) instead of creating one.</summary>
+    public bool? Reused { get; init; }
 }
 
 public sealed record StoreArtifact
@@ -279,6 +288,9 @@ public sealed record StoreArtifact
     public required string Status { get; init; }
     public long ReceivedBytes { get; init; }
     public JsonElement? Validation { get; init; }
+    public string? Kind { get; init; }
+    public bool KindCheckedByStore { get; init; }
+    public StoreReadiness? Readiness { get; init; }
 }
 
 public sealed record StoreUploadUrl(string UploadUrl, long ExpiresAt, int ChunkBytes)
