@@ -381,6 +381,10 @@
             </Button>
           </Grid>
           <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsVerifying}" />
+          <Button HorizontalAlignment="Left" Command="{Binding ShipToStoreCommand}" IsVisible="{Binding CanShipToStore}"
+                  ToolTip.Tip="Upload this build's verified files to HCG Store as a private draft. Nothing is published, and nothing is sent to TestFlight or any app store.">
+            <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Export}" /><TextBlock Text="Ship to Store…" /></StackPanel>
+          </Button>
           <ItemsControl ItemsSource="{Binding BuiltArtifacts}" IsVisible="{Binding HasBuiltArtifacts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:ArtifactItem">

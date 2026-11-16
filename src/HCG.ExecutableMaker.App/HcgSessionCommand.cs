@@ -145,7 +145,7 @@ internal static class HcgSessionCommand
     }
 
     /// <summary>The user's default browser (system browser), for real HCG sign-in from a terminal.</summary>
-    private sealed class ProcessBrowser : ISystemBrowser
+    internal sealed class ProcessBrowser : ISystemBrowser
     {
         public Task<bool> OpenAsync(Uri url)
         {
@@ -158,7 +158,7 @@ internal static class HcgSessionCommand
     /// Only for a local test identity server (refused for anything else): follows its authorization redirect to this
     /// app's loopback callback, as a browser would after the user approved.
     /// </summary>
-    private sealed class LocalTestServerBrowser : ISystemBrowser
+    internal sealed class LocalTestServerBrowser : ISystemBrowser
     {
         public Task<bool> OpenAsync(Uri url)
         {

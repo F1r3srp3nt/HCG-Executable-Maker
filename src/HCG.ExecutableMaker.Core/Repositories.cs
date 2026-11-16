@@ -34,6 +34,8 @@ public sealed record AppSettings
     public string? LastPublisher { get; init; }
     /// <summary>HCG's own developer directory (…/Xcode.app/Contents/Developer), passed to HCG's processes as DEVELOPER_DIR. Null = system setting.</summary>
     public string? DeveloperDirectory { get; init; }
+    /// <summary>HCG Store origin for Ship to Store (default https://store.hakmicapitalgroup.com/).</summary>
+    public string? HcgStoreUrl { get; init; }
     /// <summary>JDK chosen in HCG (Toolchains › Java › Browse…): its JAVA_HOME. Null = automatic detection.</summary>
     public string? JavaHome { get; init; }
     /// <summary>Android SDK folder chosen in HCG. Null = automatic detection.</summary>

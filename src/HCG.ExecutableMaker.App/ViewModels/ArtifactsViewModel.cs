@@ -11,7 +11,8 @@ public sealed partial class ArtifactsViewModel(
     IBuildRepository builds,
     IDialogService dialogs,
     IPlatformShell shell,
-    ArtifactExporter exporter) : PageViewModel
+    ArtifactExporter exporter,
+    NavigationService navigation) : PageViewModel
 {
     public override string Title => "Artifacts";
     public override string Subtitle => "Generated applications and packages, with SHA-256 checksums and verification results.";
@@ -37,6 +38,9 @@ public sealed partial class ArtifactsViewModel(
     }
 
     [RelayCommand] private async Task CopyPathAsync(ArtifactItem item) => await shell.CopyAsync(item.Path);
+
+    /// <summary>Opens Ship to Store with this file (an HCG Store release; approval stays manual in HCG Store).</summary>
+    [RelayCommand] private void ShipToStore(ArtifactItem item) => navigation.Navigate("ship", new[] { item.Path });
     [RelayCommand] private async Task CopyChecksumAsync(ArtifactItem item) => await shell.CopyAsync($"{item.Sha256}  {item.Name}");
     [RelayCommand] private async Task ExportAsync(ArtifactItem item) => await exporter.ExportAsync([item.Artifact]);
 }

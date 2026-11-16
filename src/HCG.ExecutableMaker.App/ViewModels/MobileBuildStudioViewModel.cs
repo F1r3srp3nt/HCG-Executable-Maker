@@ -1,3 +1,4 @@
+using HCG.ExecutableMaker.BuildEngine.Distribution;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -61,8 +62,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private bool _loading;
 
     public MobileBuildStudioViewModel(ProjectService projectService, IProjectRepository projects, MobileBuildService builder, MobileArtifactVerifier verifier,
-        IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell)
+        IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, NavigationService? navigation = null)
     {
+        _navigation = navigation;
         _projectService = projectService;
         _projects = projects;
         _builder = builder;
@@ -704,6 +706,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             : result.FailureReason ?? "";
         foreach (var a in result.Artifacts) BuiltArtifacts.Add(new ArtifactItem(a, result));
         OnPropertyChanged(nameof(HasBuiltArtifacts));
+        OnPropertyChanged(nameof(CanShipToStore));
         UpdateBuildState(CreateOptions() is { } again && Mobile is { } mm ? MobileReadiness.Evaluate(mm, again.Output, again, _report) : null);
     }
 
@@ -771,6 +774,16 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
 
     public ObservableCollection<ArtifactItem> BuiltArtifacts { get; } = [];
     public bool HasBuiltArtifacts => BuiltArtifacts.Count > 0;
+    private readonly NavigationService? _navigation;
+    /// <summary>The last build succeeded with at least one verified file (an IPA, an APK…): "Ship to Store" is offered.
+    /// A Simulator .app is a folder and is never offered (it cannot be installed on a device).</summary>
+    public bool CanShipToStore => _lastResult is { } r && ShipFromBuild.From(r) is { Files.Count: > 0 };
+
+    [RelayCommand]
+    private void ShipToStore()
+    {
+        if (_lastResult is { } r && ShipFromBuild.From(r) is { Files.Count: > 0 } ship) _navigation?.Navigate("ship", ship);
+    }
     public ObservableCollection<CheckItem> ArtifactChecks { get; } = [];
     [ObservableProperty] private string? _artifactReportTitle;
     [ObservableProperty] private StatusTag _artifactReportTag = new("—", "neutral");

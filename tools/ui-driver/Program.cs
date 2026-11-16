@@ -55,7 +55,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing") && !_args.ContainsKey("ship-page") && !_args.ContainsKey("ship-build")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -68,6 +68,7 @@ internal static partial class Program
         // Isolated data folder: imports, history and SwiftPM scratch space do not touch a real installation.
         Environment.SetEnvironmentVariable(AppPaths.RootOverrideVariable, Path.Combine(output, "hcg-data"));
         if (_args.ContainsKey("account-signed-in")) PrepareMockHcg(Path.Combine(output, "hcg-data"));
+        if (_args.ContainsKey("ship-build")) PrepareShipStore(Path.Combine(output, "hcg-data"));
 
         var source = Path.GetFullPath(_args["source"]);
         AppClass.ServiceOverrides = services =>
@@ -246,6 +247,7 @@ internal static partial class Program
         }
 
         if (_args.ContainsKey("port")) return await PortAsync(main, output, host);
+        if (_args.ContainsKey("ship-page")) return await ShipPageAsync(main);
 
         // 1. Import through the wizard's own "Import ZIP" / "Import folder" commands (scripted picker returns --source).
         var source = _args["source"];
@@ -261,6 +263,7 @@ internal static partial class Program
         if (_args.ContainsKey("mobile")) return await RunMobileAsync(main, wizard, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
         if (_args.ContainsKey("signing")) return await RunSigningAsync(main);
+        if (_args.ContainsKey("ship-build")) return await RunShipBuildAsync(main, wizard, output);
 
         // 2. Inspect: packages listed, none auto-selected when there are several.
         Check(wizard.IsSwiftProject, $"Recognized as Swift project ({wizard.Analysis?.Framework}; support {wizard.Analysis?.Support})");

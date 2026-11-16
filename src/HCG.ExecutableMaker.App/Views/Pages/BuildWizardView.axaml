@@ -1242,6 +1242,13 @@
                       <TextBlock Text="Open Output Folder" />
                     </StackPanel>
                   </Button>
+                  <Button HorizontalAlignment="Stretch" Command="{Binding ShipToStoreCommand}" IsVisible="{Binding CanShipToStore}"
+                          ToolTip.Tip="Upload this build's verified files to HCG Store as a private draft. Approval and publication happen later in HCG Store, by a person.">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                      <PathIcon Data="{StaticResource Icon.Export}" />
+                      <TextBlock Text="Ship to Store…" />
+                    </StackPanel>
+                  </Button>
                   <Button HorizontalAlignment="Stretch" Command="{Binding ExportArtifactsCommand}" IsEnabled="{Binding HasResultArtifacts}">
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
                       <PathIcon Data="{StaticResource Icon.Export}" />

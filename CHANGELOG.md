@@ -2,6 +2,27 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Ship to Shop: Ship to Store from a build, file kinds, safe retry
+
+### Added
+- **"Ship to Store…" on a successful build** (New Build result and Mobile Build Studio artifacts): opens a new release with that build's verified output files and version; folders and unverified files are listed as not offered, with the reason.
+- **File kinds and install labels**: installer, portable app, iOS device build, iOS Simulator build, jailbreak package — from the file's content, checked again by HCG Store. iOS device builds are labelled from their signature and embedded provisioning profile (CMS signature verified; development, ad hoc, in-house, App Store, expired, none). Unsigned, Simulator and jailbreak files are never labelled installable; Simulator builds (folder, IPA or ZIP) are refused with the reason. Signature presence in Windows programs (Authenticode table), MSIX, IPA and macOS app ZIPs is read on any OS and an absent signature is reported as unsigned.
+- Unsupported file types are refused with what to ship instead and the accepted list.
+- `--ship-to-store` prints each file's kind and install label and HCG Store's label after upload.
+
+### Changed
+- **No duplicate releases on retry**: creating a draft is idempotent in HCG Store; a lost answer is retried once, and shipping again with the same details continues the existing draft (with or without `--release`).
+
+### Verification
+- `tools/ci/ship-to-store-e2e.sh`: 26 checks, including a real New Build (HelloAvalonia → Windows x64 ZIP) shipped from its result through the headless app (UI driver `--ship-build`), approver draft review with byte-identical download, unauthorised uploads, kill-and-resume without the release ID, Simulator refusal. 5 new unit tests (16 for Ship to Store).
+
+## [Unreleased] — Ship to Store (HCG Store release publishing)
+
+### Added
+- **Ship to Store** page (sidebar) and "Ship to Store…" on every artifact: product (or draft product), edition, version, build number, notes, compatibility, distribution, requested eligibility, HCG Repo delivery for `.deb`; one file per platform (Windows EXE/MSI/MSIX/ZIP, macOS app ZIP/DMG/PKG, iOS/iPadOS IPA, Linux DEB/RPM/AppImage, jailbreak DEB) detected from content, SHA-256, minimum OS, package fields, and local signature/notarisation checks (codesign, spctl, stapler, pkgutil; Authenticode on Windows).
+- Uploads to Store-issued, file-scoped URLs with resume, bounded retries, confirmed-bytes progress, server-side SHA-256 and format verification, Retry on the same draft, submit for manual review, review link. The app never approves or publishes.
+- `HCGExecutableMaker --ship-to-store` (same code) and `tools/ci/ship-to-store-e2e.sh` (TEST Store + mock HCG Connect, 16 checks). UI driver `--ship-page`. 11 unit tests. See docs/SHIP-TO-STORE.md.
+
 ## [Unreleased] — HCG Signing Vault ([docs/SIGNING-VAULT.md](docs/SIGNING-VAULT.md))
 
 ### Added

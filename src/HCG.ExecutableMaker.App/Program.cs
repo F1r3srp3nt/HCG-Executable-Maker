@@ -19,6 +19,9 @@ internal static class Program
         // e.g. to compare a Finder launch with a Terminal launch. Read-only; applies HCG's saved Xcode choice like the app.
         if (args.Contains("--toolchain-report"))
             return ToolchainReportCommand.Run();
+        // `HCGExecutableMaker --ship-to-store …`: upload a release to HCG Store as a private draft (see ShipToStoreCommand).
+        if (args.Contains("--ship-to-store"))
+            return ShipToStoreCommand.Run(args);
         // `HCGExecutableMaker --hcg-session status|sign-in|sign-out`: the HCG account services without the UI (no tokens printed).
         if (args.Contains("--hcg-session"))
             return HcgSessionCommand.Run(args);
