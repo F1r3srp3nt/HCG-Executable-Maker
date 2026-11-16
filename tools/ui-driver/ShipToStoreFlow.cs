@@ -121,6 +121,8 @@ internal static partial class Program
         Check(page.ReleaseId is not null && page.ReleaseStatus.Contains("· draft", StringComparison.Ordinal), "A DRAFT release was created in HCG Store");
         Check(page.Files.All(f => f.State == "Verified by HCG Store"), "The build's file was uploaded and verified by HCG Store (SHA-256)");
         Check(page.ReviewUrl?.StartsWith(store, StringComparison.Ordinal) == true, "A link to review the draft in HCG Store is shown");
+        await Task.Delay(TimeSpan.FromSeconds(Arg("settle-seconds") is { } st ? double.Parse(st, System.Globalization.CultureInfo.InvariantCulture) : 5));
+        Check(page.Connection == "Connected", $"The page still shows the Store it shipped to (a late answer from an earlier Connect does not overwrite it): [{page.Connection}] {page.ConnectionDetail}");
         File.WriteAllText(Path.Combine(output, "ship-build.json"), JsonSerializer.Serialize(new { releaseId = page.ReleaseId, reviewUrl = page.ReviewUrl, file = zip.Path, sha256 = zip.Sha256 }));
         Shot("ship-build-uploaded");
 

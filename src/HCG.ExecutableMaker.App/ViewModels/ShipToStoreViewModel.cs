@@ -30,7 +30,12 @@ public sealed partial class ShipFileItem(StoreArtifactCandidate candidate) : Obs
         "signed" => "Signed (checked on this computer)",
         "unsigned" => "Unsigned",
         "invalid" => "Signature INVALID",
-        _ => "Signature not checked on this computer",
+        _ => Candidate.SignatureStructure switch
+        {
+            "absent" => "No signature in the file",
+            "present" => "Signature present in the file; not verified on this computer",
+            _ => "Signature not checked on this computer",
+        },
     };
     public string? SigningEvidence => Candidate.Signing.Evidence;
     public string Kind => Candidate.KindName;
@@ -132,9 +137,14 @@ public sealed partial class ShipToStoreViewModel(
         return stores.Create(origin);
     }
 
+    private int _connectGeneration;
+
     [RelayCommand]
     private async Task ConnectAsync()
     {
+        // Only the latest Connect may change the page: an earlier one (e.g. to the previous address) that answers late
+        // must not overwrite the newer result.
+        var generation = ++_connectGeneration;
         Products.Clear();
         if (account.Status != HcgAccountStatus.SignedIn)
         {
@@ -142,10 +152,13 @@ public sealed partial class ShipToStoreViewModel(
             return;
         }
         if (Client() is not { } client) return;
+        (Connection, ConnectionTone, ConnectionDetail) = ("Connecting…", "info", $"Contacting {client.Origin.Host}…");
         try
         {
             var who = await client.WhoAmIAsync();
-            foreach (var p in await client.ProductsAsync()) Products.Add(p);
+            var products = await client.ProductsAsync();
+            if (generation != _connectGeneration) return;
+            foreach (var p in products) Products.Add(p);
             (Connection, ConnectionTone) = Products.Count > 0 ? ("Connected", "success") : ("No publishing permission", "warning");
             ConnectionDetail = Products.Count > 0
                 ? $"Signed in as {who.Email ?? who.Sub}. HCG allows you to publish {Products.Count} product(s). Files up to {Format.Bytes(who.MaxUploadBytes)}."
@@ -154,6 +167,7 @@ public sealed partial class ShipToStoreViewModel(
         }
         catch (HcgStoreException ex)
         {
+            if (generation != _connectGeneration) return;
             (Connection, ConnectionTone, ConnectionDetail) = (ex.Status switch { 401 => "Not accepted", 403 => "No publishing permission", 404 => "Publishing not enabled", 0 => "Unreachable", _ => "Error" }, "error", ex.Message);
         }
     }
