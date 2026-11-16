@@ -1,3 +1,4 @@
+using HCG.ExecutableMaker.Account;
 using HCG.ExecutableMaker.Account.Store;
 
 namespace HCG.ExecutableMaker.BuildEngine.Distribution;
@@ -18,13 +19,15 @@ public sealed record ShipResult(StoreRelease Release, IReadOnlyList<ShipItemProg
 /// interrupted uploads and recovering from rejected ones. Used by the Ship to Store page and by
 /// <c>HCGExecutableMaker --ship-to-store</c>. It never submits, approves or publishes on its own.
 /// </summary>
-public sealed class ShipToStoreService(HcgStoreClient client)
+public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessService? features = null)
 {
     /// <param name="existingReleaseId">Continue this draft (Retry after a failure) instead of creating a new release.</param>
     public async Task<ShipResult> ShipAsync(StoreReleaseRequest request, IReadOnlyList<StoreArtifactCandidate> files, string? existingReleaseId,
         IProgress<ShipItemProgress>? progress, CancellationToken ct)
     {
         if (files.Count == 0) throw new InvalidOperationException("Add at least one file.");
+        // The staff publishing permission is asked again now, from the same HCG Store (UI and command line alike).
+        if (features is not null) await features.RequireAsync(MakerFeatures.StorePublish, ct, client.Origin).ConfigureAwait(false);
         if (files.FirstOrDefault(f => !f.IsSupported) is { } bad) throw new InvalidOperationException($"{bad.FileName}: {string.Join(" ", bad.Problems)}");
         if (files.GroupBy(f => f.FileName, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1) is { } twice)
             throw new InvalidOperationException($"Two files are named {twice.Key}; a release holds each file name once.");

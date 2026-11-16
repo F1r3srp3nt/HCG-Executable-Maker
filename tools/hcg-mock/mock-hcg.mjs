@@ -2,12 +2,16 @@
 //
 // Stands in for HCG's identity server (OAuth 2.1 authorization code + PKCE S256, public client, ES256 ID tokens,
 // refresh-token rotation, userinfo, JWKS, discovery) and HCG's central Ecosystem API (/api/public/ecosystem/v1/me,
-// features, check), following docs/hcg-connect/HANDOFF.md. The authorize step approves at once, as if the user had
-// signed in and consented, so a packaged app can be verified without a person.
+// features, check) in the shapes HCG's main site documents and deploys (main site docs/executable-maker/desktop-handoff.md,
+// 13 Nov 2026): /me → user + organisations[].org_role; /features → features MAP (only enabled features), plan, licence(s),
+// links, revalidate_after_seconds, 403 not_org_member; /check → allowed/layer/reason/verified_at. The authorize step
+// approves at once, as if the user had signed in and consented, so a packaged app can be verified without a person.
 //
 // Usage: node tools/hcg-mock/mock-hcg.mjs <info.json> [client-id]
 //   writes {"port":…,"issuer":…,"clientId":…} to info.json once listening on 127.0.0.1.
-// Control (loopback only): POST /__mock/scenario {plan, licence, organisations, links, features} · GET /__mock/state
+// Control (loopback only): POST /__mock/scenario {plan, licence, organisations, links, features, checks, revalidate, outage} · GET /__mock/state
+//   features: [{feature_key, allowed}] (only allowed ones are listed by /features, as HCG does); checks: {feature_key: reason}
+//   forces a refusal reason (e.g. feature_unavailable); organisations[].role is accepted as org_role.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -24,7 +28,9 @@ const accessTokens = new Map();   // token -> { exp }
 const refreshTokens = new Map();  // token -> 'live' | 'used'
 const state = { authorizations: 0, codeExchanges: 0, refreshes: 0, rejected: [] };
 let scenario = {
-  organisations: [{ org_id: 'org-hcg', name: 'Hakmi Capital Group', role: 'owner' }],
+  organisations: [{ org_id: 'org-hcg', name: 'Hakmi Capital Group', org_role: 'owner' }],
+  checks: {},
+  revalidate: 300,
   plan: { plan_key: 'pro', name: 'Pro', billing_type: 'consumer_subscription' },
   licence: { status: 'active', license_type: 'subscription', starts_at: '2026-11-01T00:00:00Z', ends_at: '2027-11-01T00:00:00Z' },
   features: [
@@ -118,19 +124,33 @@ const server = http.createServer(async (req, res) => {
     }
     if (p.startsWith('/api/public/ecosystem/v1/')) {
       if (!bearer(req)) return apiError(res, 401, 'unauthorized', 'Missing, invalid or expired access token.');
+      if (scenario.outage) return apiError(res, 503, 'evaluation_failed', 'Access evaluation is temporarily unavailable.');
       const route = p.slice('/api/public/ecosystem/v1/'.length);
+      const orgs = scenario.organisations.map(o => ({ org_id: o.org_id, slug: o.slug ?? o.org_id, name: o.name, kind: o.kind ?? 'internal', org_role: o.org_role ?? o.role ?? 'member' }));
+      const licenceLive = !scenario.licence || !['expired', 'revoked', 'suspended'].includes(scenario.licence.status);
+      const allowed = key => licenceLive && scenario.features.some(x => x.feature_key === key && x.allowed) && !scenario.checks[key];
       if (route === 'me' && req.method === 'GET')
-        return json(res, 200, { account: { id: SUB, email: 'founder@example.test', display_name: 'Test Founder' }, organisations: scenario.organisations, api_version: 'v1' });
+        return json(res, 200, { api_version: 'v1', user: { id: SUB, email: 'founder@example.test' }, organisations: orgs });
       if (route === 'features' && req.method === 'GET') {
         const org = url.searchParams.get('org');
-        if (scenario.organisations.length > 0 && !scenario.organisations.some(o => o.org_id === org))
-          return apiError(res, 403, 'forbidden', 'Not a member of that organisation.');
-        return json(res, 200, { product_id: url.searchParams.get('product'), org_id: org, features: scenario.features, plan: scenario.plan, licence: scenario.licence, links: scenario.links, api_version: 'v1' });
+        if (!orgs.some(o => o.org_id === org)) return apiError(res, 403, 'not_org_member', 'Not a member of this organisation.');
+        const licence = scenario.licence ? { scope: 'product', scope_key: null, ...scenario.licence } : null;
+        return json(res, 200, {
+          api_version: 'v1', org_id: org, product_id: url.searchParams.get('product'),
+          features: Object.fromEntries(scenario.features.filter(f => allowed(f.feature_key)).map(f => [f.feature_key, true])),
+          plan: scenario.plan ?? null, licence, licences: licence ? [licence] : [], links: { manage: null, checkout: null, ...scenario.links },
+          revalidate_after_seconds: scenario.revalidate,
+        });
       }
       if (route === 'check' && req.method === 'POST') {
         const b = JSON.parse(await readBody(req) || '{}');
-        const f = scenario.features.find(x => x.feature_key === b.feature_key);
-        return json(res, 200, f?.allowed ? { allowed: true } : { allowed: false, blocking_layer: f ? 'feature' : 'app_access', message: 'Not granted by HCG.' });
+        if (!b.org_id || !b.product_id || !b.feature_key) return apiError(res, 400, 'invalid_body', 'org_id, product_id and feature_key are required.');
+        const member = orgs.some(o => o.org_id === b.org_id);
+        const known = scenario.features.some(x => x.feature_key === b.feature_key);
+        const ok = member && allowed(b.feature_key);
+        const reason = ok ? null : !member ? 'not_org_member' : scenario.checks[b.feature_key] ?? (known ? 'not_licensed' : 'feature_unavailable');
+        const layer = ok ? null : reason === 'not_licensed' ? 'licence' : ['not_org_member', 'org_inactive', 'user_not_permitted'].includes(reason) ? 'identity' : 'availability';
+        return json(res, 200, { api_version: 'v1', org_id: b.org_id, product_id: b.product_id, feature_key: b.feature_key, allowed: ok, layer, reason, verified_at: new Date().toISOString() });
       }
       return apiError(res, 404, 'not_found', 'No such route.');
     }

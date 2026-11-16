@@ -45,6 +45,11 @@ internal static class ShipToStoreCommand
         var origin = StoreOrigin.Parse(Arg("--store")) ?? services.GetRequiredService<StoreClientFactory>().OriginAsync().GetAwaiter().GetResult();
         var client = services.GetRequiredService<StoreClientFactory>().Create(origin);
         var runner = services.GetRequiredService<IProcessRunner>();
+        // Enforced at command execution by the same shared service the UI uses: HCG Store decides the staff permission.
+        var features = services.GetRequiredService<FeatureAccessService>();
+        var decision = features.CheckNowAsync(MakerFeatures.StorePublish, storeOrigin: origin).GetAwaiter().GetResult();
+        Console.WriteLine($"Feature {decision.Feature.Id}: {decision.StateLabel} — {decision.Explanation}" + (decision.RemedyText is { Length: > 0 } rt ? " " + rt : ""));
+        if (!decision.IsAllowed) return HcgSessionCommand.ExitCode(decision);
         try
         {
             var who = client.WhoAmIAsync().GetAwaiter().GetResult();
@@ -84,7 +89,7 @@ internal static class ShipToStoreCommand
                 Distribution = Arg("--distribution") ?? "paid", Eligibility = Arg("--eligibility") ?? "private",
                 Destinations = args.Contains("--hcg-repo") ? ["hcg-store", "hcg-repo"] : ["hcg-store"],
             };
-            var result = new ShipToStoreService(client).ShipAsync(request, files, Arg("--release"),
+            var result = new ShipToStoreService(client, features).ShipAsync(request, files, Arg("--release"),
                 new Progress<ShipItemProgress>(p => { if (p.State != ShipItemState.Uploading || p.Detail is not null || p.Received == p.Total) Console.WriteLine($"  {p.FileName}: {p.State} {p.Received:N0}/{p.Total:N0} {p.Detail}"); }),
                 CancellationToken.None).GetAwaiter().GetResult();
             var r = result.Release;
@@ -104,10 +109,16 @@ internal static class ShipToStoreCommand
                 }
             if (args.Contains("--submit") && ok)
             {
+                features.RequireAsync(MakerFeatures.StorePublish, storeOrigin: origin).GetAwaiter().GetResult();
                 var s = client.SubmitAsync(r.Id).GetAwaiter().GetResult();
                 Console.WriteLine($"Submitted for manual review: {s.Status}. An approver approves it in HCG Store; nothing is published automatically.");
             }
             return ok ? 0 : 1;
+        }
+        catch (FeatureAccessDeniedException ex)
+        {
+            Console.Error.WriteLine($"Feature {ex.Decision.Feature.Id}: {ex.Decision.StateLabel} — {ex.Decision.Explanation} {ex.Decision.RemedyText}".TrimEnd());
+            return HcgSessionCommand.ExitCode(ex.Decision);
         }
         catch (HcgStoreException ex)
         {

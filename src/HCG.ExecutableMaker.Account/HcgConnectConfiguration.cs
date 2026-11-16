@@ -3,15 +3,26 @@ using System.Text.Json.Serialization;
 
 namespace HCG.ExecutableMaker.Account;
 
+/// <summary>Which HCG registration this build uses. Each has its own client and its own stored session.</summary>
+public enum HcgEnvironment
+{
+    /// <summary>HCG's production registration <c>hcg-executable-maker-desktop-production</c> (client issued 13 Nov 2026).</summary>
+    Production,
+    /// <summary>HCG's development registration <c>hcg-executable-maker-desktop</c>: no client issued yet, so sign-in is off
+    /// unless an issued development hcg-connect.json is imported.</summary>
+    Development,
+}
+
 /// <summary>
 /// How Executable Maker reaches HCG: the identity server (OAuth 2.1 authorization code + PKCE, public client, no
-/// secret), the HCG website API (ERP App Access, support requests) and the HCG AI gateway.
+/// secret) and HCG's central Ecosystem API.
 /// <para>
-/// Built-in defaults contain only values that were verified on the live HCG systems or in the identity server's
-/// source (see docs/hcg-connect/HANDOFF.md). The OAuth client ID is empty until HCG issues Executable Maker's public
-/// client; until then the account features report "Not configured" and contact nothing. A local file
-/// (<c>hcg-connect.json</c> in the app data folder, schema docs/hcg-connect/hcg-connect.schema.json) can supply the
-/// issued client ID; it may never contain a secret, and unknown keys are refused so a typo cannot go unnoticed.
+/// Built-in defaults are HCG's own values: the production client HCG issued for Executable Maker
+/// (<c>fb9b6edf-2bfc-4b5e-a354-dbb1af697029</c>, registration <c>hcg-executable-maker-desktop-production</c>, the same
+/// values as the hcg-connect.json HCG's Owner screen exports) and the live-verified identity server. The development
+/// registration has no issued client, so a development build stays "Not configured" until its file is imported.
+/// A local file (<c>hcg-connect.json</c> in the app data folder, schema docs/hcg-connect/hcg-connect.schema.json)
+/// overrides the defaults; it may never contain a secret, and unknown keys are refused so a typo cannot go unnoticed.
 /// </para>
 /// </summary>
 public sealed record HcgConnectConfiguration
@@ -77,7 +88,35 @@ public sealed record HcgConnectConfiguration
     public Uri? AiGatewayBaseUrl { get; init; }
     public string? AiCapabilitiesPath { get; init; }
 
-    public static HcgConnectConfiguration Default { get; } = new();
+    /// <summary>The public client HCG issued for the production registration (not a secret: public clients have none).</summary>
+    public const string ProductionClientId = "fb9b6edf-2bfc-4b5e-a354-dbb1af697029";
+    /// <summary>Selects the registration: <c>production</c> (default) or <c>development</c>.</summary>
+    public const string EnvironmentVariable = "HCG_EXECUTABLE_MAKER_HCG_ENVIRONMENT";
+
+    /// <summary>The registration these values belong to. Not part of hcg-connect.json: chosen by the build/environment.</summary>
+    [JsonIgnore] public HcgEnvironment Environment { get; init; } = HcgEnvironment.Production;
+
+    /// <summary>HCG's registry key for this registration (ERP ▸ Integrations ▸ hcg.executable.maker).</summary>
+    [JsonIgnore] public string RegistryKey => Environment == HcgEnvironment.Production ? "hcg-executable-maker-desktop-production" : "hcg-executable-maker-desktop";
+
+    /// <summary>
+    /// Entry in the OS credential store for this registration's session. Production, development and a local test
+    /// identity server never share a stored session.
+    /// </summary>
+    [JsonIgnore] public string SessionStoreAccount =>
+        UsesLocalIdentityServer ? "session-local-test" : Environment == HcgEnvironment.Production ? "session" : "session-development";
+
+    public static HcgConnectConfiguration Production { get; } = new() { ClientId = ProductionClientId, Environment = HcgEnvironment.Production };
+    public static HcgConnectConfiguration Development { get; } = new() { ClientId = null, Environment = HcgEnvironment.Development };
+    /// <summary>The registration selected for this process (see <see cref="SelectedEnvironment"/>).</summary>
+    public static HcgConnectConfiguration Default => ForEnvironment(SelectedEnvironment());
+    public static HcgConnectConfiguration ForEnvironment(HcgEnvironment environment) => environment == HcgEnvironment.Production ? Production : Development;
+
+    /// <summary><see cref="EnvironmentVariable"/> = development selects the development registration; anything else production.</summary>
+    public static HcgEnvironment SelectedEnvironment() => ParseEnvironment(System.Environment.GetEnvironmentVariable(EnvironmentVariable));
+
+    public static HcgEnvironment ParseEnvironment(string? value) =>
+        string.Equals(value?.Trim(), "development", StringComparison.OrdinalIgnoreCase) ? HcgEnvironment.Development : HcgEnvironment.Production;
 
     public const string ClientIdPlaceholder = "<ISSUED_PUBLIC_CLIENT_ID>";
 
@@ -89,7 +128,9 @@ public sealed record HcgConnectConfiguration
     {
         var issues = new List<ConfigurationIssue>();
         if (string.IsNullOrWhiteSpace(ClientId))
-            issues.Add(new("clientId", "missing: no client ID is configured on this computer or built into this version. HCG issues it when Executable Maker's public desktop client is registered; import the hcg-connect.json HCG provides."));
+            issues.Add(new("clientId", Environment == HcgEnvironment.Development
+                ? "missing: HCG has not issued a client for the development registration (hcg-executable-maker-desktop). Import an issued development hcg-connect.json, or use the production registration."
+                : "missing: no client ID is configured on this computer or built into this version. Import the hcg-connect.json HCG provides."));
         else if (ClientId == ClientIdPlaceholder)
             issues.Add(new("clientId", $"\"{ClientIdPlaceholder}\" is the template placeholder, not an issued HCG client ID (HCG issues UUIDs); replace it with the issued public client ID."));
         else if (!Guid.TryParseExact(ClientId, "D", out var id) || id == Guid.Empty)
@@ -116,7 +157,7 @@ public sealed record HcgConnectConfiguration
     /// </summary>
     public static string TemplateJson()
     {
-        var node = System.Text.Json.Nodes.JsonNode.Parse((Default with { ClientId = ClientIdPlaceholder }).ToJson())!.AsObject();
+        var node = System.Text.Json.Nodes.JsonNode.Parse((Development with { ClientId = ClientIdPlaceholder }).ToJson())!.AsObject();
         var template = new System.Text.Json.Nodes.JsonObject { ["$schema"] = "./hcg-connect.schema.json" };
         foreach (var (key, value) in node)
             if (KnownKeys.Contains(key) && value is not null) template[key] = value.DeepClone();
@@ -149,8 +190,10 @@ public sealed record HcgConnectConfiguration
     /// Loads <c>hcg-connect.json</c> from the app data folder over the built-in defaults. A file with a secret-like key,
     /// another contract version or invalid JSON is refused (the defaults are used and the problem is reported).
     /// </summary>
-    public static LoadResult Load(string appDataRoot)
+    public static LoadResult Load(string appDataRoot, HcgEnvironment? environment = null)
     {
+        var env = environment ?? SelectedEnvironment();
+        var Default = ForEnvironment(env);
         var path = Path.Combine(appDataRoot, FileName);
         if (!File.Exists(path)) return new LoadResult(Default, null);
         string text;
@@ -159,15 +202,17 @@ public sealed record HcgConnectConfiguration
         {
             return new LoadResult(Default, $"{FileName} could not be read ({ex.Message}). The file was ignored.");
         }
-        return Parse(text);
+        return Parse(text, env);
     }
 
     /// <summary>Largest configuration file accepted (the real one is about 1 KB).</summary>
     public const int MaxFileBytes = 64 * 1024;
 
     /// <summary>Validates configuration text with the same rules as <see cref="Load"/> (nothing is written).</summary>
-    public static LoadResult Parse(string text)
+    public static LoadResult Parse(string text, HcgEnvironment? environment = null)
     {
+        var env = environment ?? SelectedEnvironment();
+        var Default = ForEnvironment(env);
         if (text.Length > MaxFileBytes) return new LoadResult(Default, $"{FileName} is larger than {MaxFileBytes / 1024} KB; it is not an HCG Connect configuration. The file was ignored.");
         try
         {
@@ -180,7 +225,7 @@ public sealed record HcgConnectConfiguration
             foreach (var p in doc.RootElement.EnumerateObject())
                 if (!KnownKeys.Contains(p.Name))
                     return new LoadResult(Default, $"{FileName} has an unknown setting \"{p.Name}\" (check its spelling against docs/hcg-connect/hcg-connect.schema.json). The file was ignored.");
-            var loaded = JsonSerializer.Deserialize<HcgConnectConfiguration>(text, Json) ?? Default;
+            var loaded = (JsonSerializer.Deserialize<HcgConnectConfiguration>(text, Json) ?? Default) with { Environment = env };
             if (loaded.Contract != ContractVersion)
                 return new LoadResult(Default, $"{FileName} is for contract \"{loaded.Contract}\"; this version needs \"{ContractVersion}\". The file was ignored.");
             return new LoadResult(loaded, null);

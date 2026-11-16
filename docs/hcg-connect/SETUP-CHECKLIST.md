@@ -1,5 +1,9 @@
 # HCG Connect: remaining setup checklist
 
+> **16 Nov 2026:** HCG issued the production client `fb9b6edf-2bfc-4b5e-a354-dbb1af697029` and it is built in; the steps
+> below about obtaining a client are done for production. What remains is the on-device sign-in acceptance (HANDOFF §9).
+> See [../FEATURE-ACCESS.md](../FEATURE-ACCESS.md).
+
 State on 11 November 2026, as checked against live HCG. The checks were read-only and used no account.
 
 | What | State | Evidence |

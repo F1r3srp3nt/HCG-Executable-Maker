@@ -5,8 +5,8 @@ This document covers HCG Executable Maker's integration with HCG's central syste
 | System | Role |
 |---|---|
 | HCG identity | Supabase Auth on project `qggdyzoydveafkmjgkpq`, behind `beta.hakmicapitalgroup.com/auth` |
-| HCG ERP / Executive Control Center | Decides access through App Access |
-| HCG website API | Serves Executable Maker's routes |
+| HCG ERP / Executive Control Center | Decides access: organisations, licences and features, answered by the central Ecosystem API (`/me`, `/features`, `/check`) |
+| HCG website API | Would serve Executable Maker's support routes (not deployed) |
 | HCG AI gateway | `ai.hakmicapitalgroup.com` |
 
 It creates no account system and no role system, holds no secret, and never decides access itself.
@@ -19,16 +19,17 @@ It creates no account system and no role system, holds no secret, and never deci
 
 | Part | State |
 |---|---|
-| Sign in with HCG (browser, PKCE, loopback) | **Implemented and tested against a mock identity server.** It stays switched off ("Not available yet") until Executable Maker's OAuth client is registered (step 1 below). |
+| Sign in with HCG (browser, PKCE, loopback) | **Implemented; production client built in.** HCG issued `fb9b6edf-2bfc-4b5e-a354-dbb1af697029` (registration `hcg-executable-maker-desktop-production`, `configured_untested`) on 13 Nov 2026. HCG's live identity service accepts it (connection check, 16 Nov). No real sign-in has been completed yet: that needs a person's consent on a device. |
+| Feature access (one shared service for UI and command line) | **Implemented and tested against mocks of the deployed contract.** See [FEATURE-ACCESS.md](FEATURE-ACCESS.md): central `/check` decisions for `support.submit`, `support.attach`, `ai.use` (registered disabled/planned by HCG, no grants), fresh checks before privileged operations, "not permitted" ≠ "HCG unavailable", Store link only for a missing licence, staff-only publishing → administrator. |
 | Session storage, restore, refresh, expiry, sign-out, revocation | **Implemented and tested with mocks.** The OS stores were exercised as follows: Windows Credential Manager and the macOS Keychain by the CI test on those runners; libsecret on Linux falls back to a session-only store when no keyring exists. |
-| ERP App Access, permissions, organisations | **Implemented** in the app and in the website package. Tested on PostgreSQL with an ERP stand-in. **Not deployed.** Organisation membership has no ERP contract yet (see below). |
+| ERP App Access route (`/executable-maker/v1/access`) | **No longer used by the app for decisions** (HCG's central `/check` decides). The website package still contains it; **not deployed**. Organisations come from `/me`. |
 | Support requests, uploads, My requests, ERP support desk | **Implemented and tested** (16 package tests and 3 cross-language contract tests). **Not deployed.** |
 | HCG AI ("Explain this build error" and three prepared capabilities) | **Not connected.** No gateway contract exists anywhere in HCG's sources. Executable Maker shows "Not connected" and never simulates an answer. |
-| Plan, licence, organisation, features (central Ecosystem API) | **Implemented and tested against the MOCK HCG.** Routes are live on HCG and need a token; their response bodies await HCG's confirmation (handoff §6). |
+| Plan, licence, organisation, features (central Ecosystem API) | **Implemented to the contract HCG confirmed** (13 and 16 Nov 2026: `user`, `org_role`, features map, `licences`, `layer`/`reason`). Tested against mocks of it. Routes are live and answer 401 without a token; no real authenticated answer has been read yet. |
 | Packaged macOS app: sign-in, restart, sign-out | **Passed in CI run 47 (9 Nov 2026) against the MOCK HCG** with the real login Keychain: sign-in, two restarts and a GUI start restored the session without the browser; sign-out removed the Keychain item. |
 | Importing the issued configuration; connection check | **Implemented.** Account page › HCG Connect: *Import configuration…* (validated; nothing changes on a problem; applied without a restart), *Check connection* (names DNS, TLS, HTTP and identity-server errors), and the registration HCG needs, produced from code. Same in the CLI: `--hcg-session import <file> \| check \| registration`. |
 | Account connection states | **Implemented.** The page separates three situations: *Not set up on this computer* (names the missing or invalid fields), *Rejected by HCG* (set only from the identity service's own answer, e.g. `oauth_client_not_found` or `invalid_client`, including a no-browser preflight before sign-in), and *HCG unavailable* (DNS/TLS/HTTP). Actions: Import HCG connection configuration…, Check configuration, Retry connection (re-reads the saved file), Export registration request… (request + template + steps). Remaining setup: [hcg-connect/SETUP-CHECKLIST.md](hcg-connect/SETUP-CHECKLIST.md). |
-| Live verification against HCG | **None with an account.** Read-only checks on 9–10 Nov 2026: discovery, JWKS, `ecosystem/v1/*` answering 401. The connection check with an unissued client ID gets `oauth_client_not_found`, so **no Executable Maker client is registered yet**. `executable-maker/v1/*` is not deployed. Signing in needs the issued client ID and a person to consent. |
+| Live verification against HCG | **None with an account.** 16 Nov 2026: the connection check with the built-in production client passed every identity step, including client registration (HCG accepted `fb9b6edf-…`, redirect and PKCE S256); `ecosystem/v1/me`, `features`, `check` answer 401 with HCG's envelope; `executable-maker/v1/*` is not deployed. Signing in needs a person to consent. |
 
 ## 1. Identity (what was verified, and where)
 
@@ -78,7 +79,11 @@ Sources: HCG ONE (`HCG-CARDX-AUTH-INTEGRATION-REPORT.md`) and HCG LifeOS (`docs/
 
 Tokens are never logged. The file log, diagnostics and AI payloads pass through `SecretRedactor`, which masks bearer tokens, JWTs, keys and passwords.
 
-## 2. Access: ERP App Access (the ERP is the authority)
+## 2. Access: ERP App Access (superseded)
+
+> **Superseded on 16 Nov 2026.** The app now decides from HCG's central Ecosystem API through one shared service:
+> see [FEATURE-ACCESS.md](FEATURE-ACCESS.md). The App Access route below belongs to the website package, which is not
+> deployed; it is kept for reference and its contract test.
 
 `GET /api/public/executable-maker/v1/access` returns the directory schema of `/api/public/mobile/workspaces`, plus the permissions computed **in the database** from the caller's verified token. Each permission comes from an ERP App Access product:
 

@@ -134,10 +134,11 @@ public static class AiPayloadBuilder
 }
 
 /// <summary>
-/// Combines the account, ERP App Access (permission <c>ai.use</c>) and the gateway's own capability list. The server
-/// side (ERP + gateway) enforces permission and quota again on every call; this only decides what to show.
+/// Combines the account, HCG's central decision for <c>ai.use</c> (shared <see cref="FeatureAccessService"/>) and the
+/// gateway's own capability list. The decision is asked again, fresh, before every request; the servers enforce
+/// permission and quota again on every call.
 /// </summary>
-public sealed class AiAssistant(IHcgAiGateway gateway, AppAccessService access, HcgAccountService account)
+public sealed class AiAssistant(IHcgAiGateway gateway, FeatureAccessService features, HcgAccountService account)
 {
     public bool IsConnected => gateway is not NotConnectedAiGateway;
 
@@ -146,25 +147,31 @@ public sealed class AiAssistant(IHcgAiGateway gateway, AppAccessService access, 
         var status = await gateway.GetStatusAsync(ct).ConfigureAwait(false);
         if (status.State == AiConnectionState.NotConnected) return status;
         if (!account.IsSignedIn) return status with { State = AiConnectionState.SignedOut, Message = "Sign in with HCG to use HCG AI assistance." };
-        if (access.State == AppAccessState.Unavailable) return status with { State = AiConnectionState.Unavailable, Message = access.Message };
-        if (!access.Has(HcgPermissions.AiUse))
-            return status with { State = AiConnectionState.NotPermitted, Message = "HCG has not granted AI assistance to your account. Access and quotas are managed by HCG (ERP)." };
-        return status;
+        var decision = features.Decide(MakerFeatures.AiUse);
+        return decision.State switch
+        {
+            FeatureAccessState.Allowed => status,
+            FeatureAccessState.Unavailable or FeatureAccessState.Checking => status with { State = AiConnectionState.Unavailable, Message = decision.Explanation },
+            _ => status with { State = AiConnectionState.NotPermitted, Message = decision.Explanation + (decision.RemedyText is { Length: > 0 } r ? " " + r : "") },
+        };
     }
 
     /// <summary>Runs an action the user approved after reviewing <paramref name="payload"/>. Never runs anything from the answer.</summary>
     public async Task<AiResult> RunAsync(AiPayload payload, bool userApproved, CancellationToken ct = default)
     {
         if (!userApproved) throw new AiException(AiFailure.Rejected, "Review and approve what will be sent first.");
-        var status = await StatusAsync(ct).ConfigureAwait(false);
+        var status = await gateway.GetStatusAsync(ct).ConfigureAwait(false);
+        if (status.State == AiConnectionState.NotConnected) throw new AiException(AiFailure.NotConnected, status.Message);
+        if (!account.IsSignedIn) throw new AiException(AiFailure.NotPermitted, "Sign in with HCG to use HCG AI assistance.");
+        // HCG decides now, before anything is sent.
+        var decision = await features.CheckNowAsync(MakerFeatures.AiUse, ct).ConfigureAwait(false);
+        if (decision.IsUnavailable) throw new AiException(AiFailure.Unavailable, decision.Explanation);
+        if (!decision.IsAllowed) throw new AiException(AiFailure.NotPermitted, decision.Explanation);
         var capability = status.Capabilities.FirstOrDefault(c => c.Id == payload.Capability);
-        return status.State switch
+        return capability switch
         {
-            AiConnectionState.NotConnected => throw new AiException(AiFailure.NotConnected, status.Message),
-            AiConnectionState.SignedOut or AiConnectionState.NotPermitted => throw new AiException(AiFailure.NotPermitted, status.Message),
-            AiConnectionState.Unavailable => throw new AiException(AiFailure.Unavailable, status.Message),
-            _ when capability is not { Available: true } => throw new AiException(AiFailure.NotPermitted, capability?.Reason ?? "This AI capability is not available to your account."),
-            _ when capability.Quota is { Remaining: <= 0 } => throw new AiException(AiFailure.QuotaExhausted,
+            not { Available: true } => throw new AiException(AiFailure.NotPermitted, capability?.Reason ?? "This AI capability is not available to your account."),
+            { Quota.Remaining: <= 0 } => throw new AiException(AiFailure.QuotaExhausted,
                 $"Your HCG AI quota for this is used up{(capability.Quota.ResetsAt is { } r ? $"; it resets {r.LocalDateTime:g}" : "")}."),
             _ => await gateway.RunAsync(payload, ct).ConfigureAwait(false),
         };

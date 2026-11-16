@@ -91,7 +91,7 @@ public partial class HcgSessionTests
     {
         var server = new MockIdentityServer();
         var store = new SessionOnlyCredentialStore();
-        var unconfigured = HcgConnectConfiguration.Default;
+        var unconfigured = HcgConnectConfiguration.Development;
         var account = new HcgAccountService(unconfigured, new HcgAuthClient(new HttpClient(server), unconfigured, TimeProvider.System), store, TimeProvider.System);
         Assert.Equal(HcgAccountStatus.NotConfigured, account.Status);
         await account.ApplyConfigurationAsync(WithFreePorts(MockIdentityServer.Config));
@@ -220,7 +220,7 @@ public class HcgConnectionCheckTests
     public async Task A_configuration_without_a_client_is_not_sent_anywhere()
     {
         var handler = Hcg();
-        var result = await new HcgConnectionCheck(new HttpClient(handler)).RunAsync(HcgConnectConfiguration.Default);
+        var result = await new HcgConnectionCheck(new HttpClient(handler)).RunAsync(HcgConnectConfiguration.Development);
         Assert.Equal(ConnectionCheckState.Failed, result.Steps[0].State);
         Assert.All(result.Steps.Skip(1), s => Assert.Equal(ConnectionCheckState.Skipped, s.State));
         Assert.Empty(handler.Requests);

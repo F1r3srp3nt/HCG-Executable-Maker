@@ -7,6 +7,11 @@ and on every artifact) uploads a release to HCG Store
 
 ## Who decides what
 
+Ship to Store is the staff-only feature `store.publish` of the shared feature-access service
+([FEATURE-ACCESS.md](FEATURE-ACCESS.md)): HCG Store decides it (asking HCG for its publisher permission) when you
+connect, before an upload, and before Submit, for the UI and `--ship-to-store` alike. A refusal says to ask your
+organisation's HCG administrator; it is never offered for sale.
+
 - **HCG Connect** identifies you: Ship to Store uses the session from the Account page; the app holds no Store or storage
   credentials.
 - **HCG** decides whether you may publish or approve (central permissions), and who owns a product (entitlements).
@@ -18,7 +23,7 @@ and on every artifact) uploads a release to HCG Store
 
 | Contract | Where it is | State |
 |---|---|---|
-| Sign-in, tokens | HCG Connect (OAuth 2.1 + PKCE), Executable Maker's existing account code | Implemented; Executable Maker's client ID is still a placeholder until HCG issues it |
+| Sign-in, tokens | HCG Connect (OAuth 2.1 + PKCE), Executable Maker's existing account code | Implemented; HCG's production client `fb9b6edf-…` is built in (issued 13 Nov 2026, not yet used for a real sign-in) |
 | Who may publish / approve | HCG's entitlement authority, read by HCG Store (`HCG_STORE_PUBLISHER_CENTRAL_ID`, `HCG_STORE_RELEASE_APPROVER_CENTRAL_ID`) | Implemented in HCG Store; the central permission IDs are not issued yet |
 | Products and editions | HCG Store catalogue (`catalogue/products.json`) + Store draft products | Implemented |
 | Upload, storage, drafts, review, approval | HCG Store publishing API (`web-hcg-store/server/src/publishing.ts`, branch `publishing/ship-to-store`) | Implemented and tested in TEST mode; not merged or deployed |
@@ -107,13 +112,15 @@ TEST mode with the mock HCG Connect provider (nothing real is contacted):
 
 ## Not available yet (blockers)
 
-1. **HCG Store publishing API is not merged or deployed** (`F1r3srp3nt/store`, branch `publishing/ship-to-store`;
-   founder review). `store.hakmicapitalgroup.com` is not live.
+1. **The HCG Store server is not deployed.** The publishing API is merged (`F1r3srp3nt/store` PR #12) but off by
+   default and not hosted: `store.hakmicapitalgroup.com` serves only the static storefront (GitHub Pages), so its
+   publishing routes do not exist there and Ship to Store says "HCG Store does not answer publishing requests"
+   (decision D1, hosting, is open).
 2. **Central permission IDs** for publishing and release approval are not issued by HCG, and the entitlement API must
    serve them (`HCG_STORE_PUBLISHER_CENTRAL_ID`, `HCG_STORE_RELEASE_APPROVER_CENTRAL_ID`). The deployed `/check`
    only answers for `feature_key: "download"`, so against live HCG publishing fails closed until then.
-3. **Executable Maker's HCG Connect client** is not registered (the configuration ships a placeholder); HCG Store must
-   list it in `HCG_STORE_PUBLISHING_CLIENT_IDS`.
+3. **HCG Store must allow Executable Maker's client**: HCG issued `fb9b6edf-2bfc-4b5e-a354-dbb1af697029`; the Store's
+   `HCG_STORE_PUBLISHING_CLIENT_IDS` must list it when the Store is deployed.
 4. **Release record (founder question).** Decision D6 keeps releases with HCG Store, so nothing is needed from the
    main HCG backend. Still open: whether a release approved in HCG Store must also be added to the Store's
    founder-reviewed `catalogue/releases.json` before public delivery (`web-hcg-store/docs/PUBLISHING.md` §7).

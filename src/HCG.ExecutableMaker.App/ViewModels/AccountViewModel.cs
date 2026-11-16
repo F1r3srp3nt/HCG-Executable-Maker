@@ -10,6 +10,19 @@ namespace HCG.ExecutableMaker.App.ViewModels;
 
 public sealed record AccountPermissionRow(string Title, string Detail, StatusTag State);
 
+/// <summary>One feature and HCG's decision for it, with the explanation and what the person can do.</summary>
+public sealed record AccountFeatureRow(FeatureDecision Decision)
+{
+    public string Title => Decision.Feature.Title;
+    public string Detail => Decision.Explanation;
+    public string Remedy => Decision.RemedyText;
+    public bool HasRemedy => Remedy.Length > 0;
+    public StatusTag State => new(Decision.StateLabel, Decision.Tone);
+    /// <summary>Only when a licence is what is missing: the product's page in HCG Store. Never for staff permissions.</summary>
+    public Uri? StoreLink => Decision.Remedy == FeatureRemedy.ViewInStore ? Decision.Link : null;
+    public bool HasStoreLink => StoreLink is not null;
+}
+
 /// <summary>
 /// Account: Sign in with HCG (system browser), profile, organisation, the access HCG granted, sign out. Every state is
 /// explained (not configured, signing in, expired, revoked, denied, HCG unavailable). Local builds never need this.
@@ -17,14 +30,14 @@ public sealed record AccountPermissionRow(string Title, string Detail, StatusTag
 public sealed partial class AccountViewModel : PageViewModel
 {
     private readonly HcgAccountService _account;
-    private readonly AppAccessService _access;
+    private readonly FeatureAccessService _access;
     private readonly AccountPlanService _plan;
     private readonly IPlatformShell _shell;
     private readonly IAppPaths _paths;
     private readonly HcgConnectionCheck _check;
     private bool _applyingOrganisation;
 
-    public AccountViewModel(HcgAccountService account, AppAccessService access, AccountPlanService plan, IPlatformShell shell, IAppPaths paths, HcgConnectionCheck check)
+    public AccountViewModel(HcgAccountService account, FeatureAccessService access, AccountPlanService plan, IPlatformShell shell, IAppPaths paths, HcgConnectionCheck check)
     {
         _check = check;
         _account = account;
@@ -60,7 +73,7 @@ public sealed partial class AccountViewModel : PageViewModel
     [ObservableProperty] private bool _needsOrganisation;
     [ObservableProperty] private EcosystemOrganisation? _selectedOrganisation;
     public ObservableCollection<EcosystemOrganisation> Organisations { get; } = [];
-    public ObservableCollection<AccountPermissionRow> Permissions { get; } = [];
+    public ObservableCollection<AccountFeatureRow> Permissions { get; } = [];
 
     // Plan and access, as HCG's central API reports them (never decided or assumed by the app).
     [ObservableProperty] private StatusTag _planTag = new("—", "neutral");
@@ -101,8 +114,7 @@ public sealed partial class AccountViewModel : PageViewModel
     {
         Refresh();
         if (!_account.IsSignedIn) return;
-        await _plan.RefreshAsync(force: false);
-        await _access.RefreshAsync(force: false);
+        await _access.RefreshAsync("account page", force: false);
     }
 
     private void Refresh()
@@ -153,28 +165,23 @@ public sealed partial class AccountViewModel : PageViewModel
             : $"Organisation: not chosen ({_plan.Organisations.Count} available).";
         RefreshConnect();
 
-        (AccessTag, AccessMessage) = _access.State switch
+        var decisions = _access.DecideAll();
+        var central = decisions.Where(d => d.Feature.Kind == FeatureKind.Account).ToList();
+        (AccessTag, AccessMessage) = _access.Status switch
         {
-            AppAccessState.Granted => (new StatusTag("Granted by HCG", "success"), _access.Message),
-            AppAccessState.Checking => (new StatusTag("Checking", "info"), _access.Message),
-            AppAccessState.NotGranted => (new StatusTag("Not granted", "warning"), _access.Message),
-            AppAccessState.Revoked => (new StatusTag("Revoked", "error"), _access.Message),
-            AppAccessState.Unavailable => (new StatusTag("Unknown (HCG unavailable)", "warning"), _access.Message),
-            _ => (new StatusTag("Sign in required", "neutral"), _access.Message),
+            FeatureAccessStatus.Ready => central.Any(d => d.IsAllowed)
+                ? (new StatusTag("Decided by HCG", "success"), _access.StatusMessage)
+                : (new StatusTag("Nothing enabled", "warning"), _access.StatusMessage + " HCG enables no account feature here yet."),
+            FeatureAccessStatus.Checking => (new StatusTag("Checking", "info"), _access.StatusMessage),
+            FeatureAccessStatus.Unavailable => (new StatusTag("HCG unavailable", "warning"), _access.StatusMessage),
+            FeatureAccessStatus.ChooseOrganisation => (new StatusTag("Choose organisation", "warning"), _access.StatusMessage),
+            FeatureAccessStatus.NoOrganisation or FeatureAccessStatus.NotMember => (new StatusTag("No organisation access", "warning"), _access.StatusMessage),
+            FeatureAccessStatus.NotConfigured => (new StatusTag("Not set up", "neutral"), _access.StatusMessage),
+            _ => (new StatusTag("Sign in required", "neutral"), _access.StatusMessage),
         };
         RefreshPlan();
         Permissions.Clear();
-        foreach (var (perm, title, detail) in new[]
-                 {
-                     (HcgPermissions.SupportSubmit, "Project support requests", "Describe a project HCG Executable Maker cannot build yet and send diagnostics to HCG."),
-                     (HcgPermissions.SupportAttach, "Attach project files", "Include selected files or a project archive with a request."),
-                     (HcgPermissions.AiUse, "HCG AI assistance", "Explain build errors and other problems with HCG AI (when HCG AI is connected)."),
-                 })
-        {
-            var granted = _access.Has(perm);
-            Permissions.Add(new AccountPermissionRow(title, detail, _access.State != AppAccessState.Granted
-                ? new StatusTag("—", "neutral") : granted ? new StatusTag("Allowed", "success") : new StatusTag("Not granted", "neutral")));
-        }
+        foreach (var d in decisions) Permissions.Add(new AccountFeatureRow(d));
         _applyingOrganisation = true;
         Organisations.Clear();
         foreach (var o in _plan.Organisations) Organisations.Add(o);
@@ -184,13 +191,6 @@ public sealed partial class AccountViewModel : PageViewModel
         _applyingOrganisation = false;
         SignInCommand.NotifyCanExecuteChanged();
     }
-
-    private static readonly Dictionary<string, (string Title, string Detail)> KnownFeatures = new(StringComparer.Ordinal)
-    {
-        [HcgPermissions.SupportSubmit] = ("Project support requests", "Send diagnostics about a project HCG Executable Maker cannot build yet."),
-        [HcgPermissions.SupportAttach] = ("Attach project files", "Include selected files or a project archive with a request."),
-        [HcgPermissions.AiUse] = ("HCG AI assistance", "Explain build errors with HCG AI (when HCG AI is connected)."),
-    };
 
     private void RefreshPlan()
     {
@@ -216,12 +216,16 @@ public sealed partial class AccountViewModel : PageViewModel
         HasChange = _plan.ChangeState != PlanChangeState.None;
         ChangeMessage = _plan.ChangeMessage;
         ChangeTone = _plan.ChangeState switch { PlanChangeState.Confirmed => "success", PlanChangeState.NotConfirmed => "warning", _ => "info" };
+        // Licence records HCG holds for HCG Executable Maker in this organisation (display only; access is decided per feature).
         Features.Clear();
-        foreach (var f in _plan.Access?.Features ?? [])
+        foreach (var l in _plan.Access?.Licences ?? [])
         {
-            var (title, detail) = KnownFeatures.TryGetValue(f.Key, out var k) ? k : (f.DisplayName ?? f.Key, f.Key);
-            Features.Add(new AccountPermissionRow(title, detail, f.Allowed && _plan.State == PlanAccessState.Granted
-                ? new StatusTag("Allowed", "success") : new StatusTag("Not allowed", "neutral")));
+            var applies = l.AppliesTo(FeatureAccessService.EditionKey);
+            var title = $"Licence · {l.Scope ?? "unknown scope"}{(l.ScopeKey is { } k ? " " + k : "")}";
+            var detail = (l.Type ?? "type not reported") + (l.StartsAt is { } s ? $" · from {s.LocalDateTime:d}" : "") +
+                         (l.EndsAt is { } e ? $" · until {e.LocalDateTime:d}" : " · no end date") + (applies ? "" : " · another edition: does not apply to the desktop app");
+            var tone = !applies ? "neutral" : l.Status switch { "active" => "success", "expired" => "warning", "revoked" or "suspended" => "error", _ => "neutral" };
+            Features.Add(new AccountPermissionRow(title, detail, new StatusTag(l.Status ?? "status not reported", tone)));
         }
     }
 
@@ -233,8 +237,7 @@ public sealed partial class AccountViewModel : PageViewModel
 
     private async Task SwitchOrganisationAsync(string id)
     {
-        await _plan.SelectOrganisationAsync(id); // access may differ per organisation; HCG decides
-        await _access.RefreshAsync();
+        await _plan.SelectOrganisationAsync(id); // access may differ per organisation; HCG decides (re-read inside)
     }
 
     [RelayCommand]
@@ -267,10 +270,8 @@ public sealed partial class AccountViewModel : PageViewModel
     [RelayCommand(CanExecute = nameof(CanSignIn))]
     private async Task SignInAsync()
     {
+        // Signing in makes the shared feature-access service ask HCG (it listens to the account).
         await _account.SignInAsync(new ShellBrowser(_shell));
-        if (!_account.IsSignedIn) return;
-        await _plan.RefreshAsync();
-        await _access.RefreshAsync();
     }
 
     [RelayCommand] private void CancelSignIn() => _account.CancelSignIn();
@@ -282,17 +283,20 @@ public sealed partial class AccountViewModel : PageViewModel
     private async Task RefreshAccessAsync()
     {
         IsBusy = true;
-        try { await _access.RefreshAsync(); }
+        try { await _access.RefreshAsync("check again"); }
         finally { IsBusy = false; }
     }
+
+    /// <summary>The product's HCG Store page, offered only where a missing licence is the reason.</summary>
+    [RelayCommand]
+    private Task OpenStorePageAsync(AccountFeatureRow row) => row.StoreLink is { } u ? _shell.OpenUrlAsync(u.ToString()) : Task.CompletedTask;
 
     [RelayCommand]
     private async Task RetryAsync()
     {
         await _account.RetryAsync();
         if (!_account.IsSignedIn) return;
-        await _plan.RefreshAsync();
-        await _access.RefreshAsync();
+        await _access.RefreshAsync("retry");
     }
 
     [RelayCommand]

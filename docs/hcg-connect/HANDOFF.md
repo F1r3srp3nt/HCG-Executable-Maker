@@ -1,5 +1,16 @@
 # HCG Connect × HCG Executable Maker — integration handoff for the main HCG site
 
+> **Update, 16 November 2026: HCG answered this handoff.** The main site (its `docs/executable-maker/desktop-handoff.md`,
+> 13 Nov) issued the production client **`fb9b6edf-2bfc-4b5e-a354-dbb1af697029`** (registration
+> `hcg-executable-maker-desktop-production`, public, no secret, the three callbacks; state `configured_untested`), kept
+> the development registration `hcg-executable-maker-desktop` unissued, registered `support.submit`, `support.attach` and
+> `ai.use` disabled/planned with no grants, and confirmed the real Ecosystem API bodies, which differ from §6 below:
+> `/me` returns `user` and `organisations[].org_role`; `/features` returns a features **map**, nullable `plan`,
+> `licence`/`licences`, `links`, `revalidate_after_seconds`; `/check` returns `layer` and `reason`. The app now uses the
+> issued client by default and reads exactly those shapes; see [../FEATURE-ACCESS.md](../FEATURE-ACCESS.md). §1, §6, §8
+> and §10 below are the original request and are kept as the record. HCG's open item is its own: whether the Ecosystem
+> API's bearer verification accepts a desktop OAuth token (to be shown by the first real sign-in, §9).
+
 Prepared 9 November 2026 for the main HCG project (beta.hakmicapitalgroup.com, ERP ▸ HCG Ecosystem). It covers what HCG must issue and confirm so that the desktop app HCG Executable Maker can sign in with HCG and read organisation, licence and feature access from HCG's central APIs.
 
 **Status labels**

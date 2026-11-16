@@ -17,6 +17,9 @@ namespace HCG.ExecutableMaker.App;
 /// <item><c>import &lt;file&gt;</c> validates an issued hcg-connect.json and installs it in the data folder (as the Account page does).</item>
 /// <item><c>check</c> checks the configuration against the identity server and HCG's APIs without signing in.</item>
 /// <item><c>registration</c> prints the client registration HCG needs, produced from this build's configuration.</item>
+/// <item><c>features</c> prints the shared feature-access decisions (the same the Account page shows).</item>
+/// <item><c>require &lt;feature&gt;</c> asks HCG now, as before a privileged operation; exit 0 allowed, 8 not permitted,
+/// 9 HCG unavailable or not available yet, 3 sign-in needed.</item>
 /// </list>
 /// Never prints a token. Exit code 0 when the requested state was reached.
 /// </summary>
@@ -35,6 +38,9 @@ internal static class HcgSessionCommand
         Console.WriteLine("Credential store: " + account.StoreDescription + (account.StoreNote is { } n ? " — " + n : ""));
         if (account.ConfigurationProblem is { } problem) Console.WriteLine("Configuration: " + problem);
         Console.WriteLine("Identity server: " + account.Configuration.Issuer + (account.Configuration.UsesLocalIdentityServer ? " (LOCAL TEST SERVER, not HCG)" : ""));
+        Console.WriteLine(account.Configuration.UsesLocalIdentityServer
+            ? $"Registration: local test identity server (not HCG) · client {account.Configuration.ClientId ?? "(none)"}"
+            : $"Registration: {account.Configuration.Environment} ({account.Configuration.RegistryKey}) · client {account.Configuration.ClientId ?? "(none issued)"}");
         return verb switch
         {
             "status" => Status(account, plan),
@@ -43,6 +49,8 @@ internal static class HcgSessionCommand
             "import" => Import(args.SkipWhile(a => a != "import").Skip(1).FirstOrDefault(), paths, account, services.GetRequiredService<HcgConnectionCheck>()),
             "check" => Check(account.Configuration, services.GetRequiredService<HcgConnectionCheck>()),
             "registration" => Registration(account.Configuration),
+            "features" => Features(account, services.GetRequiredService<FeatureAccessService>(), args.Contains("--sign-in")),
+            "require" => Require(args.SkipWhile(a => a != "require").Skip(1).FirstOrDefault(), account, services.GetRequiredService<FeatureAccessService>(), args.Contains("--sign-in")),
             "export" => Export(args.SkipWhile(a => a != "export").Skip(1).FirstOrDefault(), account.Configuration),
             _ => Usage(),
         };
@@ -50,7 +58,7 @@ internal static class HcgSessionCommand
 
     private static int Usage()
     {
-        Console.Error.WriteLine("Usage: HCGExecutableMaker --hcg-session status|sign-in|sign-out|check|registration|import <hcg-connect.json>|export <folder>");
+        Console.Error.WriteLine("Usage: HCGExecutableMaker --hcg-session status|sign-in|sign-out|check|registration|features|require <feature>|import <hcg-connect.json>|export <folder>");
         return 2;
     }
 
@@ -89,6 +97,51 @@ internal static class HcgSessionCommand
         Console.WriteLine("Register it centrally (ERP > App integrations); never reuse another app's client. No secret is requested or accepted.");
         Console.WriteLine(config.RegistrationRequestJson());
         return 0;
+    }
+
+    /// <summary>Exit code for a decision: 0 allowed, 3 sign-in needed, 8 not permitted, 9 unavailable / not available yet.</summary>
+    internal static int ExitCode(FeatureDecision d) => d.State switch
+    {
+        FeatureAccessState.Free or FeatureAccessState.Allowed => 0,
+        FeatureAccessState.SignInRequired or FeatureAccessState.NotConfigured => 3,
+        FeatureAccessState.NotPermitted or FeatureAccessState.ChooseOrganisation => 8,
+        _ => 9,
+    };
+
+    private static void PrintDecision(FeatureDecision d) =>
+        Console.WriteLine($"Feature {d.Feature.Id} ({d.Feature.Title}): {d.StateLabel} — {d.Explanation}" +
+                          (d.RemedyText is { Length: > 0 } r ? " " + r : "") + (d.Link is { } l ? " " + l : "") +
+                          (d.Reason is { } why ? $" [HCG {d.Layer ?? "?"}/{why}]" : ""));
+
+    /// <summary>Restores the stored session; with --sign-in, signs in when there is none (needed where no keyring keeps it).</summary>
+    private static void Restore(HcgAccountService account, bool signIn)
+    {
+        account.InitializeAsync().GetAwaiter().GetResult();
+        if (account.IsSignedIn || !signIn || account.Status == HcgAccountStatus.NotConfigured) return;
+        ISystemBrowser browser = account.Configuration.UsesLocalIdentityServer ? new LocalTestServerBrowser() : new ProcessBrowser();
+        account.SignInAsync(browser).GetAwaiter().GetResult();
+    }
+
+    private static int Features(HcgAccountService account, FeatureAccessService features, bool signIn)
+    {
+        Restore(account, signIn);
+        Print(account);
+        if (account.IsSignedIn) features.RefreshAsync("features command").GetAwaiter().GetResult();
+        Console.WriteLine($"Access: {features.Status} — {features.StatusMessage}");
+        foreach (var d in features.DecideAll()) PrintDecision(d);
+        return 0;
+    }
+
+    private static int Require(string? id, HcgAccountService account, FeatureAccessService features, bool signIn)
+    {
+        if (id is null) return Usage();
+        MakerFeature feature;
+        try { feature = MakerFeatures.ById(id); }
+        catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message + " Known: " + string.Join(", ", MakerFeatures.All.Select(f => f.Id))); return 2; }
+        Restore(account, signIn);
+        var d = features.CheckNowAsync(feature).GetAwaiter().GetResult();
+        PrintDecision(d);
+        return ExitCode(d);
     }
 
     private static int Status(HcgAccountService account, AccountPlanService plan)
@@ -140,7 +193,10 @@ internal static class HcgSessionCommand
         Console.WriteLine($"Plan and access: {plan.State} — {plan.Message}");
         Console.WriteLine($"Plan: {plan.PlanDisplay} · valid until: {(plan.ValidUntil is { } v ? v.ToString("u") : "not reported by HCG")}");
         Console.WriteLine($"Organisation: {(plan.OrganisationId is { } o ? plan.Organisations.First(x => x.Id == o).Name : plan.Organisations.Count == 0 ? "(none)" : "(not chosen)")}");
-        foreach (var f in plan.Access?.Features ?? []) Console.WriteLine($"Feature {f.Key}: {(f.Allowed ? "allowed" : "not allowed")}");
+        foreach (var d in plan.Features.DecideAll()) PrintDecision(d);
+        foreach (var l in plan.Access?.Licences ?? [])
+            Console.WriteLine($"Licence {l.Scope}{(l.ScopeKey is { } k ? " " + k : "")}: {l.Status ?? "status not reported"}" + (l.EndsAt is { } e ? $" until {e:u}" : "") +
+                              (l.AppliesTo(FeatureAccessService.EditionKey) ? "" : " (another edition; does not apply)"));
         if (plan.Access?.Links.Manage is { } m) Console.WriteLine("Manage link (from HCG): " + m);
     }
 

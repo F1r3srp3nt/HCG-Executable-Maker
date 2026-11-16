@@ -103,15 +103,16 @@ compilers:
 States: toolchain missing · configuration required · ready · building · failed · verified. Theos projects are
 built as jailbreak `.deb` packages ([`docs/HCG-PROJECTS.md`](docs/HCG-PROJECTS.md)), never as a desktop app or IPA. Details: [`docs/NATIVE-CPP.md`](docs/NATIVE-CPP.md).
 
-## HCG account (unreleased, `feature/hcg-account`)
+## HCG account
 
 Optional. Local builds never need it.
-- **Sign in with HCG** uses your existing HCG account. It runs in the system browser with PKCE, and access is governed by HCG ERP App Access.
+- **Sign in with HCG** uses your existing HCG account (HCG Connect, production client issued by HCG and built in). It runs in the system browser with PKCE.
+- **Feature access** is decided by HCG for your organisation and checked again before each account operation, by one shared service for the app and the command line ([`docs/FEATURE-ACCESS.md`](docs/FEATURE-ACCESS.md)). "Not permitted" and "HCG unavailable" are never confused; publishing to HCG Store is a staff permission.
 - **Request project support** for anything Executable Maker cannot build yet. You choose and review exactly what is sent, and credentials are never sent.
 - **My requests** shows HCG's responses.
 - **AI assistance** is prepared for HCG AI and shows **Not connected** until HCG publishes its gateway contract.
 
-The website/ERP side is a reviewable drop-in package (`integration/hcg-website`). Nothing is deployed or registered yet. Details and the exact remaining configuration: [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md).
+Support requests use a website/ERP drop-in package (`integration/hcg-website`) that is not deployed, and HCG has not enabled the support or AI features yet. Details: [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md).
 
 ## Mobile Build Studio (M0.5)
 

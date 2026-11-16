@@ -168,26 +168,29 @@
         </StackPanel>
       </Border>
 
-      <!-- Executable Maker's own services on HCG (support requests, AI) -->
+      <!-- Feature access: one shared decision per feature (the command line uses the same service) -->
       <Border Classes="card">
         <StackPanel Spacing="12">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2">
-              <TextBlock Classes="h2" Text="Support and AI services" />
-              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Decided by HCG (ERP ▸ App Access) and checked again by HCG on every request. HCG Executable Maker cannot grant itself anything." />
+              <TextBlock Classes="h2" Text="Feature access" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Account features are decided by HCG for your organisation and asked again, fresh, each time you use them. Local builds are free and work offline. HCG Executable Maker cannot grant itself anything." />
             </StackPanel>
             <c:StatusChip Grid.Column="1" Status="{Binding AccessTag}" VerticalAlignment="Top" />
           </Grid>
           <TextBlock Classes="body secondary" Text="{Binding AccessMessage}" TextWrapping="Wrap" />
           <ItemsControl ItemsSource="{Binding Permissions}">
             <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:AccountPermissionRow">
+              <DataTemplate x:DataType="vm:AccountFeatureRow">
                 <Grid ColumnDefinitions="*,Auto" Margin="0,6">
-                  <StackPanel Spacing="1">
+                  <StackPanel Spacing="2">
                     <TextBlock Text="{Binding Title}" FontWeight="Medium" />
                     <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                    <TextBlock FontSize="12" Text="{Binding Remedy}" TextWrapping="Wrap" IsVisible="{Binding HasRemedy}" />
+                    <Button Classes="small" Content="View HCG Executable Maker in HCG Store" HorizontalAlignment="Left" IsVisible="{Binding HasStoreLink}"
+                            Command="{Binding $parent[UserControl].((vm:AccountViewModel)DataContext).OpenStorePageCommand}" CommandParameter="{Binding}" />
                   </StackPanel>
-                  <c:StatusChip Grid.Column="1" Status="{Binding State}" VerticalAlignment="Center" />
+                  <c:StatusChip Grid.Column="1" Status="{Binding State}" VerticalAlignment="Top" />
                 </Grid>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

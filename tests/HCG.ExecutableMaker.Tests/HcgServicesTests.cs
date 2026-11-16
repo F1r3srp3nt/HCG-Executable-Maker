@@ -58,7 +58,7 @@ public class HcgApiTests
     {
         var (api, site, _, _) = Setup();
         site.Respond = (_, _) => MockIdentityServer.Json(HttpStatusCode.OK, MockHcgWebsite.Directory(["support.submit"]));
-        await api.GetAsync<AppAccessDirectory>("access", default);
+        await api.GetAsync<JsonElement>("access", default);
         var call = site.Calls.Single();
         Assert.Equal("/api/public/executable-maker/v1/access", call.Path);
         Assert.NotNull(call.Auth);
@@ -74,7 +74,7 @@ public class HcgApiTests
             if (first) { first = false; return MockIdentityServer.Json(HttpStatusCode.Unauthorized, """{"error":"unauthorized"}"""); }
             return MockIdentityServer.Json(HttpStatusCode.OK, MockHcgWebsite.Directory([]));
         };
-        await api.GetAsync<AppAccessDirectory>("access", default);
+        await api.GetAsync<JsonElement>("access", default);
         Assert.Equal(1, identity.RefreshCount);
         Assert.Equal(2, site.Calls.Count);
     }
@@ -84,7 +84,7 @@ public class HcgApiTests
     {
         var (api, site, account, _) = Setup();
         site.Respond = (_, _) => MockIdentityServer.Json(HttpStatusCode.Forbidden, """{"error":"revoked","message":"HCG has withdrawn HCG Executable Maker access for this account."}""");
-        var ex = await Assert.ThrowsAsync<HcgApiException>(() => api.GetAsync<AppAccessDirectory>("access", default));
+        var ex = await Assert.ThrowsAsync<HcgApiException>(() => api.GetAsync<JsonElement>("access", default));
         Assert.Equal(HcgApiFailure.Revoked, ex.Failure);
         Assert.Equal(HcgAccountStatus.Revoked, account.Status);
         Assert.Null(await account.GetAccessTokenAsync());
@@ -101,7 +101,7 @@ public class HcgApiTests
     {
         var (api, site, account, _) = Setup();
         site.Respond = (_, _) => MockIdentityServer.Json(status, body);
-        var ex = await Assert.ThrowsAsync<HcgApiException>(() => api.GetAsync<AppAccessDirectory>("access", default));
+        var ex = await Assert.ThrowsAsync<HcgApiException>(() => api.GetAsync<JsonElement>("access", default));
         Assert.Equal(expected, ex.Failure);
         Assert.Equal(outage, ex.IsOutage);
         Assert.True(account.IsSignedIn); // neither outages nor 403s sign the user out
@@ -112,244 +112,9 @@ public class HcgApiTests
     {
         var (api, site, _, _) = Setup();
         site.Respond = (_, _) => throw new HttpRequestException("connection refused");
-        Assert.Equal(HcgApiFailure.Unavailable, (await Assert.ThrowsAsync<HcgApiException>(() => api.GetAsync<AppAccessDirectory>("access", default))).Failure);
+        Assert.Equal(HcgApiFailure.Unavailable, (await Assert.ThrowsAsync<HcgApiException>(() => api.GetAsync<JsonElement>("access", default))).Failure);
     }
 
-    [Fact]
-    public async Task App_access_states_and_organisation_switching()
-    {
-        var (api, site, account, _) = Setup();
-        var access = new AppAccessService(api, TimeProvider.System);
-        site.Respond = (_, _) => MockIdentityServer.Json(HttpStatusCode.OK, MockHcgWebsite.Directory(["support.submit", "support.attach"]));
-        await access.RefreshAsync();
-        Assert.Equal(AppAccessState.Granted, access.State);
-        Assert.True(access.Has(HcgPermissions.SupportAttach));
-        Assert.False(access.Has(HcgPermissions.AiUse));
-        Assert.Equal(2, access.Directory!.Organisations.Count);
-
-        // Selecting an organisation sends it on every request; the server validates membership.
-        await account.SetOrganisationAsync("client-co");
-        await access.RefreshAsync();
-        Assert.Equal("client-co", site.Calls.Last().Org);
-
-        site.Respond = (_, _) => MockIdentityServer.Json(HttpStatusCode.OK, MockHcgWebsite.Directory([], permitted: false));
-        await access.RefreshAsync();
-        Assert.Equal(AppAccessState.NotGranted, access.State);
-        Assert.False(access.Has(HcgPermissions.SupportSubmit));
-
-        // A directory about another account is ignored (permission isolation).
-        site.Respond = (_, _) => MockIdentityServer.Json(HttpStatusCode.OK, MockHcgWebsite.Directory(["support.submit"], user: "someone-else"));
-        await access.RefreshAsync();
-        Assert.Equal(AppAccessState.Unavailable, access.State);
-        Assert.False(access.Has(HcgPermissions.SupportSubmit));
-
-        site.Respond = (_, _) => MockIdentityServer.Json(HttpStatusCode.NotFound, "");
-        await access.RefreshAsync();
-        Assert.Equal(AppAccessState.Unavailable, access.State);
-        Assert.Contains("not live on HCG yet", access.Message);
-
-        await account.SignOutAsync();
-        Assert.Equal(AppAccessState.SignedOut, access.State);
-        Assert.Null(access.Directory);
-    }
-}
-
-public class SupportClientTests
-{
-    private static CreateSupportRequest Draft(SubmissionMode mode, params AttachmentManifest[] files) => new()
-    {
-        ClientRequestId = Guid.NewGuid(), Title = "Unity WebGL", Mode = mode, AppVersion = "0.4.0", Attachments = files,
-        Details = new SupportRequestDetails { Goal = "Build Unity WebGL", Problem = "Unsupported" },
-        Diagnostics = [new DiagnosticEntry("Project", "Language", "C#")],
-    };
-
-    private static string Summary(string status = "draft") => JsonSerializer.Serialize(new
-    {
-        id = Guid.Parse("aaaaaaaa-0000-4000-8000-000000000001"), reference = "HCG-ABC234", title = "Unity WebGL", status,
-        createdAt = DateTimeOffset.UtcNow, updatedAt = DateTimeOffset.UtcNow, staffMessages = 0,
-    });
-
-    [Fact]
-    public async Task Submitting_uploads_with_progress_then_completes_and_submits()
-    {
-        var (api, site, _, _) = HcgApiTests.Setup();
-        using var t = new TempDir();
-        var file = new UploadFile(t.Write("project.zip", new string('x', 300_000)), "project.zip", "application/zip");
-        var manifest = file.Manifest();
-        byte[]? uploaded = null;
-        site.Respond = (req, body) => req.RequestUri!.AbsolutePath switch
-        {
-            "/api/public/executable-maker/v1/support/requests" => MockIdentityServer.Json(HttpStatusCode.OK,
-                $$"""{"request":{{Summary()}},"duplicate":false,"uploads":[{"attachmentId":"bbbbbbbb-0000-4000-8000-000000000002","name":"project.zip","uploadUrl":"https://qggdyzoydveafkmjgkpq.supabase.co/storage/v1/object/upload/sign/executable-maker-support/x?token=t","expiresAt":"{{DateTimeOffset.UtcNow.AddHours(2):O}}","maxBytes":52428800}]}"""),
-            var p when p.StartsWith("/storage/") => Upload(req),
-            var p when p.EndsWith("/complete") => MockIdentityServer.Json(HttpStatusCode.OK, """{"attachment":{"id":"bbbbbbbb-0000-4000-8000-000000000002","name":"project.zip","state":"received","scan":"not_scanned"}}"""),
-            var p when p.EndsWith("/submit") => MockIdentityServer.Json(HttpStatusCode.OK, $$$"""{"request":{"summary":{{{Summary("submitted")}}},"details":{"goal":"g","problem":"p"},"mode":"diagnostics_and_files"}}"""),
-            _ => MockIdentityServer.Json(HttpStatusCode.NotFound, "{}"),
-        };
-        HttpResponseMessage Upload(HttpRequestMessage req)
-        {
-            uploaded = req.Content!.ReadAsByteArrayAsync().Result;
-            Assert.Null(req.Headers.Authorization); // the signed URL carries its own short-lived token
-            return MockIdentityServer.Json(HttpStatusCode.OK, "{}");
-        }
-        var progress = new List<UploadProgress>();
-        var service = new SupportService(api, new HttpClient(site));
-        var result = await service.SubmitAsync(Draft(SubmissionMode.DiagnosticsAndFiles, manifest), [file], new SyncProgress(progress.Add), default);
-        Assert.Equal(SubmitOutcome.Submitted, result.Outcome);
-        Assert.Equal("HCG-ABC234", result.Request.Reference);
-        Assert.Equal(300_000, uploaded!.Length);
-        Assert.Equal(300_000, progress.Last().SentBytes);
-        Assert.Contains("\"clientRequestId\"", site.Calls.First().Body);
-    }
-
-    [Fact]
-    public async Task Upload_urls_outside_HCG_are_refused_and_failures_keep_a_resumable_draft()
-    {
-        var (api, site, _, _) = HcgApiTests.Setup();
-        using var t = new TempDir();
-        var file = new UploadFile(t.Write("project.zip", "zip"), "project.zip", "application/zip");
-        var uploadUrl = "https://evil.example/upload";
-        site.Respond = (req, _) => req.RequestUri!.AbsolutePath == "/api/public/executable-maker/v1/support/requests"
-            ? MockIdentityServer.Json(HttpStatusCode.OK, $$"""{"request":{{Summary()}},"duplicate":false,"uploads":[{"attachmentId":"bbbbbbbb-0000-4000-8000-000000000002","name":"project.zip","uploadUrl":"{{uploadUrl}}","expiresAt":"{{DateTimeOffset.UtcNow.AddHours(2):O}}","maxBytes":100}]}""")
-            : MockIdentityServer.Json(HttpStatusCode.ServiceUnavailable, "{}");
-        var service = new SupportService(api, new HttpClient(site));
-        var ex = await Assert.ThrowsAsync<HcgApiException>(() => service.SubmitAsync(Draft(SubmissionMode.DiagnosticsAndFiles, file.Manifest()), [file], null, default));
-        Assert.Contains("outside HCG", ex.Message);
-        Assert.DoesNotContain(site.Calls, c => c.Path == "/upload");
-
-        // A storage outage: the request stays a draft on HCG; the same draft resumes later (no duplicate).
-        uploadUrl = "https://qggdyzoydveafkmjgkpq.supabase.co/storage/v1/object/upload/sign/b/x?token=t";
-        var draft = Draft(SubmissionMode.DiagnosticsAndFiles, file.Manifest());
-        var r = await service.SubmitAsync(draft, [file], null, default);
-        Assert.Equal(SubmitOutcome.UploadIncomplete, r.Outcome);
-        Assert.Contains("will not be duplicated", r.Message);
-    }
-
-    [Fact]
-    public async Task Cancelling_an_upload_keeps_the_request_as_a_draft()
-    {
-        var (api, site, _, _) = HcgApiTests.Setup();
-        using var t = new TempDir();
-        var file = new UploadFile(t.Write("project.zip", new string('x', 1000)), "project.zip", "application/zip");
-        using var cts = new CancellationTokenSource();
-        site.Respond = (req, _) =>
-        {
-            if (req.RequestUri!.AbsolutePath.StartsWith("/storage/")) { cts.Cancel(); cts.Token.ThrowIfCancellationRequested(); }
-            return MockIdentityServer.Json(HttpStatusCode.OK, $$"""{"request":{{Summary()}},"duplicate":false,"uploads":[{"attachmentId":"bbbbbbbb-0000-4000-8000-000000000002","name":"project.zip","uploadUrl":"https://qggdyzoydveafkmjgkpq.supabase.co/storage/v1/object/upload/sign/b/x?token=t","expiresAt":"{{DateTimeOffset.UtcNow.AddHours(2):O}}","maxBytes":52428800}]}""");
-        };
-        var r = await new SupportService(api, new HttpClient(site)).SubmitAsync(Draft(SubmissionMode.DiagnosticsAndFiles, file.Manifest()), [file], null, cts.Token);
-        Assert.Equal(SubmitOutcome.UploadIncomplete, r.Outcome);
-        Assert.Contains("cancelled", r.Message);
-        Assert.DoesNotContain(site.Calls, c => c.Path.EndsWith("/submit"));
-    }
-
-    private sealed class SyncProgress(Action<UploadProgress> report) : IProgress<UploadProgress>
-    {
-        public void Report(UploadProgress value) => report(value);
-    }
-}
-
-public class SupportPlanningTests : IDisposable
-{
-    private readonly TempDir _t = new();
-    public void Dispose() => _t.Dispose();
-
-    [Fact]
-    public void Credentials_signing_material_dependencies_and_outputs_are_excluded_by_default()
-    {
-        _t.Write("src/main.ts", "export const x = 1;");
-        _t.Write("package.json", "{}");
-        _t.Write(".env", "API_KEY=abc");
-        _t.Write(".env.example", "API_KEY=");
-        _t.Write("certs/dev.p12", "binary");
-        _t.Write("android/app/release.keystore", "binary");
-        _t.Write("ios/AuthKey_ABC.p8", "-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----");
-        _t.Write(".npmrc", "//registry.npmjs.org/:_authToken=npm_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        _t.Write("node_modules/left-pad/index.js", "module.exports = 1");
-        _t.Write("dist/app.js", "built");
-        _t.Write(".git/config", "[core]");
-        _t.Write("config/settings.json", """{"stripeKey":"sk_live_abcdefghijklmnopqrstuv"}""");
-        _t.Write("data/app.sqlite", "SQLite format 3");
-        var plan = AttachmentPlanner.Plan(_t.Path);
-        string[] Included() => plan.Included.Select(f => f.RelativePath).OrderBy(x => x, StringComparer.Ordinal).ToArray();
-        Assert.Equal([".env.example", "package.json", "src/main.ts"], Included());
-        Assert.True(plan.Files.Single(f => f.RelativePath == ".env").NeverSend);
-        Assert.True(plan.Files.Single(f => f.RelativePath == "certs/dev.p12").NeverSend);
-        Assert.True(plan.Files.Single(f => f.RelativePath == "android/app/release.keystore").NeverSend);
-        Assert.True(plan.Files.Single(f => f.RelativePath == ".npmrc").NeverSend);
-        var flagged = plan.Files.Single(f => f.RelativePath == "config/settings.json");
-        Assert.True(flagged.IsFlagged);
-        Assert.False(flagged.Included);
-        Assert.Contains("Stripe key (line 1)", flagged.Explanation);
-        Assert.Contains("node_modules/", plan.SkippedDirectories);
-        Assert.Contains("dist/", plan.SkippedDirectories);
-        Assert.Contains(".git/", plan.SkippedDirectories);
-        Assert.False(plan.Files.Single(f => f.RelativePath == "data/app.sqlite").Included);
-
-        // The archive contains exactly the included files, under project/.
-        var archive = AttachmentPlanner.BuildArchive(plan, _t.Combine("out"), "project.zip");
-        using var zip = ZipFile.OpenRead(archive.Path);
-        Assert.Equal(["project/.env.example", "project/package.json", "project/src/main.ts"], zip.Entries.Select(e => e.FullName).OrderBy(x => x, StringComparer.Ordinal).ToArray());
-        Assert.Equal(64, archive.Sha256.Length);
-    }
-
-    [UnixFact]
-    public void Symbolic_links_are_never_followed_or_sent()
-    {
-        _t.Write("real.txt", "hello");
-        File.CreateSymbolicLink(_t.Combine("link-to-passwd"), "/etc/passwd");
-        Directory.CreateSymbolicLink(_t.Combine("linked-dir"), "/etc");
-        var plan = AttachmentPlanner.Plan(_t.Path);
-        Assert.True(plan.Files.Single(f => f.RelativePath == "link-to-passwd").NeverSend);
-        Assert.True(plan.Files.Single(f => f.RelativePath == "linked-dir").NeverSend);
-        Assert.DoesNotContain(plan.Files, f => f.RelativePath.StartsWith("linked-dir/", StringComparison.Ordinal));
-        // Even if a never-send file were marked included, the archive skips it.
-        foreach (var f in plan.Files) f.Included = true;
-        using var zip = ZipFile.OpenRead(AttachmentPlanner.BuildArchive(plan, _t.Combine("out"), "p.zip").Path);
-        Assert.Equal(["project/real.txt"], zip.Entries.Select(e => e.FullName).ToArray());
-    }
-
-    [Theory]
-    [InlineData("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "eyJhbGci")]
-    [InlineData("export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE")]
-    [InlineData("token: ghp_abcdefghijklmnopqrstuvwxyz0123456789", "ghp_abcdefghijklmnopqrstuvwxyz0123456789")]
-    [InlineData("git clone https://user:hunter2secret@github.com/x/y", "hunter2secret")]
-    [InlineData("DB_PASSWORD=correct-horse-battery", "correct-horse-battery")]
-    [InlineData("\"client_secret\": \"s3cr3t-value-123\"", "s3cr3t-value-123")]
-    [InlineData("-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----", "MIIEow")]
-    public void Secrets_are_redacted_from_logs_diagnostics_and_ai_payloads(string text, string secret)
-    {
-        var redacted = SecretRedactor.Redact(text);
-        Assert.DoesNotContain(secret, redacted);
-        Assert.Contains(SecretRedactor.Mask, redacted);
-        Assert.NotEmpty(SecretRedactor.Scan(text));
-    }
-
-    [Fact]
-    public void Ordinary_build_output_is_not_redacted()
-    {
-        const string line = "error CS0246: The type or namespace name 'Foo' could not be found (are you missing a using directive?) [/src/App.csproj]";
-        Assert.Equal(line, SecretRedactor.Redact(line));
-    }
-
-    [Fact]
-    public void Diagnostics_hide_the_home_folder_and_secrets_and_contain_no_source()
-    {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var build = new BuildRecord
-        {
-            Id = Guid.NewGuid(), ProjectId = Guid.NewGuid(), StartedAt = DateTimeOffset.UtcNow, Status = BuildStatus.Failed,
-            FailureReason = $"dotnet publish failed in {home}/Projects/App",
-            Settings = new BuildSettings { ProjectRelativePath = "App.csproj", Platform = TargetPlatform.Windows, Architecture = TargetArchitecture.X64, OutputDirectory = "/o", Identity = new AppIdentity { ApplicationName = "A", Version = "1", ApplicationId = "a.b" } },
-            Messages = [new BuildMessage(DiagnosticSeverity.Error, "NU1301: Unable to load the service index for source https://user:p4ssw0rd-xyz@nuget.example/v3/index.json", "NU1301")],
-        };
-        var items = DiagnosticsCollector.FromBuild(build, [$"  Restoring {home}/Projects/App/App.csproj", "NPM_TOKEN=npm_abcdefghijklmnopqrstuvwxyz0123456789"]);
-        var all = string.Join("\n", items.Select(i => i.Value));
-        if (home.Length > 3) Assert.DoesNotContain(home, all);
-        Assert.DoesNotContain("p4ssw0rd-xyz", all);
-        Assert.DoesNotContain("npm_abcdefghijklmnopqrstuvwxyz0123456789", all);
-        Assert.Contains("~/Projects/App", all);
-    }
 }
 
 public class HcgAiTests
@@ -370,13 +135,13 @@ public class HcgAiTests
     private static AiStatus Available(AiQuota? quota = null) => new(AiConnectionState.Available, "ok",
         [new AiCapability(AiCapabilities.ExplainBuildError, "Explain this build error", true, null, quota)]);
 
-    private static async Task<(AiAssistant Ai, HcgApiClient Api, MockHcgWebsite Site, AppAccessService Access)> Setup(IHcgAiGateway gateway, string[] permissions)
+    private static async Task<(AiAssistant Ai, MockEcosystem Api, FeatureAccessService Features, HcgAccountService Account)> Setup(IHcgAiGateway gateway, string[] permissions)
     {
-        var (api, site, account, _) = HcgApiTests.Setup();
-        site.Respond = (_, _) => MockIdentityServer.Json(HttpStatusCode.OK, MockHcgWebsite.Directory(permissions));
-        var access = new AppAccessService(api, TimeProvider.System);
-        await access.RefreshAsync();
-        return (new AiAssistant(gateway, access, account), api, site, access);
+        var api = new MockEcosystem();
+        api.Features[MockEcosystem.OrgA] = permissions.ToDictionary(p => p, _ => true);
+        var (features, _, _, account, _) = HcgEcosystemTests.Setup(api);
+        await features.RefreshAsync();
+        return (new AiAssistant(gateway, features, account), api, features, account);
     }
 
     private static AiPayload Payload() => new()

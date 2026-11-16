@@ -1,0 +1,27 @@
+{
+  "contractVersion": "hcg.executable-maker.connect/1",
+  "clientId": "fb9b6edf-2bfc-4b5e-a354-dbb1af697029",
+  "issuer": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1",
+  "authorizationEndpoint": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/authorize",
+  "tokenEndpoint": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/token",
+  "userinfoEndpoint": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/userinfo",
+  "jwksEndpoint": "https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/.well-known/jwks.json",
+  "redirectUris": [
+    "http://127.0.0.1:47820/oauth/callback",
+    "http://127.0.0.1:47821/oauth/callback",
+    "http://127.0.0.1:47822/oauth/callback"
+  ],
+  "scopes": [
+    "openid",
+    "email",
+    "profile"
+  ],
+  "apiBaseUrl": "https://beta.hakmicapitalgroup.com",
+  "ecosystemApiPath": "/api/public/ecosystem/v1",
+  "productId": "hcg.executable.maker",
+  "accountPortalUrl": "https://beta.hakmicapitalgroup.com/client-portal",
+  "trustedLinkHosts": [
+    "beta.hakmicapitalgroup.com",
+    "hakmicapitalgroup.com"
+  ]
+}

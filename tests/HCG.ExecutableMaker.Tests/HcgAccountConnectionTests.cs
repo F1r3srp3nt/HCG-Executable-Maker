@@ -49,11 +49,11 @@ public partial class HcgSessionTests
     [Fact]
     public void Missing_local_configuration_names_the_fields_and_never_claims_HCG_rejected_the_app()
     {
-        var account = new HcgAccountService(HcgConnectConfiguration.Default, new HcgAuthClient(new HttpClient(new MockIdentityServer()), HcgConnectConfiguration.Default, TimeProvider.System),
+        var account = new HcgAccountService(HcgConnectConfiguration.Development, new HcgAuthClient(new HttpClient(new MockIdentityServer()), HcgConnectConfiguration.Development, TimeProvider.System),
             new SessionOnlyCredentialStore(), TimeProvider.System);
         Assert.Equal(HcgAccountStatus.NotConfigured, account.Status);
         Assert.Contains("Missing or invalid: clientId", account.Message, StringComparison.Ordinal);
-        Assert.StartsWith("missing: no client ID is configured on this computer", Assert.Single(account.Configuration.Issues()).Problem, StringComparison.Ordinal);
+        Assert.StartsWith("missing: HCG has not issued a client for the development registration", Assert.Single(account.Configuration.Issues()).Problem, StringComparison.Ordinal);
         Assert.Contains("it does not mean HCG rejected the app", account.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("not registered", account.Message, StringComparison.OrdinalIgnoreCase);
     }
