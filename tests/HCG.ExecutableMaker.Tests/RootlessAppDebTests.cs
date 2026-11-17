@@ -15,7 +15,7 @@ internal static class MachOFixture
     public const int Execute = 2, Dylib = 6;
 
     public static byte[] Build(int fileType = Execute, string minos = "14.7", uint platform = 2, string[]? dylibs = null, string[]? rpaths = null,
-        bool signed = true, string? entitlementsXml = null, bool encrypted = false, uint cpu = 0x0100000C)
+        bool signed = true, string? entitlementsXml = null, bool encrypted = false, uint cpu = 0x0100000C, bool codeDirectory = true)
     {
         var cmds = new List<byte[]>();
         byte[] Cmd(uint cmd, int size, Action<byte[]> fill) { var b = new byte[size]; BinaryPrimitives.WriteUInt32LittleEndian(b, cmd); BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(4), (uint)size); fill(b); return b; }
@@ -36,15 +36,33 @@ internal static class MachOFixture
         byte[]? signature = null;
         if (signed)
         {
+            // A superblob with a CodeDirectory (slot 0, as ldid writes it; the hashes are not real) and optional entitlements (slot 5).
+            var blobs = new List<(uint Slot, byte[] Data)>();
+            if (codeDirectory)
+            {
+                var cd = new byte[44];
+                BinaryPrimitives.WriteUInt32BigEndian(cd, 0xFADE0C02); BinaryPrimitives.WriteUInt32BigEndian(cd.AsSpan(4), 44); BinaryPrimitives.WriteUInt32BigEndian(cd.AsSpan(8), 0x20001);
+                blobs.Add((0, cd));
+            }
             var ent = entitlementsXml is null ? [] : Encoding.UTF8.GetBytes(entitlementsXml);
-            var entBlob = ent.Length == 0 ? [] : new byte[8 + ent.Length];
-            if (ent.Length > 0) { BinaryPrimitives.WriteUInt32BigEndian(entBlob, 0xFADE7171); BinaryPrimitives.WriteUInt32BigEndian(entBlob.AsSpan(4), (uint)entBlob.Length); ent.CopyTo(entBlob, 8); }
-            var count = ent.Length == 0 ? 0 : 1;
-            signature = new byte[12 + count * 8 + entBlob.Length];
+            if (ent.Length > 0)
+            {
+                var entBlob = new byte[8 + ent.Length];
+                BinaryPrimitives.WriteUInt32BigEndian(entBlob, 0xFADE7171); BinaryPrimitives.WriteUInt32BigEndian(entBlob.AsSpan(4), (uint)entBlob.Length); ent.CopyTo(entBlob, 8);
+                blobs.Add((5, entBlob));
+            }
+            var header = 12 + blobs.Count * 8;
+            signature = new byte[header + blobs.Sum(b => b.Data.Length)];
             BinaryPrimitives.WriteUInt32BigEndian(signature, 0xFADE0CC0);
             BinaryPrimitives.WriteUInt32BigEndian(signature.AsSpan(4), (uint)signature.Length);
-            BinaryPrimitives.WriteUInt32BigEndian(signature.AsSpan(8), (uint)count);
-            if (count == 1) { BinaryPrimitives.WriteUInt32BigEndian(signature.AsSpan(12), 5); BinaryPrimitives.WriteUInt32BigEndian(signature.AsSpan(16), 20); entBlob.CopyTo(signature, 20); }
+            BinaryPrimitives.WriteUInt32BigEndian(signature.AsSpan(8), (uint)blobs.Count);
+            var at = header;
+            for (var i = 0; i < blobs.Count; i++)
+            {
+                BinaryPrimitives.WriteUInt32BigEndian(signature.AsSpan(12 + i * 8), blobs[i].Slot);
+                BinaryPrimitives.WriteUInt32BigEndian(signature.AsSpan(16 + i * 8), (uint)at);
+                blobs[i].Data.CopyTo(signature, at); at += blobs[i].Data.Length;
+            }
             cmds.Add(Cmd(0x1D, 16, _ => { }));
         }
         var sizeofcmds = cmds.Sum(c => c.Length);
@@ -304,6 +322,17 @@ public class RootlessAppDebTests
         var (p2, _) = await Package(rootful);
         var v2 = await RootlessAppDebValidator.ValidateAsync(p2.DebPath, new(), CancellationToken.None);
         Assert.Contains("rootful jailbreak location", v2.Checks.Single(c => c.Name == "Dynamic libraries").Detail);
+    }
+
+    [Fact]
+    public async Task A_signature_command_without_a_CodeDirectory_is_unsigned_and_is_signed_with_ldid()
+    {
+        var app = MachOFixture.App(_t.Combine("nocd"));
+        File.WriteAllBytes(Path.Combine(app, "HCGSentinel"), MachOFixture.Build(codeDirectory: false,
+            dylibs: ["/usr/lib/libSystem.B.dylib", "@rpath/SentinelCore.framework/SentinelCore"], rpaths: ["@executable_path/Frameworks"]));
+        Assert.False(MachOLinkage.Read(Path.Combine(app, "HCGSentinel"))[0].HasCodeSignature);
+        var (pkg, _) = await Package(app, ldid: "/usr/local/bin/ldid");
+        Assert.Equal(["HCGSentinel"], pkg.SignedFiles);
     }
 
     [Fact]
