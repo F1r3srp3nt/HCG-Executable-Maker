@@ -307,6 +307,20 @@ public class RootlessAppDebTests
     }
 
     [Fact]
+    public async Task Swift_libraries_found_through_an_rpath_into_the_OS_count_as_system_libraries()
+    {
+        var app = MachOFixture.App(_t.Combine("swift"));
+        File.WriteAllBytes(Path.Combine(app, "HCGSentinel"), MachOFixture.Build(
+            dylibs: ["/usr/lib/libSystem.B.dylib", "@rpath/libswift_Concurrency.dylib", "@rpath/SentinelCore.framework/SentinelCore"],
+            rpaths: ["/usr/lib/swift", "@executable_path/Frameworks"]));
+        var (pkg, _) = await Package(app);
+        var v = await RootlessAppDebValidator.ValidateAsync(pkg.DebPath, new(), CancellationToken.None);
+        var libs = v.Checks.Single(c => c.Name == "Dynamic libraries");
+        Assert.Equal(VerificationStatus.Passed, libs.Status);
+        Assert.True(libs.Detail.Contains("3 system libraries"), libs.Detail); // libSystem, UIKit (framework) and libswift_Concurrency via /usr/lib/swift
+    }
+
+    [Fact]
     public async Task Privileged_entitlements_are_refused_whether_embedded_or_requested_and_ordinary_ones_are_listed()
     {
         const string privileged = """<?xml version="1.0"?><plist version="1.0"><dict><key>platform-application</key><true/><key>com.apple.private.security.no-sandbox</key><true/></dict></plist>""";
