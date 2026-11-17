@@ -219,6 +219,8 @@ public static class RootlessAppDebValidator
                         {
                             var resolved = Resolve(d.Path, installed, s.RPaths, installPath + "/" + exe);
                             if (resolved.Any(payloadFiles.Contains)) continue;
+                            // An rpath into the OS (Xcode adds /usr/lib/swift for Swift apps): the library comes from iOS itself.
+                            if (resolved.FirstOrDefault(r => SystemLibraryPrefixes.Any(p => r.StartsWith(p, StringComparison.Ordinal))) is { } sys) { systemLibs.Add(sys); continue; }
                             (weak ? linkWarnings : linkProblems).Add($"{rel} loads {d.Path}, which is not in the package{(weak ? " (weak: optional)" : "")}");
                             continue;
                         }

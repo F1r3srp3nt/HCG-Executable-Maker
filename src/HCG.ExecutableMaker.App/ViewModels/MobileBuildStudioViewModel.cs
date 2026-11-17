@@ -780,9 +780,12 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     /// A Simulator .app is a folder and is never offered (it cannot be installed on a device).</summary>
     public bool CanShipToStore => _lastResult is { } r && ShipFromBuild.From(r) is { Files.Count: > 0 };
 
-    /// <summary>The device build (an .xcarchive or .ipa, never a Simulator .app) that a rootless jailbreak .deb can be made from.</summary>
+    /// <summary>
+    /// The device build (an .xcarchive or .ipa, never a Simulator .app) that a rootless jailbreak .deb can be made from.
+    /// An unsigned archive verifies with warnings ("not code-signed"): that is the usual input, signed with ldid later.
+    /// </summary>
     private string? RootlessSource => _lastResult?.Artifacts
-        .Where(a => a.Verification == VerificationStatus.Passed && a.Format is PackagingFormat.IosArchive or PackagingFormat.IosIpa)
+        .Where(a => (a.Verification is VerificationStatus.Passed or VerificationStatus.PassedWithWarnings) && (a.Format is PackagingFormat.IosArchive or PackagingFormat.IosIpa))
         .OrderBy(a => a.Format == PackagingFormat.IosArchive ? 0 : 1).Select(a => a.Path).FirstOrDefault();
     public bool CanPackageRootless => RootlessSource is not null;
 
