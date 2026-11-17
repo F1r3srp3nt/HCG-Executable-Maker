@@ -272,6 +272,17 @@ public sealed class ShipToStoreTests : IDisposable
         Assert.Equal("not-notarized", (mac with { SignatureStructure = "present", Signing = new("signed", null, "codesign") }).Readiness.Status);
         Assert.True((mac with { SignatureStructure = "present", Signing = new("notarized", null, "codesign") }).Readiness.OrdinaryInstall);
 
+        // A Linux portable ZIP (as Maker packages its own Linux build) is not a Windows app, and HCG Store takes no Linux ZIP.
+        var elf = new byte[64]; "\u007FELF"u8.CopyTo(elf);
+        var linuxZip = await StoreArtifacts.DetectAsync(ZipBytes("Tool-linux-x64.zip", ("Tool/Tool", elf), ("Tool/Tool.dll", "x"u8.ToArray())));
+        Assert.Equal("linux", linuxZip.Platform);
+        Assert.False(linuxZip.IsSupported);
+        Assert.Contains("Linux apps only as .deb, .rpm or .AppImage", Assert.Single(linuxZip.Problems));
+        Assert.DoesNotContain(linuxZip.Notes, n => n.Contains("Windows ZIP"));
+        var noProgram = await StoreArtifacts.DetectAsync(ZipBytes("Docs.zip", ("README.txt", "hello"u8.ToArray())));
+        Assert.Equal("windows", noProgram.Platform); // unchanged: no program at all is still only a note
+        Assert.Contains(noProgram.Notes, n => n.Contains("Windows ZIP"));
+
         var apk = await StoreArtifacts.DetectAsync(_t.Write("app.apk", "PK"));
         Assert.Contains("Android packages are not distributed through HCG Store", apk.Problems[0]);
         Assert.Contains("HCG Store accepts:", apk.Problems[0]);

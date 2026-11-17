@@ -253,7 +253,16 @@ public static class StoreArtifacts
                 }
                 if (apps.Count > 0 && !z.Entries.Any(e => e.FullName.EndsWith(".app/Contents/Info.plist", StringComparison.Ordinal))) problems.Add("The .app bundle has no Contents/Info.plist.");
                 if (apps.Count == 0 && !z.Entries.Any(e => e.FullName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
-                    notes.Add("No .app or .exe inside: shipped as a Windows ZIP. Check that this is what you meant.");
+                {
+                    if (LinuxProgram(z) is { } elf)
+                    {
+                        // A Linux portable ZIP (no .exe, a Linux program inside) is not a Windows app, and HCG Store takes no
+                        // Linux ZIPs: refuse it here rather than declare it as something it is not.
+                        platform = "linux";
+                        problems.Add($"A Linux app in a ZIP ({elf} is a Linux program). HCG Store takes Linux apps only as .deb, .rpm or .AppImage, not ZIP. Package it as one of those to ship it.");
+                    }
+                    else notes.Add("No .app or .exe inside: shipped as a Windows ZIP. Check that this is what you meant.");
+                }
             });
         }
         else problems.Add(UnsupportedExplanation(lower));
@@ -317,6 +326,19 @@ public static class StoreArtifacts
     }
 
     private static readonly HashSet<string> RuntimeHelpers = new(StringComparer.OrdinalIgnoreCase) { "createdump.exe" };
+
+    /// <summary>The shallowest Linux (ELF) program in a ZIP without a .exe or .app, if any: its entry name.</summary>
+    private static string? LinuxProgram(ZipArchive z)
+    {
+        var files = z.Entries.Where(e => e.Length >= 4 && !e.FullName.EndsWith('/')).OrderBy(e => e.FullName.Count(ch => ch == '/')).Take(200);
+        foreach (var e in files)
+        {
+            using var s = e.Open();
+            Span<byte> magic = stackalloc byte[4];
+            if (s.ReadAtLeast(magic, 4, throwOnEndOfStream: false) == 4 && magic.SequenceEqual("\u007FELF"u8)) return e.FullName;
+        }
+        return null;
+    }
 
     /// <summary>Authenticode certificate table in a PE file's data directory: "present", "absent", or null if not a PE.</summary>
     public static string? PeSignature(Stream s)

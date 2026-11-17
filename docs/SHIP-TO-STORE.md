@@ -26,7 +26,7 @@ organisation's HCG administrator; it is never offered for sale.
 | Sign-in, tokens | HCG Connect (OAuth 2.1 + PKCE), Executable Maker's existing account code | Implemented; HCG's production client `fb9b6edf-…` is built in (issued 13 Nov 2026, not yet used for a real sign-in) |
 | Who may publish / approve | HCG's entitlement authority, read by HCG Store (`HCG_STORE_PUBLISHER_CENTRAL_ID`, `HCG_STORE_RELEASE_APPROVER_CENTRAL_ID`) | Implemented in HCG Store; the central permission IDs are not issued yet |
 | Products and editions | HCG Store catalogue (`catalogue/products.json`) + Store draft products | Implemented |
-| Upload, storage, drafts, review, approval | HCG Store publishing API (`web-hcg-store/server/src/publishing.ts`, branch `publishing/ship-to-store`) | Implemented and tested in TEST mode; not merged or deployed |
+| Upload, storage, drafts, review, approval | HCG Store publishing API (`web-hcg-store/server/src/publishing.ts`) | Merged (`F1r3srp3nt/store` PR #12) and tested in TEST mode; not deployed (the HCG Store server is not hosted, D1) |
 | Release and file records | HCG Store (decision D6 in `web-hcg-store/docs/MAIN-SITE-INTEGRATION.md`: the Store's catalogue and protected storage stay authoritative for releases and files; no central release-approval authority) | Decided. The main site has no release or upload API, and Executable Maker calls no guessed endpoint. |
 
 ## Ship to Store after a build
@@ -46,6 +46,7 @@ Executable Maker decides each file's **kind** from its content, and HCG Store de
 | Installer | `.exe .msi .msix .dmg .pkg .rpm`, Linux `.deb` | by signature: unsigned / signature present but not verified / signed (Windows) / signed and notarized (macOS) |
 | Portable app | Windows `.zip`, macOS app `.zip`, `.AppImage` | as installers; a Windows ZIP is judged by its own top-level programs (not vendor-signed runtime helpers such as .NET's `createdump.exe`) |
 | iOS device build | `.ipa` | unsigned · development or ad hoc (registered devices only) · in-house · App Store profile (installs only through the App Store/TestFlight, which HCG never submits to) · profile expired · signed without a profile. The embedded profile's CMS signature is verified; "Apple" only when it chains to Apple on this computer |
+| Linux app in a ZIP | `.zip` with no `.exe` or `.app` and a Linux (ELF) program inside, e.g. Executable Maker's own `*-linux-x64.zip` | **not accepted**: HCG Store takes Linux apps only as `.deb`, `.rpm` or `.AppImage`. Before 17 Nov 2026 such a ZIP was wrongly declared as a Windows ZIP. Executable Maker cannot build those Linux packages yet, so its own Linux build cannot be shipped through HCG Store |
 | iOS Simulator build | Simulator `.app`, or an `.ipa`/`.zip` whose app is built for the Simulator | **not accepted**: it runs only in the Simulator on a Mac and cannot be installed on an iPhone or iPad |
 | Jailbreak package | `.deb` with an `iphoneos-*` architecture | jailbroken devices only (Sileo), never an ordinary device |
 

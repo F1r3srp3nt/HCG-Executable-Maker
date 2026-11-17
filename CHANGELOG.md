@@ -10,6 +10,9 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - Account page **Feature access** card with HCG's reason and what to do: HCG Store product link only when a licence is missing; "ask your administrator" for staff and organisation access; "not enabled yet" for features HCG has not enabled.
 - `--hcg-session features` and `--hcg-session require <feature>` (exit 0/3/8/9); `--ship-to-store` enforces the same check.
 
+### Fixed
+- Ship to Store declared a Linux portable ZIP (no `.exe`, a Linux program inside) as a **Windows** ZIP, and HCG Store accepted it. It is now refused before upload: HCG Store takes Linux apps only as `.deb`, `.rpm` or `.AppImage`. Found by shipping Executable Maker's own Linux package to a TEST HCG Store.
+
 ### Changed
 - The Ecosystem API client reads HCG's confirmed shapes only (`user`, `org_role`, features map, `licences`, `layer`/`reason`); anything else, or an answer about another organisation, product or feature, is "access unknown". Edition licences for other editions never count for the desktop app.
 - Support requests and HCG AI are enforced in their services (UI and command line alike); the undeployed App Access route no longer decides anything.

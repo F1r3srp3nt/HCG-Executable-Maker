@@ -15,7 +15,7 @@ It creates no account system and no role system, holds no secret, and never deci
 
 ## Status at a glance
 
-> **HCG Connect handoff for the main HCG site:** [docs/hcg-connect/HANDOFF.md](hcg-connect/HANDOFF.md). It covers the client to issue, the callback URIs, scopes, issuer and audience, and the `hcg-connect.json` schema with a placeholder client ID. It also covers the central Ecosystem API used for organisation, licence and feature access, and the implemented / configured / end-to-end-tested status of each part.
+> **HCG Connect handoff for the main HCG site:** [docs/hcg-connect/HANDOFF.md](hcg-connect/HANDOFF.md). It covers the client to issue, the callback URIs, scopes, issuer and audience, and the `hcg-connect.json` schema. HCG issued the production client on 13 Nov 2026 and it is built in (see [FEATURE-ACCESS.md](FEATURE-ACCESS.md)). It also covers the central Ecosystem API used for organisation, licence and feature access, and the implemented / configured / end-to-end-tested status of each part.
 
 | Part | State |
 |---|---|
