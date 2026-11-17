@@ -210,6 +210,8 @@ public class HcgEcosystemTests
     [InlineData("identity", "user_not_permitted", FeatureAccessState.NotPermitted, FeatureRemedy.AskAdministrator)]
     [InlineData("identity", "org_inactive", FeatureAccessState.NotPermitted, FeatureRemedy.AskAdministrator)]
     [InlineData("identity", "not_org_member", FeatureAccessState.NotPermitted, FeatureRemedy.ChooseOrganisation)]
+    [InlineData("licence", "expired", FeatureAccessState.NotPermitted, FeatureRemedy.ViewInStore)]
+    [InlineData("licence", "revoked", FeatureAccessState.NotPermitted, FeatureRemedy.AskAdministrator)]
     [InlineData("licence", "something_new", FeatureAccessState.NotPermitted, FeatureRemedy.None)]
     public async Task Each_reason_hcg_gives_has_its_own_explanation_and_only_a_missing_licence_points_to_hcg_store(string layer, string reason, FeatureAccessState state, FeatureRemedy remedy)
     {

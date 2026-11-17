@@ -149,7 +149,7 @@ const server = http.createServer(async (req, res) => {
         const known = scenario.features.some(x => x.feature_key === b.feature_key);
         const ok = member && allowed(b.feature_key);
         const reason = ok ? null : !member ? 'not_org_member' : scenario.checks[b.feature_key] ?? (known ? 'not_licensed' : 'feature_unavailable');
-        const layer = ok ? null : reason === 'not_licensed' ? 'licence' : ['not_org_member', 'org_inactive', 'user_not_permitted'].includes(reason) ? 'identity' : 'availability';
+        const layer = ok ? null : ['not_licensed', 'expired', 'revoked'].includes(reason) ? 'licence' : ['not_org_member', 'org_inactive', 'user_not_permitted'].includes(reason) ? 'identity' : 'availability';
         return json(res, 200, { api_version: 'v1', org_id: b.org_id, product_id: b.product_id, feature_key: b.feature_key, allowed: ok, layer, reason, verified_at: new Date().toISOString() });
       }
       return apiError(res, 404, 'not_found', 'No such route.');

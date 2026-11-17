@@ -113,18 +113,21 @@ TEST mode with the mock HCG Connect provider (nothing real is contacted):
 
 ## Not available yet (blockers)
 
-1. **The HCG Store server is not deployed.** The publishing API is merged (`F1r3srp3nt/store` PR #12) but off by
-   default and not hosted: `store.hakmicapitalgroup.com` serves only the static storefront (GitHub Pages), so its
-   publishing routes do not exist there and Ship to Store says "HCG Store does not answer publishing requests"
-   (decision D1, hosting, is open).
-2. **Central permission IDs** for publishing and release approval are not issued by HCG, and the entitlement API must
-   serve them (`HCG_STORE_PUBLISHER_CENTRAL_ID`, `HCG_STORE_RELEASE_APPROVER_CENTRAL_ID`). The deployed `/check`
-   only answers for `feature_key: "download"`, so against live HCG publishing fails closed until then.
-3. **HCG Store must allow Executable Maker's client**: HCG issued `fb9b6edf-2bfc-4b5e-a354-dbb1af697029`; the Store's
-   `HCG_STORE_PUBLISHING_CLIENT_IDS` must list it when the Store is deployed.
-4. **Release record (founder question).** Decision D6 keeps releases with HCG Store, so nothing is needed from the
-   main HCG backend. Still open: whether a release approved in HCG Store must also be added to the Store's
-   founder-reviewed `catalogue/releases.json` before public delivery (`web-hcg-store/docs/PUBLISHING.md` §7).
+State on 17 Nov 2026. Details and proposals: [hcg-connect/RESPONSE-2026-11-17.md](hcg-connect/RESPONSE-2026-11-17.md).
+
+1. **The HCG Store server is not deployed.** The publishing API is merged (`F1r3srp3nt/store` PR #12) but not hosted.
+   `store.hakmicapitalgroup.com` serves only the static storefront (GitHub Pages), so Ship to Store says "HCG Store does
+   not answer publishing requests". HCG Store's open PR #14 packages the server for Fly.io, with publishing as its
+   phase 3. Neither the PR nor the deployment is done.
+2. **The publishing permissions are not settled.** HCG created `hcg.store` / `store.publish` and
+   `store.release.approve` (operational, disabled, 16 Nov), plus `hcg.executable.maker` / `store.upload` as a
+   *customer* feature. HCG Store PR #14 checks `store.publish` under each published product's own central ID, where
+   HCG has not registered it, so publishing would always be refused. Which key means "may upload a draft", whether it
+   is staff-only, and under which product: founder decision (response §4).
+3. **HCG Store must allow Executable Maker's client.** HCG issued `fb9b6edf-2bfc-4b5e-a354-dbb1af697029`; PR #14 lists
+   it for phase 3 (`HCG_STORE_PUBLISHING_CLIENT_IDS`).
+4. **Release record.** HCG Store PR #14 generates `catalogue/releases.json` from approval records
+   (`npm run releases:sync`); this is not merged yet.
 5. HCG Repo does not list Store-held packages yet (`web-hcg-store/docs/PUBLISHING.md` §5).
 
 Until 1–3 are done Ship to Store works only against a test Store.

@@ -35,9 +35,11 @@ Base `https://beta.hakmicapitalgroup.com/api/public/ecosystem/v1`, the user's ow
   `licences[]` (`scope`, `scope_key`, `status`, `license_type`, `starts_at`, `ends_at`), `links`
   (`manage`/`checkout` null today), `revalidate_after_seconds`. 403 `not_org_member` for another organisation.
 - `POST /check {org_id, product_id, feature_key}` → `{ allowed, layer, reason, verified_at }` echoing the three
-  inputs. `layer`: availability · identity · licence. `reason`: product_unavailable · feature_unavailable ·
-  not_org_member · org_inactive · not_licensed · user_not_permitted. No edition field (edition checks, D2, are not
-  deployed; Executable Maker's features are not edition-scoped). Expiry and revocation both answer `not_licensed`.
+  inputs. `layer`: availability · identity · licence (`null` when allowed). `reason`: product_unavailable ·
+  feature_unavailable · not_org_member · org_inactive · not_licensed · **expired** · **revoked** · user_not_permitted.
+  `expired` and `revoked` were added by HCG on 16 Nov 2026 (main site `docs/hcg-store/maker-store-integration-handoff.md`
+  §3; revoked takes precedence). A failed evaluation is 503 `service_unavailable` (was 500). Licences may now carry an
+  `edition` that a feature's `editions` list must include; Executable Maker's own features list none.
 
 An answer with another `api_version`, another shape, or about another organisation, product or feature is **not
 recognised**: access is unknown, never a grant and never a denial.
@@ -68,7 +70,9 @@ signs in or another organisation is chosen while HCG is answering, the answer is
 
 | HCG's reason | Shown as | What to do |
 |---|---|---|
-| `not_licensed` (licence layer) | Not permitted: the organisation has no active licence that includes it (none, expired or revoked) | **View HCG Executable Maker in HCG Store** (`https://store.hakmicapitalgroup.com/apps/hcg-executable-maker`) |
+| `not_licensed` (licence layer) | Not permitted: the organisation has no active licence that includes it | **View HCG Executable Maker in HCG Store** (`https://store.hakmicapitalgroup.com/apps/hcg-executable-maker`) |
+| `expired` (licence layer, 16 Nov) | Not permitted: the licence has expired | **View HCG Executable Maker in HCG Store** (renewal) |
+| `revoked` (licence layer, 16 Nov) | Not permitted: the licence was revoked (refund or by HCG) | Ask your organisation's HCG administrator; no purchase offer |
 | `feature_unavailable`, `product_unavailable` | Not available yet: HCG has not enabled it | Nothing to buy or change |
 | `user_not_permitted`, `org_inactive` | Not permitted | Ask your organisation's HCG administrator |
 | `not_org_member` | Not permitted: not a member (anymore) | Choose another organisation, or ask its administrator |
@@ -76,7 +80,7 @@ signs in or another organisation is chosen while HCG is answering, the answer is
 | HCG Store 403 (publishing) | Not permitted: a staff permission | Ask your organisation's HCG administrator (**never** a purchase button) |
 | outage / unrecognised | HCG unavailable | Try again later |
 
-The Store link is the only purchase-related link, and only for a missing licence. HCG Store sells no Executable
+The Store link is the only purchase-related link, and only for a missing or expired licence. HCG Store sells no Executable
 Maker offer yet, so the page shows the product and its status, not a checkout. `links.checkout` from HCG is still
 shown only when HCG sends it (it is null today).
 

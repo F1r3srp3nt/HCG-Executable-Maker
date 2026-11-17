@@ -501,8 +501,16 @@ public sealed class FeatureAccessService : IDisposable
         var (state, text, remedy, link) = check.Reason switch
         {
             "not_licensed" => (FeatureAccessState.NotPermitted,
-                $"{name} has no active HCG Executable Maker licence that includes {feature.Title} (none was granted, or it expired or was revoked).",
+                $"{name} has no active HCG Executable Maker licence that includes {feature.Title}.",
                 FeatureRemedy.ViewInStore, StoreProductPage),
+            // HCG's main site, 16 Nov 2026: expired = past ends_at (offer renewal); revoked = refunded or revoked
+            // (deny, no purchase offer; revoked takes precedence over expired).
+            "expired" => (FeatureAccessState.NotPermitted,
+                $"{name}'s HCG Executable Maker licence that included {feature.Title} has expired.",
+                FeatureRemedy.ViewInStore, StoreProductPage),
+            "revoked" => (FeatureAccessState.NotPermitted,
+                $"{name}'s HCG Executable Maker licence that included {feature.Title} was revoked (for example after a refund).",
+                FeatureRemedy.AskAdministrator, (Uri?)null),
             "feature_unavailable" => (FeatureAccessState.NotAvailableYet, $"HCG has not enabled {feature.Title} for HCG Executable Maker yet.", FeatureRemedy.WaitForHcg, (Uri?)null),
             "product_unavailable" => (FeatureAccessState.NotAvailableYet, "HCG Executable Maker's account features are not available on HCG yet.", FeatureRemedy.WaitForHcg, null),
             "not_org_member" => (FeatureAccessState.NotPermitted, $"You are not a member of {name} (anymore).", FeatureRemedy.ChooseOrganisation, null),
