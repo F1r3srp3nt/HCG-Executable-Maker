@@ -2,6 +2,12 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Rootless packages for HCG Repo Candidate
+
+### Added
+- **Rootless package** workflow (UI page, Mobile Build Studio action, `--rootless-deb` / `--rootless-deb-validate`): an iOS app a build produced (device .app, .xcarchive or .ipa) → rootless `iphoneos-arm64` .deb with gzip members at `/var/jb/Applications` → full validation (paths, dependencies, Mach-O architecture/platform/minimum iOS/signature/entitlements/libraries, versions, gzip and complete extraction, SHA-256) → HCG Repo candidate handoff (provenance, changelog, known issues, package.toml, icon, import request, device test and recovery). The app is packaged unchanged: no added entitlements, privileged ones refused. See docs/ROOTLESS-PACKAGING.md.
+- CI `rootless-app-deb`: HCG Sentinel built from source and packaged through Mobile Build Studio and the Rootless package page, packaged again through the CLI (byte-identical), re-validated and dpkg-tested in a sandbox.
+
 ## [Unreleased] — Real HCG integration: issued registration, confirmed contracts, shared feature access
 
 ### Added

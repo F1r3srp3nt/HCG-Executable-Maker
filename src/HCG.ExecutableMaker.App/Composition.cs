@@ -146,6 +146,7 @@ public static class Composition
         services.AddSingleton<StoreClientFactory>();
         services.AddSingleton<StorePublishingAuthority>();
         services.AddSingleton<ShipToStoreViewModel>();
+        services.AddSingleton<RootlessPackageViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();

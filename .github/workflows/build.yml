@@ -1091,6 +1091,108 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  rootless-app-deb:
+    name: Rootless .deb — HCG Sentinel archived in Mobile Build Studio, packaged on the Rootless package page (UI) and by --rootless-deb (CLI), validated, dpkg-tested
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/rootless-out
+      # HCG-Sentinel main (merge of PR #6). The app is packaged as it is: no code, entitlement or capability changes.
+      SENTINEL_COMMIT: 490858c15343e9c24e6fe85a9a83f498d744a7af
+      PKG: com.hakmicapitalgroup.hcgsentinel
+      PKG_VERSION: 0.1.0~beta1
+      # For HCG Repo's importer: the run's repository and the commit this run built (a pull request's head, not its merge ref).
+      CI_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: ldid (pseudo-signing for jailbroken devices) and dpkg (sandbox install test)
+        run: |
+          brew install ldid dpkg
+          ldid 2>&1 | head -1 || true
+          dpkg --version | head -1
+      - name: HCG Sentinel at the pinned commit
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Sentinel.git "$OUT/src/HCG-Sentinel"
+          git -C "$OUT/src/HCG-Sentinel" checkout --quiet "$SENTINEL_COMMIT"
+          xcodebuild -version
+      - name: Build HCG and the UI driver
+        run: |
+          dotnet build tools/ui-driver -c Release
+          dotnet build src/HCG.ExecutableMaker.App -c Release
+      - name: UI — Mobile Build Studio archives HCGSentinel (unsigned device build), then "Rootless .deb (jailbreak)…" packages, validates and exports the handoff
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG-Sentinel" \
+            --mobile-output archive --scheme HCGSentinel --signing unsigned \
+            --rootless --rootless-package "$PKG" --rootless-version "$PKG_VERSION" --rootless-name "HCG Sentinel" \
+            --rootless-description "Toolkit for authorised testing of your own devices, networks and services. Candidate beta of the standard app, packaged for rootless jailbreaks." \
+            --rootless-repository F1r3srp3nt/HCG-Sentinel --rootless-commit "$SENTINEL_COMMIT" \
+            --rootless-ci-repository "${{ github.repository }}" --rootless-ci-commit "$CI_COMMIT" \
+            --rootless-ci-run "${{ github.run_id }}" --rootless-ci-artifact hcg-sentinel-rootless-deb \
+            --rootless-access undecided --rootless-device-ios 16.5 \
+            --rootless-change "First rootless candidate of HCG Sentinel 0.1.0 (the standard app, unchanged), built from source with Xcode." \
+            --rootless-known-issue "Sentinel's optional privileged helper exists only as a specification and is not part of this package; the app reports only what it implements." \
+            --rootless-out "$OUT/ui" --output "$OUT/ui-run" --screenshots "$OUT/screens" --prefix sentinel-rootless
+      - name: CLI — the same archive through --rootless-deb gives byte-identical output
+        run: |
+          archive="$(find "$OUT/ui-run" -path '*hcg-data/builds/*' -name '*.xcarchive' -type d | head -1)"
+          echo "Archive: $archive"
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
+            --package "$PKG" --package-version "$PKG_VERSION" --name "HCG Sentinel" \
+            --description "Toolkit for authorised testing of your own devices, networks and services. Candidate beta of the standard app, packaged for rootless jailbreaks." \
+            --device-ios 16.5 --repository F1r3srp3nt/HCG-Sentinel --commit "$SENTINEL_COMMIT" --no-handoff --out "$OUT/cli" | tee "$OUT/cli.log"
+          ui="$(ls "$OUT/ui"/*.deb)"; cli="$(ls "$OUT/cli"/*.deb)"
+          shasum -a 256 "$ui" "$cli" | tee "$OUT/sha256.txt"
+          [ "$(shasum -a 256 < "$ui")" = "$(shasum -a 256 < "$cli")" ] || { echo "UI and CLI packages differ"; exit 1; }
+      - name: Independent re-validation (--rootless-deb-validate) against iOS 16.5
+        run: |
+          deb="$(ls "$OUT/ui"/*.deb)"
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb-validate "$deb" \
+            --package "$PKG" --package-version "$PKG_VERSION" --bundle-id com.hcg.sentinel --device-ios 16.5 | tee "$OUT/validate.txt"
+      - name: dpkg sandbox — install, reinstall, remove and purge with real dpkg (not a device test)
+        run: |
+          deb="$(ls "$OUT/ui"/*.deb)"; R="$OUT/dpkg"
+          mkdir -p "$R/root" "$R/admin/updates" "$R/admin/info" "$R/bin"; touch "$R/admin/status" "$R/admin/available"
+          printf '#!/bin/sh\necho "uicache $*" >> "%s/uicache.log"\n' "$R" > "$R/bin/uicache"; chmod +x "$R/bin/uicache"
+          D="dpkg --root=/ --instdir=$R/root --admindir=$R/admin --force-script-chrootless --force-architecture --force-depends --force-not-root"
+          PATH="$R/bin:$PATH" $D -i "$deb"
+          PATH="$R/bin:$PATH" $D -s "$PKG" | grep -E "^(Status|Version)"
+          find "$R/root" -type f | sed "s|$R/root||" | sort > "$R/installed.txt"; wc -l < "$R/installed.txt"
+          PATH="$R/bin:$PATH" $D -i "$deb"     # reinstall of the same version (upgrade path)
+          PATH="$R/bin:$PATH" $D -r "$PKG"
+          left="$(find "$R/root" -type f | wc -l | tr -d ' ')"; echo "files left after removal: $left"; [ "$left" = 0 ]
+          PATH="$R/bin:$PATH" $D -P "$PKG"
+          cat "$R/uicache.log"
+          echo "### Rootless HCG Sentinel ($PKG $PKG_VERSION)" >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/- /' "$OUT/sha256.txt" >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^\s+\[" "$OUT/validate.txt" | sed 's/^ */- /' >> "$GITHUB_STEP_SUMMARY"
+          echo "- dpkg sandbox: installed $(wc -l < "$R/installed.txt" | tr -d ' ') files, removed all; uicache calls: $(tr '\n' ';' < "$R/uicache.log")" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hcg-sentinel-rootless-deb
+          path: ${{ github.workspace }}/rootless-out/ui/*.deb
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: hcg-sentinel-rootless-handoff
+          path: |
+            ${{ github.workspace }}/rootless-out/ui/*-candidate-handoff
+            ${{ github.workspace }}/rootless-out/ui/VALIDATION.txt
+            ${{ github.workspace }}/rootless-out/*.txt
+            ${{ github.workspace }}/rootless-out/*.log
+            ${{ github.workspace }}/rootless-out/dpkg/*.txt
+            ${{ github.workspace }}/rootless-out/dpkg/*.log
+            ${{ github.workspace }}/rootless-out/ui-run/*.json
+            ${{ github.workspace }}/rootless-out/ui-run/*.log
+            ${{ github.workspace }}/rootless-out/screens
+          if-no-files-found: warn
+          retention-days: 30
+
   native-cpp:
     name: C/C++ — CMake and Make fixtures through the New Build wizard (${{ matrix.os }})
     needs: test

@@ -707,6 +707,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         foreach (var a in result.Artifacts) BuiltArtifacts.Add(new ArtifactItem(a, result));
         OnPropertyChanged(nameof(HasBuiltArtifacts));
         OnPropertyChanged(nameof(CanShipToStore));
+        OnPropertyChanged(nameof(CanPackageRootless));
         UpdateBuildState(CreateOptions() is { } again && Mobile is { } mm ? MobileReadiness.Evaluate(mm, again.Output, again, _report) : null);
     }
 
@@ -778,6 +779,18 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     /// <summary>The last build succeeded with at least one verified file (an IPA, an APK…): "Ship to Store" is offered.
     /// A Simulator .app is a folder and is never offered (it cannot be installed on a device).</summary>
     public bool CanShipToStore => _lastResult is { } r && ShipFromBuild.From(r) is { Files.Count: > 0 };
+
+    /// <summary>The device build (an .xcarchive or .ipa, never a Simulator .app) that a rootless jailbreak .deb can be made from.</summary>
+    private string? RootlessSource => _lastResult?.Artifacts
+        .Where(a => a.Verification == VerificationStatus.Passed && a.Format is PackagingFormat.IosArchive or PackagingFormat.IosIpa)
+        .OrderBy(a => a.Format == PackagingFormat.IosArchive ? 0 : 1).Select(a => a.Path).FirstOrDefault();
+    public bool CanPackageRootless => RootlessSource is not null;
+
+    [RelayCommand]
+    private void PackageRootless()
+    {
+        if (RootlessSource is { } source) _navigation?.Navigate("rootless", source);
+    }
 
     [RelayCommand]
     private void ShipToStore()
