@@ -3,8 +3,14 @@
     Build identity: the git commit (and whether the working tree had uncommitted changes) is embedded in
     HCG.ExecutableMaker.Core so the running app can show exactly which build it is (footer, Settings › About this build,
     and `HCGExecutableMaker - -version`). HCG_SOURCE_REVISION overrides git (e.g. for builds from a source archive).
+    Without either, build-revision.txt next to this file is used: tools/self-package writes it into the imported copy,
+    which has no .git, because Executable Maker's build environment removes every HCG_* variable.
   -->
   <Target Name="HcgEmbedBuildIdentity" BeforeTargets="GetAssemblyAttributes" Condition="'$(MSBuildProjectName)' == 'HCG.ExecutableMaker.Core'">
+    <PropertyGroup><HcgRevisionFile>$(MSBuildThisFileDirectory)build-revision.txt</HcgRevisionFile></PropertyGroup>
+    <ReadLinesFromFile File="$(HcgRevisionFile)" Condition="'$(HCG_SOURCE_REVISION)' == '' and Exists('$(HcgRevisionFile)')">
+      <Output TaskParameter="Lines" PropertyName="HCG_SOURCE_REVISION" />
+    </ReadLinesFromFile>
     <Exec Command="git rev-parse --short=12 HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low"
           WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HCG_SOURCE_REVISION)' == ''">
       <Output TaskParameter="ConsoleOutput" PropertyName="HcgCommit" />

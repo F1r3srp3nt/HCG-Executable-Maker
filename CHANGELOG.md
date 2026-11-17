@@ -12,6 +12,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 
 ### Fixed
 - Ship to Store declared a Linux portable ZIP (no `.exe`, a Linux program inside) as a **Windows** ZIP, and HCG Store accepted it. It is now refused before upload: HCG Store takes Linux apps only as `.deb`, `.rpm` or `.AppImage`. Found by shipping Executable Maker's own Linux package to a TEST HCG Store.
+- Executable Maker's own packages (`tools/self-package`, CI "Package") reported commit "unknown": the build environment removes `HCG_*` variables, so `HCG_SOURCE_REVISION` never reached the build. The commit now travels as `build-revision.txt` in the imported copy, and `--version` names the exact commit a package was built from.
 
 ### Changed
 - The Ecosystem API client reads HCG's confirmed shapes only (`user`, `org_role`, features map, `licences`, `layer`/`reason`); anything else, or an answer about another organisation, product or feature, is "access unknown". Edition licences for other editions never count for the desktop app.
