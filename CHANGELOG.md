@@ -2,6 +2,12 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG's 16 Nov access policy: expired and revoked licences; handoff answer
+
+### Added
+- HCG's new `/check` reasons: `expired` ("the licence has expired", HCG Store page for renewal) and `revoked` ("the licence was revoked", ask the administrator, no purchase offer).
+- `docs/hcg-connect/RESPONSE-2026-11-17.md`: Executable Maker's answer to the main site's 16 Nov handoff. It lists the implemented keys (`support.submit`, `support.attach`, `ai.use`), explains why `build.*` and `package.installer` are not adopted (local builds stay free and offline), gives the development callback, corrects two pieces of handoff text, and sets out the Ship to Store permission mismatch for founder review.
+
 ## [Unreleased] — Real HCG integration: issued registration, confirmed contracts, shared feature access
 
 ### Added

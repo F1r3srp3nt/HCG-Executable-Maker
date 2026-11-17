@@ -318,6 +318,9 @@ All calls send `Authorization: Bearer <access token>` to `https://beta.hakmicapi
 
 **Then** mark the registry row `verified_production`.
 
+> **17 Nov 2026:** Executable Maker's answer to the main site's 16 Nov handoff (implemented keys, development callback,
+> two corrections, and the Ship to Store permission mismatch) is in [RESPONSE-2026-11-17.md](RESPONSE-2026-11-17.md).
+
 ## 10. Status (implemented / configured / end-to-end tested)
 
 **Kinds of verification:**
