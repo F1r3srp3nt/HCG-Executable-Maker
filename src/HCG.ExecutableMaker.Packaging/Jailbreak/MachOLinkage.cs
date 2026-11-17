@@ -34,6 +34,7 @@ public static class MachOLinkage
     private const uint LcRpath = 0x8000001C, LcCodeSignature = 0x1D, LcBuildVersion = 0x32, LcVersionMinIphoneOS = 0x25;
     private const uint LcEncryptionInfo = 0x21, LcEncryptionInfo64 = 0x2C;
     private const uint CsMagicEmbeddedSignature = 0xFADE0CC0, CsMagicEntitlements = 0xFADE7171, CsSlotEntitlements = 5;
+    private const uint CsMagicCodeDirectory = 0xFADE0C02, CsSlotCodeDirectory = 0;
     private const int MaxSignatureBytes = 4 * 1024 * 1024;
 
     /// <summary>True when the file starts with a Mach-O or fat (universal) header.</summary>
@@ -135,8 +136,8 @@ public static class MachOLinkage
                     encrypted |= BinaryPrimitives.ReadUInt32LittleEndian(c[16..]) != 0;
                     break;
                 case LcCodeSignature when size >= 16:
-                    signed = true;
-                    entitlements = Entitlements(fs, offset + BinaryPrimitives.ReadUInt32LittleEndian(c[8..]), BinaryPrimitives.ReadUInt32LittleEndian(c[12..]));
+                    // Signed means a CodeDirectory is present (as HCG Repo's validator and the kernel require), not just the command.
+                    (signed, entitlements) = Signature(fs, offset + BinaryPrimitives.ReadUInt32LittleEndian(c[8..]), BinaryPrimitives.ReadUInt32LittleEndian(c[12..]));
                     break;
             }
             pos += size;
@@ -153,29 +154,36 @@ public static class MachOLinkage
         return text.Length == 0 ? null : text;
     }
 
-    /// <summary>The XML entitlements blob (slot 5) of an embedded code signature, if the signature carries one.</summary>
-    private static string? Entitlements(FileStream fs, long start, uint length)
+    /// <summary>
+    /// Whether an embedded code signature carries a CodeDirectory (slot 0), and its XML entitlements blob (slot 5), if any.
+    /// </summary>
+    private static (bool HasCodeDirectory, string? Entitlements) Signature(FileStream fs, long start, uint length)
     {
-        if (length < 12 || length > MaxSignatureBytes || start < 0 || start + length > fs.Length) return null;
+        if (length < 12 || length > MaxSignatureBytes || start < 0 || start + length > fs.Length) return (false, null);
         var position = fs.Position;
         try
         {
             fs.Position = start;
             var blob = new byte[length];
             fs.ReadExactly(blob);
-            if (BinaryPrimitives.ReadUInt32BigEndian(blob) != CsMagicEmbeddedSignature) return null;
+            if (BinaryPrimitives.ReadUInt32BigEndian(blob) != CsMagicEmbeddedSignature) return (false, null);
             var count = BinaryPrimitives.ReadUInt32BigEndian(blob.AsSpan(8));
-            for (var i = 0; i < count && 12 + (i + 1) * 8 <= blob.Length; i++)
+            bool codeDirectory = false;
+            string? ents = null;
+            for (var i = 0; i < Math.Min(count, 64) && 12 + (i + 1) * 8 <= blob.Length; i++)
             {
                 var type = BinaryPrimitives.ReadUInt32BigEndian(blob.AsSpan(12 + i * 8));
                 var at = (int)BinaryPrimitives.ReadUInt32BigEndian(blob.AsSpan(16 + i * 8));
-                if (type != CsSlotEntitlements || at + 8 > blob.Length) continue;
-                if (BinaryPrimitives.ReadUInt32BigEndian(blob.AsSpan(at)) != CsMagicEntitlements) return null;
-                var len = (int)BinaryPrimitives.ReadUInt32BigEndian(blob.AsSpan(at + 4));
-                if (len < 8 || at + len > blob.Length) return null;
-                return Encoding.UTF8.GetString(blob, at + 8, len - 8);
+                if (at < 0 || at + 8 > blob.Length) continue;
+                var magic = BinaryPrimitives.ReadUInt32BigEndian(blob.AsSpan(at));
+                if (type == CsSlotCodeDirectory && magic == CsMagicCodeDirectory) codeDirectory = true;
+                else if (type == CsSlotEntitlements && magic == CsMagicEntitlements)
+                {
+                    var len = (int)BinaryPrimitives.ReadUInt32BigEndian(blob.AsSpan(at + 4));
+                    if (len >= 8 && at + len <= blob.Length) ents = Encoding.UTF8.GetString(blob, at + 8, len - 8);
+                }
             }
-            return null;
+            return (codeDirectory, ents);
         }
         finally { fs.Position = position; }
     }

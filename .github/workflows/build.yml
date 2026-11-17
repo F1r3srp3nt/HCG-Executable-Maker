@@ -1152,6 +1152,13 @@ jobs:
           deb="$(ls "$OUT/ui"/*.deb)"
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb-validate "$deb" \
             --package "$PKG" --package-version "$PKG_VERSION" --bundle-id com.hcg.sentinel --device-ios 16.5 | tee "$OUT/validate.txt"
+      - name: HCG Repo's own validator (bin/hcgrepo inspect, HCG-repo 6ff63fd) accepts the package
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo"
+          git -C "$OUT/hcg-repo" checkout --quiet 6ff63fd587ffcce762b1b097f9bb93902e78dbad
+          deb="$(ls "$OUT/ui"/*.deb)"
+          (cd "$OUT/hcg-repo" && bin/hcgrepo inspect "$deb") | tee "$OUT/hcgrepo-inspect.txt"
+          grep -q "^OK: package passes package-level validation" "$OUT/hcgrepo-inspect.txt"
       - name: dpkg sandbox — install, reinstall, remove and purge with real dpkg (not a device test)
         run: |
           deb="$(ls "$OUT/ui"/*.deb)"; R="$OUT/dpkg"
