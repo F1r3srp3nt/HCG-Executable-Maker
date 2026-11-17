@@ -34,8 +34,12 @@ json.dump({"contractVersion": "hcg.executable-maker.connect/1", "clientId": i["c
            "apiBaseUrl": i["apiBaseUrl"]}, open(sys.argv[2], "w"), indent=2)
 EOF
 state() { curl -s "http://127.0.0.1:$PORT/__mock/state"; }
-item() { security find-generic-password -s "$SERVICE" -a session >/dev/null 2>&1 && echo present || echo absent; }
-security delete-generic-password -s "$SERVICE" -a session >/dev/null 2>&1 || true
+# The MOCK identity server is a local test server, so the app keeps its session under its own entry
+# ("session-local-test"), never the production registration's ("session").
+ACCOUNT=session-local-test
+item() { security find-generic-password -s "$SERVICE" -a "$ACCOUNT" >/dev/null 2>&1 && echo present || echo absent; }
+security delete-generic-password -s "$SERVICE" -a "$ACCOUNT" >/dev/null 2>&1 || true
+security find-generic-password -s "$SERVICE" -a session >/dev/null 2>&1 && echo "note: a production session entry exists and is left untouched" || true
 
 run() { # $1 = label, $2 = verb, $3 = expected exit code
   echo "===== $1: \"$EXE\" --hcg-session $2 (new process)"
@@ -49,7 +53,7 @@ grep -q "Credential store: macOS Keychain" "$WORK/sign-in.out" || fail "the pack
 grep -q "HCG account: SignedIn — Signed in as founder@example.test\.$" "$WORK/sign-in.out" || fail "not signed in, or the session was not stored"
 grep -q "Plan: Pro" "$WORK/sign-in.out" || fail "plan not read from the (mock) central API"
 [ "$(item)" = present ] || fail "no Keychain item after sign-in"
-pass "signed in through the browser flow (PKCE S256, state, nonce, ES256 ID token); session stored in the login Keychain ($SERVICE / session)"
+pass "signed in through the browser flow (PKCE S256, state, nonce, ES256 ID token); session stored in the login Keychain ($SERVICE / $ACCOUNT)"
 echo "mock: $(state)"
 
 run "Restart 1" status 0

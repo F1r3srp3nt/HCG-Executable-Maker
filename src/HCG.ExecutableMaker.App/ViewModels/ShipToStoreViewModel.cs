@@ -62,7 +62,8 @@ public sealed partial class ShipToStoreViewModel(
     IProcessRunner runner,
     IDialogService dialogs,
     IPlatformShell shell,
-    NavigationService navigation) : PageViewModel
+    NavigationService navigation,
+    FeatureAccessService features) : PageViewModel
 {
     public override string Title => "Ship to Store";
     public override string Subtitle => "Upload a release to HCG Store as a private draft. Approval and publication happen in HCG Store, by a person.";
@@ -153,6 +154,22 @@ public sealed partial class ShipToStoreViewModel(
         }
         if (Client() is not { } client) return;
         (Connection, ConnectionTone, ConnectionDetail) = ("Connecting…", "info", $"Contacting {client.Origin.Host}…");
+        // The shared feature-access service asks HCG Store for the staff publishing permission (same as the command line).
+        var decision = await features.CheckNowAsync(MakerFeatures.StorePublish, storeOrigin: client.Origin);
+        if (generation != _connectGeneration) return;
+        if (!decision.IsAllowed)
+        {
+            (Connection, ConnectionTone) = decision.State switch
+            {
+                FeatureAccessState.NotPermitted => ("No publishing permission", "warning"),
+                FeatureAccessState.NotAvailableYet => ("Publishing not available", "warning"),
+                FeatureAccessState.SignInRequired => ("Not accepted", "error"),
+                FeatureAccessState.Unavailable => ("Unreachable", "error"),
+                _ => (decision.StateLabel, "warning"),
+            };
+            ConnectionDetail = decision.Explanation + (decision.RemedyText is { Length: > 0 } r ? " " + r : "");
+            return;
+        }
         try
         {
             var who = await client.WhoAmIAsync();
@@ -246,7 +263,7 @@ public sealed partial class ShipToStoreViewModel(
         if (Client() is not { } client) return;
         IsShipping = true;
         _cts = new CancellationTokenSource();
-        var service = new ShipToStoreService(client);
+        var service = new ShipToStoreService(client, features);
         var progress = new Progress<ShipItemProgress>(p =>
         {
             if (Files.FirstOrDefault(f => f.FileName == p.FileName) is not { } item) return;
@@ -273,6 +290,11 @@ public sealed partial class ShipToStoreViewModel(
                 : "Some files did not make it. Fix the problem and press Retry: verified files are kept, interrupted uploads resume.");
         }
         catch (HcgStoreException ex) { Summary = ex.Message; await dialogs.AlertAsync("Ship to Store stopped", ex.Message); }
+        catch (FeatureAccessDeniedException ex)
+        {
+            Summary = ex.Decision.Explanation + (ex.Decision.RemedyText is { Length: > 0 } r ? " " + r : "");
+            await dialogs.AlertAsync(ex.Decision.IsUnavailable ? "HCG Store could not decide" : "Not permitted", Summary);
+        }
         catch (OperationCanceledException) { Summary = "Cancelled. Press Retry to resume; the bytes HCG Store confirmed are kept."; }
         finally { IsShipping = false; }
     }
@@ -292,8 +314,13 @@ public sealed partial class ShipToStoreViewModel(
     {
         if (ReleaseId is null || Client() is not { } client) return;
         if (!await dialogs.ConfirmAsync("Submit for review?", "The release is locked (no more files) and waits for a person with HCG's approver permission to review and approve it in HCG Store. Nothing is published automatically, and nothing is sent to TestFlight or any external store.", "Submit for review")) return;
-        try { ShowRelease(await client.SubmitAsync(ReleaseId)); }
+        try
+        {
+            await features.RequireAsync(MakerFeatures.StorePublish, storeOrigin: client.Origin);
+            ShowRelease(await client.SubmitAsync(ReleaseId));
+        }
         catch (HcgStoreException ex) { await dialogs.AlertAsync("Not submitted", ex.Message); }
+        catch (FeatureAccessDeniedException ex) { await dialogs.AlertAsync("Not submitted", ex.Decision.Explanation + " " + ex.Decision.RemedyText); }
     }
 
     [RelayCommand]

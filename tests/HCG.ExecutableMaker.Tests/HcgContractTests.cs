@@ -80,21 +80,23 @@ public class HcgContractTests
     }
 
     [ContractServerFact]
-    public async Task App_access_matches_the_servers_erp_decision()
+    public async Task The_website_packages_access_route_answers_with_the_servers_decision()
     {
+        // The app no longer decides from this route (HCG's central /check decides, see FeatureAccessService); the website
+        // package still serves it, and this keeps its contract honest.
         var info = Load();
         var (api, _) = Client(info, "granted");
-        var access = new AppAccessService(api, TimeProvider.System);
-        await access.RefreshAsync();
-        Assert.Equal(AppAccessState.Granted, access.State);
-        Assert.True(access.Has(HcgPermissions.SupportSubmit));
-        Assert.Equal(52428800, access.Directory!.Limits!.MaxAttachmentBytes);
+        var granted = await api.GetAsync<JsonElement>("access", default);
+        Assert.Contains("support.submit", granted.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()));
+        Assert.Equal(52428800, granted.GetProperty("limits").GetProperty("maxAttachmentBytes").GetInt64());
 
         var (api2, _) = Client(info, "outsider", subject: "ignored");
-        var denied = new AppAccessService(api2, TimeProvider.System);
-        await denied.RefreshAsync();
-        Assert.True(denied.State is AppAccessState.NotGranted or AppAccessState.Unavailable); // subject mismatch is also refused
-        Assert.False(denied.Has(HcgPermissions.SupportSubmit));
+        try
+        {
+            var denied = await api2.GetAsync<JsonElement>("access", default);
+            Assert.DoesNotContain("support.submit", denied.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()));
+        }
+        catch (HcgApiException ex) { Assert.True(ex.Failure is HcgApiFailure.Forbidden or HcgApiFailure.Unauthorized); }
     }
 
     [ContractServerFact]

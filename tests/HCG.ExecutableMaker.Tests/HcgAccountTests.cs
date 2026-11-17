@@ -124,12 +124,13 @@ public class HcgAuthTests
     [Fact]
     public void Without_a_local_client_id_sign_in_is_not_configured_and_nothing_is_claimed_about_HCG()
     {
-        var (client, server) = Client(HcgConnectConfiguration.Default);
+        // The development registration has no issued client (HCG issued only the production one).
+        var (client, server) = Client(HcgConnectConfiguration.Development);
         Assert.Equal(HcgAuthFailure.NotConfigured, Assert.Throws<HcgAuthException>(() => client.BeginSignIn(Redirect)).Failure);
-        var issue = Assert.Single(HcgConnectConfiguration.Default.Issues());
+        var issue = Assert.Single(HcgConnectConfiguration.Development.Issues());
         Assert.Equal("clientId", issue.Field);
-        Assert.StartsWith("missing: no client ID is configured on this computer", issue.Problem, StringComparison.Ordinal);
-        Assert.DoesNotContain(HcgConnectConfiguration.Default.MissingForSignIn(), m => m.Contains("not registered", StringComparison.OrdinalIgnoreCase));
+        Assert.StartsWith("missing: HCG has not issued a client for the development registration", issue.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain(HcgConnectConfiguration.Development.MissingForSignIn(), m => m.Contains("not registered", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(server.Calls); // nothing is contacted
     }
 
@@ -267,8 +268,8 @@ public class HcgAuthTests
     {
         using var t = new TempDir();
         t.Write(HcgConnectConfiguration.FileName, """{"contractVersion":"hcg.executable-maker.connect/1","clientId":"abc","clientSecret":"nope"}""");
-        var r = HcgConnectConfiguration.Load(t.Path);
-        Assert.Null(r.Configuration.ClientId);
+        var r = HcgConnectConfiguration.Load(t.Path, HcgEnvironment.Production);
+        Assert.Equal(HcgConnectConfiguration.ProductionClientId, r.Configuration.ClientId); // the refused file changes nothing
         Assert.Contains("must not contain secrets", r.Problem);
         t.Write(HcgConnectConfiguration.FileName, """{"contractVersion":"hcg.lifeos.connect/1","clientId":"abc"}""");
         Assert.Contains("contract", HcgConnectConfiguration.Load(t.Path).Problem);
@@ -477,7 +478,7 @@ public partial class HcgSessionTests
     public async Task Not_configured_builds_contact_nothing()
     {
         var server = new MockIdentityServer();
-        var config = HcgConnectConfiguration.Default; // no client registered
+        var config = HcgConnectConfiguration.Development; // no client issued for this registration
         var account = AccountWith(config, server, new SessionOnlyCredentialStore());
         Assert.Equal(HcgAccountStatus.NotConfigured, account.Status);
         await account.InitializeAsync();

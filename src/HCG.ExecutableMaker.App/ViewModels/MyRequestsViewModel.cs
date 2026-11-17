@@ -39,7 +39,7 @@ public sealed record AttachmentRow(SupportAttachmentInfo Attachment)
 }
 
 /// <summary>My requests: status, timestamps, HCG staff responses, replies, attachments, withdrawal.</summary>
-public sealed partial class MyRequestsViewModel(HcgAccountService account, AppAccessService access, SupportService support,
+public sealed partial class MyRequestsViewModel(HcgAccountService account, FeatureAccessService access, SupportService support,
     IPlatformShell shell, IDialogService dialogs, NavigationService navigation) : PageViewModel
 {
     public override string Title => "My requests";
@@ -91,7 +91,7 @@ public sealed partial class MyRequestsViewModel(HcgAccountService account, AppAc
         {
             CanLoad = false;
             State = ex.Message;
-            if (ex.Failure is HcgApiFailure.Forbidden) State += " " + access.Message;
+            if (ex.Failure is HcgApiFailure.Forbidden) State += " " + access.Decide(MakerFeatures.SupportSubmit).Explanation;
         }
         finally { IsBusy = false; }
     }

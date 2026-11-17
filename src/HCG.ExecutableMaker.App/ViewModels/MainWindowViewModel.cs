@@ -68,8 +68,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
                 await account.InitializeAsync();
                 if (account.IsSignedIn)
                 {
-                    await _services.GetRequiredService<HCG.ExecutableMaker.Account.AccountPlanService>().RefreshAsync();
-                    await _services.GetRequiredService<HCG.ExecutableMaker.Account.AppAccessService>().RefreshAsync();
+                    // Usually already started by the sign-in event; force=false keeps an answer that has not expired.
+                    await _services.GetRequiredService<HCG.ExecutableMaker.Account.FeatureAccessService>().RefreshAsync("startup", force: false);
                 }
             }
             catch (Exception) { /* reported on the Account page */ }

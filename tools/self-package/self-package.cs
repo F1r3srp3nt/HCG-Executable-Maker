@@ -83,6 +83,9 @@ if (analysis.Support != SupportLevel.Supported || analysis.PrimaryProjectPath is
     Console.Error.WriteLine("Inspection did not report a supported application: " + analysis.SupportSummary);
     return 1;
 }
+// Executable Maker's build environment removes HCG_* variables, so the commit travels as a file in the imported copy.
+if (Environment.GetEnvironmentVariable("HCG_SOURCE_REVISION") is { Length: > 0 } revision)
+    File.WriteAllText(Path.Combine(import.Project.SourceDirectory, "build-revision.txt"), revision + "\n");
 var icon = Path.Combine(import.Project.SourceDirectory, "src", "HCG.ExecutableMaker.App", "Assets", "Branding", "hcg-app-icon.png");
 if (dist is not null) Directory.CreateDirectory(dist);
 

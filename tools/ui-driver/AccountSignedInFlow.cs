@@ -31,7 +31,12 @@ internal static partial class Program
         Directory.CreateDirectory(dataRoot);
         // With --import-config the file is "issued" next to the data folder and imported through the Account page.
         var target = _args.ContainsKey("import-config") ? Path.Combine(Path.GetDirectoryName(dataRoot)!, "issued-hcg-connect.json") : Path.Combine(dataRoot, HcgConnectConfiguration.FileName);
-        if (_args.ContainsKey("import-config")) _args["pick-file"] = target;
+        // Starting unconfigured means the development registration, for which HCG has issued no client (production is built in).
+        if (_args.ContainsKey("import-config"))
+        {
+            _args["pick-file"] = target;
+            Environment.SetEnvironmentVariable(HcgConnectConfiguration.EnvironmentVariable, "development");
+        }
         File.WriteAllText(target, JsonSerializer.Serialize(new Dictionary<string, object>
         {
             ["contractVersion"] = HcgConnectConfiguration.ContractVersion, ["clientId"] = r.GetProperty("clientId").GetString()!, ["issuer"] = issuer,
@@ -143,6 +148,15 @@ internal static partial class Program
         Check(account.PlanName == "Pro" && account.ValidUntil.Length > 0, "Plan and validity come from the central API");
         Check(account.HasManageLink && !account.HasCheckoutLink, "Only the links HCG provides are offered (manage; no checkout)");
         Shot("plan-active");
+        await WaitUntil(() => account.Permissions.Any(r => r.Decision.Feature.Id == "ai.use" && r.Decision.Reason is not null), TimeSpan.FromSeconds(20), "feature decisions");
+        foreach (var r in account.Permissions) Log($"Feature access: {r.Title} [{r.State.Text}] {r.Detail} {r.Remedy}{(r.HasStoreLink ? " → " + r.StoreLink : "")}");
+        Check(account.Permissions.Single(r => r.Decision.Feature.Id == "local.builds").State.Text == "Free · works offline", "Local builds are shown as free and offline");
+        Check(account.Permissions.Single(r => r.Decision.Feature.Id == "support.submit").State.Text == "Allowed by HCG", "An allowed feature says HCG allowed it");
+        var ai = account.Permissions.Single(r => r.Decision.Feature.Id == "ai.use");
+        Check(ai.State.Text == "Not permitted" && ai.HasStoreLink && ai.StoreLink!.Host == "store.hakmicapitalgroup.com", "A feature the licence lacks explains it and links to the product in HCG Store");
+        var publish = account.Permissions.Single(r => r.Decision.Feature.Id == "store.publish");
+        Check(!publish.HasStoreLink, "Staff-only publishing never offers a purchase");
+        ShotScrolledToEnd("feature-access");
 
         await Scenario(new { organisations = new[] { new { org_id = "org-hcg", name = "Hakmi Capital Group", role = "owner" }, new { org_id = "org-client", name = "Client Co AS", role = "member" } } });
         account.CheckPlanCommand.Execute(null);

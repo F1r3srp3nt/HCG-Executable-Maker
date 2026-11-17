@@ -1,5 +1,9 @@
 # HCG Connect: remaining setup checklist
 
+> **16 Nov 2026:** HCG issued the production client `fb9b6edf-2bfc-4b5e-a354-dbb1af697029` and it is built in; the steps
+> below about obtaining a client are done for production. What remains is the on-device sign-in acceptance (HANDOFF §9).
+> See [../FEATURE-ACCESS.md](../FEATURE-ACCESS.md).
+
 State on 11 November 2026, as checked against live HCG. The checks were read-only and used no account.
 
 | What | State | Evidence |
@@ -7,8 +11,8 @@ State on 11 November 2026, as checked against live HCG. The checks were read-onl
 | HCG identity service (`qggdyzoydveafkmjgkpq.supabase.co/auth/v1`) | Reachable. Publishes matching endpoints, PKCE S256, public clients and one ES256 key | `--hcg-session check` |
 | HCG central Ecosystem API (`/api/public/ecosystem/v1`) | Deployed (401 without sign-in) | `--hcg-session check` |
 | Executable Maker API (`/api/public/executable-maker/v1`) | **Not deployed** (HTTP 404/406) | `--hcg-session check` |
-| An Executable Maker client ID | **None is configured in any build or shipped file.** The packaged app ships no `hcg-connect.json`, and the built-in client ID is empty | Code, packaged build |
-| Whether HCG has registered an Executable Maker client | **Unknown.** No client ID was ever issued to this project. Any unissued ID gets `oauth_client_not_found` from HCG's identity service | Live probe with a random UUID |
+| An Executable Maker client ID | 11 Nov: none. **16 Nov: HCG issued the production client `fb9b6edf-2bfc-4b5e-a354-dbb1af697029`; it is built in** (development: none issued) | `HcgConnectConfiguration.Production`, HCG's Owner-screen export |
+| Whether HCG has registered an Executable Maker client | 11 Nov: unknown. **16 Nov: registered.** HCG's identity service accepts `fb9b6edf-…` with redirect `http://127.0.0.1:47820/oauth/callback` and PKCE S256 (an unissued ID gets `oauth_client_not_found`) | `--hcg-session check`, no account |
 | HCG AI service API | **No documented contract exists** (endpoints, request format, quotas). Requests stay behind the `IHcgAiGateway` adapter, which shows "Not connected" | HCG sources and handoffs seen so far |
 
 ## For HCG (central; the website and ERP are not changed by Executable Maker)

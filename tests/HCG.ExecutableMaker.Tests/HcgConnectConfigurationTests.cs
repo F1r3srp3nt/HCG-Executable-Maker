@@ -70,9 +70,9 @@ public class HcgConnectConfigurationTests
     {
         using var t = new TempDir();
         t.Write(HcgConnectConfiguration.FileName, json);
-        var r = HcgConnectConfiguration.Load(t.Path);
+        var r = HcgConnectConfiguration.Load(t.Path, HcgEnvironment.Development);
         Assert.Contains(problem, r.Problem);
-        Assert.Null(r.Configuration.ClientId);
+        Assert.Null(r.Configuration.ClientId); // ignored: the built-in registration (development: none issued) applies
     }
 
     [Theory]
@@ -115,4 +115,63 @@ public class HcgConnectConfigurationTests
     [InlineData(null, false)]
     public void Only_https_links_on_hcg_hosts_are_offered(string? url, bool offered) =>
         Assert.Equal(offered, HcgConnectConfiguration.Default.TrustedLink(url) is not null);
+
+    // ───────────── Environment-specific registration (HCG's main site, 13 Nov 2026) ─────────────
+
+    /// <summary>The hcg-connect.json HCG's Owner screen exports for the production registration (main site
+    /// docs/executable-maker/hcg-connect.json), byte for byte except whitespace.</summary>
+    private const string OwnerExport = """
+        {"contractVersion":"hcg.executable-maker.connect/1","clientId":"fb9b6edf-2bfc-4b5e-a354-dbb1af697029",
+         "issuer":"https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1",
+         "authorizationEndpoint":"https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/authorize",
+         "tokenEndpoint":"https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/token",
+         "userinfoEndpoint":"https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/oauth/userinfo",
+         "jwksEndpoint":"https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1/.well-known/jwks.json",
+         "redirectUris":["http://127.0.0.1:47820/oauth/callback","http://127.0.0.1:47821/oauth/callback","http://127.0.0.1:47822/oauth/callback"],
+         "scopes":["openid","email","profile"],"apiBaseUrl":"https://beta.hakmicapitalgroup.com","ecosystemApiPath":"/api/public/ecosystem/v1",
+         "productId":"hcg.executable.maker","accountPortalUrl":"https://beta.hakmicapitalgroup.com/client-portal",
+         "trustedLinkHosts":["beta.hakmicapitalgroup.com","hakmicapitalgroup.com"]}
+        """;
+
+    [Fact]
+    public void The_production_registration_hcg_issued_is_built_in_and_identical_to_hcgs_export()
+    {
+        var p = HcgConnectConfiguration.Production;
+        Assert.Equal("fb9b6edf-2bfc-4b5e-a354-dbb1af697029", p.ClientId);
+        Assert.Equal("hcg-executable-maker-desktop-production", p.RegistryKey);
+        Assert.Empty(p.MissingForSignIn());
+        var (exported, problem) = HcgConnectConfiguration.Parse(OwnerExport, HcgEnvironment.Production);
+        Assert.Null(problem);
+        Assert.Equal(p.ToJson(), exported.ToJson()); // every value HCG exported is the built-in default
+    }
+
+    [Fact]
+    public void The_development_registration_has_no_issued_client_and_never_borrows_production()
+    {
+        var d = HcgConnectConfiguration.Development;
+        Assert.Null(d.ClientId);
+        Assert.Equal("hcg-executable-maker-desktop", d.RegistryKey);
+        Assert.Contains("development registration", Assert.Single(d.Issues()).Problem);
+        using var t = new TempDir();
+        Assert.Null(HcgConnectConfiguration.Load(t.Path, HcgEnvironment.Development).Configuration.ClientId);
+        Assert.Equal(HcgConnectConfiguration.ProductionClientId, HcgConnectConfiguration.Load(t.Path, HcgEnvironment.Production).Configuration.ClientId);
+    }
+
+    [Fact]
+    public void Each_registration_keeps_its_own_stored_session()
+    {
+        var local = HcgConnectConfiguration.Production with { Issuer = new Uri("http://127.0.0.1:9/auth/v1") };
+        Assert.Equal(["session", "session-development", "session-local-test"],
+            new[] { HcgConnectConfiguration.Production.SessionStoreAccount, HcgConnectConfiguration.Development.SessionStoreAccount, local.SessionStoreAccount });
+        Assert.Equal(HcgEnvironment.Development, HcgConnectConfiguration.Parse(OwnerExport, HcgEnvironment.Development).Configuration.Environment);
+    }
+
+    [Theory]
+    [InlineData("development", HcgEnvironment.Development)]
+    [InlineData(" Development ", HcgEnvironment.Development)]
+    [InlineData("production", HcgEnvironment.Production)]
+    [InlineData(null, HcgEnvironment.Production)]
+    [InlineData("staging", HcgEnvironment.Production)] // no such registration: production, never a guessed third one
+    public void The_environment_variable_selects_the_registration(string? value, HcgEnvironment expected) =>
+        Assert.Equal(expected, HcgConnectConfiguration.ParseEnvironment(value));
 }

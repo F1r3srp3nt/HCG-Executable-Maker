@@ -116,11 +116,16 @@ public static class Composition
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgApiClient(hcgHttp, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAccountService>()));
         // Connection check: never follows redirects (the authorization request is probed, not opened), 15 s per step.
         services.AddSingleton(_ => new HCG.ExecutableMaker.Account.HcgConnectionCheck(new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) }));
-        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AppAccessService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), TimeProvider.System));
-        // Plan, licence, organisation and feature access from HCG's central Ecosystem API.
+        // One shared feature-access service (UI and command line): organisation, features and fresh access checks from
+        // HCG's central Ecosystem API; the staff-only publishing permission from HCG Store.
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgEcosystemClient(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>()));
-        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AccountPlanService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgEcosystemClient>(), TimeProvider.System));
-        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Support.SupportService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), uploadHttp));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.FeatureAccessService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgEcosystemClient>(), TimeProvider.System)
+        {
+            StoreAuthority = sp.GetRequiredService<StorePublishingAuthority>(),
+        });
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.AccountPlanService(sp.GetRequiredService<HCG.ExecutableMaker.Account.FeatureAccessService>(), TimeProvider.System));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Support.SupportService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>(), uploadHttp,
+            sp.GetRequiredService<HCG.ExecutableMaker.Account.FeatureAccessService>()));
         // HCG AI: no verified gateway contract exists yet, so the "Not connected" adapter is used (never simulated answers).
         // Optional account metadata for signing assets (never private keys; the encrypted vault is not available).
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Signing.SigningAccountService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>()));
@@ -139,6 +144,7 @@ public static class Composition
         services.AddSingleton<BuildHistoryViewModel>();
         services.AddSingleton<ArtifactsViewModel>();
         services.AddSingleton<StoreClientFactory>();
+        services.AddSingleton<StorePublishingAuthority>();
         services.AddSingleton<ShipToStoreViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();

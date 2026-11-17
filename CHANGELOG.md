@@ -2,6 +2,29 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Real HCG integration: issued registration, confirmed contracts, shared feature access
+
+### Added
+- **Production HCG Connect registration built in**: client `fb9b6edf-2bfc-4b5e-a354-dbb1af697029` issued by HCG (`hcg-executable-maker-desktop-production`), identical to HCG's exported `hcg-connect.json` (`docs/hcg-connect/production.hcg-connect.json`). The development registration (`hcg-executable-maker-desktop`, no client issued) is selected with `HCG_EXECUTABLE_MAKER_HCG_ENVIRONMENT=development`. Each registration keeps its own session in the OS credential store.
+- **One shared feature-access service** (`FeatureAccessService`) for the UI and the command line: local builds free and offline; `support.submit`, `support.attach`, `ai.use` decided by HCG's central `/check`; Ship to Store's staff permission decided by HCG Store. Decisions refresh on sign-in, account and organisation change, when HCG's answer expires (`revalidate_after_seconds`), and fresh before every privileged remote operation. "Not permitted" and "HCG unavailable" are separate states.
+- Account page **Feature access** card with HCG's reason and what to do: HCG Store product link only when a licence is missing; "ask your administrator" for staff and organisation access; "not enabled yet" for features HCG has not enabled.
+- `--hcg-session features` and `--hcg-session require <feature>` (exit 0/3/8/9); `--ship-to-store` enforces the same check.
+
+### Fixed
+- Review of PR #11: the Help & Support page no longer crashes when HCG refuses or cannot confirm a request at the moment of sending (it says why, and offers Submit again only when HCG was unavailable). An answer that arrives after another account signed in or another organisation was chosen is discarded instead of shown. HCG being unreachable while renewing the session is "HCG unavailable", not "sign in". Only HCG's own `not_org_member` 403 means "not a member"; any other 403 is unknown. An HCG Store timeout is "HCG Store did not answer", not a crash. Large Linux ZIPs (hundreds of managed DLLs) are still recognised as Linux. After an outage HCG is asked again after a minute. Cached HCG Store decisions name the Store they came from.
+- Command line: "choose an organisation" is exit code **10** (was 8, "not permitted"); `--organisation <slug|id>` chooses one for `features` and `require`.
+- Ship to Store declared a Linux portable ZIP (no `.exe`, a Linux program inside) as a **Windows** ZIP, and HCG Store accepted it. It is now refused before upload: HCG Store takes Linux apps only as `.deb`, `.rpm` or `.AppImage`. Found by shipping Executable Maker's own Linux package to a TEST HCG Store.
+- Executable Maker's own packages (`tools/self-package`, CI "Package") reported commit "unknown": the build environment removes `HCG_*` variables, so `HCG_SOURCE_REVISION` never reached the build. The commit now travels as `build-revision.txt` in the imported copy, and `--version` names the exact commit a package was built from.
+
+### Changed
+- The Ecosystem API client reads HCG's confirmed shapes only (`user`, `org_role`, features map, `licences`, `layer`/`reason`); anything else, or an answer about another organisation, product or feature, is "access unknown". Edition licences for other editions never count for the desktop app.
+- Support requests and HCG AI are enforced in their services (UI and command line alike); the undeployed App Access route no longer decides anything.
+- MOCK HCG (`tools/hcg-mock/mock-hcg.mjs`) serves the confirmed contract, with `checks` and `outage` scenarios.
+
+### Verification
+- Unit tests 813 passed (11 skipped); command line against the MOCK HCG; UI driver Account flow; Ship to Store end to end 26/26 against the merged HCG Store.
+- **Live HCG (no account):** connection check with the built-in production client passed every identity step, including client registration; the Ecosystem API answers 401 as deployed. No real sign-in or real-account upload: see docs/FEATURE-ACCESS.md.
+
 ## [Unreleased] — Ship to Shop: Ship to Store from a build, file kinds, safe retry
 
 ### Added

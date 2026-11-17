@@ -43,7 +43,6 @@ public interface ISystemBrowser
 /// </summary>
 public sealed class HcgAccountService : IDisposable
 {
-    private const string StoreAccount = "session";
     public static readonly TimeSpan SignInTimeout = TimeSpan.FromMinutes(5);
 
     private readonly HcgAuthClient _auth;
@@ -108,7 +107,7 @@ public sealed class HcgAccountService : IDisposable
         StoredSession? stored;
         try
         {
-            var json = await _store.ReadAsync(StoreAccount, ct).ConfigureAwait(false);
+            var json = await _store.ReadAsync(Configuration.SessionStoreAccount, ct).ConfigureAwait(false);
             stored = json is null ? null : JsonSerializer.Deserialize<StoredSession>(json);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -263,11 +262,12 @@ public sealed class HcgAccountService : IDisposable
         _signInCts?.Cancel();
         var previous = Configuration;
         var sameClient = previous.ClientId == config.ClientId && previous.Issuer == config.Issuer && previous.TokenEndpoint == config.TokenEndpoint;
+        // A session issued to the previous client is removed from its own credential-store entry before switching.
+        if (!sameClient) await ForgetAsync().ConfigureAwait(false);
         Configuration = config;
         _auth.Configuration = config;
         ConfigurationProblem = null;
         var missing = config.MissingForSignIn();
-        if (!sameClient) await ForgetAsync().ConfigureAwait(false);
         if (missing.Count > 0)
         {
             await ForgetAsync().ConfigureAwait(false);
@@ -338,7 +338,7 @@ public sealed class HcgAccountService : IDisposable
 
     private async Task SafeDeleteAsync()
     {
-        try { await _store.DeleteAsync(StoreAccount).ConfigureAwait(false); }
+        try { await _store.DeleteAsync(Configuration.SessionStoreAccount).ConfigureAwait(false); }
         catch (Exception ex) { _log.LogWarning("The stored HCG session could not be deleted: {Error}", ex.GetType().Name); }
     }
 
@@ -356,7 +356,7 @@ public sealed class HcgAccountService : IDisposable
         }
         try
         {
-            await _store.WriteAsync(StoreAccount, JsonSerializer.Serialize(new StoredSession
+            await _store.WriteAsync(Configuration.SessionStoreAccount, JsonSerializer.Serialize(new StoredSession
             {
                 Version = 1, ClientId = session.ClientId, RefreshToken = session.RefreshToken, Subject = session.Identity.Subject,
                 Email = session.Identity.Email, DisplayName = session.Identity.DisplayName, OrganisationId = session.OrganisationId,
@@ -414,7 +414,7 @@ public sealed class HcgAccountService : IDisposable
     public async Task RetryAsync(CancellationToken ct = default)
     {
         if (Status != HcgAccountStatus.Unavailable) return;
-        var json = await _store.ReadAsync(StoreAccount, ct).ConfigureAwait(false);
+        var json = await _store.ReadAsync(Configuration.SessionStoreAccount, ct).ConfigureAwait(false);
         if (json is null) { Set(HcgAccountStatus.SignedOut, "Not signed in.", null); return; }
         var stored = JsonSerializer.Deserialize<StoredSession>(json)!;
         await RefreshCoreAsync(new HcgSession

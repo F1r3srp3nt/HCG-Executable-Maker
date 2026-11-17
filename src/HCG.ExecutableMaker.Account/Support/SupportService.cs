@@ -33,7 +33,7 @@ public sealed record SubmitResult(SubmitOutcome Outcome, SupportRequestSummary R
 /// a project never calls this. The server checks ownership and permissions on every call (support.submit /
 /// support.attach), stores attachments privately and validates them again after upload.
 /// </summary>
-public sealed class SupportService(HcgApiClient api, HttpClient uploadHttp)
+public sealed class SupportService(HcgApiClient api, HttpClient uploadHttp, FeatureAccessService? features = null)
 {
     public Task<SupportRequestList> ListAsync(CancellationToken ct = default) => api.GetAsync<SupportRequestList>("support/requests", ct);
 
@@ -59,6 +59,12 @@ public sealed class SupportService(HcgApiClient api, HttpClient uploadHttp)
     {
         if (request.Mode == SubmissionMode.DiagnosticsOnly && files.Count > 0)
             throw new ArgumentException("Diagnostics-only requests carry no files.", nameof(files));
+        // Enforced here, at the moment of sending (UI and command line alike): HCG is asked again, never a cached answer.
+        if (features is not null)
+        {
+            await features.RequireAsync(MakerFeatures.SupportSubmit, ct).ConfigureAwait(false);
+            if (files.Count > 0) await features.RequireAsync(MakerFeatures.SupportAttach, ct).ConfigureAwait(false);
+        }
         var created = await api.PostAsync<CreateSupportResponse>("support/requests", request, ct).ConfigureAwait(false);
         var byName = files.ToDictionary(f => f.Name, StringComparer.Ordinal);
         var attachments = new List<SupportAttachmentInfo>();

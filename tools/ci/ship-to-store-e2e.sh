@@ -87,9 +87,9 @@ check "7b Another HCG account without permission refused before approval (403)" 
 curl -s -X POST "${ISS%/auth/v1}/__test/next-user/e2e-carol" >/dev/null
 dotnet "$MAKER" --ship-to-store --sign-in --store "$STORE" --product fixture-quasar-shell --edition standard --release-version 9.9.9 --build-number 1 \
   --distribution paid --eligibility private --file "$S/HCGSample-1.3.0-windows.zip" > "$OUT/ship-carol.log" 2>&1; rc=$?
-check "7e Upload by an account HCG has not allowed to publish is refused (Maker exit $rc, HCG Store 403), and no release is created" \
-  '[ $rc = 4 ] && grep -q "HTTP 403" "$OUT/ship-carol.log" && [ "$(curl -s -H "authorization: Bearer $(ctl token "{\"sub\":\"e2e-alice\"}" | jq -r .token)" "$STORE/api/v1/publishing/releases?productId=fixture-quasar-shell" | jq "[.releases[] | select(.version==\"9.9.9\")] | length")" = 0 ]'
-sed 's/^/    /' "$OUT/ship-carol.log" | grep -E "HCG Store:|signed in" | tee -a "$RESULTS"
+check "7e Upload by an account HCG has not allowed to publish is refused by the shared feature-access check (Maker exit $rc: not permitted, ask the administrator, no purchase link), and no release is created" \
+  '[ $rc = 8 ] && grep -q "Feature store.publish: Not permitted" "$OUT/ship-carol.log" && grep -q "Ask your organisation.s HCG administrator" "$OUT/ship-carol.log" && ! grep -q "store.hakmicapitalgroup.com/apps" "$OUT/ship-carol.log" && [ "$(curl -s -H "authorization: Bearer $(ctl token "{\"sub\":\"e2e-alice\"}" | jq -r .token)" "$STORE/api/v1/publishing/releases?productId=fixture-quasar-shell" | jq "[.releases[] | select(.version==\"9.9.9\")] | length")" = 0 ]'
+sed 's/^/    /' "$OUT/ship-carol.log" | grep -E "HCG Store:|signed in|^    Feature" | tee -a "$RESULTS"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "authorization: Bearer $CAROL" -H 'content-type: application/json' "$STORE/api/v1/publishing/releases/$REL/artifacts" \
   -d '{"fileName":"evil.zip","platform":"windows","format":"zip","sizeBytes":10,"sha256":"'"$(printf x | sha256sum | cut -c1-64)"'"}')
 check "7f Adding a file to someone else's draft without permission is refused ($code)" '[ "$code" = 403 ]'

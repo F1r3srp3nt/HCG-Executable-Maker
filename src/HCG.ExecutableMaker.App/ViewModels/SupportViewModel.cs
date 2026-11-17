@@ -42,7 +42,7 @@ public sealed partial class PlannedFileItem(PlannedFile file, Action changed) : 
 public sealed partial class SupportViewModel : PageViewModel
 {
     private readonly HcgAccountService _account;
-    private readonly AppAccessService _access;
+    private readonly FeatureAccessService _access;
     private readonly SupportService _support;
     private readonly IPlatformShell _shell;
     private readonly IAppPaths _paths;
@@ -52,7 +52,7 @@ public sealed partial class SupportViewModel : PageViewModel
     private Guid _clientRequestId = Guid.NewGuid();
     private AttachmentPlan? _plan;
 
-    public SupportViewModel(HcgAccountService account, AppAccessService access, SupportService support, IPlatformShell shell, IAppPaths paths,
+    public SupportViewModel(HcgAccountService account, FeatureAccessService access, SupportService support, IPlatformShell shell, IAppPaths paths,
         IToolchainService toolchains, NavigationService navigation)
     {
         _account = account;
@@ -182,12 +182,14 @@ public sealed partial class SupportViewModel : PageViewModel
     private void UpdateAvailability()
     {
         NeedsSignIn = !_account.IsSignedIn;
-        CanUseSupport = _access.Has(HcgPermissions.SupportSubmit);
+        var decision = _access.Decide(MakerFeatures.SupportSubmit);
+        CanUseSupport = decision.IsAllowed;
         Availability = _account.Status is HcgAccountStatus.NotConfigured or HcgAccountStatus.ClientRejected
             ? "Support requests need HCG sign-in, and the HCG connection is not working yet (see Account › HCG Connect). You can still prepare a request below; nothing can be sent."
             : !_account.IsSignedIn
                 ? "Sign in with HCG (Account page) to send support requests. You can prepare the request first."
-                : CanUseSupport ? "Ready: requests go to HCG Executable Maker support." : _access.Message;
+                : CanUseSupport ? "Ready: HCG allows support requests. HCG checks again when you press Submit."
+                : decision.Explanation + (decision.RemedyText is { Length: > 0 } r ? " " + r : "") + " You can still prepare a request below.";
         Destination = $"HCG Executable Maker support on {_account.Configuration.ApiBaseUrl.Host}. Files are stored privately; only you and authorised HCG support staff can open them.";
         RecomputeSummary();
         SubmitCommand.NotifyCanExecuteChanged();
@@ -195,14 +197,12 @@ public sealed partial class SupportViewModel : PageViewModel
 
     private void RecomputeSummary()
     {
-        var limits = _access.Directory?.Limits;
         var included = IncludeFiles ? Files.Where(f => f.Included).ToList() : [];
         HasFlaggedIncluded = included.Any(f => f.IsFlagged);
         var bytes = included.Sum(f => f.File.SizeBytes);
         Summary = IncludeFiles
             ? $"{Diagnostics.Count} diagnostic item(s) and {included.Count} file(s), {Format.Bytes(bytes)} before compression, sent as one ZIP archive." +
-              (limits is null ? "" : $" Limits: {Format.Bytes(limits.MaxAttachmentBytes)} per file, {limits.MaxAttachments} files per request; archives up to {limits.MaxArchiveEntries:N0} entries.") +
-              (limits is null ? "" : $" Attachments are deleted {limits.AttachmentRetentionDays} days after the request is closed, or immediately if you withdraw it.")
+              " HCG checks the size and contents again when you send it."
             : $"{Diagnostics.Count} diagnostic item(s); no project files.";
         SubmitCommand.NotifyCanExecuteChanged();
     }
@@ -228,11 +228,6 @@ public sealed partial class SupportViewModel : PageViewModel
                 var dir = Path.Combine(_paths.Root, "support-uploads", _clientRequestId.ToString("N"));
                 var archive = await Task.Run(() => AttachmentPlanner.BuildArchive(_plan, dir, "project.zip", _submitCts.Token));
                 archivePath = archive.Path;
-                if (_access.Directory?.Limits is { } l && archive.SizeBytes > l.MaxAttachmentBytes)
-                {
-                    ValidationError = $"The archive is {Format.Bytes(archive.SizeBytes)}; HCG accepts {Format.Bytes(l.MaxAttachmentBytes)} per file. Deselect large files and try again.";
-                    return;
-                }
                 files.Add(new UploadFile(archive.Path, "project.zip", "application/zip"));
             }
             var request = new CreateSupportRequest
@@ -266,6 +261,13 @@ public sealed partial class SupportViewModel : PageViewModel
             ResultSucceeded = false;
             ResultMessage = ex.Message + (ex.IsOutage ? " Nothing is lost: Submit again to retry (the request will not be duplicated)." : "");
             CanResume = ex.IsOutage;
+        }
+        catch (FeatureAccessDeniedException ex)
+        {
+            // HCG refused (or could not answer) at the moment of sending: nothing was sent. Say why and what to do.
+            ResultSucceeded = false;
+            ResultMessage = "Not sent. " + ex.Decision.Explanation + (ex.Decision.RemedyText is { Length: > 0 } r ? " " + r : "");
+            CanResume = ex.Decision.State == FeatureAccessState.Unavailable;
         }
         catch (OperationCanceledException)
         {
