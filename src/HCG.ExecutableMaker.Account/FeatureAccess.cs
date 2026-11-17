@@ -121,6 +121,23 @@ public sealed class FeatureAccessDeniedException(FeatureDecision decision) : Exc
     public FeatureDecision Decision { get; } = decision;
 }
 
+/// <summary>
+/// Command-line exit codes for a decision (the same for <c>--hcg-session require</c> and <c>--ship-to-store</c>):
+/// 0 allowed, 3 sign-in needed, 8 not permitted, 9 HCG unavailable or not available yet, 10 choose an organisation
+/// (not a refusal: HCG has not been asked about one yet).
+/// </summary>
+public static class FeatureExitCodes
+{
+    public static int For(FeatureDecision d) => d.State switch
+    {
+        FeatureAccessState.Free or FeatureAccessState.Allowed => 0,
+        FeatureAccessState.SignInRequired or FeatureAccessState.NotConfigured => 3,
+        FeatureAccessState.NotPermitted => 8,
+        FeatureAccessState.ChooseOrganisation => 10,
+        _ => 9,
+    };
+}
+
 /// <summary>Decides the staff-only publishing permission by asking HCG Store (which asks HCG). Implemented by the app.</summary>
 public interface IStorePublishingAuthority
 {
@@ -186,6 +203,9 @@ public sealed class FeatureAccessService : IDisposable
     }
 
     private const string SignedOutMessage = "Sign in with HCG to use account features. Local builds do not need an account.";
+    /// <summary>HCG could not renew the session because it could not be reached: not a sign-out and not a refusal.</summary>
+    private bool SessionPaused => _account.Status == HcgAccountStatus.Unavailable;
+    private string PausedMessage => _account.Message is { Length: > 0 } m ? m : "HCG could not be reached to renew your session. Access is unknown until it answers; local builds keep working.";
 
     public Uri StoreProductPage { get; }
     public HcgConnectConfiguration Configuration => _account.Configuration;
@@ -211,6 +231,7 @@ public sealed class FeatureAccessService : IDisposable
         if (!_account.IsSignedIn)
         {
             if (_account.Status is HcgAccountStatus.Restoring or HcgAccountStatus.SigningIn) return;
+            if (SessionPaused) { Set(FeatureAccessStatus.Unavailable, PausedMessage); return; }
             var notConfigured = _account.Status == HcgAccountStatus.NotConfigured;
             if (Account is null && Status == (notConfigured ? FeatureAccessStatus.NotConfigured : FeatureAccessStatus.SignedOut)) return;
             Clear(notConfigured ? FeatureAccessStatus.NotConfigured : FeatureAccessStatus.SignedOut, notConfigured ? _account.Message : SignedOutMessage);
@@ -255,6 +276,7 @@ public sealed class FeatureAccessService : IDisposable
     {
         if (!_account.IsSignedIn)
         {
+            if (SessionPaused) { Set(FeatureAccessStatus.Unavailable, PausedMessage); return; }
             if (Status is not (FeatureAccessStatus.SignedOut or FeatureAccessStatus.NotConfigured))
                 Clear(_account.Status == HcgAccountStatus.NotConfigured ? FeatureAccessStatus.NotConfigured : FeatureAccessStatus.SignedOut,
                     _account.Status == HcgAccountStatus.NotConfigured ? _account.Message : SignedOutMessage);
@@ -267,7 +289,7 @@ public sealed class FeatureAccessService : IDisposable
             Set(FeatureAccessStatus.Checking, "Checking your access with HCG…");
             var subject = _account.Identity?.Subject;
             var me = await _ecosystem.MeAsync(ct).ConfigureAwait(false);
-            if (me.Id is null || me.Id != subject)
+            if (me.Id is null || me.Id != subject || _account.Identity?.Subject != subject)
             {
                 Account = null;
                 Access = null;
@@ -294,7 +316,7 @@ public sealed class FeatureAccessService : IDisposable
             }
             ProductAccess access;
             try { access = await _ecosystem.FeaturesAsync(org, ct).ConfigureAwait(false); }
-            catch (HcgApiException ex) when (ex.Failure == HcgApiFailure.Forbidden)
+            catch (HcgApiException ex) when (ex.Failure == HcgApiFailure.Forbidden && ex.Code == "not_org_member")
             {
                 Access = null;
                 Stamp(now, HcgEcosystemClient.DefaultRevalidateAfter);
@@ -320,7 +342,8 @@ public sealed class FeatureAccessService : IDisposable
         catch (HcgApiException ex)
         {
             // Outages, missing routes and unrecognised answers: unknown, never a denial. The last answer stays visible but
-            // is no longer used to allow anything.
+            // is no longer used to allow anything, and HCG is asked again after a minute.
+            ArmRetry(OutageRetry);
             Set(FeatureAccessStatus.Unavailable, (ex.Failure == HcgApiFailure.NotDeployed
                 ? "HCG's access service is not available on this HCG site."
                 : ex.Message) + " Access is unknown until HCG answers; local builds keep working.");
@@ -336,8 +359,15 @@ public sealed class FeatureAccessService : IDisposable
     {
         CheckedAt = now;
         ValidUntil = now + lifetime;
+        ArmRetry(lifetime + TimeSpan.FromSeconds(1));
+    }
+
+    internal static readonly TimeSpan OutageRetry = TimeSpan.FromSeconds(60);
+
+    private void ArmRetry(TimeSpan after)
+    {
         _expiry?.Dispose();
-        _expiry = _time.CreateTimer(_ => _ = RefreshIfExpiredAsync(), null, lifetime + TimeSpan.FromSeconds(1), Timeout.InfiniteTimeSpan);
+        _expiry = _time.CreateTimer(_ => _ = RefreshIfExpiredAsync(), null, after, Timeout.InfiniteTimeSpan);
     }
 
     public async Task SelectOrganisationAsync(string organisationId, CancellationToken ct = default)
@@ -356,6 +386,8 @@ public sealed class FeatureAccessService : IDisposable
             return new(feature, FeatureAccessState.Free, feature.Description, Source: "this computer");
         if (_account.Status == HcgAccountStatus.NotConfigured)
             return new(feature, FeatureAccessState.NotConfigured, "The HCG connection is not set up on this computer, so HCG cannot be asked. " + _account.Message);
+        if (SessionPaused)
+            return new(feature, FeatureAccessState.Unavailable, $"HCG cannot confirm {feature.Title} right now. This is not a refusal: {PausedMessage}", FeatureRemedy.TryAgain);
         if (!_account.IsSignedIn)
             return new(feature, FeatureAccessState.SignInRequired, $"{feature.Title} needs your HCG account. Sign in with HCG; local builds keep working without it.", FeatureRemedy.SignIn);
         if (feature.Kind == FeatureKind.StaffOnly)
@@ -381,7 +413,7 @@ public sealed class FeatureAccessService : IDisposable
             case FeatureAccessStatus.SignedOut or FeatureAccessStatus.NotConfigured:
                 return new(feature, FeatureAccessState.SignInRequired, StatusMessage, FeatureRemedy.SignIn);
         }
-        if (Access is null || org is null)
+        if (Access is null || org is null || Access.OrganisationId != org)
             return new(feature, FeatureAccessState.Checking, "Checking with HCG…");
         if (IsExpired)
             return new(feature, FeatureAccessState.Checking, "HCG's last answer has expired; checking again…", OrganisationId: org);
@@ -427,13 +459,14 @@ public sealed class FeatureAccessService : IDisposable
         if (Account is null || IsExpired || Status != FeatureAccessStatus.Ready || OrganisationId is null || _account.OrganisationId != _organisation)
             await RefreshAsync("before " + feature.Id, ct).ConfigureAwait(false);
         if (Status != FeatureAccessStatus.Ready || OrganisationId is not { } org) return Decide(feature);
+        var askedFor = _account.Identity?.Subject;
         AccessCheck check;
         try { check = await _ecosystem.CheckAsync(org, feature.CentralKey!, ct).ConfigureAwait(false); }
         catch (HcgApiException ex) when (ex.Failure is HcgApiFailure.NotSignedIn or HcgApiFailure.Unauthorized or HcgApiFailure.Revoked)
         {
             return new(feature, FeatureAccessState.SignInRequired, ex.Message, FeatureRemedy.SignIn);
         }
-        catch (HcgApiException ex) when (ex.Failure == HcgApiFailure.Forbidden)
+        catch (HcgApiException ex) when (ex.Failure == HcgApiFailure.Forbidden && ex.Code == "not_org_member")
         {
             return new(feature, FeatureAccessState.NotPermitted, $"HCG says you are not a member of {OrganisationName(org)} (anymore).", FeatureRemedy.ChooseOrganisation,
                 Layer: "identity", Reason: "not_org_member", OrganisationId: org);
@@ -443,9 +476,13 @@ public sealed class FeatureAccessService : IDisposable
             return new(feature, FeatureAccessState.Unavailable, $"HCG cannot confirm {feature.Title} right now, so it was not used. This is not a refusal: {ex.Message}",
                 FeatureRemedy.TryAgain, OrganisationId: org);
         }
+        // Signed out, another account or another organisation while HCG answered: the answer is about someone else now.
+        if (_account.Identity?.Subject != askedFor || !_account.IsSignedIn || OrganisationId != org)
+            return new(feature, FeatureAccessState.Unavailable, $"Your HCG account or organisation changed while HCG was checking {feature.Title}, so the answer was not used. Try again.",
+                FeatureRemedy.TryAgain);
         // The fresh answer replaces what the app showed: a revocation or a new grant shows at once.
         lock (_checks) _checks[feature.CentralKey!] = check;
-        if (Access is { } a && a.Allows(feature.CentralKey!) != check.Allowed)
+        if (Access is { } a && a.OrganisationId == org && a.Allows(feature.CentralKey!) != check.Allowed)
         {
             var map = new Dictionary<string, bool>(a.FeatureMap, StringComparer.Ordinal);
             if (check.Allowed) map[feature.CentralKey!] = true; else map.Remove(feature.CentralKey!);

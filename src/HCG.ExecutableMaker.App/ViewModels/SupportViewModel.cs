@@ -262,6 +262,13 @@ public sealed partial class SupportViewModel : PageViewModel
             ResultMessage = ex.Message + (ex.IsOutage ? " Nothing is lost: Submit again to retry (the request will not be duplicated)." : "");
             CanResume = ex.IsOutage;
         }
+        catch (FeatureAccessDeniedException ex)
+        {
+            // HCG refused (or could not answer) at the moment of sending: nothing was sent. Say why and what to do.
+            ResultSucceeded = false;
+            ResultMessage = "Not sent. " + ex.Decision.Explanation + (ex.Decision.RemedyText is { Length: > 0 } r ? " " + r : "");
+            CanResume = ex.Decision.State == FeatureAccessState.Unavailable;
+        }
         catch (OperationCanceledException)
         {
             ResultMessage = "Cancelled before anything was sent.";

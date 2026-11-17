@@ -279,6 +279,11 @@ public sealed class ShipToStoreTests : IDisposable
         Assert.False(linuxZip.IsSupported);
         Assert.Contains("Linux apps only as .deb, .rpm or .AppImage", Assert.Single(linuxZip.Problems));
         Assert.DoesNotContain(linuxZip.Notes, n => n.Contains("Windows ZIP"));
+        // A self-contained .NET Linux publish: hundreds of managed DLLs before the app host (no extension) in the archive.
+        var many = Enumerable.Range(0, 400).Select(i => ($"Tool/System.Lib{i:D3}.dll", "MZ-not-elf"u8.ToArray())).Append(("Tool/zz-tool", elf)).ToArray();
+        var bigLinux = await StoreArtifacts.DetectAsync(ZipBytes("Tool-big-linux-x64.zip", many));
+        Assert.Equal("linux", bigLinux.Platform);
+        Assert.Contains("Linux apps only as .deb, .rpm or .AppImage", Assert.Single(bigLinux.Problems));
         var noProgram = await StoreArtifacts.DetectAsync(ZipBytes("Docs.zip", ("README.txt", "hello"u8.ToArray())));
         Assert.Equal("windows", noProgram.Platform); // unchanged: no program at all is still only a note
         Assert.Contains(noProgram.Notes, n => n.Contains("Windows ZIP"));
@@ -287,6 +292,27 @@ public sealed class ShipToStoreTests : IDisposable
         Assert.Contains("Android packages are not distributed through HCG Store", apk.Problems[0]);
         Assert.Contains("HCG Store accepts:", apk.Problems[0]);
         Assert.Contains("Linux apps ship as .deb", (await StoreArtifacts.DetectAsync(_t.Write("tool.tar.gz", "x"))).Problems[0]);
+    }
+
+    private sealed class Hang : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        }
+    }
+
+    [Fact]
+    public async Task A_store_that_does_not_answer_in_time_is_unreachable_not_a_crash_and_not_a_refusal()
+    {
+        var client = new HcgStoreClient(new HttpClient(new Hang()) { Timeout = TimeSpan.FromMilliseconds(200) }, new Uri("https://store.test/"), _ => Task.FromResult<string?>("t"));
+        var ex = await Assert.ThrowsAsync<HcgStoreException>(() => client.WhoAmIAsync());
+        Assert.Equal(("store_timeout", 0), (ex.Code, ex.Status));
+        // The person cancelling is still a cancellation, not "did not answer".
+        using var cts = new CancellationTokenSource(100);
+        var slow = new HcgStoreClient(new HttpClient(new Hang()), new Uri("https://store.test/"), _ => Task.FromResult<string?>("t"));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => slow.WhoAmIAsync(cts.Token));
     }
 
     [Fact]

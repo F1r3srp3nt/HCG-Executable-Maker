@@ -19,7 +19,8 @@ namespace HCG.ExecutableMaker.App;
 /// <item><c>registration</c> prints the client registration HCG needs, produced from this build's configuration.</item>
 /// <item><c>features</c> prints the shared feature-access decisions (the same the Account page shows).</item>
 /// <item><c>require &lt;feature&gt;</c> asks HCG now, as before a privileged operation; exit 0 allowed, 8 not permitted,
-/// 9 HCG unavailable or not available yet, 3 sign-in needed.</item>
+/// 9 HCG unavailable or not available yet, 3 sign-in needed, 10 choose an organisation
+/// (<c>--organisation &lt;id or slug&gt;</c>, also on <c>features</c>).</item>
 /// </list>
 /// Never prints a token. Exit code 0 when the requested state was reached.
 /// </summary>
@@ -49,8 +50,8 @@ internal static class HcgSessionCommand
             "import" => Import(args.SkipWhile(a => a != "import").Skip(1).FirstOrDefault(), paths, account, services.GetRequiredService<HcgConnectionCheck>()),
             "check" => Check(account.Configuration, services.GetRequiredService<HcgConnectionCheck>()),
             "registration" => Registration(account.Configuration),
-            "features" => Features(account, services.GetRequiredService<FeatureAccessService>(), args.Contains("--sign-in")),
-            "require" => Require(args.SkipWhile(a => a != "require").Skip(1).FirstOrDefault(), account, services.GetRequiredService<FeatureAccessService>(), args.Contains("--sign-in")),
+            "features" => Features(account, services.GetRequiredService<FeatureAccessService>(), args.Contains("--sign-in"), Organisation(args)),
+            "require" => Require(args.SkipWhile(a => a != "require").Skip(1).FirstOrDefault(), account, services.GetRequiredService<FeatureAccessService>(), args.Contains("--sign-in"), Organisation(args)),
             "export" => Export(args.SkipWhile(a => a != "export").Skip(1).FirstOrDefault(), account.Configuration),
             _ => Usage(),
         };
@@ -59,6 +60,7 @@ internal static class HcgSessionCommand
     private static int Usage()
     {
         Console.Error.WriteLine("Usage: HCGExecutableMaker --hcg-session status|sign-in|sign-out|check|registration|features|require <feature>|import <hcg-connect.json>|export <folder>");
+        Console.Error.WriteLine("       features and require take [--sign-in] [--organisation <id or slug>].");
         return 2;
     }
 
@@ -99,14 +101,29 @@ internal static class HcgSessionCommand
         return 0;
     }
 
-    /// <summary>Exit code for a decision: 0 allowed, 3 sign-in needed, 8 not permitted, 9 unavailable / not available yet.</summary>
-    internal static int ExitCode(FeatureDecision d) => d.State switch
+    /// <summary>
+    /// Exit code for a decision: 0 allowed, 3 sign-in needed, 8 not permitted, 9 unavailable / not available yet,
+    /// 10 choose an organisation (not a refusal: HCG has not been asked yet).
+    /// </summary>
+    internal static int ExitCode(FeatureDecision d) => FeatureExitCodes.For(d);
+
+    private static string? Organisation(string[] args) => args.SkipWhile(a => a != "--organisation").Skip(1).FirstOrDefault();
+
+    /// <summary>Chooses the organisation (by HCG's id or slug) among the account's memberships, as the Account page does.</summary>
+    private static int? ChooseOrganisation(FeatureAccessService features, string? wanted)
     {
-        FeatureAccessState.Free or FeatureAccessState.Allowed => 0,
-        FeatureAccessState.SignInRequired or FeatureAccessState.NotConfigured => 3,
-        FeatureAccessState.NotPermitted or FeatureAccessState.ChooseOrganisation => 8,
-        _ => 9,
-    };
+        if (wanted is null || features.Status == FeatureAccessStatus.SignedOut) return null;
+        if (features.Account is null) features.RefreshAsync("organisation choice").GetAwaiter().GetResult();
+        var match = features.Organisations.FirstOrDefault(o => o.Id == wanted || string.Equals(o.Slug, wanted, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            Console.Error.WriteLine($"Organisation '{wanted}' is not one of this account's HCG organisations. Yours: " +
+                (features.Organisations.Count == 0 ? "(none)" : string.Join(", ", features.Organisations.Select(o => $"{o.Slug ?? o.Id} ({o.Name})"))));
+            return 10;
+        }
+        features.SelectOrganisationAsync(match.Id).GetAwaiter().GetResult();
+        return null;
+    }
 
     private static void PrintDecision(FeatureDecision d) =>
         Console.WriteLine($"Feature {d.Feature.Id} ({d.Feature.Title}): {d.StateLabel} — {d.Explanation}" +
@@ -122,25 +139,29 @@ internal static class HcgSessionCommand
         account.SignInAsync(browser).GetAwaiter().GetResult();
     }
 
-    private static int Features(HcgAccountService account, FeatureAccessService features, bool signIn)
+    private static int Features(HcgAccountService account, FeatureAccessService features, bool signIn, string? organisation)
     {
         Restore(account, signIn);
         Print(account);
+        if (account.IsSignedIn && ChooseOrganisation(features, organisation) is { } bad) return bad;
         if (account.IsSignedIn) features.RefreshAsync("features command").GetAwaiter().GetResult();
         Console.WriteLine($"Access: {features.Status} — {features.StatusMessage}");
         foreach (var d in features.DecideAll()) PrintDecision(d);
         return 0;
     }
 
-    private static int Require(string? id, HcgAccountService account, FeatureAccessService features, bool signIn)
+    private static int Require(string? id, HcgAccountService account, FeatureAccessService features, bool signIn, string? organisation)
     {
         if (id is null) return Usage();
         MakerFeature feature;
         try { feature = MakerFeatures.ById(id); }
         catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message + " Known: " + string.Join(", ", MakerFeatures.All.Select(f => f.Id))); return 2; }
         Restore(account, signIn);
+        if (account.IsSignedIn && ChooseOrganisation(features, organisation) is { } bad) return bad;
         var d = features.CheckNowAsync(feature).GetAwaiter().GetResult();
         PrintDecision(d);
+        if (d.State == FeatureAccessState.ChooseOrganisation)
+            Console.WriteLine("On the command line: add --organisation <slug or id>, one of: " + string.Join(", ", features.Organisations.Select(o => o.Slug ?? o.Id)));
         return ExitCode(d);
     }
 

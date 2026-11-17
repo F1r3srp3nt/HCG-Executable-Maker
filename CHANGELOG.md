@@ -11,6 +11,8 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - `--hcg-session features` and `--hcg-session require <feature>` (exit 0/3/8/9); `--ship-to-store` enforces the same check.
 
 ### Fixed
+- Review of PR #11: the Help & Support page no longer crashes when HCG refuses or cannot confirm a request at the moment of sending (it says why, and offers Submit again only when HCG was unavailable). An answer that arrives after another account signed in or another organisation was chosen is discarded instead of shown. HCG being unreachable while renewing the session is "HCG unavailable", not "sign in". Only HCG's own `not_org_member` 403 means "not a member"; any other 403 is unknown. An HCG Store timeout is "HCG Store did not answer", not a crash. Large Linux ZIPs (hundreds of managed DLLs) are still recognised as Linux. After an outage HCG is asked again after a minute. Cached HCG Store decisions name the Store they came from.
+- Command line: "choose an organisation" is exit code **10** (was 8, "not permitted"); `--organisation <slug|id>` chooses one for `features` and `require`.
 - Ship to Store declared a Linux portable ZIP (no `.exe`, a Linux program inside) as a **Windows** ZIP, and HCG Store accepted it. It is now refused before upload: HCG Store takes Linux apps only as `.deb`, `.rpm` or `.AppImage`. Found by shipping Executable Maker's own Linux package to a TEST HCG Store.
 - Executable Maker's own packages (`tools/self-package`, CI "Package") reported commit "unknown": the build environment removes `HCG_*` variables, so `HCG_SOURCE_REVISION` never reached the build. The commit now travels as `build-revision.txt` in the imported copy, and `--version` names the exact commit a package was built from.
 

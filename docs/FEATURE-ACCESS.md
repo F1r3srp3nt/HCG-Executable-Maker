@@ -56,9 +56,13 @@ recognised**: access is unknown, never a grant and never a denial.
 **Refreshed:** on sign-in, when another account signs in, when the organisation changes, when HCG's answer expires
 (timer), on "Check access again", after a recovered outage, and before privileged operations.
 
-**Not permitted vs HCG unavailable:** network errors, 5xx, 429, a missing route or an unrecognised answer are
-**HCG unavailable** ("this is not a refusal; try again; local builds keep working") and allow nothing. Only HCG's own
-`allowed: false` (or HCG Store's 403) is **not permitted**.
+**Not permitted vs HCG unavailable:** network errors, timeouts, 5xx, 429, a missing route, an unrecognised answer, a
+403 that is not HCG's own `not_org_member`, and HCG being unreachable while the session is renewed are **HCG
+unavailable** ("this is not a refusal; try again; local builds keep working") and allow nothing; HCG is asked again
+after a minute. Only HCG's own `allowed: false`, its `not_org_member`, or HCG Store's 403 is **not permitted**.
+
+**Whose answer:** an answer is used only for the account and organisation it was asked about. If another account
+signs in or another organisation is chosen while HCG is answering, the answer is discarded ("try again").
 
 ## What the person sees
 
@@ -79,10 +83,14 @@ shown only when HCG sends it (it is null today).
 ## Command line
 
 ```
-HCGExecutableMaker --hcg-session features [--sign-in]          # every decision, as the Account page shows them
-HCGExecutableMaker --hcg-session require <feature> [--sign-in] # ask now: exit 0 allowed, 8 not permitted, 9 HCG unavailable / not available yet, 3 sign-in needed
+HCGExecutableMaker --hcg-session features [--sign-in] [--organisation <slug|id>]          # every decision, as the Account page shows them
+HCGExecutableMaker --hcg-session require <feature> [--sign-in] [--organisation <slug|id>] # ask now (exit codes below)
 HCGExecutableMaker --ship-to-store …                           # refuses with exit 8/9 before anything is uploaded
 ```
+
+Exit codes: **0** allowed · **3** sign-in needed · **8** not permitted (HCG's or HCG Store's refusal) · **9** HCG or
+HCG Store unavailable, or HCG has not enabled the feature yet · **10** choose an organisation (several memberships and
+none chosen; not a refusal) · **2** usage.
 
 ## Registration (HCG Connect)
 

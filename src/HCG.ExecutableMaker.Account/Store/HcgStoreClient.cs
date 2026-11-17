@@ -149,6 +149,11 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
             {
                 throw new HcgStoreException("store_unreachable", $"HCG Store ({Origin.Host}) could not be reached: {ex.Message}", 0);
             }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // HttpClient's timeout, not the person cancelling: the Store did not answer. Not a refusal.
+                throw new HcgStoreException("store_timeout", $"HCG Store ({Origin.Host}) did not answer in time.", 0);
+            }
             using (response)
             {
                 if (response.StatusCode == HttpStatusCode.Unauthorized && attempt == 0 && recoverUnauthorized is not null && await recoverUnauthorized(token, ct).ConfigureAwait(false)) continue;

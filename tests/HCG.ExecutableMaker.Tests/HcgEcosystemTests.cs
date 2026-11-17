@@ -286,6 +286,74 @@ public class HcgEcosystemTests
         Assert.True(f.Decide(MakerFeatures.SupportSubmit).IsAllowed);
     }
 
+    [Fact]
+    public async Task A_403_that_is_not_hcgs_not_org_member_answer_is_unknown_never_a_denial()
+    {
+        // A proxy or firewall 403, or another 403 code: not evidence that the person left the organisation.
+        var (f, _, api, _, _) = Setup();
+        await Ready(f);
+        api.FailWith = HttpStatusCode.Forbidden; // body code "evaluation_failed"
+        await f.RefreshAsync();
+        Assert.Equal(FeatureAccessStatus.Unavailable, f.Status);
+        Assert.Equal(FeatureAccessState.Unavailable, f.Decide(MakerFeatures.SupportSubmit).State);
+        api.FailWith = null;
+        await Ready(f);
+        api.FailWith = HttpStatusCode.Forbidden;
+        var d = await f.CheckNowAsync(MakerFeatures.SupportSubmit);
+        Assert.Equal((FeatureAccessState.Unavailable, (string?)null), (d.State, d.Reason));
+        Assert.Equal(9, FeatureExitCodes.For(d));
+    }
+
+    [Fact]
+    public async Task An_identity_service_outage_while_renewing_is_hcg_unavailable_not_sign_in()
+    {
+        var server = new MockIdentityServer();
+        var store = new SessionOnlyCredentialStore();
+        var config = MockIdentityServer.Config;
+        var account = new HcgAccountService(config, new HcgAuthClient(new HttpClient(server), config, TimeProvider.System), store, TimeProvider.System);
+        var f = new FeatureAccessService(new HcgEcosystemClient(new HcgApiClient(new HttpClient(new MockEcosystem()), account)), new Clock());
+        await store.WriteAsync(config.SessionStoreAccount, JsonSerializer.Serialize(new { Version = 1, ClientId = MockIdentityServer.ClientId, RefreshToken = "keep", Subject = server.Subject, Email = "a@b.c" }));
+        server.Override = _ => MockIdentityServer.Json(HttpStatusCode.BadGateway, "{}");
+        await account.InitializeAsync();
+        Assert.Equal(HcgAccountStatus.Unavailable, account.Status);
+        var shown = f.Decide(MakerFeatures.SupportSubmit);
+        Assert.Equal((FeatureAccessState.Unavailable, FeatureRemedy.TryAgain), (shown.State, shown.Remedy));
+        var asked = await f.CheckNowAsync(MakerFeatures.SupportSubmit);
+        Assert.Equal(FeatureAccessState.Unavailable, asked.State);
+        Assert.Equal(9, FeatureExitCodes.For(asked)); // not 3: nobody signed out
+        Assert.Equal(FeatureAccessState.Free, f.Decide(MakerFeatures.LocalBuilds).State);
+    }
+
+    [Fact]
+    public async Task An_answer_that_arrives_after_another_account_signed_in_is_not_used_or_shown()
+    {
+        var api = new MockEcosystem();
+        api.Features[MockEcosystem.OrgA].Clear(); // nothing enabled for the first account
+        var (f, _, _, account, _) = Setup(api);
+        await Ready(f);
+        const string other = "7a1e0000-0000-4000-8000-0000000000ee";
+        // While HCG answers "allowed" about the first account, a different account signs in on this computer.
+        api.Check = (_, key) =>
+        {
+            if (key == "ai.use" && account.Identity?.Subject == MockEcosystem.Sub) { api.Subject = other; SignIn(account, other); }
+            return key == "ai.use" ? (true, null, null) : null;
+        };
+        var d = await f.CheckNowAsync(MakerFeatures.AiUse);
+        Assert.Equal(FeatureAccessState.Unavailable, d.State);
+        Assert.Contains("changed while HCG was checking", d.Explanation);
+        api.Check = (_, _) => null;
+        await WaitFor(() => f.Status == FeatureAccessStatus.Ready && f.Account?.Id == other);
+        Assert.False(f.Decide(MakerFeatures.AiUse).IsAllowed); // the first account's "allowed" never reached the second
+    }
+
+    [Fact]
+    public void Choosing_an_organisation_is_its_own_exit_code_not_a_refusal()
+    {
+        var choose = new FeatureDecision(MakerFeatures.SupportSubmit, FeatureAccessState.ChooseOrganisation, "Choose.", FeatureRemedy.ChooseOrganisation);
+        Assert.Equal(10, FeatureExitCodes.For(choose));
+        Assert.Equal(8, FeatureExitCodes.For(choose with { State = FeatureAccessState.NotPermitted }));
+    }
+
     // ───────────── Organisations ─────────────
 
     [Fact]

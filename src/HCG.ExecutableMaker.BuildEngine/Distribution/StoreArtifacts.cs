@@ -330,7 +330,12 @@ public static class StoreArtifacts
     /// <summary>The shallowest Linux (ELF) program in a ZIP without a .exe or .app, if any: its entry name.</summary>
     private static string? LinuxProgram(ZipArchive z)
     {
-        var files = z.Entries.Where(e => e.Length >= 4 && !e.FullName.EndsWith('/')).OrderBy(e => e.FullName.Count(ch => ch == '/')).Take(200);
+        // Programs first: files without an extension (an app host, createdump) or shared libraries (.so), in any number
+        // of entries, so hundreds of managed .dll files cannot hide them; a few other files after that. 4 bytes each.
+        static bool Candidate(string name) => !System.IO.Path.GetFileName(name).Contains('.') || name.EndsWith(".so", StringComparison.Ordinal) || name.Contains(".so.", StringComparison.Ordinal);
+        var all = z.Entries.Where(e => e.Length >= 4 && !e.FullName.EndsWith('/')).ToList();
+        var files = all.Where(e => Candidate(e.FullName)).OrderBy(e => e.FullName.Count(ch => ch == '/')).Take(5000)
+            .Concat(all.Where(e => !Candidate(e.FullName)).OrderBy(e => e.FullName.Count(ch => ch == '/')).Take(200));
         foreach (var e in files)
         {
             using var s = e.Open();
