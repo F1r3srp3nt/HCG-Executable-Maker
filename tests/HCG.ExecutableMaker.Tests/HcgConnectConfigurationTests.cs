@@ -158,6 +158,36 @@ public class HcgConnectConfigurationTests
     }
 
     [Fact]
+    public void A_file_without_a_client_id_keeps_the_client_built_into_this_build()
+    {
+        using var t = new TempDir();
+        t.Write(HcgConnectConfiguration.FileName, $"{{\"contractVersion\": \"{HcgConnectConfiguration.ContractVersion}\"}}");
+        var prod = HcgConnectConfiguration.Load(t.Path, HcgEnvironment.Production);
+        Assert.Null(prod.Problem);
+        Assert.Equal(HcgConnectConfiguration.ProductionClientId, prod.Configuration.ClientId);
+        Assert.True(prod.Configuration.UsesBuiltInClient);
+        Assert.Empty(prod.Configuration.MissingForSignIn());
+        // Development has no issued client: nothing is borrowed from production.
+        Assert.Null(HcgConnectConfiguration.Load(t.Path, HcgEnvironment.Development).Configuration.ClientId);
+    }
+
+    [Fact]
+    public void The_source_names_the_registration_built_into_this_build()
+    {
+        var p = HcgConnectConfiguration.Production;
+        Assert.Equal("built into this build: Production registration (hcg-executable-maker-desktop-production) (no hcg-connect.json needed)",
+            HcgConnectConfiguration.DescribeSource(p, null, fileIgnored: false));
+        Assert.Equal("built into this build: Production registration (hcg-executable-maker-desktop-production) (hcg-connect.json was ignored)",
+            HcgConnectConfiguration.DescribeSource(p, "/x/hcg-connect.json", fileIgnored: true));
+        Assert.Equal("/x/hcg-connect.json (client built into this build)", HcgConnectConfiguration.DescribeSource(p, "/x/hcg-connect.json", false));
+        Assert.Equal("/x/hcg-connect.json", HcgConnectConfiguration.DescribeSource(p with { ClientId = IssuedId }, "/x/hcg-connect.json", false));
+        Assert.StartsWith("built-in development defaults; HCG has not issued a client",
+            HcgConnectConfiguration.DescribeSource(HcgConnectConfiguration.Development, null, false), StringComparison.Ordinal);
+        Assert.Equal("HCG Connect: Production registration (hcg-executable-maker-desktop-production), client fb9b6edf-2bfc-4b5e-a354-dbb1af697029 built in, " +
+            "issuer https://qggdyzoydveafkmjgkpq.supabase.co/auth/v1", HcgConnectConfiguration.BuiltInDescription(HcgEnvironment.Production));
+    }
+
+    [Fact]
     public void Each_registration_keeps_its_own_stored_session()
     {
         var local = HcgConnectConfiguration.Production with { Issuer = new Uri("http://127.0.0.1:9/auth/v1") };

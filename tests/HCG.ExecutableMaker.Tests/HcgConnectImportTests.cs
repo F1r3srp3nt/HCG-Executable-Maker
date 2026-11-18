@@ -193,6 +193,22 @@ public class HcgConnectionCheckTests
     }
 
     [Fact]
+    public async Task Every_registered_callback_is_checked_and_an_unregistered_fallback_port_is_named()
+    {
+        var config = Config with { RedirectUris = [new("http://127.0.0.1:47820/oauth/callback"), new("http://127.0.0.1:47821/oauth/callback"), new("http://127.0.0.1:47822/oauth/callback")] };
+        var handler = Hcg(r => r.RequestUri!.AbsolutePath.EndsWith("/oauth/authorize", StringComparison.Ordinal)
+            ? r.RequestUri.Query.Contains(Uri.EscapeDataString("http://127.0.0.1:47822/oauth/callback"), StringComparison.Ordinal)
+                ? Json(HttpStatusCode.BadRequest, new { code = 400, error_code = "validation_failed", msg = "invalid redirect_uri" })
+                : new HttpResponseMessage(HttpStatusCode.Found) { Headers = { Location = new Uri("https://beta.hakmicapitalgroup.com/oauth/consent?authorization_id=x") } }
+            : null);
+        var result = await new HcgConnectionCheck(new HttpClient(handler)).RunAsync(config);
+        Assert.False(result.ReadyToSignIn);
+        Assert.Equal(ConnectionCheckState.Failed, result.Steps[3].State);
+        Assert.Contains("rejected the redirect URI http://127.0.0.1:47822/oauth/callback", result.Steps[3].Detail);
+        Assert.Equal(3, handler.Requests.Count(u => u.AbsolutePath.EndsWith("/oauth/authorize", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task A_rejected_redirect_uri_and_a_mismatched_issuer_are_named()
     {
         var redirect = await new HcgConnectionCheck(new HttpClient(Hcg(r => r.RequestUri!.AbsolutePath.EndsWith("/oauth/authorize", StringComparison.Ordinal)

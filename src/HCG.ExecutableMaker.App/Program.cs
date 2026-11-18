@@ -11,6 +11,7 @@ internal static class Program
         if (args.Contains("--version"))
         {
             Console.WriteLine(Core.HostInfo.BuildIdentity);
+            Console.WriteLine(Account.HcgConnectConfiguration.BuiltInDescription(Account.HcgConnectConfiguration.SelectedEnvironment()));
             Console.WriteLine("Executable: " + Core.HostInfo.ExecutablePath);
             if (Core.HostInfo.AppBundlePath is { } app) Console.WriteLine("App bundle: " + app);
             return 0;

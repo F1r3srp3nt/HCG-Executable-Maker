@@ -42,6 +42,9 @@ internal static class HcgSessionCommand
         Console.WriteLine(account.Configuration.UsesLocalIdentityServer
             ? $"Registration: local test identity server (not HCG) · client {account.Configuration.ClientId ?? "(none)"}"
             : $"Registration: {account.Configuration.Environment} ({account.Configuration.RegistryKey}) · client {account.Configuration.ClientId ?? "(none issued)"}");
+        var configFile = Path.Combine(paths.Root, HcgConnectConfiguration.FileName);
+        Console.WriteLine("Configuration source: " + HcgConnectConfiguration.DescribeSource(account.Configuration,
+            File.Exists(configFile) ? configFile : null, account.ConfigurationProblem is not null));
         return verb switch
         {
             "status" => Status(account, plan),

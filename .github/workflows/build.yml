@@ -218,6 +218,14 @@ jobs:
           --dist "${{ runner.temp }}/dist"
           ${{ matrix.extra }}
 
+      # The distributable for this runner, unpacked and run as a user gets it (empty data folder, nothing imported):
+      # it must report this version and commit, load Maker's own production HCG Connect client, and HCG's live
+      # identity server must accept that client with every registered callback. Read-only towards HCG.
+      - name: Packaged app loads the built-in production HCG Connect client (live check, no sign-in)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash tools/ci/verify-packaged-hcg-connect.sh "${{ runner.temp }}/dist" "$VERSION" "$GITHUB_SHA"
+
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:

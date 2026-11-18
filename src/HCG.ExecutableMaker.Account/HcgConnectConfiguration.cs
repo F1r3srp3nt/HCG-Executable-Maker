@@ -112,6 +112,35 @@ public sealed record HcgConnectConfiguration
     public static HcgConnectConfiguration Default => ForEnvironment(SelectedEnvironment());
     public static HcgConnectConfiguration ForEnvironment(HcgEnvironment environment) => environment == HcgEnvironment.Production ? Production : Development;
 
+    /// <summary>True when this configuration uses the public client built into this build for its registration.</summary>
+    [JsonIgnore] public bool UsesBuiltInClient => !string.IsNullOrWhiteSpace(ClientId) && ClientId == ForEnvironment(Environment).ClientId;
+
+    /// <summary>One line naming the registration this build has built in (shown by <c>--version</c>; no secrets: public client).</summary>
+    public static string BuiltInDescription(HcgEnvironment environment)
+    {
+        var c = ForEnvironment(environment);
+        return string.IsNullOrWhiteSpace(c.ClientId)
+            ? $"HCG Connect: {environment} registration ({c.RegistryKey}) has no client built into this build"
+            : $"HCG Connect: {environment} registration ({c.RegistryKey}), client {c.ClientId} built in, issuer {c.Issuer}";
+    }
+
+    /// <summary>
+    /// Where the configuration in use came from, for the Account page: the registration built into this build, or the
+    /// imported <c>hcg-connect.json</c> (<paramref name="importedFile"/>), or the built-in one because that file was ignored.
+    /// </summary>
+    public static string DescribeSource(HcgConnectConfiguration inUse, string? importedFile, bool fileIgnored)
+    {
+        var builtIn = ForEnvironment(inUse.Environment);
+        var name = $"{inUse.Environment} registration ({inUse.RegistryKey})";
+        var builtInText = string.IsNullOrWhiteSpace(builtIn.ClientId)
+            ? $"built-in {inUse.Environment.ToString().ToLowerInvariant()} defaults; HCG has not issued a client for the {name}"
+            : $"built into this build: {name}";
+        if (fileIgnored) return $"{builtInText} ({FileName} was ignored)";
+        if (importedFile is null)
+            return builtInText + (string.IsNullOrWhiteSpace(builtIn.ClientId) ? $" (no {FileName} imported)" : $" (no {FileName} needed)");
+        return inUse.UsesBuiltInClient ? $"{importedFile} (client built into this build)" : importedFile;
+    }
+
     /// <summary><see cref="EnvironmentVariable"/> = development selects the development registration; anything else production.</summary>
     public static HcgEnvironment SelectedEnvironment() => ParseEnvironment(System.Environment.GetEnvironmentVariable(EnvironmentVariable));
 
@@ -228,6 +257,10 @@ public sealed record HcgConnectConfiguration
             var loaded = (JsonSerializer.Deserialize<HcgConnectConfiguration>(text, Json) ?? Default) with { Environment = env };
             if (loaded.Contract != ContractVersion)
                 return new LoadResult(Default, $"{FileName} is for contract \"{loaded.Contract}\"; this version needs \"{ContractVersion}\". The file was ignored.");
+            // A file that names no client at all must not switch off the client built into this build: keep the built-in
+            // public client for the selected registration. (A wrong value, such as the template placeholder, stays an error.)
+            if (string.IsNullOrWhiteSpace(loaded.ClientId) && !string.IsNullOrWhiteSpace(Default.ClientId))
+                loaded = loaded with { ClientId = Default.ClientId };
             return new LoadResult(loaded, null);
         }
         catch (JsonException ex)

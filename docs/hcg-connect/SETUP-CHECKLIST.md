@@ -32,10 +32,15 @@ State on 11 November 2026, as checked against live HCG. The checks were read-onl
 
 ## For the user (on each computer)
 
-1. Install a build that contains this fix. v0.3.0 predates the import UI; it can only read a hand-placed `hcg-connect.json`.
-2. Account › HCG Connect › **Import HCG connection configuration…** and choose the `hcg-connect.json` from HCG.
-3. **Check configuration.** Configuration, Identity server, Signing keys and Client registration must show **Passed**.
-   - "Client registration: Failed … oauth_client_not_found" is HCG's own answer: the client ID is wrong or not registered. Go back to HCG step 1 or 2.
+1. Install **0.3.1 or later** and confirm it: the Account page footer, or `HCGExecutableMaker --version`, shows
+   `0.3.1… (commit …)` and `HCG Connect: Production registration (hcg-executable-maker-desktop-production), client fb9b6edf-… built in`.
+   A build that shows "Version 0.3.0 · unknown" predates the built-in client; it reports "clientId — missing".
+2. Nothing to import. Account › HCG Connect shows *Client ID: fb9b6edf-2bfc-4b5e-a354-dbb1af697029* and
+   *Source: built into this build: Production registration (hcg-executable-maker-desktop-production)*.
+   (An `hcg-connect.json` is only for a development or test registration.)
+3. **Check configuration.** Configuration, Identity server, Signing keys and Client registration must show **Passed**;
+   Client registration asks HCG about every callback (ports 47820, 47821 and 47822).
+   - "Client registration: Failed … oauth_client_not_found" is HCG's own answer: the client ID is wrong or not registered.
 4. **Sign in with HCG.** Your browser opens HCG's sign-in page; Executable Maker never asks for your password. Allow the app; the tab then says you can close it.
 5. Quit and reopen the app. It must still show **Signed in**, restored from the OS credential store without the browser.
 6. Check the Account page:
@@ -45,4 +50,4 @@ State on 11 November 2026, as checked against live HCG. The checks were read-onl
    - support and AI permissions, shown separately from sign-in.
 7. **Sign out.** The stored session is removed; after a restart the app shows Not signed in.
 
-Steps 4–7 against live HCG are the **verified live sign-in**. They have not been done: they need the issued client ID and a person to consent in the browser. Every sign-in test so far ran against a mock identity server.
+Steps 4–7 against live HCG are the **verified live sign-in**. They need a person to sign in and consent in the browser, so they cannot be automated without an account. CI runs the same browser flow (PKCE, loopback callback, restart, sign-out) in the packaged macOS app against a MOCK identity server, and checks every package against the live identity server up to the consent redirect.

@@ -306,8 +306,7 @@ public sealed partial class AccountViewModel : PageViewModel
     {
         var c = _account.Configuration;
         var file = Path.Combine(_paths.Root, HcgConnectConfiguration.FileName);
-        var source = _account.ConfigurationProblem is not null ? $"built-in defaults ({HcgConnectConfiguration.FileName} was ignored)"
-            : File.Exists(file) ? file : "built-in defaults (no " + HcgConnectConfiguration.FileName + " imported)";
+        var source = HcgConnectConfiguration.DescribeSource(c, File.Exists(file) ? file : null, _account.ConfigurationProblem is not null);
         ConnectTag = c.MissingForSignIn().Count > 0 ? new StatusTag("Not configured", "neutral")
             : c.UsesLocalIdentityServer ? new StatusTag("Local test server", "warning")
             : new StatusTag("Configured, not verified", "info");

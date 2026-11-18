@@ -134,36 +134,42 @@ public sealed class HcgConnectionCheck(HttpClient http)
     private async Task<ConnectionCheckStep> ClientAsync(HcgConnectConfiguration c, CancellationToken ct)
     {
         const string name = "Client registration";
-        var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
-        var challenge = Base64Url(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)));
-        var query = string.Join("&", new Dictionary<string, string>
+        // Every registered callback is asked: sign-in falls back to the next port when one is busy, so an unregistered
+        // fallback would otherwise only fail in the middle of a sign-in.
+        foreach (var redirect in c.RedirectUris)
         {
-            ["response_type"] = "code", ["client_id"] = c.ClientId!, ["redirect_uri"] = c.RedirectUris[0].ToString(),
-            ["scope"] = string.Join(' ', c.Scopes), ["state"] = Base64Url(RandomNumberGenerator.GetBytes(16)),
-            ["nonce"] = Base64Url(RandomNumberGenerator.GetBytes(16)), ["code_challenge"] = challenge, ["code_challenge_method"] = "S256",
-        }.Select(kv => $"{kv.Key}={Uri.EscapeDataString(kv.Value)}"));
-        var url = new UriBuilder(c.AuthorizationEndpoint) { Query = query }.Uri;
-        var (response, error) = await GetAsync(url, ct).ConfigureAwait(false);
-        if (error is not null) return new(name, ConnectionCheckState.Failed, error);
-        using (response)
-        {
-            var status = (int)response!.StatusCode;
-            if (status is >= 300 and < 400)
-                return new(name, ConnectionCheckState.Passed, $"{c.Issuer.Host} accepted client {c.ClientId} with redirect URI {c.RedirectUris[0]} and PKCE S256 (the sign-in page was not opened).");
-            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            var (code, message) = OAuthError(body);
-            var detail = code switch
+            var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
+            var challenge = Base64Url(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)));
+            var query = string.Join("&", new Dictionary<string, string>
             {
-                "oauth_client_not_found" or "invalid_client" =>
-                    $"HCG's identity service ({c.Issuer.Host}) answered {code}: it does not know client ID {c.ClientId}. Either this configuration has a wrong client ID, or the client is not registered (or was removed) at HCG. Compare the client ID with the one HCG issued in ERP › App integrations.",
-                _ when (code + " " + message).Contains("redirect", StringComparison.OrdinalIgnoreCase) =>
-                    $"{c.Issuer.Host} knows the client but rejected the redirect URI {c.RedirectUris[0]}: HCG must register all of {string.Join(", ", c.RedirectUris)} exactly.",
-                _ when (code + " " + message).Contains("scope", StringComparison.OrdinalIgnoreCase) =>
-                    $"{c.Issuer.Host} rejected the scopes \"{string.Join(' ', c.Scopes)}\": {message ?? code}.",
-                _ => $"{c.Issuer.Host} rejected the authorization request (HTTP {status}{(code is null ? "" : ", " + code)}{(message is null ? "" : ": " + message)}).",
-            };
-            return new(name, ConnectionCheckState.Failed, detail, code);
+                ["response_type"] = "code", ["client_id"] = c.ClientId!, ["redirect_uri"] = redirect.ToString(),
+                ["scope"] = string.Join(' ', c.Scopes), ["state"] = Base64Url(RandomNumberGenerator.GetBytes(16)),
+                ["nonce"] = Base64Url(RandomNumberGenerator.GetBytes(16)), ["code_challenge"] = challenge, ["code_challenge_method"] = "S256",
+            }.Select(kv => $"{kv.Key}={Uri.EscapeDataString(kv.Value)}"));
+            var url = new UriBuilder(c.AuthorizationEndpoint) { Query = query }.Uri;
+            var (response, error) = await GetAsync(url, ct).ConfigureAwait(false);
+            if (error is not null) return new(name, ConnectionCheckState.Failed, error);
+            using (response)
+            {
+                var status = (int)response!.StatusCode;
+                if (status is >= 300 and < 400) continue;
+                var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var (code, message) = OAuthError(body);
+                var detail = code switch
+                {
+                    "oauth_client_not_found" or "invalid_client" =>
+                        $"HCG's identity service ({c.Issuer.Host}) answered {code}: it does not know client ID {c.ClientId}. Either this configuration has a wrong client ID, or the client is not registered (or was removed) at HCG. Compare the client ID with the one HCG issued in ERP › App integrations.",
+                    _ when (code + " " + message).Contains("redirect", StringComparison.OrdinalIgnoreCase) =>
+                        $"{c.Issuer.Host} knows the client but rejected the redirect URI {redirect}: HCG must register all of {string.Join(", ", c.RedirectUris)} exactly.",
+                    _ when (code + " " + message).Contains("scope", StringComparison.OrdinalIgnoreCase) =>
+                        $"{c.Issuer.Host} rejected the scopes \"{string.Join(' ', c.Scopes)}\": {message ?? code}.",
+                    _ => $"{c.Issuer.Host} rejected the authorization request for {redirect} (HTTP {status}{(code is null ? "" : ", " + code)}{(message is null ? "" : ": " + message)}).",
+                };
+                return new(name, ConnectionCheckState.Failed, detail, code);
+            }
         }
+        return new(name, ConnectionCheckState.Passed,
+            $"{c.Issuer.Host} accepted client {c.ClientId} with each redirect URI ({string.Join(", ", c.RedirectUris)}) and PKCE S256 (the sign-in page was not opened).");
     }
 
     private async Task<ConnectionCheckStep> ApiAsync(string name, Uri url, HcgConnectConfiguration c, CancellationToken ct)

@@ -2,7 +2,18 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — Real HCG integration: issued registration, confirmed contracts, shared feature access
+## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
+
+Identify this build with `--version` (or the Account page footer): it prints `HCG Executable Maker 0.3.1… (commit …)` and
+`HCG Connect: Production registration (hcg-executable-maker-desktop-production), client fb9b6edf-… built in`.
+Builds that show "Version 0.3.0 · unknown" predate the built-in production client and cannot sign in without importing a file.
+
+### Fixed (0.3.1)
+- **Sign-in works out of the box**: the packaged app uses Maker's own production HCG Connect client (`fb9b6edf-2bfc-4b5e-a354-dbb1af697029`, public PKCE client, no secret) with no `hcg-connect.json` to import. The Account page now says "Source: built into this build: Production registration (hcg-executable-maker-desktop-production)" instead of "built-in defaults (no hcg-connect.json imported)".
+- An `hcg-connect.json` in the data folder that names no `clientId` no longer switches off the built-in client (it showed "clientId — missing"). A wrong value, such as the template placeholder, is still reported.
+- `--version` names the HCG Connect registration and client built into the build.
+- CI "Package" now runs each packaged macOS and Linux app with an empty data folder and fails unless it loads client `fb9b6edf-…`, reports its own version and commit, and HCG's identity server accepts the client and all three registered callbacks (`http://127.0.0.1:47820–47822/oauth/callback`).
+
 
 ### Added
 - **Production HCG Connect registration built in**: client `fb9b6edf-2bfc-4b5e-a354-dbb1af697029` issued by HCG (`hcg-executable-maker-desktop-production`), identical to HCG's exported `hcg-connect.json` (`docs/hcg-connect/production.hcg-connect.json`). The development registration (`hcg-executable-maker-desktop`, no client issued) is selected with `HCG_EXECUTABLE_MAKER_HCG_ENVIRONMENT=development`. Each registration keeps its own session in the OS credential store.
