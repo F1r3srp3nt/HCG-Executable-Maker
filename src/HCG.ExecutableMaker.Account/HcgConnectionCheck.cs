@@ -129,14 +129,16 @@ public sealed class HcgConnectionCheck(HttpClient http)
     /// Asks the identity service whether it accepts this client and its first redirect URI, without opening a browser
     /// or sending credentials. Failed with <see cref="ConnectionCheckStep.Code"/> = the service's own error code.
     /// </summary>
-    public Task<ConnectionCheckStep> ProbeClientAsync(HcgConnectConfiguration c, CancellationToken ct = default) => ClientAsync(c, ct);
+    public Task<ConnectionCheckStep> ProbeClientAsync(HcgConnectConfiguration c, CancellationToken ct = default) => ClientAsync(c, ct, firstRedirectOnly: true);
 
-    private async Task<ConnectionCheckStep> ClientAsync(HcgConnectConfiguration c, CancellationToken ct)
+    private async Task<ConnectionCheckStep> ClientAsync(HcgConnectConfiguration c, CancellationToken ct, bool firstRedirectOnly = false)
     {
         const string name = "Client registration";
-        // Every registered callback is asked: sign-in falls back to the next port when one is busy, so an unregistered
-        // fallback would otherwise only fail in the middle of a sign-in.
-        foreach (var redirect in c.RedirectUris)
+        // The connection check asks about every registered callback: sign-in falls back to the next port when one is
+        // busy, so an unregistered fallback would otherwise only fail in the middle of a sign-in. The quick probe before
+        // a sign-in only needs to know HCG still knows the client, so it asks once.
+        var redirects = firstRedirectOnly ? c.RedirectUris.Take(1).ToList() : c.RedirectUris.ToList();
+        foreach (var redirect in redirects)
         {
             var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
             var challenge = Base64Url(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)));
@@ -169,7 +171,9 @@ public sealed class HcgConnectionCheck(HttpClient http)
             }
         }
         return new(name, ConnectionCheckState.Passed,
-            $"{c.Issuer.Host} accepted client {c.ClientId} with each redirect URI ({string.Join(", ", c.RedirectUris)}) and PKCE S256 (the sign-in page was not opened).");
+            redirects.Count == 1
+                ? $"{c.Issuer.Host} accepted client {c.ClientId} with redirect URI {redirects[0]} and PKCE S256 (the sign-in page was not opened)."
+                : $"{c.Issuer.Host} accepted client {c.ClientId} with each redirect URI ({string.Join(", ", redirects)}) and PKCE S256 (the sign-in page was not opened).");
     }
 
     private async Task<ConnectionCheckStep> ApiAsync(string name, Uri url, HcgConnectConfiguration c, CancellationToken ct)

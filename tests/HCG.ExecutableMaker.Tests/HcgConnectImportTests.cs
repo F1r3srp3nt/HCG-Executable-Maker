@@ -206,6 +206,12 @@ public class HcgConnectionCheckTests
         Assert.Equal(ConnectionCheckState.Failed, result.Steps[3].State);
         Assert.Contains("rejected the redirect URI http://127.0.0.1:47822/oauth/callback", result.Steps[3].Detail);
         Assert.Equal(3, handler.Requests.Count(u => u.AbsolutePath.EndsWith("/oauth/authorize", StringComparison.Ordinal)));
+
+        // The quick probe before a sign-in asks once (first callback): it only confirms HCG still knows the client.
+        handler.Requests.Clear();
+        var probe = await new HcgConnectionCheck(new HttpClient(handler)).ProbeClientAsync(config);
+        Assert.Equal(ConnectionCheckState.Passed, probe.State);
+        Assert.Equal(1, handler.Requests.Count(u => u.AbsolutePath.EndsWith("/oauth/authorize", StringComparison.Ordinal)));
     }
 
     [Fact]
