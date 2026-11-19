@@ -23,7 +23,8 @@ public static class MacXcodeBuildPlanner
     public sealed record Resolved(string Target, string BuiltProductsDir, string FullProductName, string ExecutablePath,
         string? BundleIdentifier, string? DeploymentTarget, string? MarketingVersion, string? BuildVersion, string? Archs, string? SdkVersion, string? XcodeBuild, string? CodeSignIdentity)
     {
-        public string AppPath => Path.Combine(BuiltProductsDir, FullProductName);
+        /// <summary>A macOS path as xcodebuild reports it ('/'-separated on every host that reads it).</summary>
+        public string AppPath => BuiltProductsDir.TrimEnd('/') + "/" + FullProductName;
     }
 
     public static void Validate(BuildSettings s, HostEnvironment host, string sourceDir)
