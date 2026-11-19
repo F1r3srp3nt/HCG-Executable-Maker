@@ -47,6 +47,7 @@ public static class Composition
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileArtifactProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Swift.SwiftProjectInspector>();
+        services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.MacXcode.MacXcodeProjectInspector>();
         foreach (var inspector in EcosystemSignatureInspector.CreateDefaults(TimeProvider.System))
             services.AddSingleton(inspector);
         services.AddSingleton<IProjectInspectionService, ProjectInspectionService>();

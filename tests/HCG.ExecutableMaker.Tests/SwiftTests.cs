@@ -185,7 +185,7 @@ public class SwiftTests : IDisposable
     public void Minimum_macOS_hint(string code, string? expected) => Assert.Equal(expected, SwiftPackageScanner.ParseMinimumMacOS(code));
 
     [Fact]
-    public async Task Mac_only_Xcode_project_without_a_package_is_explained_as_not_built()
+    public async Task Mac_only_Xcode_project_without_an_app_target_is_explained()
     {
         _t.Write("MacApp.xcodeproj/project.pbxproj", """
             // !$*UTF8*$!
@@ -197,7 +197,7 @@ public class SwiftTests : IDisposable
         var a = await Service().InspectAsync(_t.Path, MacReport(), CancellationToken.None);
         Assert.Equal("swift", a.InspectorId);
         Assert.Equal(SupportLevel.Unsupported, a.Support);
-        Assert.Contains("not built in this version", a.SupportSummary, StringComparison.Ordinal);
+        Assert.Contains("no application target", a.SupportSummary, StringComparison.Ordinal);
         Assert.Contains("Mobile Build Studio", a.SupportSummary, StringComparison.Ordinal);
     }
 
