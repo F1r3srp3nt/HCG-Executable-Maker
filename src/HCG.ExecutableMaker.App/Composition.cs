@@ -47,6 +47,7 @@ public static class Composition
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileArtifactProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Swift.SwiftProjectInspector>();
+        services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.MacXcode.MacXcodeProjectInspector>();
         foreach (var inspector in EcosystemSignatureInspector.CreateDefaults(TimeProvider.System))
             services.AddSingleton(inspector);
         services.AddSingleton<IProjectInspectionService, ProjectInspectionService>();
@@ -63,6 +64,9 @@ public static class Composition
         // C/C++ app bundles (a project's own .app) before the generic packagers.
         services.AddSingleton<IPackager, NativeAppBundlePackager>();
         services.AddSingleton<IPackager, NativeAppZipPackager>();
+        // Native macOS apps built with Xcode (the project's own .app) before the generic packagers.
+        services.AddSingleton<IPackager, XcodeAppBundlePackager>();
+        services.AddSingleton<IPackager, XcodeAppZipPackager>();
         services.AddSingleton<IPackager, PortableFolderPackager>();
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();

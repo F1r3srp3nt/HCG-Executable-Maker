@@ -88,6 +88,8 @@ public sealed record ProjectAnalysis
     public NodeAnalysis? Node { get; init; }
     /// <summary>C/C++ projects (CMake, Make, sources, Theos) found in the workspace.</summary>
     public NativeAnalysis? Native { get; init; }
+    /// <summary>Native macOS apps with an Xcode project (xcodebuild builds the .app; HCG packages and verifies it).</summary>
+    public MacXcodeAnalysis? MacXcode { get; init; }
     public IReadOnlyList<AnalysisDiagnostic> Diagnostics { get; init; } = [];
     public required DateTimeOffset AnalyzedAt { get; init; }
 }

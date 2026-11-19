@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using HCG.ExecutableMaker.BuildEngine.Electron;
+using HCG.ExecutableMaker.BuildEngine.MacXcode;
 using HCG.ExecutableMaker.BuildEngine.Swift;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -116,7 +117,9 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.Preparing, "Validating configuration and toolchains");
             Log(BuildLogKind.Info, $"HCG Executable Maker {HostInfo.ProductVersion} — build {build.Id}");
             Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
-            Log(BuildLogKind.Info, settings.Electron is { } el
+            Log(BuildLogKind.Info, settings.MacXcode is { } mxTarget
+                ? $"Target: macOS {mxTarget.Architecture.Label()} · native macOS app — Xcode · {(mxTarget.WorkspacePath ?? mxTarget.ProjectPath)} · scheme {mxTarget.Scheme} · {mxTarget.Configuration}"
+                : settings.Electron is { } el
                 ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · Electron app {(el.ProjectDirectory.Length == 0 ? "(root)" : el.ProjectDirectory)} · electron-builder --{el.Platform} {string.Join(' ', el.Targets)}{(el.PackagingScript is null ? "" : $" (following script \"{el.PackagingScript}\")")}"
                 : settings.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } ts } theosOpts
                 ? $"Target: jailbroken iOS · Theos package {(theosOpts.ProjectDirectory.Length == 0 ? "(root)" : theosOpts.ProjectDirectory)} · {ts.Label} · iOS {ts.DeploymentTarget ?? "(Theos default)"}+ · SDK {ts.SdkVersion ?? "latest"} · {string.Join(" ", ts.Architectures)} · output .deb (not an IPA)"
@@ -145,6 +148,9 @@ public sealed class BuildService(
             var isElectron = settings.Electron is not null;
             var isTheos = settings.Native?.Kind == NativeProjectKind.Theos;
             var isNative = settings.Native is not null && !isTheos;
+            var isMacXcode = settings.MacXcode is not null;
+            string? xcodebuild = null;
+            MacXcodeTargetInfo? xcodeTarget = null;
             Native.NativeBuildPlanner.Tools? nativeTools = null;
             Native.TheosBuildPlanner.Tools? theosTools = null;
             NativeProjectInfo? theosProject = null;
@@ -223,6 +229,38 @@ public sealed class BuildService(
                     ? $"make: {nativeTools.Make}. The project is copied into HCG's build folder and built there; the imported source is not written to."
                     : $"CMake: {nativeTools.CMake}; generator: {(nat.Preset is { } pr ? $"from preset {pr}" : Native.NativeBuildPlanner.ChooseGenerator(nativeTools, null) ?? "CMake's default")}. Build folder: HCG's own (outside the imported source)." +
                       (nat.AllowDownloads ? " Downloads by FetchContent are ALLOWED for this project." : " FetchContent downloads are blocked (FETCHCONTENT_FULLY_DISCONNECTED=ON)."));
+            }
+            else if (isMacXcode)
+            {
+                var mx = settings.MacXcode!;
+                MacXcodeBuildPlanner.Validate(settings, host, PathGuard.GetRealPath(request.Project.SourceDirectory));
+                var xproject = request.Project.Analysis?.MacXcode?.Projects.FirstOrDefault(p => p.ProjectPath == mx.ProjectPath);
+                xcodeTarget = xproject?.Targets.FirstOrDefault(t => t.Name == mx.AppTarget)
+                              ?? throw new BuildValidationException($"The app target {mx.AppTarget} is not in the inspection of {mx.ProjectPath}. Re-inspect the project.");
+                var assessment = HCG.ExecutableMaker.ProjectInspection.MacXcode.MacXcodeCapabilities.Evaluate(xcodeTarget, report);
+                foreach (var req in assessment.Requirements) Log(req.IsSatisfied ? BuildLogKind.Info : BuildLogKind.Error, $"{(req.IsSatisfied ? "✓" : "✗")} {req.DisplayName}: {req.Detail}");
+                if (assessment.Support != SupportLevel.Supported || assessment.Xcodebuild is null)
+                {
+                    Fail(BuildStatus.Failed, assessment.Summary + " " + string.Join(" ", assessment.Remediation));
+                    return build;
+                }
+                if (!assessment.Architectures.Contains(mx.Architecture))
+                {
+                    Fail(BuildStatus.Failed, $"{mx.Architecture.Label()} is not offered by the selected macOS SDK (it builds: {string.Join(", ", assessment.Architectures.Select(a => a.Label()))}).");
+                    return build;
+                }
+                if (assessment.Note is { } note) Log(BuildLogKind.Warning, note);
+                xcodebuild = assessment.Xcodebuild;
+                if (report.Xcode is { VerifiedVersion: { } xv } xs) build.ToolchainVersions["xcode"] = $"{xv}{(xs.VerifiedBuild is { } xb ? $" ({xb})" : "")} — {xs.ActiveDeveloperDirectory}";
+                if (report.Find(ToolchainIds.MacOSSdk) is { IsAvailable: true, Version: { } sdkVersion }) build.ToolchainVersions["macos-sdk"] = sdkVersion;
+                if (report.Find(ToolchainIds.MacOSVersion) is { IsAvailable: true, Version: { } macVersion }) build.ToolchainVersions["macos"] = macVersion;
+                build.ToolchainVersions["xcodebuild"] = xcodebuild;
+                Log(BuildLogKind.Info, $"Project settings kept: bundle ID {xcodeTarget.BundleIdentifier ?? "(from the project)"}, version {xcodeTarget.MarketingVersion ?? "?"} ({xcodeTarget.BuildVersion ?? "?"}), " +
+                                       $"macOS {xcodeTarget.DeploymentTarget ?? "(Xcode default)"}+, signing {xcodeTarget.SigningDescription}.");
+                foreach (var o in MacXcodeBuildPlanner.Overrides(mx, xcodeTarget.Architectures))
+                    Log(BuildLogKind.Info, $"Override: {o.Setting}={(o.Value.Length == 0 ? "\"\"" : o.Value)} — {o.Reason}");
+                if (xproject!.HelperScripts.Count > 0)
+                    Log(BuildLogKind.Info, $"Not run: {string.Join(", ", xproject.HelperScripts.Select(Path.GetFileName))} (HCG calls xcodebuild directly; the project's scripts may build Debug or open the app).");
             }
             else if (isSwift)
             {
@@ -339,7 +377,10 @@ public sealed class BuildService(
                 Directory.CreateDirectory(helpersDir);
                 prebuild.AddRange(SwiftContractPlanner.PlanPrebuild(contract, sourceDir, helpersDir, tools, scrub.Environment, _executables));
             }
-            var steps = isTheos
+            MacXcodeBuildPlanner.Layout? xcodeLayout = isMacXcode ? MacXcodeBuildPlanner.PrepareLayout(settings, PathGuard.GetRealPath(buildDir), sourceDir) : null;
+            var steps = isMacXcode
+                ? MacXcodeBuildPlanner.Plan(settings, xcodeLayout!, sourceDir, xcodebuild!, xcodeTarget!.Architectures, scrub.Environment)
+                : isTheos
                 ? [Native.TheosBuildPlanner.Plan(settings, theosPrepared!, theosTools!, scrub.Environment)]
                 : isNative
                 ? Native.NativeBuildPlanner.Plan(nativeInput!, nativePrepared!)
@@ -353,7 +394,7 @@ public sealed class BuildService(
             if (prebuild.Count > 0) steps = [.. prebuild, .. steps];
 
             // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
-            IBuildOutputParser parser = isNative || isTheos ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
+            IBuildOutputParser parser = isMacXcode ? new XcodeBuildOutputParser() : isNative || isTheos ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
             var captured = new List<string>();
             foreach (var step in steps)
             {
@@ -408,7 +449,9 @@ public sealed class BuildService(
                     overall.Token.ThrowIfCancellationRequested();
                 if (result.ExitCode != 0)
                 {
-                    Fail(BuildStatus.Failed, $"{step.Title} failed with exit code {result.ExitCode}.");
+                    var first = isMacXcode ? FirstActionableError(build, parser) : null;
+                    Fail(BuildStatus.Failed, $"{step.Title} failed with exit code {result.ExitCode}." + (first is null ? "" : $" First error: {first}") +
+                         (isMacXcode && xcodeLayout is not null && Directory.Exists(xcodeLayout.ResultBundle) ? $" Result bundle (open in Xcode): {xcodeLayout.ResultBundle}" : ""));
                     return build;
                 }
                 Log(BuildLogKind.Success, $"{step.Title} completed in {result.Duration.TotalSeconds:F1}s");
@@ -417,7 +460,43 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.VerifyingOutput, isElectron ? "Verify: locate the app electron-builder produced" : "Verifying publish output");
             string? exeName;
             var packagingInput = publishDir;
-            if (isTheos)
+            MacXcodeBuildPlanner.Resolved? xcodeApp = null;
+            if (isMacXcode)
+            {
+                string? problem;
+                (xcodeApp, problem) = MacXcodeBuildPlanner.Resolve(captured, settings.MacXcode!);
+                problem ??= xcodeApp is null ? "xcodebuild did not report the app." : MacXcodeBuildPlanner.CheckFresh(xcodeApp, build.StartedAt);
+                if (problem is not null)
+                {
+                    Fail(BuildStatus.Failed, problem);
+                    return build;
+                }
+                Log(BuildLogKind.Info, $"xcodebuild product: {xcodeApp!.AppPath} (target {xcodeApp.Target}, bundle ID {xcodeApp.BundleIdentifier}, version {xcodeApp.MarketingVersion} ({xcodeApp.BuildVersion}), " +
+                                       $"macOS {xcodeApp.DeploymentTarget}+, ARCHS {xcodeApp.Archs}, SDK {xcodeApp.SdkVersion}, Xcode build {xcodeApp.XcodeBuild})");
+                if (xcodeTarget?.BundleIdentifier is { } expectedId && !expectedId.Contains("$(", StringComparison.Ordinal) && xcodeApp.BundleIdentifier != expectedId)
+                    AddMessage(new BuildMessage(DiagnosticSeverity.Warning, $"xcodebuild resolved the bundle ID to {xcodeApp.BundleIdentifier}; the project file says {expectedId}.", "HCG-XCODE"));
+                Directory.CreateDirectory(publishDir);
+                var staged = Path.Combine(publishDir, xcodeApp.FullProductName);
+                if (Directory.Exists(staged)) Directory.Delete(staged, recursive: true);
+                var copy = await new WorkerRunner(worker, scrub.Environment).RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = [xcodeApp.AppPath, staged], Timeout = TimeSpan.FromMinutes(10) },
+                    (_, l) => Log(BuildLogKind.Output, l), overall.Token).ConfigureAwait(false);
+                overall.Token.ThrowIfCancellationRequested();
+                if (!copy.Succeeded)
+                {
+                    Fail(BuildStatus.Failed, $"ditto could not copy {xcodeApp.FullProductName} out of DerivedData (exit code {copy.ExitCode}).");
+                    return build;
+                }
+                // Licence and attribution files travel with the app (next to it and inside the DMG), unchanged.
+                var extras = Path.Combine(publishDir, MacXcodeExtrasFolder);
+                Directory.CreateDirectory(extras);
+                foreach (var rel in settings.MacXcode!.LicenseFiles)
+                {
+                    var file = Mobile.MobileArgs.Inside(sourceDir, rel);
+                    if (File.Exists(file)) File.Copy(file, Path.Combine(extras, Path.GetFileName(file)), overwrite: true);
+                }
+                exeName = xcodeApp.ExecutablePath;
+            }
+            else if (isTheos)
             {
                 var deb = Native.TheosBuildPlanner.Locate(theosPrepared!);
                 Directory.CreateDirectory(publishDir);
@@ -515,6 +594,8 @@ public sealed class BuildService(
                 Icons = icons,
                 Host = host,
                 Toolchains = report,
+                DistributionExtras = isMacXcode && Directory.Exists(Path.Combine(publishDir, MacXcodeExtrasFolder))
+                    ? Directory.GetFiles(Path.Combine(publishDir, MacXcodeExtrasFolder)).Order(StringComparer.Ordinal).ToList() : [],
             };
             var packagingLog = new PackagingLog(Log);
             var outputs = new List<PackagedOutput>();
@@ -581,6 +662,22 @@ public sealed class BuildService(
             }
             if (sums.Length > 0)
                 await File.WriteAllTextAsync(Path.Combine(outputRoot, "SHA256SUMS.txt"), sums.ToString(), overall.Token).ConfigureAwait(false);
+            if (isMacXcode && build.Artifacts.All(a => a.Verification != VerificationStatus.Failed))
+            {
+                // Licence and attribution files next to the app (also inside the DMG), and a build report.
+                foreach (var extra in packagingRequest.DistributionExtras)
+                    File.Copy(extra, Path.Combine(outputRoot, Path.GetFileName(extra)), overwrite: true);
+                var reportFiles = await MacXcodeBuildReport.WriteAsync(new MacXcodeBuildReport.Input(build, settings, request.Project, xcodeApp!, xcodeTarget!, outputRoot,
+                    MacXcodeBuildPlanner.Overrides(settings.MacXcode!, xcodeTarget!.Architectures), steps.Select(st => st.Process.DisplayCommand).ToList(), report),
+                    new WorkerRunner(worker, scrub.Environment), overall.Token).ConfigureAwait(false);
+                foreach (var f in reportFiles) Log(BuildLogKind.Info, $"Wrote {Path.GetFileName(f)}");
+                // The build folder keeps only the result bundle (for Xcode); the source copy and derived data are not needed.
+                foreach (var dir in new[] { xcodeLayout!.SourceCopy, xcodeLayout.DerivedData, xcodeLayout.SourcePackages })
+                {
+                    try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {dir}: {ex.Message}"); }
+                }
+            }
             await File.WriteAllTextAsync(Path.Combine(outputRoot, OutputMarkerFile), HcgJson.Serialize(new
             {
                 buildId = build.Id,
@@ -590,7 +687,8 @@ public sealed class BuildService(
                 runtimeIdentifier = settings.RuntimeIdentifier,
                 createdAt = time.GetUtcNow(),
                 complete = true,
-                signing = settings.Platform == TargetPlatform.MacOS ? settings.MacDistribution.SigningMode.ToString() : "none",
+                signing = isMacXcode && settings.MacDistribution.SigningMode != MacSigningMode.DeveloperId ? "project (as Xcode signed it)"
+                    : settings.Platform == TargetPlatform.MacOS ? settings.MacDistribution.SigningMode.ToString() : "none",
                 notarized = false,
             }), overall.Token).ConfigureAwait(false);
 
@@ -655,6 +753,20 @@ public sealed class BuildService(
         (line.Contains("error MSB4018", StringComparison.Ordinal) || line.Contains("IOException", StringComparison.Ordinal));
 
     /// <summary>Base name shared by the per-build output folder and its artifacts, e.g. <c>MyApp-1.2.0-osx-arm64</c>.</summary>
+    /// <summary>Folder in the publish output holding the project's licence files for an Xcode build.</summary>
+    internal const string MacXcodeExtrasFolder = "_licence";
+
+    /// <summary>The first error worth showing: a compiler/project diagnostic, not xcodebuild's closing "** BUILD FAILED **".</summary>
+    private static string? FirstActionableError(BuildRecord build, IBuildOutputParser parser)
+    {
+        BuildMessage? first;
+        lock (build.Messages)
+            first = build.Messages.FirstOrDefault(m => m.Severity == DiagnosticSeverity.Error && !m.Text.Contains("** BUILD FAILED **", StringComparison.Ordinal));
+        if (first is null) return null;
+        var text = parser is XcodeBuildOutputParser x ? x.Describe(first) : first.Text;
+        return first.File is { } f ? $"{Path.GetFileName(f)}{(first.Line is { } l ? ":" + l : "")}: {text}" : text;
+    }
+
     public static string ArtifactBaseName(BuildSettings s) => s.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } theos }
         ? $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-ios-{PathGuard.SanitizeFileName(theos.PackageScheme, "theos")}"
         : $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier ?? (s.Platform == TargetPlatform.MacOS ? "osx" : s.Platform.ToString().ToLowerInvariant()) + "-" + s.Architecture.ToString().ToLowerInvariant()}";

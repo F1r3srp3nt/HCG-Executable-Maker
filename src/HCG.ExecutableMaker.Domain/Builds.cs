@@ -48,6 +48,8 @@ public sealed record BuildSettings
     public ElectronBuildOptions? Electron { get; init; }
     /// <summary>Set for C/C++ builds (CMake, Make, sources); null otherwise.</summary>
     public NativeBuildOptions? Native { get; init; }
+    /// <summary>Set for native macOS apps built from an Xcode project/workspace with xcodebuild; null otherwise.</summary>
+    public MacXcodeBuildOptions? MacXcode { get; init; }
     /// <summary>macOS signing (ad hoc / Developer ID), installer and Mac App Store settings.</summary>
     public MacDistributionOptions MacDistribution { get; init; } = new();
 
