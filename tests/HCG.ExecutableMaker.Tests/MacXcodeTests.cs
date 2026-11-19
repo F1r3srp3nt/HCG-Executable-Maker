@@ -1,5 +1,10 @@
 using System.IO.Compression;
+using HCG.ExecutableMaker.BuildEngine;
+using HCG.ExecutableMaker.BuildEngine.MacXcode;
 using HCG.ExecutableMaker.Core;
+using HCG.ExecutableMaker.Packaging;
+using HCG.ExecutableMaker.Packaging.MacDistribution;
+using HCG.ExecutableMaker.Packaging.Packagers;
 using HCG.ExecutableMaker.Domain;
 using HCG.ExecutableMaker.Infrastructure.Import;
 using HCG.ExecutableMaker.Infrastructure.Persistence;
@@ -246,6 +251,129 @@ public sealed class MacXcodeTests : IDisposable
         Assert.Contains("built with Xcode on a Mac. This computer runs Linux", a.SupportSummary, StringComparison.Ordinal);
         Assert.Contains("no remote Mac build host is configured", a.SupportSummary, StringComparison.Ordinal);
         Assert.Contains(a.RequiredToolchains, r => r.ToolchainId == "macos-host" && !r.IsSatisfied);
+    }
+
+    // ───────────── Build plan ─────────────
+
+    private static BuildSettings XcodeSettings(string output, MacXcodeArchitecture arch = MacXcodeArchitecture.AppleSilicon, bool adHoc = false) => new()
+    {
+        ProjectRelativePath = "MotionWallpaper-master/MotionWallpaper.xcodeproj",
+        Platform = TargetPlatform.MacOS,
+        Architecture = arch.ToTarget(),
+        OutputDirectory = output,
+        Identity = new AppIdentity { ApplicationName = "MotionWallpaper", Version = "1.0.5", ApplicationId = "com.example.MotionWallpaper", Publisher = "" },
+        PackagingFormats = [PackagingFormat.MacAppBundle, PackagingFormat.PortableZip, PackagingFormat.MacDmg],
+        MacXcode = new MacXcodeBuildOptions
+        {
+            ProjectPath = "MotionWallpaper-master/MotionWallpaper.xcodeproj", Scheme = "MotionWallpaper", Configuration = "Release", Architecture = arch,
+            AppTarget = "MotionWallpaper", ProductName = "MotionWallpaper", BundleIdentifier = "com.example.MotionWallpaper", DisplayName = "Motion Wallpaper",
+            DeploymentTarget = "26.0", SignLocallyAdHoc = adHoc, LicenseFiles = ["MotionWallpaper-master/LICENSE"],
+        },
+    };
+
+    [Fact]
+    public void The_plan_copies_the_source_and_runs_xcodebuild_on_the_copy_with_only_the_listed_overrides()
+    {
+        var source = _t.Combine("ws", "source");
+        Directory.CreateDirectory(Path.Combine(source, "MotionWallpaper-master", "MotionWallpaper.xcodeproj"));
+        var s = XcodeSettings(_t.Combine("out"));
+        var layout = MacXcodeBuildPlanner.PrepareLayout(s, _t.Combine("build"), source);
+        var steps = MacXcodeBuildPlanner.Plan(s, layout, source, "/Applications/Xcode_26.6.app/Contents/Developer/usr/bin/xcodebuild", null, new Dictionary<string, string> { ["PATH"] = "/usr/bin" });
+
+        Assert.Equal(3, steps.Count);
+        Assert.Equal("/usr/bin/ditto", steps[0].Process.Executable);
+        Assert.Equal([source, layout.SourceCopy], steps[0].Process.Arguments);
+        var build = steps[2].Process;
+        Assert.EndsWith("xcodebuild", build.Executable, StringComparison.Ordinal);
+        var args = build.Arguments.ToList();
+        // On the copy, never on the imported source; derived data, result bundle and packages in HCG's build folder.
+        Assert.Equal(Path.Combine(layout.SourceCopy, "MotionWallpaper-master", "MotionWallpaper.xcodeproj"), args[args.IndexOf("-project") + 1]);
+        Assert.StartsWith(_t.Combine("build"), args[args.IndexOf("-derivedDataPath") + 1], StringComparison.Ordinal);
+        Assert.StartsWith(_t.Combine("build"), args[args.IndexOf("-resultBundlePath") + 1], StringComparison.Ordinal);
+        Assert.StartsWith(_t.Combine("build"), args[args.IndexOf("-clonedSourcePackagesDirPath") + 1], StringComparison.Ordinal);
+        Assert.Equal("generic/platform=macOS", args[args.IndexOf("-destination") + 1]);
+        Assert.Equal(("MotionWallpaper", "Release"), (args[args.IndexOf("-scheme") + 1], args[args.IndexOf("-configuration") + 1]));
+        Assert.Equal("build", args[^1]);
+        // Exactly the visible overrides; no signing settings unless chosen; no project script.
+        var settingsArgs = args.Where(a => a.Contains('=') && !a.StartsWith('/') && !a.StartsWith("generic/", StringComparison.Ordinal)).ToList();
+        Assert.Equal(["ARCHS=arm64", "ONLY_ACTIVE_ARCH=NO", "COMPILER_INDEX_STORE_ENABLE=NO"], settingsArgs);
+        Assert.DoesNotContain(steps, st => st.Process.Arguments.Any(a => a.EndsWith(".command", StringComparison.Ordinal)));
+        Assert.Equal("YES", build.Environment!["NSUnbufferedIO"]);
+        Assert.True(steps[1].CaptureStdout);
+        Assert.Contains("-showBuildSettings", steps[1].Process.Arguments);
+    }
+
+    [Fact]
+    public void Universal_and_local_ad_hoc_signing_are_visible_overrides()
+    {
+        var universal = MacXcodeBuildPlanner.Overrides(XcodeSettings("/o", MacXcodeArchitecture.Universal).MacXcode!, null);
+        Assert.Equal("arm64 x86_64", universal.Single(o => o.Setting == "ARCHS").Value);
+        Assert.Contains("the project sets no ARCHS", universal[0].Reason, StringComparison.Ordinal);
+        var adHoc = MacXcodeBuildPlanner.Overrides(XcodeSettings("/o", adHoc: true).MacXcode!, "arm64");
+        Assert.Equal(["ARCHS", "ONLY_ACTIVE_ARCH", "COMPILER_INDEX_STORE_ENABLE", "CODE_SIGN_IDENTITY", "CODE_SIGN_STYLE", "DEVELOPMENT_TEAM", "PROVISIONING_PROFILE_SPECIFIER"],
+            adHoc.Select(o => o.Setting));
+        Assert.Equal("-", adHoc.Single(o => o.Setting == "CODE_SIGN_IDENTITY").Value);
+    }
+
+    [Fact]
+    public void The_built_app_is_taken_from_xcodebuilds_own_settings()
+    {
+        string[] captured =
+        [
+            "Command line invocation:", "    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -showBuildSettings -json", "",
+            """[ { "action" : "build", "buildSettings" : { "TARGET_BUILD_DIR" : "/b/DerivedData/Build/Products/Release", "FULL_PRODUCT_NAME" : "MotionWallpaper.app",""",
+            """ "EXECUTABLE_PATH" : "MotionWallpaper.app/Contents/MacOS/MotionWallpaper", "PRODUCT_BUNDLE_IDENTIFIER" : "com.example.MotionWallpaper", "WRAPPER_EXTENSION" : "app",""",
+            """ "PRODUCT_TYPE" : "com.apple.product-type.application", "MACOSX_DEPLOYMENT_TARGET" : "26.0", "MARKETING_VERSION" : "1.0.5", "CURRENT_PROJECT_VERSION" : "5", "ARCHS" : "arm64", "SDK_VERSION" : "26.5" },""",
+            """ "target" : "MotionWallpaper" } ]""",
+        ];
+        var (app, problem) = MacXcodeBuildPlanner.Resolve(captured, XcodeSettings("/o").MacXcode!);
+        Assert.Null(problem);
+        Assert.Equal("/b/DerivedData/Build/Products/Release/MotionWallpaper.app", app!.AppPath);
+        Assert.Equal("MotionWallpaper.app/Contents/MacOS/MotionWallpaper", app.ExecutablePath);
+        Assert.Equal(("com.example.MotionWallpaper", "26.0", "arm64", "26.5"), (app.BundleIdentifier, app.DeploymentTarget, app.Archs, app.SdkVersion));
+        Assert.Contains("builds no macOS application", MacXcodeBuildPlanner.Resolve(["[ ]"], XcodeSettings("/o").MacXcode!).Problem, StringComparison.Ordinal);
+        Assert.Contains("not at", MacXcodeBuildPlanner.CheckFresh(app, DateTimeOffset.UtcNow), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Building_is_refused_off_a_Mac_and_for_paths_outside_the_source()
+    {
+        var source = _t.Combine("src");
+        Directory.CreateDirectory(Path.Combine(source, "MotionWallpaper-master", "MotionWallpaper.xcodeproj"));
+        var linux = Assert.Throws<BuildValidationException>(() => MacXcodeBuildPlanner.Validate(XcodeSettings("/o"), Linux().Host, source));
+        Assert.Contains("built with Xcode on a Mac. This computer runs Linux; nothing was built", linux.Message, StringComparison.Ordinal);
+        var mac = Mac().Host;
+        MacXcodeBuildPlanner.Validate(XcodeSettings("/o"), mac, source);
+        var escape = XcodeSettings("/o") with { MacXcode = XcodeSettings("/o").MacXcode! with { ProjectPath = "../../etc/x.xcodeproj" } };
+        Assert.Throws<BuildValidationException>(() => MacXcodeBuildPlanner.Validate(escape, mac, source));
+        var badScheme = XcodeSettings("/o") with { MacXcode = XcodeSettings("/o").MacXcode! with { Scheme = "-quiet; rm" } };
+        Assert.Throws<BuildValidationException>(() => MacXcodeBuildPlanner.Validate(badScheme, mac, source));
+    }
+
+    [Fact]
+    public void Packaging_offers_app_zip_and_dmg_on_a_Mac_and_nothing_buildable_elsewhere()
+    {
+        var mac = PackagingCatalog.Evaluate(new PackagingContext(TargetPlatform.MacOS, Mac().Host, Mac(), true) { IsMacXcode = true });
+        Assert.Equal([PackagingFormat.MacAppBundle, PackagingFormat.PortableZip, PackagingFormat.MacDmg], mac.Where(o => o.IsAvailable).Select(o => o.Format));
+        var linux = PackagingCatalog.Evaluate(new PackagingContext(TargetPlatform.MacOS, Linux().Host, Linux(), true) { IsMacXcode = true });
+        Assert.DoesNotContain(linux, o => o.IsAvailable);
+        Assert.All(linux.Where(o => o.Format is PackagingFormat.MacAppBundle or PackagingFormat.PortableZip or PackagingFormat.MacDmg),
+            o => Assert.Equal(PackagingAvailability.RequiresDifferentHost, o.Availability));
+        // The ZIP and DMG wrap the app, so the app is always produced first.
+        Assert.Equal([PackagingFormat.MacAppBundle, PackagingFormat.PortableZip, PackagingFormat.MacDmg],
+            PackagingCatalog.WithDependencies([PackagingFormat.MacDmg, PackagingFormat.PortableZip], XcodeSettings("/o")));
+    }
+
+    [Theory]
+    [InlineData("Signature=adhoc\nIdentifier=com.example.MotionWallpaper", "AdHoc", "Ad hoc signature (no certificate, no team)")]
+    [InlineData("Authority=Developer ID Application: Example (ABCDE12345)\nTeamIdentifier=ABCDE12345\nCodeDirectory v=20500 size=1 flags=0x10000(runtime)\nTimestamp=1 Jan 2026", "DeveloperId", "Developer ID signature")]
+    [InlineData("Authority=Apple Development: someone (XYZ)\nTeamIdentifier=XYZ1234567", "Development", "not a distribution signature")]
+    public void Signatures_are_classified_without_blurring_ad_hoc_and_Developer_ID(string codesignOutput, string kind, string text)
+    {
+        var info = MacCodeSigner.ParseSignatureInfo(codesignOutput.Replace("\\n", "\n", StringComparison.Ordinal));
+        Assert.Equal(kind, MacSignatureDescription.Classify(info).ToString());
+        Assert.Contains(text, MacSignatureDescription.Describe(info), StringComparison.Ordinal);
+        Assert.Contains("not notarized", MacSignatureDescription.Describe(info), StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class FixedToolchains(ToolchainReport report) : IToolchainService

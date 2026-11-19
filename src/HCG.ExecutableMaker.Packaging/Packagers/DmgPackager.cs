@@ -20,7 +20,11 @@ public sealed class DmgPackager(IProcessRunner runner) : IPackager
             throw new InvalidOperationException("DMG creation requires a macOS host.");
         var hdiutil = request.Toolchains.Find(ToolchainIds.Hdiutil)?.ExecutablePath
                       ?? throw new InvalidOperationException("hdiutil was not detected.");
-        var bundleName = PathGuard.SanitizeFileName(request.Settings.Identity.ApplicationName, "Application") + ".app";
+        // An app the project built itself (Xcode) keeps its own bundle name (PRODUCT_NAME.app); HCG-assembled bundles are named after the app.
+        var bundleName = request.ExecutableFileName.Split('/')[0] is { } own && own.EndsWith(".app", StringComparison.Ordinal) && Directory.Exists(Path.Combine(request.OutputRoot, own))
+            ? own
+            : PathGuard.SanitizeFileName(request.Settings.Identity.ApplicationName, "Application") + ".app";
+        var volumeName = request.Settings.MacXcode?.DisplayName is { Length: > 0 } display ? display : request.Settings.Identity.ApplicationName;
         var bundle = Path.Combine(request.OutputRoot, bundleName);
         if (!Directory.Exists(bundle))
             throw new InvalidOperationException("The .app bundle must be created before the DMG.");
@@ -34,6 +38,9 @@ public sealed class DmgPackager(IProcessRunner runner) : IPackager
                 (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
             if (!ditto.Succeeded) throw new InvalidOperationException($"ditto failed with exit code {ditto.ExitCode}.");
             File.CreateSymbolicLink(Path.Combine(staging, "Applications"), "/Applications");
+            // Licence and attribution files that must travel with the app (copied unchanged).
+            foreach (var extra in request.DistributionExtras)
+                File.Copy(extra, Path.Combine(staging, Path.GetFileName(extra)), overwrite: true);
 
             var dmg = Path.Combine(request.OutputRoot, request.ArtifactBaseName + ".dmg");
             // hdiutil intermittently fails with "Resource busy" (notably on CI Macs); retry a few times.
@@ -44,7 +51,7 @@ public sealed class DmgPackager(IProcessRunner runner) : IPackager
                 create = await runner.RunAsync(new ProcessSpec
                 {
                     Executable = hdiutil,
-                    Arguments = ["create", "-volname", request.Settings.Identity.ApplicationName, "-srcfolder", staging, "-format", "UDZO", "-fs", "HFS+", dmg],
+                    Arguments = ["create", "-volname", volumeName, "-srcfolder", staging, "-format", "UDZO", "-fs", "HFS+", dmg],
                     Timeout = TimeSpan.FromMinutes(10),
                 }, (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
                 if ((create.Succeeded && File.Exists(dmg)) || create.Cancelled || create.TimedOut) break;

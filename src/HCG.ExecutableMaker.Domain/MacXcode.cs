@@ -122,6 +122,11 @@ public sealed record MacXcodeBuildOptions
     public string? BundleIdentifier { get; init; }
     public string? DisplayName { get; init; }
     public string? DeploymentTarget { get; init; }
+    /// <summary>
+    /// Visible override for projects that sign with a certificate this Mac may not have (Apple Development, a team):
+    /// sign ad hoc to run locally instead. Off by default: the project's own signing is kept.
+    /// </summary>
+    public bool SignLocallyAdHoc { get; init; }
     /// <summary>Licence/attribution files (relative to the source) shipped next to the app and inside the DMG.</summary>
     public IReadOnlyList<string> LicenseFiles { get; init; } = [];
 }

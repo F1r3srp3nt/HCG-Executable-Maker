@@ -2,6 +2,21 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Native macOS apps built with Xcode
+
+### Added
+- **Native macOS app — Xcode**: import a source ZIP (a GitHub-style enclosing folder is handled) or folder with a
+  macOS Xcode project, choose project/target, scheme, configuration and architecture, and build it with `xcodebuild`
+  into the project's own `.app`, a ZIP, an optional DMG with an Applications shortcut and the project's licence files,
+  SHA-256 checksums and a build report. Release and this Mac's architecture by default (Apple silicon); Universal when
+  the SDK builds both. Preflight names exactly what is missing (a Mac, full Xcode, xcodebuild, a macOS SDK at least as
+  new as `MACOSX_DEPLOYMENT_TARGET`). Built in a copy of the source; only the listed overrides are passed; helper
+  scripts (e.g. `INSTALL.command`) are never run. The app keeps its identity and signature; ad hoc, development and
+  Developer ID signatures are reported as such; quarantine and Gatekeeper are never changed. See docs/MACOS-XCODE.md.
+- CI job `xcode-macos`: MotionWallpaper 1.0.5 (pinned commit, checked against the uploaded ZIP) through the wizard —
+  build verification with Apple's tools, Universal build, cancellation, and runtime checks (launch, MP4 import, desktop
+  playback) on the runner's disposable session.
+
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
 
 Identify this build with `--version` (or the Account page footer): it prints `HCG Executable Maker 0.3.1… (commit …)` and

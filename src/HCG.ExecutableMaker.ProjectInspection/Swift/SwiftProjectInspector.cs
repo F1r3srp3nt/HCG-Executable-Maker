@@ -21,7 +21,9 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
     {
         var manifests = SwiftPackageScanner.FindManifests(index)
             .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m)).ToList();
-        var macProjects = XcodeProjectAnalyzer.FindProjects(index).Where(p => XcodeProjectAnalyzer.IsMacOnlyProject(index, p)).ToList();
+        // macOS Xcode projects with an app target belong to "Native macOS app — Xcode"; only the others are explained here.
+        var macProjects = XcodeProjectAnalyzer.FindProjects(index).Where(p => XcodeProjectAnalyzer.IsMacOnlyProject(index, p))
+            .Where(p => manifests.Count > 0 || MacXcode.MacXcodeProjectAnalyzer.Analyze(index, p).AppTargets.Count == 0).ToList();
         if (manifests.Count == 0 && macProjects.Count == 0) return 0;
         var swiftDepth = manifests.Concat(macProjects).Min(SourceIndex.Depth);
         var dotnetDepth = index.WithExtension(".csproj", ".fsproj", ".vbproj", ".sln", ".slnx").Select(SourceIndex.Depth).DefaultIfEmpty(int.MaxValue).Min();

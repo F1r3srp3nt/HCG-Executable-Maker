@@ -61,7 +61,7 @@ public sealed class MacXcodeProjectInspector(TimeProvider time) : IProjectInspec
                 diagnostics.Add(new(DiagnosticSeverity.Info, "The project uses Swift packages; xcodebuild resolves them during the build (network access required).", p.ProjectPath));
             foreach (var t in p.AppTargets)
                 diagnostics.Add(new(DiagnosticSeverity.Info,
-                    $"Target {t.Name}: signing {t.SigningDescription}. HCG keeps the project's signing; Developer ID signing is a separate choice in Distribution, and notarization a separate step.", p.ProjectPath));
+                    $"Target {t.Name}: signing {t.SigningDescription}. HCG keeps the project's signing (Xcode signs during the build); for a Developer ID build, set your Developer ID identity in the project. Notarization is a separate step.", p.ProjectPath));
             if (p.LicenseFiles.Count > 0)
                 diagnostics.Add(new(DiagnosticSeverity.Info, $"Licence/attribution: {string.Join(", ", p.LicenseFiles.Select(SourceIndex.FileName))}. Shipped unchanged next to the app and inside the DMG; the app keeps its own name, bundle ID and icon.", p.Directory));
         }

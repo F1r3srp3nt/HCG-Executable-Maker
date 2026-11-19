@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HCG.ExecutableMaker.App.Services;
 using HCG.ExecutableMaker.BuildEngine;
+using HCG.ExecutableMaker.BuildEngine.MacXcode;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
 using HCG.ExecutableMaker.Packaging;
@@ -364,7 +365,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [ObservableProperty] private bool _hasDiagnostics;
     [ObservableProperty] private bool _hasMissing;
 
-    public bool CanConfigure => IsNativeProject
+    public bool CanConfigure => IsMacXcodeProject
+        ? XcodeReadyToConfigure
+        : IsNativeProject
         ? NativeReadyToConfigure
         : IsSwiftProject
         ? SwiftReadyToConfigure
@@ -378,6 +381,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         RefreshElectronProject();
         RefreshDesktopConversion();
         RefreshNativeProject();
+        RefreshXcodeProject();
         OnPropertyChanged(nameof(CanConfigure));
     }
 
@@ -442,10 +446,15 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                 $"{p.DisplayDirectory} — {HCG.ExecutableMaker.ProjectInspection.Native.NativeCapabilities.KindLabel(p.Kind)}" +
                 (p.Configured is { } c ? $" (configured: {c.Executables.Count()} executable(s), {c.Libraries.Count()} librar{(c.Libraries.Count() == 1 ? "y" : "ies")})" : "")))));
         }
+        else if (a is { InspectorId: HCG.ExecutableMaker.ProjectInspection.MacXcode.MacXcodeProjectInspector.InspectorId, MacXcode: { } mxa })
+        {
+            AnalysisRows.Add(new("Xcode projects", string.Join("\n", mxa.Projects.Select(p =>
+                $"{p.WorkspacePath ?? p.ProjectPath} — app target(s) {string.Join(", ", p.AppTargets.Select(t => t.Name))} · scheme(s) {string.Join(", ", p.Schemes.Select(s => s.Name).DefaultIfEmpty("(per target)"))} · {string.Join("/", p.Configurations)}"))));
+        }
         else if (a.Swift is { } sa)
         {
             AnalysisRows.Add(new("Swift packages", sa.Packages.Count > 0 ? string.Join(", ", sa.Packages.Select(p => p.DisplayDirectory)) : "None"));
-            if (sa.MacXcodeProjects.Count > 0) AnalysisRows.Add(new("macOS Xcode projects", string.Join(", ", sa.MacXcodeProjects) + " (not built in this version)"));
+            if (sa.MacXcodeProjects.Count > 0) AnalysisRows.Add(new("macOS Xcode projects", string.Join(", ", sa.MacXcodeProjects) + " (no application target)"));
         }
         else
         {
@@ -481,6 +490,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         RefreshElectronProject();
         RefreshDesktopConversion();
         RefreshNativeProject();
+        RefreshXcodeProject();
         OnPropertyChanged(nameof(ProjectPickerPlaceholder));
         OnPropertyChanged(nameof(CanConfigure));
         NextCommand.NotifyCanExecuteChanged();
@@ -522,7 +532,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (detected is null) return;
         var settings = await _settings.LoadAsync();
         var swift = IsSwiftBuild;
-        if (!IsElectronBuild && !IsNativeBuild) SetArchitectureOptions(swift);
+        if (!IsElectronBuild && !IsNativeBuild && !IsMacXcodeBuild) SetArchitectureOptions(swift);
         OnPropertyChanged(nameof(IsSwiftBuild));
         OnPropertyChanged(nameof(IsDotNetBuild));
         OnPropertyChanged(nameof(IsSwiftGui));
@@ -530,7 +540,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         OnPropertyChanged(nameof(IsElectronBuild));
         OnPropertyChanged(nameof(IdentityEditable));
         OnPropertyChanged(nameof(ShowConfigurationChoice));
-        if (IsNativeBuild)
+        if (IsMacXcodeBuild)
+        {
+            PrepareXcodeConfiguration(key, settings);
+        }
+        else if (IsNativeBuild)
         {
             PrepareNativeConfiguration(key, settings);
         }
@@ -608,6 +622,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         SelectedPlatform = PlatformOptions.FirstOrDefault(p => p.Value == s.Platform && p.IsEnabled) ?? SelectedPlatform;
         if (s.Swift is { } swiftOptions) ApplySwiftSettings(swiftOptions);
         if (s.Native is { } nativeOptions) ApplyNativeSettings(nativeOptions);
+        if (s.MacXcode is { } xcodeOptions) ApplyXcodeSettings(xcodeOptions);
         _repeatDistribution = s.MacDistribution;
         SelectedArchitecture = ArchitectureOptions.FirstOrDefault(a => a.Value == s.Architecture) ?? SelectedArchitecture;
         SelectedConfiguration = ConfigurationOptions.First(c => c.Value == s.Configuration);
@@ -643,6 +658,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     {
         PlatformNote = value?.Value switch
         {
+            _ when IsMacXcodeBuild => "Built with Xcode on this Mac (xcodebuild), for the architecture chosen in the Xcode panel. The app keeps its own name, bundle ID, version, icon and signing.",
             _ when IsTheosBuild => "Theos builds the package on this computer for jailbroken iPhones and iPads. The package scheme (rootless / rootful), deployment target and architectures come from the project; HCG does not change them or claim compatibility beyond them.",
             _ when IsNativeBuild => HostInfo.CurrentPlatform == TargetPlatform.MacOS
                 ? "C/C++ builds run on this Mac with its own compilers: arm64, x86_64, or both (universal, when every dependency is universal too). Windows, Linux and iOS binaries need those platforms' toolchains."
@@ -668,7 +684,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         if (SelectedArchitecture is null) ConfigErrors.Add("Choose a target architecture.");
         if (TimeoutMinutes is not (>= 1 and <= 720)) ConfigErrors.Add("Timeout must be between 1 and 720 minutes.");
         if (IconNotes.Any(n => n.IsError)) ConfigErrors.Add("The selected icon is invalid.");
-        if (ConfigErrors.Count == 0 && SelectedProject is not null && IsNativeBuild)
+        if (ConfigErrors.Count == 0 && SelectedProject is not null && IsMacXcodeBuild)
+        {
+            ValidateXcode();
+        }
+        else if (ConfigErrors.Count == 0 && SelectedProject is not null && IsNativeBuild)
         {
             ValidateNative();
         }
@@ -729,8 +749,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private BuildSettings CreateSettings(IReadOnlyList<PackagingFormat> formats) => new()
     {
         ProjectRelativePath = SelectedProject?.Path ?? "",
-        Platform = SelectedPlatform?.Value ?? TargetPlatform.Windows,
-        Architecture = SelectedArchitecture?.Value ?? TargetArchitecture.X64,
+        Platform = IsMacXcodeBuild ? TargetPlatform.MacOS : SelectedPlatform?.Value ?? TargetPlatform.Windows,
+        Architecture = IsMacXcodeBuild ? (SelectedXcodeArchitecture?.Value ?? MacXcodeArchitecture.AppleSilicon).ToTarget() : SelectedArchitecture?.Value ?? TargetArchitecture.X64,
         Configuration = SelectedConfiguration?.Value ?? BuildConfigurationKind.Release,
         SelfContained = SelfContained,
         SingleFile = SingleFile,
@@ -741,6 +761,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         Swift = CreateSwiftOptions(),
         Electron = CreateElectronOptions(formats),
         Native = IsNativeBuild ? CreateNativeOptions() : null,
+        MacXcode = IsMacXcodeBuild ? CreateXcodeOptions() : null,
         MacDistribution = CreateDistributionOptions(),
         Identity = new AppIdentity
         {
@@ -769,6 +790,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             IsNative = IsNativeBuild && !IsTheosBuild,
             IsTheos = IsTheosBuild,
             IsNativeMacBundle = IsNativeBuild && IsNativeMacBundle,
+            IsMacXcode = IsMacXcodeBuild,
         };
     }
 
@@ -785,6 +807,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             preselect ??= swiftKind == SwiftAppKind.GuiApp ? [PackagingFormat.MacAppBundle] : [PackagingFormat.PortableZip];
         if (IsNativeBuild)
             preselect ??= DefaultNativeFormats();
+        if (IsMacXcodeBuild)
+            preselect ??= DefaultXcodeFormats();
         foreach (var old in PackagingOptions) old.PropertyChanged -= OnPackagingOptionChanged;
         PackagingOptions.Clear();
         var recommended = preselect ?? Analysis?.RecommendedFormats ?? [];
@@ -886,6 +910,16 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                 ? "As the electron-builder configuration says (mac.identity); HCG verifies the signature and does not re-sign."
                 : "Not code-signed (Linux)."));
         }
+        else if (s.MacXcode is { } mx)
+        {
+            Summary.Add(new("Xcode", $"{mx.WorkspacePath ?? mx.ProjectPath} · scheme {mx.Scheme} · target {mx.AppTarget} · {mx.Configuration}"));
+            Summary.Add(new("Architecture", mx.Architecture.Label()));
+            Summary.Add(new("Kept from the project", $"{mx.DisplayName ?? mx.ProductName} · {mx.BundleIdentifier} · minimum macOS {mx.DeploymentTarget ?? "Xcode default"} · icon, resources, Info.plist, entitlements"));
+            Summary.Add(new("Overrides", string.Join(" ", MacXcodeBuildPlanner.Overrides(mx, SelectedXcodeTarget?.Architectures).Select(x => $"{x.Setting}={(x.Value.Length == 0 ? "\"\"" : x.Value)}"))));
+            Summary.Add(new("Signing", mx.SignLocallyAdHoc ? "Ad hoc, to run on this Mac (override chosen in HCG). Not Developer ID signed, not notarized."
+                : $"As the project signs ({SelectedXcodeTarget?.SigningDescription}). Notarization is not part of the build."));
+            Summary.Add(new("Not run", "Scripts that ship with the project (HCG runs xcodebuild directly). The app is not launched by the build."));
+        }
         else if (s.Swift is { } sw)
         {
             Summary.Add(new("Swift package", $"{(sw.PackageDirectory.Length == 0 ? "(workspace root)" : sw.PackageDirectory + "/")} · product {sw.Product} · {(sw.Kind == SwiftAppKind.GuiApp ? "macOS app" : "command-line tool")}"));
@@ -952,6 +986,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         try
         {
             if (settings.Swift is not null) HCG.ExecutableMaker.BuildEngine.Swift.SwiftBuildPlanner.Validate(settings, HostInfo.CurrentPlatform);
+            else if (settings.MacXcode is not null) MacXcodeBuildPlanner.Validate(settings, HostInfo.Detect(), PathGuard.GetRealPath(Project.SourceDirectory));
             else DotNetBuildPlanner.Validate(settings);
         }
         catch (BuildValidationException ex)
