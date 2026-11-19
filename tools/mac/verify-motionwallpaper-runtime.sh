@@ -115,6 +115,10 @@ else
   sleep 3
   "$WORK/window-report" "$apid" > "$WORK/agent-windows.jsonl"
   screen="$(system_profiler SPDisplaysDataType 2>/dev/null | awk -F': ' '/Resolution/{print $2; exit}')"
+  [ -n "$screen" ] || screen="$(python3 -c 'import json,sys
+w=[json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+d=[x for x in w if x.get("desktopLayer")]
+print("%dx%d" % (d[0]["width"], d[0]["height"]) if d else "size not reported")' "$WORK/agent-windows.jsonl" 2>/dev/null)"
   desktop_windows="$(grep -c '"desktopLayer":true' "$WORK/agent-windows.jsonl")"
   # Hide the main window so the desktop is visible; the renderer keeps running after the UI quits (by design).
   mp="$(main_pid)"; [ -n "$mp" ] && kill "$mp"; sleep 2

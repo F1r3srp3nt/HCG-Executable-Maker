@@ -969,7 +969,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             Summary.Add(new("Installer", $"{(w.Scope == InstallScope.AllUsers ? "All users (admin)" : "Current user")} · folder “{w.InstallFolderName ?? s.Identity.ApplicationName}” · Start-menu shortcut" +
                 $"{(w.OfferDesktopShortcut ? $" · optional desktop shortcut ({(w.DesktopShortcutCheckedByDefault ? "on" : "off")} by default)" : "")}{(w.OfferLaunchAfterInstall ? " · launch after install" : "")} · uninstaller"));
         }
-        Summary.Add(new("Icon", IsElectronBuild
+        Summary.Add(new("Icon", s.MacXcode is not null
+            ? SelectedXcodeProject?.AppIconSet is { } set ? $"The project's own ({Path.GetFileName(set)}, compiled by Xcode)" : "The project's own (none defined)"
+            : IsElectronBuild
             ? SelectedNodeProject?.BuilderConfig?.Source is { } cfg ? $"From the electron-builder configuration ({cfg})" : "From the electron-builder configuration"
             : s.Identity.IconSourcePath is null ? "None" : Path.GetFileName(s.Identity.IconSourcePath)));
         Summary.Add(new("Output", BuildService.OutputRootFor(s)));
