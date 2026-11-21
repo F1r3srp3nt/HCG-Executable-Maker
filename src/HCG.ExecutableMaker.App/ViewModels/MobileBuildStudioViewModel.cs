@@ -23,6 +23,8 @@ public sealed partial class MobileOutputItem(MobileOutputOption option) : Observ
     public string Description => Option.Description;
     public string? Reason => Option.Reason;
     public bool HasReason => Option.Reason is not null;
+    /// <summary>The first sentence of the reason; the full text is in the tooltip and in Build Doctor.</summary>
+    public string? ShortReason => Option.Reason is { } r && r.IndexOf(". ", StringComparison.Ordinal) is var i and > 0 ? r[..(i + 1)] : Option.Reason;
     public bool IsEnabled => Option.IsAvailable;
     public StatusTag Status => Option.IsAvailable ? new StatusTag("Available", "success") : new StatusTag("Unavailable", "warning");
     [ObservableProperty] private bool _isSelected;
@@ -54,6 +56,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private readonly IAppPaths _paths;
     private readonly IDialogService _dialogs;
     private readonly IPlatformShell _shell;
+    private readonly IProcessRunner? _runner;
     private readonly ConcurrentQueue<BuildLogLine> _pendingLog = new();
     private readonly DispatcherTimer _uiTimer;
     private readonly Stopwatch _clock = new();
@@ -62,9 +65,11 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private bool _loading;
 
     public MobileBuildStudioViewModel(ProjectService projectService, IProjectRepository projects, MobileBuildService builder, MobileArtifactVerifier verifier,
-        IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, NavigationService? navigation = null)
+        IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, NavigationService? navigation = null,
+        IProcessRunner? runner = null)
     {
         _navigation = navigation;
+        _runner = runner;
         _projectService = projectService;
         _projects = projects;
         _builder = builder;
@@ -612,6 +617,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     {
         Summary.Clear();
         UpdateReadiness(CreateOptions());
+        RunDoctorQuietly();
         if (CreateOptions() is not { } o) return;
         var s = CreateSettings(o);
         var m = Mobile!;

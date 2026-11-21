@@ -2,6 +2,18 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Build Doctor
+
+### Added
+- **Build Doctor** in Mobile Build Studio: structured findings (problem, root cause, affected file, severity, repair, approval mode, verification) for project references, MSBuild properties and imports, source files, import scope (monorepos), SDK and global.json, target framework, workload and its pin, Xcode, NuGet restore, runtime identifier, bundle identifier, entitlements, signing and provisioning, and the host. Readiness summary ("3 unresolved project references", "1 missing workload"…) with Run Build Doctor, Review proposed repairs, Install missing workload, Configure signing and Recheck actions; findings expand to technical detail. See docs/BUILD_DOCTOR.md.
+- Repairs with review → approval → backup → apply → re-validation → rollback: import the repository root for monorepo apps, reconnect an unambiguous broken reference, restore NuGet packages, install the pinned .NET iOS workload. Evaluate with MSBuild (`dotnet msbuild -getProperty/-getItem`, after trust) confirms every reference.
+- Known-good .NET for iOS sample (tests/Fixtures/DotNetIos/HelloDotNetIos) and the current HCG Mail build files as a fixture.
+
+### Fixed
+- MSBuild evaluation: properties and imports are evaluated in order with their conditions, undefined properties are empty, MSBuild path functions are evaluated, imports guarded by property conditions are followed, the environment is never read. HCG Mail's shared projects (HcgSharedDir) now resolve when the repository is imported.
+- .NET iOS toolchain pins are read from toolchain props (HcgIosWorkloadManifest, HcgRequiredXcode) as well as rollback files; the exact pinned install command is shown.
+- Output cards show the first sentence of an unavailable reason (full text in the tooltip and in Build Doctor) instead of repeating long blocks.
+
 ## [Unreleased] — Unleashify: rootless packages for HCG Repo Candidate
 
 ### Added

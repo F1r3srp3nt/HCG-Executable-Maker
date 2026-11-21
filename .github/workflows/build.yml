@@ -965,14 +965,16 @@ jobs:
           retention-days: 7
 
   hcg-mail-ios:
-    name: HCG Mail iOS — .NET for iOS (Avalonia) Simulator build and unsigned device archive through Mobile Build Studio
+    name: HCG Mail iOS — Build Doctor (folder import → repository import → MSBuild evaluation) and Simulator build; known-good .NET iOS sample
     needs: test
     runs-on: macos-26
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       OUT: ${{ github.workspace }}/mail-out
-      MAIL_COMMIT: 46d422806434d1938553cf62717c1683a67d5676
-      XCODE_VERSION: "26.3"   # what HCG Mail's pinned iOS workload (26.2.10233) requires
+      # HCG-Mail main (merge of PR #16): HcgSharedDir resolution in iOS App Store Submission/Directory.Build.props,
+      # toolchain pins in toolchain.props (iOS workload manifest 26.2.10233, Xcode 26.3).
+      MAIL_COMMIT: 13d93a8ce8cf575876d9f8e06a092268fb4e49ef
+      XCODE_VERSION: "26.3"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -982,40 +984,50 @@ jobs:
         run: |
           git clone --quiet https://github.com/F1r3srp3nt/HCG-Mail.git "$OUT/src/HCG Mail"
           git -C "$OUT/src/HCG Mail" checkout --quiet "$MAIL_COMMIT"
-      - name: Runner setup — Xcode ${{ env.XCODE_VERSION }} and the iOS workload version the project pins (HCG never installs workloads)
+      - name: Runner setup — Xcode ${{ env.XCODE_VERSION }} and the pinned iOS workload via HCG Mail's own script (CI setup; HCG never installs workloads unasked)
         run: |
           sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
           xcodebuild -version
           cd "$OUT/src/HCG Mail/iOS App Store Submission"
-          dotnet workload config --update-mode manifests
-          dotnet workload install ios --from-rollback-file scripts/workload-rollback.json --skip-sign-check
-          dotnet workload list
+          bash scripts/install-workload.sh
       - name: Build HCG and the UI driver
         run: dotnet build tools/ui-driver -c Release
-      - name: The submission folder alone is "Configuration required" (its shared projects are outside it)
+      - name: Build Doctor — import only "iOS App Store Submission", diagnose, approve the repository import, evaluate with MSBuild, check archive signing, build for the Simulator
         run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail/iOS App Store Submission"
-          --mobile-output sim --expect-state "Configuration required" --output "$OUT/partial" --screenshots "$OUT/screens" --prefix mail-partial
-      - name: Simulator build from the repository root (shared projects resolved from the repository)
-        run: >
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
-          --mobile-output sim --expect-state "Ready to build" --output "$OUT/sim" --screenshots "$OUT/screens" --prefix mail-sim
-      # CI run 78: the .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode
-      # archive"). Maker therefore offers no unsigned .NET iOS archive and, without a certificate in the keychain (none on
-      # hosted runners), blocks the archive before building. A signed archive/IPA needs the owner's certificate+profile.
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --doctor --source "$OUT/src/HCG Mail/iOS App Store Submission"
+          --doctor-expect-readiness "Configuration required" --doctor-expect-category ImportScope
+          --doctor-repair import-repository --doctor-expect-no-category ProjectReferences,MsBuildProperties,ImportScope,Workload,Xcode,Sdk,TargetFramework
+          --doctor-evaluate --doctor-archive-check --doctor-build
+          --output "$OUT/doctor" --screenshots "$OUT/screens" --prefix mail-doctor
+      # The .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode archive"); hosted
+      # runners have no certificate, so Maker blocks the archive before building. A signed archive/IPA needs the owner's
+      # certificate and provisioning profile.
       - name: Device archive — unavailable without code signing (the .NET iOS SDK archives only signed)
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
           --mobile-output archive --signing unsigned --expect-no-unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
+      - name: Known-good .NET for iOS sample (plain UIKit) — Build Doctor and Simulator build, to separate Maker defects from project defects
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --doctor --source "$PWD/tests/Fixtures/DotNetIos/HelloDotNetIos"
+          --doctor-expect-no-category ProjectReferences,MsBuildProperties,ImportScope,Workload,Sdk --doctor-build
+          --output "$OUT/hello" --screenshots "$OUT/screens" --prefix hello-dotnet-ios
       - name: Independent checks of what HCG produced
         run: |
-          app="$(find "$OUT/sim/artifacts" -maxdepth 3 -name '*.app' -type d | head -1)"
-          echo "Simulator app: $app"
-          plutil -p "$app/Info.plist" | grep -E 'CFBundle(Identifier|ShortVersionString|Version)|MinimumOSVersion'
-          test -f "$app/Assets.car"
-          xcrun vtool -show-build "$app/HCGMail.iOS" | grep -E 'platform|minos'
-          # No archive was produced (see the step above): HCG must not have written one.
+          for d in doctor hello; do
+            app="$(find "$OUT/$d/artifacts" -maxdepth 4 -name '*.app' -type d | head -1)"
+            echo "== $d: $app"; test -d "$app"
+            plutil -p "$app/Info.plist" | grep -E 'CFBundle(Identifier|ShortVersionString|Version|Executable)|MinimumOSVersion'
+            exe="$(plutil -extract CFBundleExecutable raw "$app/Info.plist")"
+            xcrun vtool -show-build "$app/$exe" | grep -E 'platform|minos'
+          done
+          plutil -extract CFBundleIdentifier raw "$(find "$OUT/doctor/artifacts" -maxdepth 4 -name '*.app' -type d | head -1)/Info.plist" | grep -qx com.hakmicapitalgroup.hcgmail
           test -z "$(find "$OUT/archive" -name '*.xcarchive' -type d 2>/dev/null | head -1)"
+          python3 - "$OUT/doctor/mail-doctor-doctor.json" <<'EOF'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          print("readiness after repair:", d["readiness"]); print("outcome:", d["repairOutcome"])
+          assert not [f for f in d["findings"] if f["severity"] == "Error"], d["findings"]
+          EOF
       - uses: actions/upload-artifact@v7
         if: always()
         with:

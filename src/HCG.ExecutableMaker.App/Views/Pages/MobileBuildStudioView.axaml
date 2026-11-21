@@ -108,15 +108,132 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <ItemsControl ItemsSource="{Binding Diagnostics}" Margin="0,6,0,0">
+              <Expander Header="Inspection notes" Margin="0,6,0,0" HorizontalAlignment="Stretch">
+                <ItemsControl ItemsSource="{Binding Diagnostics}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DiagnosticItem">
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,2" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Expander>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- BUILD DOCTOR -->
+      <Border Classes="card" IsVisible="{Binding HasDoctor}">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="BUILD DOCTOR" />
+              <TextBlock Classes="h2" Text="{Binding DoctorHeading}" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+              <TextBlock Classes="muted" Text="Build readiness" VerticalAlignment="Center" />
+              <c:StatusChip Status="{Binding DoctorReadiness}" />
+            </StackPanel>
+          </Grid>
+          <ItemsControl ItemsSource="{Binding DoctorSummary}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock FontSize="13" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" Margin="0,1" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <WrapPanel Orientation="Horizontal">
+            <Button Classes="primary" Margin="0,0,8,8" Command="{Binding RunBuildDoctorCommand}" IsEnabled="{Binding !IsBuilding}"
+                    ToolTip.Tip="Re-detect toolchains, re-read the project and diagnose again (read-only: nothing is changed or run).">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Check}" /><TextBlock Text="Run Build Doctor" /></StackPanel>
+            </Button>
+            <Button Margin="0,0,8,8" Content="Review proposed repairs" Command="{Binding ReviewFirstRepairCommand}" IsVisible="{Binding HasReviewableRepairs}" />
+            <Button Margin="0,0,8,8" Content="Install missing workload…" Command="{Binding ReviewWorkloadRepairCommand}" IsVisible="{Binding HasMissingWorkload}" />
+            <Button Margin="0,0,8,8" Content="Configure signing" Command="{Binding ConfigureSigningCommand}" IsVisible="{Binding HasSigningFindings}" />
+            <Button Margin="0,0,8,8" Classes="ghost" Content="Recheck build readiness" Command="{Binding RunBuildDoctorCommand}" />
+            <Button Margin="0,0,8,8" Classes="ghost" Content="{Binding DoctorInfoToggleText}" Command="{Binding ToggleDoctorInfoCommand}" />
+          </WrapPanel>
+
+          <ItemsControl ItemsSource="{Binding DoctorFindings}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:DoctorFindingItem">
+                <Border Classes="inset" Margin="0,0,0,8" Padding="12,10">
+                  <Expander HorizontalAlignment="Stretch" IsExpanded="{Binding IsExpanded}">
+                    <Expander.Header>
+                      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                        <c:StatusChip Status="{Binding Severity}" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="1" Classes="muted" FontSize="12" Text="{Binding Category}" Margin="8,2,10,0" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="2" FontSize="13" Text="{Binding Problem}" TextWrapping="Wrap" />
+                        <c:StatusChip Grid.Column="3" Status="{Binding Verification}" Margin="10,0,0,0" VerticalAlignment="Top" />
+                      </Grid>
+                    </Expander.Header>
+                    <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" Margin="0,6,0,0">
+                      <TextBlock Grid.Row="0" Classes="muted" FontSize="12" Text="Root cause" IsVisible="{Binding HasRootCause}" />
+                      <SelectableTextBlock Grid.Row="0" Grid.Column="1" FontSize="12.5" Text="{Binding RootCause}" TextWrapping="Wrap" IsVisible="{Binding HasRootCause}" Margin="0,0,0,6" />
+                      <TextBlock Grid.Row="1" Classes="muted" FontSize="12" Text="Affected file" IsVisible="{Binding HasFile}" />
+                      <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="mono" FontSize="12" Text="{Binding AffectedFile}" IsVisible="{Binding HasFile}" Margin="0,0,0,6" />
+                      <TextBlock Grid.Row="2" Classes="muted" FontSize="12" Text="Recommended" />
+                      <SelectableTextBlock Grid.Row="2" Grid.Column="1" FontSize="12.5" Text="{Binding Recommendation}" TextWrapping="Wrap" Margin="0,0,0,6" />
+                      <TextBlock Grid.Row="3" Classes="muted" FontSize="12" Text="Repair" IsVisible="{Binding HasRepair}" />
+                      <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasRepair}" Margin="0,0,0,6">
+                        <TextBlock FontSize="12.5" Text="{Binding RepairTitle}" VerticalAlignment="Center" />
+                        <c:StatusChip Status="{Binding RepairMode}" />
+                        <Button Classes="ghost" Content="Review…" IsVisible="{Binding CanReview}"
+                                Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).ReviewRepairCommand}" CommandParameter="{Binding}" />
+                      </StackPanel>
+                      <TextBlock Grid.Row="4" Classes="muted" FontSize="12" Text="Verification" IsVisible="{Binding VerificationDetail, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                      <TextBlock Grid.Row="4" Grid.Column="1" FontSize="12" Text="{Binding VerificationDetail}" TextWrapping="Wrap" IsVisible="{Binding VerificationDetail, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                      <TextBlock Grid.Row="5" Classes="muted" FontSize="12" Text="Technical" IsVisible="{Binding HasTechnical}" />
+                      <SelectableTextBlock Grid.Row="5" Grid.Column="1" Classes="mono" FontSize="11.5" Text="{Binding Technical}" TextWrapping="Wrap" IsVisible="{Binding HasTechnical}" />
+                    </Grid>
+                  </Expander>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- Repair review: shown before anything is changed; applied only with Approve -->
+          <Border Classes="callout warning" Padding="16" IsVisible="{Binding IsReviewing}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="h3" Text="{Binding Reviewing.RepairTitle, FallbackValue=''}" TextWrapping="Wrap" />
+              <TextBlock Classes="muted" FontSize="12" Text="Nothing changes until you approve. File changes are backed up first and can be rolled back; imports never modify the current project; commands are shown exactly as they will run." TextWrapping="Wrap" />
+              <Border Classes="inset" Padding="10">
+                <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding RepairPreview}" TextWrapping="Wrap" />
+              </Border>
+              <CheckBox IsChecked="{Binding RepairTrustAcknowledged}" IsVisible="{Binding ReviewNeedsTrust}">
+                <TextBlock Text="I trust this project: this runs .NET tooling with the project's own MSBuild files (restore targets or workload installation)." TextWrapping="Wrap" />
+              </CheckBox>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="primary" Content="Approve and apply" Command="{Binding ApproveRepairCommand}" />
+                <Button Classes="ghost" Content="Cancel" Command="{Binding CancelRepairCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <StackPanel Spacing="6" IsVisible="{Binding RepairOutcome, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <TextBlock FontSize="12.5" FontWeight="SemiBold" Text="{Binding RepairOutcome}" TextWrapping="Wrap" />
+            <Button Classes="ghost" HorizontalAlignment="Left" Content="Roll back the last repair" Command="{Binding RollbackRepairCommand}" IsVisible="{Binding CanRollback}" />
+          </StackPanel>
+          <Border Classes="inset" Padding="10" IsVisible="{Binding RepairLog, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding RepairLog}" TextWrapping="Wrap" MaxHeight="260" />
+          </Border>
+
+          <Expander Header="Evaluate with MSBuild and audit trail" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Build Doctor reads project files without running them. MSBuild evaluation (dotnet msbuild -getProperty/-getItem) runs the project's own evaluation logic — imports, conditions, property functions — without building, and confirms every project reference. Like a build, it needs your trust." />
+              <CheckBox IsChecked="{Binding RepairTrustAcknowledged}">
+                <TextBlock Text="I trust this project and want MSBuild to evaluate it." TextWrapping="Wrap" />
+              </CheckBox>
+              <Button HorizontalAlignment="Left" Content="Evaluate with MSBuild" Command="{Binding EvaluateWithMsBuildCommand}" />
+              <ItemsControl ItemsSource="{Binding DoctorFacts}">
                 <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:DiagnosticItem">
-                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,2" />
+                  <DataTemplate x:DataType="x:String">
+                    <SelectableTextBlock Classes="mono" FontSize="11" Text="{Binding}" TextWrapping="Wrap" />
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </StackPanel>
-          </Grid>
+          </Expander>
         </StackPanel>
       </Border>
 
@@ -150,7 +267,7 @@
                       <StackPanel Grid.Column="1" Spacing="3" Margin="4,0,12,0">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13.5" />
                         <TextBlock Classes="secondary" FontSize="12.5" Text="{Binding Description}" TextWrapping="Wrap" />
-                        <TextBlock Classes="warning" FontSize="12" Text="{Binding Reason}" TextWrapping="Wrap" IsVisible="{Binding HasReason}" />
+                        <TextBlock Classes="warning" FontSize="12" Text="{Binding ShortReason}" TextWrapping="Wrap" IsVisible="{Binding HasReason}" ToolTip.Tip="{Binding Reason}" />
                       </StackPanel>
                       <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
                     </Grid>
