@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Known-good .NET for iOS sample (plain UIKit, no shared projects, no Avalonia): used to tell HCG Executable Maker
+       defects apart from defects in a particular project. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>true</ImplicitUsings>
+    <SupportedOSPlatformVersion>16.0</SupportedOSPlatformVersion>
+    <ApplicationId>com.hakmicapitalgroup.fixtures.hellodotnetios</ApplicationId>
+    <ApplicationTitle>Hello .NET iOS</ApplicationTitle>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+  </PropertyGroup>
+</Project>

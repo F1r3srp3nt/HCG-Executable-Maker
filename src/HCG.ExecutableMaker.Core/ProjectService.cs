@@ -47,6 +47,9 @@ public sealed class ProjectService(
     private async Task<ImportResult> FinishImportAsync(ImportResult result, IProgress<ImportProgress>? progress, CancellationToken cancellationToken)
     {
         progress?.Report(new ImportProgress("Inspecting project", result.FileCount, result.FileCount, result.TotalBytes, null));
+        // Which revision this copy is, so a later build can tell when the imported copy is stale.
+        try { await ImportRevisions.WriteAsync(result.Project, ImportRevisions.Capture(result.Project, time), cancellationToken).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { logger.LogWarning(ex, "Could not record the imported revision of {ProjectId}", result.Project.Id); }
         await InspectAsync(result.Project, cancellationToken).ConfigureAwait(false);
         logger.LogInformation("Imported project {ProjectId} ({Name}) from {Source}: {Files} files, {Bytes} bytes",
             result.Project.Id, result.Project.Name, result.Project.SourceLocation, result.FileCount, result.TotalBytes);

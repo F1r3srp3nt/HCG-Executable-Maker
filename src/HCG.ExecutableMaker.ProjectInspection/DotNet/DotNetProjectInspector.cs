@@ -383,6 +383,17 @@ public sealed partial class DotNetProjectInspector(TimeProvider time) : IProject
     [GeneratedRegex(@"^\s*(?:public\s+|internal\s+|static\s+|sealed\s+|partial\s+)*(?:class|struct|record)\s+\w+", RegexOptions.Multiline)]
     private static partial Regex TypeDeclarationRegex();
 
+    /// <summary>
+    /// Reads a project as the build would see it statically: its Directory.Build.props chain (up to <paramref name="root"/>)
+    /// and central package versions. Null when the file is not valid XML.
+    /// </summary>
+    public static MsBuildProjectFile? LoadProject(string root, string projectFullPath)
+    {
+        var dir = Path.GetDirectoryName(projectFullPath)!;
+        try { return MsBuildProjectFile.Parse(projectFullPath, FindAncestorFiles(root, dir, "Directory.Build.props"), FindCentralVersions(root, dir), root); }
+        catch (Exception ex) when (ex is System.Xml.XmlException or IOException) { return null; }
+    }
+
     internal static IReadOnlyList<string> FindAncestorFiles(string root, string startDir, string fileName)
     {
         // MSBuild imports the nearest Directory.Build.props only (unless it imports its parent). We mirror that.

@@ -1,0 +1,9 @@
+<Project>
+  <!--
+    Privacy: Avalonia's build tooling (Avalonia.BuildServices) sends anonymous build statistics to
+    avaloniaui.net from the developer machine. HCG Mail builds must not phone home, so the target is
+    replaced with an empty one here (equivalent to AVALONIA_TELEMETRY_OPTOUT=1, but enforced for
+    every build of this repository). This affects build tooling only; the app has no telemetry.
+  -->
+  <Target Name="AvaloniaStats" />
+</Project>

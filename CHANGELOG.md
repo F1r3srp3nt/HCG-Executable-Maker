@@ -2,6 +2,36 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Build Doctor
+
+### Added
+- **Build Doctor** in Mobile Build Studio: structured findings (problem, root cause, affected file, severity, repair, approval mode, verification) for project references, MSBuild properties and imports, source files, import scope (monorepos), SDK and global.json, target framework, workload and its pin, Xcode, NuGet restore, runtime identifier, bundle identifier, entitlements, signing and provisioning, and the host. Readiness summary ("3 unresolved project references", "1 missing workload"…) with Run Build Doctor, Review proposed repairs, Install missing workload, Configure signing and Recheck actions; findings expand to technical detail. See docs/BUILD_DOCTOR.md.
+- Repairs with review → approval → backup → apply → re-validation → rollback: import the repository root for monorepo apps, reconnect an unambiguous broken reference, restore NuGet packages, install the pinned .NET iOS workload. Evaluate with MSBuild (`dotnet msbuild -getProperty/-getItem`, after trust) confirms every reference.
+- Known-good .NET for iOS sample (tests/Fixtures/DotNetIos/HelloDotNetIos) and the current HCG Mail build files as a fixture.
+
+### Fixed
+- MSBuild evaluation: properties and imports are evaluated in order with their conditions, undefined properties are empty, MSBuild path functions are evaluated, imports guarded by property conditions are followed, the environment is never read. HCG Mail's shared projects (HcgSharedDir) now resolve when the repository is imported.
+- .NET iOS toolchain pins are read from toolchain props (HcgIosWorkloadManifest, HcgRequiredXcode) as well as rollback files; the exact pinned install command is shown.
+- Output cards no longer repeat the same orange block: a reason shared by several unavailable outputs is shown once above them, other cards show only the first sentence of their own reason (full text in the tooltip and in Build Doctor). The "outside the imported folder" reason names the files instead of listing long relative paths.
+- After a repair is approved and applied, the review closes (it cannot be approved twice); the outcome, verification and log stay visible.
+
+## [Unreleased] — Unleashify: rootless packages for HCG Repo Candidate
+
+### Added
+- **Rootless package** workflow (UI page, Mobile Build Studio action, `--rootless-deb` / `--rootless-deb-validate`): an iOS app a build produced (device .app, .xcarchive or .ipa) → rootless `iphoneos-arm64` .deb with gzip members at `/var/jb/Applications` → full validation (paths, dependencies, Mach-O architecture/platform/minimum iOS/signature/entitlements/libraries, versions, gzip and complete extraction, SHA-256) → HCG Repo candidate handoff (provenance, changelog, known issues, package.toml, icon, import request, device test and recovery). The app is packaged unchanged: no added entitlements, privileged ones refused. See docs/ROOTLESS-PACKAGING.md.
+- **Unleashify** in Mobile Build Studio (replaces the separate Rootless package page): source revision with a stale-copy warning, the three modes (Jailbreak App available; Jailbreak Tweak and App + Tweak shown as not available, with the reason), build from the Xcode project (scheme, bundle ID and deployment target shown and kept) or from an existing device build (Simulator builds refused), package ID/version, output, test-device compatibility (an iOS 13.3 device is explained as a separate target metadata cannot reach), an installed-build conflict check, **Build** and **Export Candidate Handoff**. See docs/UNLEASHIFY.md.
+- Import records the source revision (`import-revision.json`: Git commit/branch, or a GitHub ZIP's commit).
+- `tools/unleashify/hcgrepo-dry-run.py`: HCG Repo's own importer (`load_request` + `import_deb(dry_run=True)`) on the exact exported bytes, in a throwaway copy of HCG Repo.
+- CI `unleashify-sentinel` (HCGSentinelModern on macos-26, the full click path through the real views, byte-identical CLI and existing-build packages, validation, HCG Repo inspect and importer dry run) and `unleashify-artifact-roundtrip` (the uploaded artifact is the manifest's exact bytes; importer dry run and dpkg sandbox on the downloaded bytes).
+
+### Changed
+- The handoff's `package.toml` follows HCG Repo's current access rules: the production level (`connect` when undecided) and a free-demo `[access] exception` only from the owner's recorded approval of that version (`--owner-approval`, or the field on the Unleashify page). Previously it wrote `level = "public"` (rejected by HCG Repo) or an exception no approval backed.
+- `DEVICE-TEST.md` is a complete procedure: detection of existing installations (uicache, dpkg, sideloaded bundles), a dpkg/uicache snapshot, install of the exact exported file (SHA-256 checked), verification, launch, removal with a before/after diff, rollback and a result record.
+- HCG Sentinel 0.1.0~beta1: the owner's approval (21 Nov 2026, preparation and validation only) is recorded in `tools/unleashify/approvals/` and entered on the Unleashify page in CI; the HCG Repo dry run uses `--require-genuine-approval` (no placeholder) in both Unleashify jobs.
+
+### Fixed
+- Validation resolves `@rpath` in embedded libraries through the main executable's run paths, as dyld does (an embedded Swift runtime library linking `@rpath/libswiftCore.dylib` was reported unresolved).
+
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
 
 Identify this build with `--version` (or the Account page footer): it prints `HCG Executable Maker 0.3.1… (commit …)` and

@@ -227,7 +227,14 @@ public sealed record DotNetIosProjectInfo
     public IReadOnlyList<string> MissingReferences { get; init; } = [];
     /// <summary>iOS workload pin from a workload rollback file next to the project (e.g. "26.2.10233/10.0.100").</summary>
     public string? WorkloadPin { get; init; }
+    /// <summary>Where the pin comes from: a workload rollback file, or a props file declaring the manifest version.</summary>
     public string? WorkloadPinFile { get; init; }
+    /// <summary>True when <see cref="WorkloadPinFile"/> is a rollback file that dotnet workload install can read directly.</summary>
+    public bool WorkloadPinIsRollbackFile { get; init; } = true;
+    /// <summary>The exact command that installs the workload the project needs (shown; run only with the user's approval).</summary>
+    public string? WorkloadInstallCommand { get; init; }
+    /// <summary>Xcode version the project declares it is built with (e.g. HcgRequiredXcode in toolchain.props).</summary>
+    public string? RequiredXcode { get; init; }
     public string? GlobalJsonSdk { get; init; }
 }
 
