@@ -7,7 +7,7 @@
     <Company>Hakmi Capital Group</Company>
     <Product>HCG Executable Maker</Product>
     <Copyright>© Hakmi Capital Group</Copyright>
-    <Version>0.3.1</Version>
+    <Version>0.4.0</Version>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
