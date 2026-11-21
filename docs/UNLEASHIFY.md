@@ -79,10 +79,10 @@ missing), `REJECTED`. Nothing is written to HCG Repo.
   Import → Unleashify → HCGSentinelModern → Build → Export through the real views; the existing-device-build input gives
   the same bytes; the CLI (`--rootless-deb`) gives the same bytes; `--rootless-deb-validate` for iOS 16.5; control,
   contents, architectures, minimum iOS and bundle ID read with `dpkg-deb`, `lipo`, `vtool`, `plutil`; HCG Repo's
-  `bin/hcgrepo inspect` and the importer dry run at a pinned HCG Repo commit; real `dpkg` install/reinstall/remove/purge
-  in a sandbox. Uploads the handoff's `.deb` as `hcg-sentinel-unleashify-deb` (the artifact the import request names).
+  `bin/hcgrepo inspect` and the importer dry run at a pinned HCG Repo commit. Uploads the handoff's `.deb` as `hcg-sentinel-unleashify-deb` (the artifact the import request names).
 - `unleashify-artifact-roundtrip` (ubuntu): downloads that artifact, checks it holds one `.deb` with the request's
-  SHA-256, and runs the importer dry run on the downloaded bytes.
+  SHA-256, runs the importer dry run on the downloaded bytes, and installs, reinstalls, removes and purges them with
+  real `dpkg` in a sandbox (on Linux: macOS refuses dpkg's backup hard links inside an installed `.app` bundle).
 
 ## Not verified here
 

@@ -1126,7 +1126,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: ldid (pseudo-signing for jailbroken devices) and dpkg (sandbox install test)
+      - name: ldid (pseudo-signing for jailbroken devices) and dpkg-deb (package inspection)
         run: |
           brew install ldid dpkg
           ldid 2>&1 | head -1 || true
@@ -1223,21 +1223,6 @@ jobs:
           PYTHONPATH="$OUT/hcg-repo/tools" python3 tools/unleashify/hcgrepo-dry-run.py --repo "$OUT/hcg-repo" --handoff "$HANDOFF" \
             --hypothetical-approval --report "$OUT/hcgrepo-dry-run.json" | tee "$OUT/hcgrepo-dry-run.txt"
           git -C "$OUT/hcg-repo" status --porcelain | tee "$OUT/hcg-repo-status.txt"; [ ! -s "$OUT/hcg-repo-status.txt" ]
-      - name: dpkg sandbox — install, reinstall, remove and purge with real dpkg (not a device test)
-        run: |
-          deb="$(ls "$HANDOFF"/*.deb)"; R="$OUT/dpkg"
-          mkdir -p "$R/root" "$R/admin/updates" "$R/admin/info" "$R/bin"; touch "$R/admin/status" "$R/admin/available"
-          printf '#!/bin/sh\necho "uicache $*" >> "%s/uicache.log"\n' "$R" > "$R/bin/uicache"; chmod +x "$R/bin/uicache"
-          D="dpkg --root=/ --instdir=$R/root --admindir=$R/admin --force-script-chrootless --force-architecture --force-depends --force-not-root"
-          PATH="$R/bin:$PATH" $D -i "$deb"
-          PATH="$R/bin:$PATH" $D -s "$PKG" | grep -E "^(Status|Version)"
-          find "$R/root" -type f | sed "s|$R/root||" | sort > "$R/installed.txt"; wc -l < "$R/installed.txt"
-          head -5 "$R/installed.txt"
-          PATH="$R/bin:$PATH" $D -i "$deb"     # reinstall of the same version (upgrade path)
-          PATH="$R/bin:$PATH" $D -r "$PKG"
-          left="$(find "$R/root" -type f | wc -l | tr -d ' ')"; echo "files left after removal: $left"; [ "$left" = 0 ]
-          PATH="$R/bin:$PATH" $D -P "$PKG"
-          cat "$R/uicache.log"
       - name: Summary
         if: always()
         run: |
@@ -1246,7 +1231,7 @@ jobs:
             echo "**Package validation**"; sed 's/^/- /' "$OUT/sha256.txt" 2>/dev/null
             grep -E "^\s+\[" "$OUT/validate.txt" 2>/dev/null | sed 's/^ */- /'
             sed 's/^/- /' "$OUT/archs.txt" 2>/dev/null
-            echo "- dpkg sandbox: installed $(wc -l < "$OUT/dpkg/installed.txt" 2>/dev/null | tr -d ' ') files, removed all; uicache calls: $(tr '\n' ';' < "$OUT/dpkg/uicache.log" 2>/dev/null)"
+            echo "- dpkg sandbox: in unleashify-artifact-roundtrip (Linux dpkg, on the uploaded artifact's bytes)"
             echo "**HCG Repo dry run (cecfcf0)**"; grep -E "^(importer|access|RESULT)" "$OUT/hcgrepo-dry-run.txt" 2>/dev/null | sed 's/^/- /'
             echo "**Real device**: not run (no phone in CI) — see DEVICE-TEST.md in the handoff"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1266,8 +1251,6 @@ jobs:
             ${{ github.workspace }}/unleashify-out/*.txt
             ${{ github.workspace }}/unleashify-out/*.log
             ${{ github.workspace }}/unleashify-out/*.json
-            ${{ github.workspace }}/unleashify-out/dpkg/*.txt
-            ${{ github.workspace }}/unleashify-out/dpkg/*.log
             ${{ github.workspace }}/unleashify-out/ui-run/*.json
             ${{ github.workspace }}/unleashify-out/ui-run/*.log
             ${{ github.workspace }}/unleashify-out/screens
@@ -1304,6 +1287,29 @@ jobs:
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git hcg-repo && git -C hcg-repo checkout --quiet "$HCG_REPO_COMMIT"
           PYTHONPATH=hcg-repo/tools python3 tools/unleashify/hcgrepo-dry-run.py --repo hcg-repo --handoff "$H" --deb "$(ls downloaded/*.deb)" --hypothetical-approval
           echo "Publication stays manual: after this run succeeds, HCG Repo's maintainer runs bin/hcgrepo import-request (with --dry-run first)."
+      # On Linux: macOS (26) refuses dpkg's backup hard links inside an installed .app bundle, an artefact of the host, not of the package.
+      - name: dpkg sandbox — install, reinstall, remove and purge the downloaded bytes with real dpkg (not a device test)
+        run: |
+          deb="$(ls "$PWD"/downloaded/*.deb)"; PKG=com.hakmicapitalgroup.hcgsentinel; R="$PWD/dpkg"
+          mkdir -p "$R/root" "$R/admin/updates" "$R/admin/info" "$R/bin"; touch "$R/admin/status" "$R/admin/available"
+          printf '#!/bin/sh\necho "uicache $*" >> "%s/uicache.log"\n' "$R" > "$R/bin/uicache"; chmod +x "$R/bin/uicache"
+          D="dpkg --root=/ --instdir=$R/root --admindir=$R/admin --force-script-chrootless --force-architecture --force-depends --force-not-root"
+          PATH="$R/bin:$PATH" $D -i "$deb"
+          PATH="$R/bin:$PATH" $D -s "$PKG" | grep -E "^(Status|Version)"
+          find "$R/root" | sed "s|$R/root||" | sort | tee "$R/installed.txt"
+          grep -qx "/var/jb/Applications/HCGSentinelModern.app/HCGSentinelModern" "$R/installed.txt"
+          [ -z "$(grep -v '^/var/jb' "$R/installed.txt" | grep -v '^/var$' | grep -v '^$')" ] || { echo "files outside /var/jb"; exit 1; }
+          PATH="$R/bin:$PATH" $D -i "$deb"     # reinstall of the same version (upgrade path)
+          PATH="$R/bin:$PATH" $D -r "$PKG"
+          left="$(find "$R/root" -type f | wc -l | tr -d ' ')"; echo "files left after removal: $left"; [ "$left" = 0 ]
+          PATH="$R/bin:$PATH" $D -P "$PKG"
+          PATH="$R/bin:$PATH" $D -s "$PKG" 2>&1 | tail -1
+          cat "$R/uicache.log"
+          {
+            echo "### Unleashify — dpkg sandbox (Linux dpkg, downloaded artifact)"
+            echo "- installed $(grep -c . "$R/installed.txt") paths, all under /var/jb; reinstall, remove (0 files left) and purge succeeded"
+            echo "- uicache calls: $(tr '\n' ';' < "$R/uicache.log")"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   native-cpp:
     name: C/C++ — CMake and Make fixtures through the New Build wizard (${{ matrix.os }})
