@@ -76,7 +76,7 @@ for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy NUGET_P
 done
 REQUIRED_SDK="$(sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$REPO/global.json" | head -1)"
 if ! (cd "$REPO" && "${clean_env[@]}" "$DOTNET" --version >/dev/null 2>&1); then
-    err "The .NET SDK at $DOTNET does not satisfy global.json (needs $REQUIRED_SDK or a later 10.0 feature band). Installed: $("$DOTNET" --list-sdks 2>/dev/null | tr '\n' ' ')"
+    err "The .NET SDK at $DOTNET does not satisfy global.json (needs $REQUIRED_SDK or a later 10.0 feature band). Installed: $("${clean_env[@]}" "$DOTNET" --list-sdks 2>/dev/null | tr '\n' ' ')"
     exit 1
 fi
 SDK_VERSION="$(cd "$REPO" && "${clean_env[@]}" "$DOTNET" --version)"

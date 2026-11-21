@@ -84,7 +84,10 @@ public class XcodeProjectFileTests
         // became TargetName and broke the build on the first macOS CI run. Every dotnet call goes through clean_env.
         var script = File.ReadAllLines(Path.Combine(Dir, "Scripts", "build-app.sh"));
         Assert.Contains(script, l => l.Contains("clean_env=(env -i ", StringComparison.Ordinal));
-        var calls = script.Where(l => l.Contains("\"$DOTNET\"", StringComparison.Ordinal) || l.Contains("/MacOS/$EXECUTABLE\" --version", StringComparison.Ordinal)).ToList();
+        // A call is "$DOTNET" followed by an argument, or the built app run with --version.
+        var calls = script.Where(l => System.Text.RegularExpressions.Regex.IsMatch(l, @"""\$DOTNET"" +(--|""|run|build|publish|restore)")
+            || l.Contains("/MacOS/$EXECUTABLE\" --version", StringComparison.Ordinal)).ToList();
+        Assert.True(calls.Count >= 4, $"expected the SDK checks, the build and the --version check; found {calls.Count}");
         Assert.NotEmpty(calls);
         Assert.All(calls, l => Assert.Contains("\"${clean_env[@]}\"", l, StringComparison.Ordinal));
     }
