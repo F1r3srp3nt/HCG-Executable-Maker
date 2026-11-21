@@ -80,10 +80,11 @@ public sealed partial class MobileBuildStudioViewModel
     {
         OnPropertyChanged(nameof(IsReviewing));
         OnPropertyChanged(nameof(ReviewNeedsTrust));
+        RepairPreview = value?.Finding.Repair is { } r ? DoctorRepairs.Preview(r) : "";
+        if (value is null) return; // closing a review (cancel, or after the repair ran) keeps the last outcome and log
         RepairTrustAcknowledged = false;
         RepairLog = "";
         RepairOutcome = null;
-        RepairPreview = value?.Finding.Repair is { } r ? DoctorRepairs.Preview(r) : "";
     }
 
     partial void OnShowDoctorInfoChanged(bool value) { OnPropertyChanged(nameof(DoctorInfoToggleText)); FillDoctorFindings(); }
@@ -216,6 +217,9 @@ public sealed partial class MobileBuildStudioViewModel
                     _report = await _toolchains.GetAsync(refresh: true);
                     break;
             }
+            // The reviewed repair has run: close the review so it cannot be approved a second time (its finding may also
+            // belong to the previous project after an import). The outcome, log and verification stay visible.
+            Reviewing = null;
             RunDoctorQuietly();
             MarkVerification(repair);
         }

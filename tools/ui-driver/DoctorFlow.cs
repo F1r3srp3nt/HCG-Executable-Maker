@@ -22,6 +22,7 @@ internal static partial class Program
         Check(studio.SelectedProject?.Project.Id == project.Id, "Project selected in Mobile Build Studio");
         SelectIosSimulator(studio);
         LogDoctor(studio, "initial");
+        CheckOutputReasons(studio);
         Shot("doctor-initial");
         if (Arg("doctor-expect-readiness") is { } want) Check(studio.DoctorReadiness.Text == want, $"Build readiness: {studio.DoctorReadiness.Text} (expected {want})");
         foreach (var c in (Arg("doctor-expect-category") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -34,9 +35,12 @@ internal static partial class Program
             if (finding is null) return 1;
             Log($"Repair: {finding.RepairTitle} [{finding.RepairMode.Text}] — {finding.Finding.Repair!.Description}");
             Check(finding.RepairMode.Text == "Requires approval", "The repair requires approval");
+            var projectsBefore = studio.MobileProjects.Count;
+            Check(!studio.ApproveRepairCommand.CanExecute(null), "Approve is unavailable before the repair is reviewed");
             studio.ReviewRepairCommand.Execute(finding);
             Log("Preview:\n" + studio.RepairPreview);
             ShotScrolledToEnd("doctor-review");
+            Check(studio.MobileProjects.Count == projectsBefore && studio.SelectedProject?.Project.Id == project.Id, "Reviewing changes nothing: no import before approval");
             if (studio.ReviewNeedsTrust)
             {
                 Check(!studio.ApproveRepairCommand.CanExecute(null), "Approve is refused before the trust confirmation");
@@ -46,9 +50,14 @@ internal static partial class Program
             await studio.ApproveRepairCommand.ExecuteAsync(null);
             await Dispatcher.UIThread.InvokeAsync(() => { });
             Log("Repair outcome: " + studio.RepairOutcome);
+            Check(!studio.IsReviewing && !studio.ApproveRepairCommand.CanExecute(null), "The review closes after the repair ran (it cannot be approved twice)");
+            Check(studio.RepairOutcome?.Contains("Verification:", StringComparison.Ordinal) == true && (repairId != "import-repository" || studio.RepairOutcome.StartsWith("Imported ", StringComparison.Ordinal)), "The repair outcome and its verification stay visible");
+            if (repairId == "import-repository")
+                Check(studio.MobileProjects.Count == projectsBefore + 1 && studio.MobileProjects.Any(p => p.Project.Id == project.Id), "After approval the repository is a new project; the original import is kept");
             if (studio.RepairLog.Length > 0) Log("Repair log:\n" + studio.RepairLog);
             SelectIosSimulator(studio);
             LogDoctor(studio, "after repair");
+            CheckOutputReasons(studio);
             Shot("doctor-after-repair");
         }
         foreach (var c in (Arg("doctor-expect-no-category") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
@@ -104,6 +113,15 @@ internal static partial class Program
             Check(studio.BuildStateTag.Text == "Artifact verified", $"Simulator app built and verified ({studio.BuildStateTag.Text})");
         }
         return Failures.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>No reason is repeated across output cards: a reason shared by several outputs is shown once, above them.</summary>
+    private static void CheckOutputReasons(MobileBuildStudioViewModel studio)
+    {
+        foreach (var o in studio.Outputs) Log($"Output {o.Name}: {o.Status.Text}{(o.ShowReason ? " — " + o.ShortReason : "")}");
+        if (studio.HasSharedOutputReason) Log($"Shared output reason: {studio.SharedOutputReasonScope} — {studio.SharedOutputReason}");
+        Check(studio.Outputs.Where(o => o.ShowReason).GroupBy(o => o.Reason).All(g => g.Count() == 1), "No output card repeats another card's reason");
+        Check(studio.Outputs.Where(o => o.HasReason && !o.ShowReason).All(o => o.Reason == studio.SharedOutputReasonFull), "Every hidden card reason is shown once in the shared note");
     }
 
     private static void SelectIosSimulator(MobileBuildStudioViewModel studio)

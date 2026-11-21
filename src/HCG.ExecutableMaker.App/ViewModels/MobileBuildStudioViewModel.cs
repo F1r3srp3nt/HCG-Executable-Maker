@@ -23,6 +23,8 @@ public sealed partial class MobileOutputItem(MobileOutputOption option) : Observ
     public string Description => Option.Description;
     public string? Reason => Option.Reason;
     public bool HasReason => Option.Reason is not null;
+    /// <summary>False when the same reason applies to every unavailable output: it is then shown once above the list.</summary>
+    [ObservableProperty] private bool _showReason = option.Reason is not null;
     /// <summary>The first sentence of the reason; the full text is in the tooltip and in Build Doctor.</summary>
     public string? ShortReason => Option.Reason is { } r && r.IndexOf(". ", StringComparison.Ordinal) is var i and > 0 ? r[..(i + 1)] : Option.Reason;
     public bool IsEnabled => Option.IsAvailable;
@@ -312,14 +314,35 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     [ObservableProperty] private PlatformChoice? _selectedPlatform;
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand))] private MobileOutputItem? _selectedOutput;
     public bool HasOutputs => Outputs.Count > 0;
+    /// <summary>
+    /// The reason shared by two or more unavailable outputs, shown once above them instead of repeated on every card
+    /// (first sentence; the full text is in the tooltip and in Build Doctor). Outputs with their own reason keep it.
+    /// </summary>
+    [ObservableProperty] private string? _sharedOutputReason;
+    [ObservableProperty] private string? _sharedOutputReasonFull;
+    [ObservableProperty] private string? _sharedOutputReasonScope;
+    public bool HasSharedOutputReason => SharedOutputReason is not null;
+    partial void OnSharedOutputReasonChanged(string? value) => OnPropertyChanged(nameof(HasSharedOutputReason));
 
     partial void OnSelectedPlatformChanged(PlatformChoice? value)
     {
         Outputs.Clear();
         if (value is not null)
             foreach (var o in _allOptions.Where(o => o.Platform == value.Platform)) Outputs.Add(new MobileOutputItem(o));
+        GroupOutputReasons();
         OnPropertyChanged(nameof(HasOutputs));
         SelectOutput(Outputs.FirstOrDefault(o => o.IsEnabled));
+    }
+
+    private void GroupOutputReasons()
+    {
+        var shared = Outputs.Where(o => !o.IsEnabled && o.Reason is not null).GroupBy(o => o.Reason!, StringComparer.Ordinal)
+            .Where(g => g.Count() >= 2).OrderByDescending(g => g.Count()).FirstOrDefault();
+        foreach (var o in Outputs) o.ShowReason = o.HasReason && (shared is null || o.Reason != shared.Key);
+        SharedOutputReasonFull = shared?.Key;
+        SharedOutputReason = shared?.First().ShortReason;
+        SharedOutputReasonScope = shared is null ? null
+            : shared.Count() == Outputs.Count ? $"All {Outputs.Count} outputs are unavailable" : $"{shared.Count()} of {Outputs.Count} outputs are unavailable";
     }
 
     [RelayCommand]

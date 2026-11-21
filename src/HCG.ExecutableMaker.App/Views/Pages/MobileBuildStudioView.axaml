@@ -257,6 +257,13 @@
             </ComboBox>
             <TextBlock Classes="label" Text="3 · BUILD OUTPUT" Margin="0,8,0,0" />
             <TextBlock Classes="muted" Text="Select a project to see the outputs it supports on this computer." IsVisible="{Binding !HasOutputs}" TextWrapping="Wrap" />
+            <Border Classes="inset" Padding="14,10" IsVisible="{Binding HasSharedOutputReason}" ToolTip.Tip="{Binding SharedOutputReasonFull}">
+              <StackPanel Spacing="2">
+                <TextBlock FontWeight="SemiBold" FontSize="12.5" Text="{Binding SharedOutputReasonScope}" />
+                <TextBlock Classes="secondary" FontSize="12.5" Text="{Binding SharedOutputReason}" TextWrapping="Wrap" />
+                <TextBlock Classes="muted" FontSize="11.5" Text="Causes, repairs and full details are in Build Doctor above." TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
             <ItemsControl ItemsSource="{Binding Outputs}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:MobileOutputItem">
@@ -267,7 +274,7 @@
                       <StackPanel Grid.Column="1" Spacing="3" Margin="4,0,12,0">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13.5" />
                         <TextBlock Classes="secondary" FontSize="12.5" Text="{Binding Description}" TextWrapping="Wrap" />
-                        <TextBlock Classes="warning" FontSize="12" Text="{Binding ShortReason}" TextWrapping="Wrap" IsVisible="{Binding HasReason}" ToolTip.Tip="{Binding Reason}" />
+                        <TextBlock Classes="warning" FontSize="12" Text="{Binding ShortReason}" TextWrapping="Wrap" IsVisible="{Binding ShowReason}" ToolTip.Tip="{Binding Reason}" />
                       </StackPanel>
                       <c:StatusChip Grid.Column="2" Status="{Binding Status}" VerticalAlignment="Top" />
                     </Grid>
