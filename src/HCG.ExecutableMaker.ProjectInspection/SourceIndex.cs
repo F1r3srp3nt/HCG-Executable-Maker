@@ -58,6 +58,28 @@ public sealed class SourceIndex
         return new SourceIndex(root, files, truncated);
     }
 
+    /// <summary>
+    /// Folder names that hold test fixtures: sample projects a repository's own tests build. They are never offered as
+    /// the repository's app (HCG Executable Maker's tests/Fixtures holds iOS, Android, Theos and Electron samples).
+    /// </summary>
+    public static readonly IReadOnlySet<string> FixtureDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Fixtures", "__fixtures__", "TestFixtures", "test-fixtures", "testdata", "test_data",
+    };
+
+    /// <summary>True when a file lies inside a test-fixture folder of this tree (the imported root itself never counts).</summary>
+    public static bool IsTestFixture(string relative) => relative.Split('/').SkipLast(1).Any(FixtureDirectories.Contains);
+
+    private SourceIndex? _withoutFixtures;
+
+    /// <summary>This listing without files inside test-fixture folders (the same instance when there are none).</summary>
+    public SourceIndex WithoutTestFixtures()
+    {
+        if (_withoutFixtures is not null) return _withoutFixtures;
+        var kept = Files.Where(f => !IsTestFixture(f)).ToList();
+        return _withoutFixtures = kept.Count == Files.Count ? this : new SourceIndex(Root, kept, Truncated);
+    }
+
     public IEnumerable<string> WithExtension(params string[] extensions) =>
         Files.Where(f => extensions.Any(x => f.EndsWith(x, StringComparison.OrdinalIgnoreCase)));
 

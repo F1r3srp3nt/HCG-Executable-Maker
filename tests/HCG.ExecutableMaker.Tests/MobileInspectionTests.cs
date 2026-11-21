@@ -270,6 +270,83 @@ public class MobileInspectionTests : IDisposable
     }
 
     [Fact]
+    public async Task HCG_Executable_Maker_itself_is_a_desktop_app_and_its_test_fixtures_are_not_offered_as_mobile_apps()
+    {
+        // The real repository: an Avalonia desktop app whose tests/Fixtures hold .NET iOS, Xcode, Android, Theos and
+        // Electron samples. 0.3.1 offered tests/Fixtures/DotNetIos/HCG Mail like as "the" iOS app.
+        var a = await Service().InspectAsync(Fixtures.RepoRoot, Report(TargetPlatform.MacOS, ToolchainIds.DotNetSdk), CancellationToken.None);
+        Assert.Contains("desktop", a.ApplicationType, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(a.Mobile);
+        Assert.Null(a.Native);
+        Assert.True(a.Node is null || a.Node.Projects.All(p => !SourceIndex.IsTestFixture(p.ManifestPath)));
+        Assert.Contains(a.Diagnostics, d => d.Message.Contains("inside test-fixture folders", StringComparison.Ordinal) && d.Message.Contains("not offered in Mobile Build Studio", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_fixture_folder_imported_on_its_own_is_still_a_mobile_app()
+    {
+        File.Copy(Path.Combine(Fixtures.RepoRoot, "tests", "Fixtures", "HelloIOS", "HelloIOS.xcodeproj", "project.pbxproj"), _t.Write("HelloIOS.xcodeproj/project.pbxproj", ""), overwrite: true);
+        var a = await Service().InspectAsync(_t.Path, Report(TargetPlatform.MacOS, ToolchainIds.Xcode, ToolchainIds.IosSdk), CancellationToken.None);
+        Assert.NotNull(a.Mobile?.Ios);
+        Assert.NotEmpty(a.Mobile!.Ios!.AppTargets);
+    }
+
+    [Fact]
+    public async Task A_desktop_repository_with_an_ios_fixture_is_not_a_mobile_project()
+    {
+        _t.Write("src/App/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+        _t.Write("src/App/Program.cs", "class P { static void Main() {} }");
+        _t.Write("tests/Fixtures/Phone/Phone.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-ios</TargetFramework><ApplicationId>com.example.phone</ApplicationId></PropertyGroup></Project>");
+        var a = await Service().InspectAsync(_t.Path, Report(TargetPlatform.MacOS, ToolchainIds.DotNetSdk), CancellationToken.None);
+        Assert.Null(a.Mobile);
+        Assert.Contains(a.Diagnostics, d => d.Message.Contains("tests/Fixtures/Phone/Phone.csproj", StringComparison.Ordinal));
+        Assert.True(SourceIndex.IsTestFixture("tests/Fixtures/Phone/Phone.csproj"));
+        Assert.False(SourceIndex.IsTestFixture("Fixtures.csproj"));
+        Assert.False(SourceIndex.IsTestFixture("src/App/App.csproj"));
+    }
+
+    [Fact]
+    public async Task Unreadable_xcode_project_is_reported_as_invalid_not_as_missing_an_app_target()
+    {
+        _t.Write("Broken.xcodeproj/project.pbxproj", "// !$*UTF8*$!\n{ objects = { A = { isa = PBXNativeTarget; name = ");
+        var a = await Service().InspectAsync(_t.Path, Report(TargetPlatform.MacOS, ToolchainIds.Xcode, ToolchainIds.IosSdk), CancellationToken.None);
+        var missing = XcodeProjectAnalyzer.MissingAppTarget(a.Mobile!.Ios);
+        Assert.NotNull(missing);
+        Assert.Contains("is not a valid Xcode project", missing!.Value.Detail, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("framework", "com.apple.product-type.framework", "iphoneos", "has no iOS application target", "framework")]
+    [InlineData("extension", "com.apple.product-type.app-extension", "iphoneos", "has no iOS application target", "app extension")]
+    [InlineData("mac app", "com.apple.product-type.application", "macosx", "builds a macOS application, not an iOS one", "Porting Studio")]
+    public void Missing_app_target_says_what_the_project_contains(string name, string productType, string sdk, string expected, string mentioned)
+    {
+        var ios = new IosProjectInfo
+        {
+            ProjectPath = "Thing.xcodeproj",
+            Targets = [new IosTargetInfo { Name = name, ProductType = productType, SdkRoot = sdk }, new IosTargetInfo { Name = "ThingTests", ProductType = "com.apple.product-type.bundle.unit-test", SdkRoot = sdk }],
+        };
+        var missing = XcodeProjectAnalyzer.MissingAppTarget(ios);
+        Assert.NotNull(missing);
+        Assert.Contains(expected, missing!.Value.Detail, StringComparison.Ordinal);
+        Assert.Contains(mentioned, missing.Value.Detail + " " + missing.Value.Remedy, StringComparison.Ordinal);
+        Assert.Contains("ThingTests (unit tests", missing.Value.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Missing_app_target_distinguishes_no_project_no_targets_and_a_real_app()
+    {
+        Assert.Contains("No Xcode project", XcodeProjectAnalyzer.MissingAppTarget(null)!.Value.Detail, StringComparison.Ordinal);
+        Assert.Contains("npx cap add ios", XcodeProjectAnalyzer.MissingAppTarget(null, capacitor: true)!.Value.Remedy, StringComparison.Ordinal);
+        Assert.Contains("contains no native targets", XcodeProjectAnalyzer.MissingAppTarget(new IosProjectInfo { ProjectPath = "E.xcodeproj" })!.Value.Detail, StringComparison.Ordinal);
+        Assert.Null(XcodeProjectAnalyzer.MissingAppTarget(new IosProjectInfo
+        {
+            ProjectPath = "A.xcodeproj",
+            Targets = [new IosTargetInfo { Name = "A", ProductType = "com.apple.product-type.application", SdkRoot = "iphoneos" }],
+        }));
+    }
+
+    [Fact]
     public async Task Library_only_android_project_has_no_buildable_app()
     {
         _t.Write("settings.gradle", "include ':lib'");

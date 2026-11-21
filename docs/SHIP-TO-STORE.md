@@ -111,12 +111,28 @@ TEST mode with the mock HCG Connect provider (nothing real is contacted):
   again continues the same draft. Then an approver opens the draft in HCG Store in a browser session and presses
   *Download to review*: the bytes' SHA-256 equals the build's. A customer gets 404 for the draft, anonymous 401.
 
+## What the connection status means
+
+Ship to Store names the exact cause instead of a generic "not available" (`StoreDiagnosis` in
+`HcgStoreClient.cs`; the full explanation is shown under the status):
+
+| Status | Cause | What fixes it |
+|---|---|---|
+| **No HCG Store server at this address** | A web page answered `/api/v1/publishing/whoami` (static site, e.g. the storefront on GitHub Pages) | Deploy the HCG Store server there, or set the Store address in Settings to where it runs |
+| **Publishing switched off** | The HCG Store server answered `publishing_disabled` | An HCG Store administrator sets `HCG_STORE_PUBLISHING` |
+| **Publishing API not found** | A JSON service answered 404/405 for publishing API v1 | Update HCG Store, or point Settings at the right service |
+| **Sign-in not accepted** | HTTP 401 | Sign in with HCG again (Account page) |
+| **No publishing permission** | HTTP 403 | HCG grants the staff publishing permission; a purchase never does |
+| **HCG Store server error** | HTTP 5xx | Try again; not a refusal |
+| **Store address not found (DNS)** / **Secure connection failed** / **HCG Store unreachable** / **did not answer** | Name resolution, TLS, connection or timeout | Network or address; not a refusal |
+
 ## Not available yet (blockers)
 
 1. **The HCG Store server is not deployed.** The publishing API is merged (`F1r3srp3nt/store` PR #12) but off by
    default and not hosted: `store.hakmicapitalgroup.com` serves only the static storefront (GitHub Pages), so its
-   publishing routes do not exist there and Ship to Store says "HCG Store does not answer publishing requests"
-   (decision D1, hosting, is open).
+   publishing routes do not exist there. Ship to Store says **No HCG Store server at this address** (0.4.0 and
+   earlier: "Publishing not available"). Hosting the server (decision D1) is a founder decision; nothing in Maker can
+   or should work around it.
 2. **Central permission IDs** for publishing and release approval are not issued by HCG, and the entitlement API must
    serve them (`HCG_STORE_PUBLISHER_CENTRAL_ID`, `HCG_STORE_RELEASE_APPROVER_CENTRAL_ID`). The deployed `/check`
    only answers for `feature_key: "download"`, so against live HCG publishing fails closed until then.

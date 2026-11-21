@@ -8,6 +8,15 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - **`macOS Xcode Project/HCGExecutableMaker.xcodeproj`**: open HCG Executable Maker in Xcode, choose the **HCG Executable Maker** scheme and press Run. An External Build System target runs `Scripts/build-app.sh`, which builds the real .NET/Avalonia app for osx-arm64 with the repository's own self-packaging pipeline (no second build system), validates the bundle (Info.plist, bundle ID `com.hakmicapital.executablemaker`, version from `Directory.Build.props`, arm64, bundled .NET runtime, icon, signature, `--version`), and skips rebuilding when nothing changed. A small Swift launcher target makes Run start the real app in place (its output in Xcode's console, Stop quits it). Debug and Release schemes; Release adds a `.app.zip` and SHA-256 and optional Developer ID signing (`HCG_CODESIGN_IDENTITY`); nothing is published or notarized. See `macOS Xcode Project/README.md`.
 - `self-package.cs`: `--configuration Debug|Release` and `--app-only`.
 - CI `xcode-project`: xcodebuild Debug and Release builds on macOS 26 (arm64), bundle checks, an up-to-date second build, Run as Xcode does with a screenshot of the app's window, and a failure-path check; `XcodeProjectFileTests` checks the project file and schemes on every platform.
+## [Unreleased] — Ship to Store diagnostics
+
+### Fixed
+- Ship to Store names the exact reason publishing cannot be used instead of "Publishing not available": no HCG Store server at the address (a web page answered — today's case for store.hakmicapitalgroup.com, which serves the static storefront), publishing switched off on the Store, publishing API not found, sign-in not accepted, no publishing permission, server error, DNS failure, TLS failure, connection failure or timeout. Network problems and server errors are never shown as refusals. See docs/SHIP-TO-STORE.md.
+## [Unreleased] — Project detection
+
+### Fixed
+- Projects inside test-fixture folders (`Fixtures`, `__fixtures__`, `testdata`, …) are never offered as a repository's app. Importing HCG Executable Maker itself into Mobile Build Studio offered a test fixture (0.3.1: `tests/Fixtures/DotNetIos/HCG Mail like`; 0.4.0: `HelloDotNetIos`) as "the" iOS app, and attached a Theos route and an Electron note from fixtures. It is now reported as an Avalonia desktop app (built in New Build), with its fixture mobile projects listed as test samples.
+- "No iOS application target was found in the Xcode project" now says what the project contains and what to do: an unreadable `project.pbxproj` (invalid project), a project without native targets, only frameworks/extensions/tests (each target listed with its kind and SDK), a macOS application (New Build or Porting Studio), or a Capacitor app without its iOS project.
 
 ## [0.4.0] — 2026-11-21 (release candidate; publication requires the owner's approval) — Build Doctor and Unleashify
 
