@@ -2,6 +2,12 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Project detection
+
+### Fixed
+- Projects inside test-fixture folders (`Fixtures`, `__fixtures__`, `testdata`, …) are never offered as a repository's app. Importing HCG Executable Maker itself into Mobile Build Studio offered a test fixture (0.3.1: `tests/Fixtures/DotNetIos/HCG Mail like`; 0.4.0: `HelloDotNetIos`) as "the" iOS app, and attached a Theos route and an Electron note from fixtures. It is now reported as an Avalonia desktop app (built in New Build), with its fixture mobile projects listed as test samples.
+- "No iOS application target was found in the Xcode project" now says what the project contains and what to do: an unreadable `project.pbxproj` (invalid project), a project without native targets, only frameworks/extensions/tests (each target listed with its kind and SDK), a macOS application (New Build or Porting Studio), or a Capacitor app without its iOS project.
+
 ## [0.4.0] — 2026-11-21 (release candidate; publication requires the owner's approval) — Build Doctor and Unleashify
 
 Identify this build with `--version` (or the Account page footer): `HCG Executable Maker 0.4.0… (commit …)`.

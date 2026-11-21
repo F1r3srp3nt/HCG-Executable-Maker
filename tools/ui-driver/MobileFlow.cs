@@ -8,7 +8,7 @@ namespace HCG.ExecutableMaker.UiDriver;
 /// Mobile Build Studio driven like a user: the project imported in New Build is opened in Mobile Build Studio, the
 /// output (simulator / archive / ipa), scheme and signing are chosen, readiness and the precise state are recorded, and
 /// the build runs after the trust confirmation. Options: --mobile, --mobile-output sim|archive|ipa (--output is the output folder), --scheme S, --signing
-/// unsigned|project, --expect-state "Ready to build", --expect-blocked-by "Deployment target", --record-only (a failure is
+/// unsigned|project, --expect-state "Ready to build", --expect-blocked-by "Deployment target", --mobile-expect-not-mobile (a desktop repository whose mobile projects are only test fixtures), --record-only (a failure is
 /// recorded, not fatal — used to reproduce HCG Sentinel's archive across Xcode versions).
 /// </summary>
 internal static partial class Program
@@ -17,6 +17,20 @@ internal static partial class Program
     {
         var project = wizard.Project ?? throw new InvalidOperationException("Nothing was imported.");
         Log($"Inspection: {project.Analysis?.InspectorId} · {project.Analysis?.ApplicationType} · {project.Analysis?.Support} — {project.Analysis?.SupportSummary}");
+        if (_args.ContainsKey("mobile-expect-not-mobile"))
+        {
+            // A desktop repository (HCG Executable Maker itself) whose tests/Fixtures hold mobile samples: none of them may be
+            // offered as its app; New Build builds the desktop app.
+            foreach (var d in project.Analysis?.Diagnostics ?? []) Log($"  {d.Severity}: {d.Message}");
+            Check(project.Analysis?.Mobile is null, "Not offered as a mobile project (its mobile projects are test fixtures)");
+            Check(project.Analysis?.Native is null, "No Theos route attached from a test fixture");
+            Check(project.Analysis?.Diagnostics.Any(d => d.Message.Contains("inside test-fixture folders", StringComparison.Ordinal)) == true, "The test fixtures are listed as samples, not apps");
+            await main.NavigateAsync("mobile", project);
+            var mbs = (MobileBuildStudioViewModel)main.CurrentPage!;
+            Check(mbs.MobileProjects.All(p => p.Project.Id != project.Id), "Mobile Build Studio does not list it");
+            Shot("not-mobile");
+            return Failures.Count == 0 ? 0 : 1;
+        }
         Check(project.Analysis?.Mobile is not null, "Mobile Build Studio can build this project");
         await main.NavigateAsync("mobile", project);
         var studio = (MobileBuildStudioViewModel)main.CurrentPage!;

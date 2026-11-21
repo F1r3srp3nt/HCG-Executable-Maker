@@ -129,7 +129,28 @@ public sealed record IosTargetInfo
     public string? DeploymentTarget { get; init; }
     public string? DevelopmentTeam { get; init; }
     public string? CodeSignStyle { get; init; }
+    /// <summary>SDKROOT of the target (iphoneos, macosx, …), with the project's value as fallback.</summary>
+    public string? SdkRoot { get; init; }
     public bool IsApplication => ProductType == "com.apple.product-type.application";
+    public bool IsMacOnly => SdkRoot is { } s && s.StartsWith("macosx", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A readable kind for the product type ("framework", "app extension", "unit tests", …).</summary>
+    public string Kind => ProductType switch
+    {
+        "com.apple.product-type.application" => "application",
+        "com.apple.product-type.framework" => "framework",
+        "com.apple.product-type.library.static" => "static library",
+        "com.apple.product-type.library.dynamic" => "dynamic library",
+        "com.apple.product-type.bundle" => "resource bundle",
+        "com.apple.product-type.bundle.unit-test" => "unit tests",
+        "com.apple.product-type.bundle.ui-testing" => "UI tests",
+        "com.apple.product-type.app-extension" or "com.apple.product-type.extensionkit-extension" => "app extension",
+        "com.apple.product-type.tool" => "command-line tool",
+        "com.apple.product-type.application.watchapp2" or "com.apple.product-type.application.watchapp2-container" => "watchOS app",
+        "com.apple.product-type.watchkit2-extension" => "watchOS extension",
+        "" => "unknown product type",
+        _ => ProductType.Replace("com.apple.product-type.", "", StringComparison.Ordinal),
+    };
 }
 
 public sealed record IosProjectInfo
@@ -143,6 +164,8 @@ public sealed record IosProjectInfo
     public IReadOnlyList<string> Configurations { get; init; } = [];
     public bool UsesSwiftPackages { get; init; }
     public bool UsesCocoaPods { get; init; }
+    /// <summary>Why project.pbxproj could not be read (null when it parsed).</summary>
+    public string? ParseError { get; init; }
     public IEnumerable<IosTargetInfo> AppTargets => Targets.Where(t => t.IsApplication);
 }
 
