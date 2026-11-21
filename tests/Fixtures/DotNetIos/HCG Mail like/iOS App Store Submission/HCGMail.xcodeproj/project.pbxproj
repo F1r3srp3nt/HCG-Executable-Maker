@@ -1,0 +1,187 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXFileReference section */
+		4C3A11000000000000000011 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		4C3A11000000000000000012 /* toolchain.props */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = toolchain.props; sourceTree = "<group>"; };
+		4C3A11000000000000000013 /* HCG.Mail.iOS */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HCG.Mail.iOS; path = src/HCG.Mail.iOS; sourceTree = "<group>"; };
+		4C3A11000000000000000014 /* HCG.Mail.Mobile */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HCG.Mail.Mobile; path = src/HCG.Mail.Mobile; sourceTree = "<group>"; };
+		4C3A11000000000000000015 /* scripts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = scripts; sourceTree = "<group>"; };
+		4C3A11000000000000000016 /* APP_STORE_SUBMISSION.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = APP_STORE_SUBMISSION.md; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		4C3A11000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				4C3A11000000000000000016 /* APP_STORE_SUBMISSION.md */,
+				4C3A11000000000000000011 /* README.md */,
+				4C3A11000000000000000012 /* toolchain.props */,
+				4C3A11000000000000000013 /* HCG.Mail.iOS */,
+				4C3A11000000000000000014 /* HCG.Mail.Mobile */,
+				4C3A11000000000000000015 /* scripts */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXLegacyTarget section */
+		4C3A11000000000000000021 /* HCG Mail */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "scripts/xcode-build.sh";
+			buildConfigurationList = 4C3A11000000000000000031 /* Build configuration list for PBXLegacyTarget "HCG Mail" */;
+			buildPhases = (
+			);
+			buildToolPath = /bin/bash;
+			buildWorkingDirectory = "$(PROJECT_DIR)";
+			dependencies = (
+			);
+			name = "HCG Mail";
+			passBuildSettingsInEnvironment = 1;
+			productName = "HCG Mail";
+		};
+		4C3A11000000000000000022 /* HCG Mail Simulator */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "scripts/xcode-build.sh --launch";
+			buildConfigurationList = 4C3A11000000000000000032 /* Build configuration list for PBXLegacyTarget "HCG Mail Simulator" */;
+			buildPhases = (
+			);
+			buildToolPath = /bin/bash;
+			buildWorkingDirectory = "$(PROJECT_DIR)";
+			dependencies = (
+			);
+			name = "HCG Mail Simulator";
+			passBuildSettingsInEnvironment = 1;
+			productName = "HCG Mail Simulator";
+		};
+/* End PBXLegacyTarget section */
+
+/* Begin PBXProject section */
+		4C3A11000000000000000002 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					4C3A11000000000000000021 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					4C3A11000000000000000022 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = 4C3A11000000000000000030 /* Build configuration list for PBXProject "HCGMail" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 4C3A11000000000000000001;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				4C3A11000000000000000021 /* HCG Mail */,
+				4C3A11000000000000000022 /* HCG Mail Simulator */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin XCBuildConfiguration section */
+		4C3A11000000000000000041 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4C3A11000000000000000042 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		4C3A11000000000000000043 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.hakmicapitalgroup.hcgmail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		4C3A11000000000000000044 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.hakmicapitalgroup.hcgmail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		4C3A11000000000000000045 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.hakmicapitalgroup.hcgmail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphonesimulator;
+				SUPPORTED_PLATFORMS = iphonesimulator;
+			};
+			name = Debug;
+		};
+		4C3A11000000000000000046 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.hakmicapitalgroup.hcgmail;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphonesimulator;
+				SUPPORTED_PLATFORMS = iphonesimulator;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4C3A11000000000000000030 /* Build configuration list for PBXProject "HCGMail" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4C3A11000000000000000041 /* Debug */,
+				4C3A11000000000000000042 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4C3A11000000000000000031 /* Build configuration list for PBXLegacyTarget "HCG Mail" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4C3A11000000000000000043 /* Debug */,
+				4C3A11000000000000000044 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4C3A11000000000000000032 /* Build configuration list for PBXLegacyTarget "HCG Mail Simulator" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4C3A11000000000000000045 /* Debug */,
+				4C3A11000000000000000046 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 4C3A11000000000000000002 /* Project object */;
+}

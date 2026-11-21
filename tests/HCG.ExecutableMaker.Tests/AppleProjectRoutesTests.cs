@@ -89,6 +89,20 @@ public class AppleProjectRoutesTests : IDisposable
     }
 
     [Fact]
+    public void An_xcode_project_that_only_wraps_another_build_is_not_a_mobile_app_project()
+    {
+        var mail = SourceIndex.Build(MailRepo(), CancellationToken.None);
+        Assert.True(XcodeProjectAnalyzer.WrapsExternalBuild(mail, "iOS App Store Submission/HCGMail.xcodeproj"));
+        Assert.Empty(XcodeProjectAnalyzer.FindMobileProjects(mail));
+        Assert.Equal(["iOS App Store Submission/HCGMail.xcodeproj"], XcodeProjectAnalyzer.FindExternalBuildWrappers(mail));
+
+        // A real iOS app project (native target) is still found.
+        var hello = SourceIndex.Build(FixtureDir("HelloIOS"), CancellationToken.None);
+        Assert.False(XcodeProjectAnalyzer.WrapsExternalBuild(hello, "HelloIOS.xcodeproj"));
+        Assert.Equal(["HelloIOS.xcodeproj"], XcodeProjectAnalyzer.FindMobileProjects(hello));
+    }
+
+    [Fact]
     public async Task Importing_only_the_submission_folder_is_a_configuration_problem_named_precisely_not_unsupported()
     {
         var a = await Service().InspectAsync(Path.Combine(MailRepo(), "iOS App Store Submission"), null, CancellationToken.None);

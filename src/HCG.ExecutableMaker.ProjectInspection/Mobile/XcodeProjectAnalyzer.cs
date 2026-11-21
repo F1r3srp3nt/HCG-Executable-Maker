@@ -157,9 +157,36 @@ public static partial class XcodeProjectAnalyzer
         catch (Exception ex) when (ex is FormatException or KeyNotFoundException or InvalidCastException) { return false; }
     }
 
-    /// <summary>Projects that are not macOS-only (iOS and multiplatform projects belong to Mobile Build Studio).</summary>
+    /// <summary>
+    /// Projects that are not macOS-only (iOS and multiplatform projects belong to Mobile Build Studio). Projects that only
+    /// wrap another build system are left out: they have no app target for Xcode to archive (see <see cref="WrapsExternalBuild"/>).
+    /// </summary>
     public static IReadOnlyList<string> FindMobileProjects(SourceIndex index) =>
-        FindProjects(index).Where(p => !IsMacOnlyProject(index, p)).ToList();
+        FindProjects(index).Where(p => !IsMacOnlyProject(index, p) && !WrapsExternalBuild(index, p)).ToList();
+
+    /// <summary>
+    /// True when every target of the project is an External Build System (PBXLegacyTarget) or aggregate target and none
+    /// is a native target: an Xcode entry point that runs another build (for example HCG Mail's HCGMail.xcodeproj, which
+    /// calls <c>dotnet build</c> for its .NET iOS app). Such a project is not the app to build — the project it wraps is.
+    /// A project without any target, or one that cannot be read, is not treated as a wrapper.
+    /// </summary>
+    public static bool WrapsExternalBuild(SourceIndex index, string projectPath)
+    {
+        try
+        {
+            var root = (Dictionary<string, object>)OpenStepPlist.Parse(AndroidGradleAnalyzer.Read(index, projectPath + "/project.pbxproj"));
+            var kinds = ((Dictionary<string, object>)root["objects"]).Values.OfType<Dictionary<string, object>>()
+                .Select(o => o.GetValueOrDefault("isa") as string)
+                .Where(isa => isa is "PBXNativeTarget" or "PBXLegacyTarget" or "PBXAggregateTarget")
+                .ToList();
+            return kinds.Count > 0 && !kinds.Contains("PBXNativeTarget");
+        }
+        catch (Exception ex) when (ex is FormatException or KeyNotFoundException or InvalidCastException or IOException) { return false; }
+    }
+
+    /// <summary>Non-macOS projects that only wrap another build system (reported, not built).</summary>
+    public static IReadOnlyList<string> FindExternalBuildWrappers(SourceIndex index) =>
+        FindProjects(index).Where(p => !IsMacOnlyProject(index, p) && WrapsExternalBuild(index, p)).ToList();
 
     public static bool IsIosAppPackage(SourceIndex index, string manifestPath) =>
         IosAppProductRegex().IsMatch(AndroidGradleAnalyzer.Read(index, manifestPath));

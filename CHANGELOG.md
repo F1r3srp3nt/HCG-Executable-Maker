@@ -2,6 +2,18 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- **HCG Mail's iOS app is found again when its repository contains `HCGMail.xcodeproj`.** That project only runs the
+  .NET build through External Build System targets. Mobile Build Studio treated it as the iOS app, found "no iOS
+  application target", and blocked every iOS output.
+  - An `.xcodeproj` whose targets are all External Build System or aggregate targets (no native target) now only wraps
+    another build. It no longer leads detection, and the .NET iOS project it wraps is attached as before.
+  - The analysis names the wrapper in an Info diagnostic.
+  - Real iOS app projects, which have a native target, are unaffected.
+  - The "HCG Mail like" fixture now includes the project.
+
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
 
 Identify this build with `--version` (or the Account page footer): it prints `HCG Executable Maker 0.3.1… (commit …)` and
