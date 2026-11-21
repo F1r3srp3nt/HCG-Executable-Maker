@@ -179,9 +179,9 @@ public static class MobileReadiness
         var sdkName = simulator ? "iphonesimulator" : "iphoneos";
         if (m.Framework is MobileFramework.NativeIos or MobileFramework.Capacitor)
         {
-            if (m.Ios is not { } ios || !ios.AppTargets.Any())
-                items.Add(new("iOS app target", ReadinessState.SetupRequired, true, "No iOS application target was found in the Xcode project."));
-            else if (ios.UsesCocoaPods && ios.WorkspacePath is null)
+            if (XcodeProjectAnalyzer.MissingAppTarget(m.Ios, m.Framework == MobileFramework.Capacitor) is { } missing)
+                items.Add(new("iOS app target", ReadinessState.SetupRequired, true, missing.Detail, missing.Remedy));
+            else if (m.Ios is { } ios && ios.UsesCocoaPods && ios.WorkspacePath is null)
                 items.Add(new("CocoaPods workspace", ReadinessState.SetupRequired, true, "The project uses CocoaPods but has no .xcworkspace.", "Run `pod install` in the project, then re-import."));
         }
         if (m.DotNetIos is { } dn)
