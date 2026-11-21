@@ -29,7 +29,9 @@ test.
 4. **Handoff** — `<package>_<version>-candidate-handoff/`: the .deb, `SHA256SUMS`, `provenance.json` (app source repo
    and commit, CI run/artifact, Xcode/SDK, ldid-signed files, every check), `control.txt`, `VALIDATION.txt`,
    `CHANGELOG.md`, `KNOWN-ISSUES.md`, `package.toml` (HCG Repo format; Beta; production access level; the free-demo
-   `[access] exception` only from the owner's recorded approval of this version, otherwise commented out), `icon.png`, `import-request.toml` (only when pinned to a CI run artifact, otherwise
+   `[access] exception` only from the owner's recorded approval of this version, otherwise commented out), `icon.png` (the bundle's largest
+   AppIcon PNG; Xcode's Apple CgBI PNGs are converted to a standard RGBA PNG, recorded in `provenance.json` `icon` and the
+   README), `import-request.toml` (only when pinned to a CI run artifact, otherwise
    `import-request.INCOMPLETE.toml`), `DEVICE-TEST.md` (Zebra install, launch, uninstall, recovery).
 
 ## Where

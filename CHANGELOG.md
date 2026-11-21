@@ -17,6 +17,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - HCG Sentinel 0.1.0~beta1: the owner's approval (21 Nov 2026, preparation and validation only) is recorded in `tools/unleashify/approvals/` and entered on the Unleashify page in CI; the HCG Repo dry run uses `--require-genuine-approval` (no placeholder) in both Unleashify jobs.
 
 ### Fixed
+- The handoff's `icon.png` is a standard PNG: Xcode writes the loose AppIcon PNGs in Apple's CgBI variant (CgBI chunk, raw deflate, premultiplied BGRA), which HCG Repo (`verify.py` "is not a PNG"), Sileo, Zebra and web depictions cannot decode. It is now converted to 8-bit RGBA (R/B swapped back, alpha un-premultiplied); standard PNGs are copied unchanged. `provenance.json` (`icon`) and `README.md` record the source file and both sizes. HCG Sentinel 0.1.0~beta1's icon had to be converted by hand (HCG Repo PR #16).
 - Validation resolves `@rpath` in embedded libraries through the main executable's run paths, as dyld does (an embedded Swift runtime library linking `@rpath/libswiftCore.dylib` was reported unresolved).
 
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration

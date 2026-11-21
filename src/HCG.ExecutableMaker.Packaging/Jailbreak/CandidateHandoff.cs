@@ -86,6 +86,18 @@ public static class CandidateHandoff
         var f = validation.Facts;
         await Write("SHA256SUMS", $"{f.Sha256}  {debName}\n").ConfigureAwait(false);
 
+        // Icon. Xcode writes the loose AppIcon PNGs in Apple's CgBI variant, which HCG Repo, Sileo, Zebra and browsers
+        // cannot decode, so those are converted to a standard RGBA PNG; a standard PNG is copied unchanged.
+        IconExport? iconExport = null;
+        if (app.LargestIcon() is { } icon)
+        {
+            var original = await File.ReadAllBytesAsync(icon, ct).ConfigureAwait(false);
+            iconExport = ExportIcon(Path.GetFileName(icon), original, out var bytes);
+            if (bytes is not null) { await File.WriteAllBytesAsync(Path.Combine(folder, "icon.png"), bytes, ct).ConfigureAwait(false); files.Add("icon.png"); }
+            else missing.Add($"icon.png: {iconExport.Source} is an Apple CgBI PNG that could not be converted ({iconExport.Error}); export a 180×180 PNG from the project's AppIcon set");
+        }
+        else missing.Add("icon.png: the app bundle has no loose AppIcon*.png (icons only in Assets.car); export a 180×180 PNG from the project's AppIcon set");
+
         // Provenance.
         var prov = new JsonObject
         {
@@ -111,6 +123,12 @@ public static class CandidateHandoff
                 ["entitlements_files"] = new JsonArray(f.Entitlements.Keys.Select(s => (JsonNode?)s).ToArray()),
             },
             ["validation"] = new JsonArray(validation.Checks.Select(c => (JsonNode?)new JsonObject { ["check"] = c.Name, ["status"] = c.Status.ToString(), ["detail"] = c.Detail }).ToArray()),
+            ["icon"] = iconExport is null ? null : new JsonObject
+            {
+                ["source"] = iconExport.Source, ["source_format"] = iconExport.Converted || iconExport.Error is not null ? "Apple CgBI PNG" : "PNG",
+                ["converted"] = iconExport.Converted, ["original_size"] = iconExport.OriginalSize, ["size"] = iconExport.Size,
+                ["width"] = iconExport.Width, ["height"] = iconExport.Height, ["error"] = iconExport.Error,
+            },
             ["device_tested"] = false,
         };
         if (context is not null)
@@ -154,10 +172,6 @@ public static class CandidateHandoff
         foreach (var check in validation.Checks.Where(ch => ch.Status == VerificationStatus.PassedWithWarnings)) issues.Add($"{check.Name}: {check.Detail}");
         await Write("KNOWN-ISSUES.md", $"# {spec.Name} {spec.Version}: known issues\n\n" + string.Join("\n", issues.Select(i => "- " + i)) + "\n").ConfigureAwait(false);
 
-        // Icon.
-        if (app.LargestIcon() is { } icon) { File.Copy(icon, Path.Combine(folder, "icon.png"), overwrite: true); files.Add("icon.png"); }
-        else missing.Add("icon.png: the app bundle has no loose AppIcon*.png (icons only in Assets.car); export a 180×180 PNG from the project's AppIcon set");
-
         if (texts.ProductionAccess == "undecided") missing.Add("production access: not recorded for this product in HCG Repo; package.toml uses HCG's default (connect) and the owner decides the production level before any stable release");
         if (NeedsApproval(texts)) missing.Add($"owner approval: HCG Repo Candidate serves only free public builds, and the owner approves each version as a free public demo (HCG Repo docs/ACCESS.md). No approval of {spec.Version} is recorded, so package.toml leaves [access] exception commented out and HCG Repo's importer will refuse the package until the owner's approval is written there");
         // package.toml draft in HCG Repo's format.
@@ -170,8 +184,39 @@ public static class CandidateHandoff
         if (!complete) missing.Add("import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact");
 
         await Write("DEVICE-TEST.md", DeviceTest(spec, app, f, context, debName)).ConfigureAwait(false);
-        await Write("README.md", Readme(spec, f, files, complete, missing, context)).ConfigureAwait(false);
+        await Write("README.md", Readme(spec, f, files, complete, missing, context, iconExport)).ConfigureAwait(false);
         return new Output(folder, files, complete, missing);
+    }
+
+    /// <summary>How the handoff's <c>icon.png</c> was made from the bundle's icon file.</summary>
+    public sealed record IconExport(string Source, bool Converted, long OriginalSize, long? Size, int? Width, int? Height, string? Error)
+    {
+        public string Describe() =>
+            Error is not null ? $"`{Source}` is an Apple CgBI PNG and could not be converted: {Error}."
+            : Converted ? $"converted from `{Source}` (Apple CgBI PNG, {OriginalSize:N0} bytes) to a standard RGBA PNG ({Size:N0} bytes, {Width}×{Height})."
+            : $"copied unchanged from `{Source}` ({OriginalSize:N0} bytes{(Width is null ? "" : $", {Width}×{Height}")}).";
+    }
+
+    /// <summary>The bytes for <c>icon.png</c>: a CgBI icon converted to a standard PNG, anything else unchanged; null when conversion failed.</summary>
+    public static IconExport ExportIcon(string sourceName, byte[] original, out byte[]? output)
+    {
+        if (!AppleCgbiPng.IsCgbi(original))
+        {
+            output = original;
+            var s = AppleCgbiPng.StandardSize(original);
+            return new IconExport(sourceName, false, original.Length, original.Length, s?.Width, s?.Height, null);
+        }
+        try
+        {
+            output = AppleCgbiPng.ToStandardPng(original);
+            var s = AppleCgbiPng.StandardSize(output)!.Value;
+            return new IconExport(sourceName, true, original.Length, output.Length, s.Width, s.Height, null);
+        }
+        catch (InvalidDataException ex)
+        {
+            output = null;
+            return new IconExport(sourceName, false, original.Length, null, null, null, ex.Message);
+        }
     }
 
     private static string TomlEscape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
@@ -352,7 +397,7 @@ public static class CandidateHandoff
     private static string InstalledLine(HandoffContext? context) =>
         context?.InstalledCheck is { } ic ? "\n- Maker's check at export: " + ic.State + " — " + ic.Summary : "";
 
-    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context)
+    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context, IconExport? icon = null)
     {
         var sb = new StringBuilder($"# Candidate handoff: {spec.Name} {spec.Version} (Beta / Experimental)\n\n");
         sb.Append($"`{spec.PackageId}` · `iphoneos-arm64` · {f.Size:N0} bytes ({f.Size} bytes) · SHA-256 `{f.Sha256}`\n\n");
@@ -367,6 +412,7 @@ public static class CandidateHandoff
         sb.Append($"For HCG Repo Candidate (`{CandidateSource}`). Nothing has been published. Not device-tested.\n\n");
         sb.Append("Files:\n");
         foreach (var file in files.Append("README.md").Distinct()) sb.Append("- `").Append(file).Append("`\n");
+        if (icon is not null) sb.Append("\nIcon: ").Append(icon.Error is null ? "`icon.png` " : "").Append(icon.Describe()).Append('\n');
         sb.Append(complete
             ? "\nTo submit: copy `import-request.toml` to HCG Repo `imports/`, `package.toml`, `CHANGELOG.md` and `icon.png` to `packages/" + spec.PackageId + "/`, push a branch; **Prepare packages** fetches and checks the pinned artifact.\n"
             : "\n**Not importable yet:** see `import-request.INCOMPLETE.toml`.\n");

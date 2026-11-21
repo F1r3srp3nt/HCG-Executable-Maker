@@ -51,7 +51,8 @@ separate compatibility target. The page shows this for the device.
 
 `<package>_<version>-candidate-handoff/`: the `.deb`, `SHA256SUMS`, byte size, `provenance.json` (app source commit,
 the CI run that built it, Xcode/SDK, signing, every check, and the `unleashify` block: mode, scheme, source revision,
-installed-build check, devices, readiness), `package.toml`, `CHANGELOG.md`, `KNOWN-ISSUES.md`, `icon.png`,
+installed-build check, devices, readiness), `package.toml`, `CHANGELOG.md`, `KNOWN-ISSUES.md`, `icon.png` (always a standard PNG: Xcode's CgBI
+icons are converted, see `provenance.json` `icon`),
 `import-request.toml` (HCG Repo's format: `[request]` package/version/architecture/channel = candidate; `[source]`
 github-artifact, repository, run_id, commit, artifact, sha256), `DEVICE-TEST.md`, `README.md`.
 

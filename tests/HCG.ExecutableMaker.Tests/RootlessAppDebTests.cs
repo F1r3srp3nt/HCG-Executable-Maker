@@ -127,6 +127,100 @@ internal static class MachOFixture
         return app;
     }
 
+    /// <summary>
+    /// A PNG in Apple's CgBI form as Xcode writes it: a CgBI chunk before IHDR, IDAT as raw deflate (no zlib header), pixels
+    /// BGRA with premultiplied alpha. <paramref name="rgba"/> is straight RGBA; row y uses filter <paramref name="filters"/>[y % n].
+    /// </summary>
+    public static byte[] CgbiPng(int width, int height, byte[] rgba, params byte[] filters)
+    {
+        if (filters.Length == 0) filters = [0];
+        var stride = width * 4;
+        var bgra = new byte[rgba.Length];
+        for (var i = 0; i < rgba.Length; i += 4)
+        {
+            int a = rgba[i + 3];
+            int Pre(byte c) => (c * a + 127) / 255;
+            bgra[i] = (byte)Pre(rgba[i + 2]); bgra[i + 1] = (byte)Pre(rgba[i + 1]); bgra[i + 2] = (byte)Pre(rgba[i]); bgra[i + 3] = (byte)a;
+        }
+        var raw = new byte[(stride + 1) * height];
+        for (var y = 0; y < height; y++)
+        {
+            var f = filters[y % filters.Length];
+            raw[y * (stride + 1)] = f;
+            for (var x = 0; x < stride; x++)
+            {
+                int cur = bgra[y * stride + x], a = x >= 4 ? bgra[y * stride + x - 4] : 0, b = y > 0 ? bgra[(y - 1) * stride + x] : 0, c = x >= 4 && y > 0 ? bgra[(y - 1) * stride + x - 4] : 0;
+                int p = a + b - c, pa = Math.Abs(p - a), pb = Math.Abs(p - b), pc = Math.Abs(p - c);
+                var pred = f switch { 1 => a, 2 => b, 3 => (a + b) >> 1, 4 => pa <= pb && pa <= pc ? a : pb <= pc ? b : c, _ => 0 };
+                raw[y * (stride + 1) + 1 + x] = (byte)(cur - pred);
+            }
+        }
+        var deflated = new MemoryStream();
+        using (var d = new DeflateStream(deflated, CompressionLevel.Optimal, leaveOpen: true)) d.Write(raw);
+        var ihdr = new byte[13];
+        BinaryPrimitives.WriteUInt32BigEndian(ihdr, (uint)width);
+        BinaryPrimitives.WriteUInt32BigEndian(ihdr.AsSpan(4), (uint)height);
+        ihdr[8] = 8; ihdr[9] = 6;
+        var png = new MemoryStream();
+        png.Write([0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+        void Chunk(string type, byte[] body)
+        {
+            var len = new byte[4]; BinaryPrimitives.WriteUInt32BigEndian(len, (uint)body.Length); png.Write(len);
+            png.Write(Encoding.ASCII.GetBytes(type)); png.Write(body);
+            png.Write(new byte[4]); // Apple's decoder ignores CRCs here; the converter must not depend on them
+        }
+        Chunk("CgBI", [0x50, 0x00, 0x20, 0x06]);
+        Chunk("IHDR", ihdr);
+        Chunk("IDAT", deflated.ToArray());
+        Chunk("IEND", []);
+        return png.ToArray();
+    }
+
+    /// <summary>Decodes a standard 8-bit RGBA, non-interlaced PNG (any filter) independently of the code under test.</summary>
+    public static (int Width, int Height, byte[] Rgba) DecodeStandardRgba(byte[] png)
+    {
+        Assert.Equal(new byte[] { 0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A }, png[..8]);
+        Assert.Equal("IHDR", Encoding.ASCII.GetString(png, 12, 4));
+        int w = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16)), h = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20));
+        Assert.Equal(8, png[24]); Assert.Equal(6, png[25]); Assert.Equal(0, png[28]);
+        var idat = new MemoryStream();
+        var types = new List<string>();
+        for (var pos = 8; pos < png.Length;)
+        {
+            var len = (int)BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(pos));
+            var type = Encoding.ASCII.GetString(png, pos + 4, 4);
+            types.Add(type);
+            Assert.Equal(Crc(png.AsSpan(pos + 4, 4 + len)), BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(pos + 8 + len)));
+            if (type == "IDAT") idat.Write(png, pos + 8, len);
+            pos += 12 + len;
+        }
+        Assert.DoesNotContain("CgBI", types);
+        Assert.Equal("IEND", types[^1]);
+        idat.Position = 0;
+        using var z = new ZLibStream(idat, CompressionMode.Decompress);
+        var raw = new MemoryStream(); z.CopyTo(raw);
+        var bytes = raw.ToArray();
+        var stride = w * 4;
+        Assert.Equal((stride + 1) * h, bytes.Length);
+        var output = new byte[stride * h];
+        for (var y = 0; y < h; y++)
+            for (var x = 0; x < stride; x++)
+            {
+                int a = x >= 4 ? output[y * stride + x - 4] : 0, b = y > 0 ? output[(y - 1) * stride + x] : 0, c = x >= 4 && y > 0 ? output[(y - 1) * stride + x - 4] : 0;
+                int p = a + b - c, pa = Math.Abs(p - a), pb = Math.Abs(p - b), pc = Math.Abs(p - c);
+                var pred = bytes[y * (stride + 1)] switch { 1 => a, 2 => b, 3 => (a + b) >> 1, 4 => pa <= pb && pa <= pc ? a : pb <= pc ? b : c, _ => 0 };
+                output[y * stride + x] = (byte)(bytes[y * (stride + 1) + 1 + x] + pred);
+            }
+        return (w, h, output);
+
+        static uint Crc(ReadOnlySpan<byte> data)
+        {
+            var crc = 0xFFFFFFFFu;
+            foreach (var b in data) { crc ^= b; for (var k = 0; k < 8; k++) crc = (crc & 1) != 0 ? 0xEDB88320 ^ (crc >> 1) : crc >> 1; }
+            return crc ^ 0xFFFFFFFFu;
+        }
+    }
+
     /// <summary>A stand-in for ldid -S: rewrites the file as the same Mach-O with a code signature.</summary>
     public static RecordingProcessRunner FakeLdid(string minos = "14.7") => new(spec =>
     {
@@ -516,6 +610,81 @@ public class RootlessAppDebTests
         Assert.False(local.Handoff!.ImportRequestComplete);
         Assert.True(File.Exists(Path.Combine(local.Handoff.Folder, "import-request.INCOMPLETE.toml")));
         Assert.Contains(local.Handoff.Missing, m => m.StartsWith("import-request.toml", StringComparison.Ordinal));
+    }
+
+    // Straight RGBA, 3×2: opaque red, green, blue / half-transparent white, half-transparent (0,100,255), fully transparent.
+    private static readonly byte[] IconPixels =
+    [
+        255, 0, 0, 255,   0, 255, 0, 255,   0, 0, 255, 255,
+        255, 255, 255, 128,   0, 100, 255, 128,   0, 0, 0, 0,
+    ];
+
+    [Fact]
+    public void An_Xcode_CgBI_icon_becomes_a_standard_RGBA_PNG_and_a_standard_PNG_is_kept()
+    {
+        var cgbi = MachOFixture.CgbiPng(3, 2, IconPixels, 1, 4); // Sub on row 0, Paeth on row 1
+        Assert.True(AppleCgbiPng.IsCgbi(cgbi));
+        Assert.Null(AppleCgbiPng.StandardSize(cgbi)); // what HCG Repo's icon_problem reports as "is not a PNG"
+
+        var export = CandidateHandoff.ExportIcon("AppIcon60x60@3x.png", cgbi, out var png);
+        Assert.NotNull(png);
+        Assert.True(export.Converted);
+        Assert.Equal(cgbi.Length, export.OriginalSize);
+        Assert.Equal(png!.Length, export.Size);
+        Assert.Equal((3, 2), (export.Width, export.Height));
+        Assert.False(AppleCgbiPng.IsCgbi(png));
+        var (w, h, rgba) = MachOFixture.DecodeStandardRgba(png); // signature, IHDR at bytes 12–16, valid CRCs, zlib IDAT
+        Assert.Equal((3, 2), (w, h));
+        Assert.Equal(IconPixels, rgba);                             // R and B swapped back, alpha un-premultiplied
+        Assert.Contains("converted from `AppIcon60x60@3x.png` (Apple CgBI PNG", export.Describe());
+
+        // Every filter type survives the round trip.
+        foreach (byte filter in new byte[] { 0, 1, 2, 3, 4 })
+            Assert.Equal(IconPixels, MachOFixture.DecodeStandardRgba(AppleCgbiPng.ToStandardPng(MachOFixture.CgbiPng(3, 2, IconPixels, filter))).Rgba);
+
+        // A standard PNG is copied byte for byte.
+        var standard = AppleCgbiPng.EncodeRgba(3, 2, IconPixels);
+        var kept = CandidateHandoff.ExportIcon("AppIcon60x60@3x.png", standard, out var same);
+        Assert.False(kept.Converted);
+        Assert.Same(standard, same);
+        Assert.Equal((3, 2), (kept.Width, kept.Height));
+        Assert.Equal(IconPixels, MachOFixture.DecodeStandardRgba(standard).Rgba);
+
+        // A CgBI file that cannot be converted gives no icon.png and says why.
+        var broken = cgbi[..40];
+        var failed = CandidateHandoff.ExportIcon("AppIcon60x60@3x.png", broken, out var none);
+        Assert.Null(none);
+        Assert.NotNull(failed.Error);
+    }
+
+    [Fact]
+    public async Task The_handoff_icon_is_a_standard_PNG_when_the_bundle_holds_Xcode_CgBI_icons()
+    {
+        var appDir = MachOFixture.App(_t.Combine("cgbi"));
+        var pixels = new byte[180 * 180 * 4];
+        for (var i = 0; i < pixels.Length; i += 4) { pixels[i] = (byte)(i / 4 % 180); pixels[i + 1] = 40; pixels[i + 2] = 255; pixels[i + 3] = (byte)(i < pixels.Length / 2 ? 255 : 128); }
+        var cgbi = MachOFixture.CgbiPng(180, 180, pixels, 0, 1, 2, 3, 4);
+        File.WriteAllBytes(Path.Combine(appDir, "AppIcon60x60@3x.png"), cgbi);
+
+        var result = await new RootlessAppWorkflow(MachOFixture.FakeLdid(), TimeProvider.System).RunAsync(Request(appDir), null, CancellationToken.None);
+        Assert.True(result.Succeeded, result.Failure);
+        var h = result.Handoff!;
+        var icon = File.ReadAllBytes(Path.Combine(h.Folder, "icon.png"));
+        var (w, hh, rgba) = MachOFixture.DecodeStandardRgba(icon);
+        Assert.Equal((180, 180), (w, hh));
+        Assert.Equal(new byte[] { 0, 40, 255, 255 }, rgba[..4]);           // red channel first, not blue
+        Assert.Equal(new byte[] { 0, 40, 255, 128 }, rgba[^(179 * 4 + 4)..^(179 * 4)]); // last row's first pixel, un-premultiplied
+        Assert.DoesNotContain(h.Missing, m => m.StartsWith("icon.png", StringComparison.Ordinal));
+
+        var prov = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(h.Folder, "provenance.json")))!["icon"]!;
+        Assert.Equal("AppIcon60x60@3x.png", (string?)prov["source"]);
+        Assert.Equal("Apple CgBI PNG", (string?)prov["source_format"]);
+        Assert.True((bool)prov["converted"]!);
+        Assert.Equal(cgbi.Length, (long)prov["original_size"]!);
+        Assert.Equal(icon.Length, (long)prov["size"]!);
+        Assert.Equal(180, (int)prov["width"]!);
+        var readme = File.ReadAllText(Path.Combine(h.Folder, "README.md"));
+        Assert.Contains($"Icon: `icon.png` converted from `AppIcon60x60@3x.png` (Apple CgBI PNG, {cgbi.Length:N0} bytes) to a standard RGBA PNG ({icon.Length:N0} bytes, 180×180).", readme);
     }
 
     [Fact]
