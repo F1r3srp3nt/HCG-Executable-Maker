@@ -970,10 +970,10 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      OUT: ${{ github.workspace }}/../xcode-out
+      OUT: ${{ runner.temp }}/xcode-out
       PROJ: macOS Xcode Project/HCGExecutableMaker.xcodeproj
       # The launched app keeps its data in a throwaway folder, not the runner's home.
-      HCG_EXECUTABLE_MAKER_HOME: ${{ github.workspace }}/../xcode-out/app-home
+      HCG_EXECUTABLE_MAKER_HOME: ${{ runner.temp }}/xcode-out/app-home
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -991,7 +991,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project "$PROJ" -scheme "HCG Executable Maker" -configuration Debug -destination "platform=macOS,arch=arm64" \
-            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-debug.log" | grep -E "error:|warning: |note: |✓|Built |BUILD (SUCCEEDED|FAILED)|\*\* "
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-debug.log" | grep -E "error:|ERROR:|warning: |note: |✓|Built |BUILD (SUCCEEDED|FAILED|INTERRUPTED)|\*\* "
 
       - name: The Debug app bundle is the real HCG Executable Maker 0.4.0
         run: |
@@ -1038,7 +1038,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild -project "$PROJ" -scheme "HCG Executable Maker (Release)" -configuration Release -destination "platform=macOS,arch=arm64" \
-            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-release.log" | grep -E "error:|warning: |note: |✓|Release archive|SHA-256|BUILD (SUCCEEDED|FAILED)"
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-release.log" | grep -E "error:|ERROR:|warning: |note: |✓|Release archive|SHA-256|BUILD (SUCCEEDED|FAILED)"
           P="$OUT/dd/Build/Products/Release"
           ls -la "$P"
           cd "$P" && shasum -a 256 -c HCG-Executable-Maker-*-osx-arm64.app.zip.sha256
@@ -1051,6 +1051,11 @@ jobs:
           code=$?
           cat "$OUT/inside.log"
           test $code -ne 0 && grep -q "^error: Xcode's build folder .* is inside the repository" "$OUT/inside.log"
+
+      - name: On failure — the end of the build script's log (the .NET build output)
+        if: failure()
+        run: |
+          for f in "$OUT"/dd/Build/Products/*/HCGExecutableMaker-build-logs/*.log; do echo "=== $f"; tail -120 "$f"; done
 
       - name: Screenshots (JPEG, base64 in the log)
         if: always()
@@ -1069,10 +1074,10 @@ jobs:
         with:
           name: xcode-project
           path: |
-            ${{ github.workspace }}/../xcode-out/*.log
-            ${{ github.workspace }}/../xcode-out/*.txt
-            ${{ github.workspace }}/../xcode-out/screens
-            ${{ github.workspace }}/../xcode-out/dd/Build/Products/*/HCGExecutableMaker-build-logs
+            ${{ runner.temp }}/xcode-out/*.log
+            ${{ runner.temp }}/xcode-out/*.txt
+            ${{ runner.temp }}/xcode-out/screens
+            ${{ runner.temp }}/xcode-out/dd/Build/Products/*/HCGExecutableMaker-build-logs
           if-no-files-found: warn
           retention-days: 7
 

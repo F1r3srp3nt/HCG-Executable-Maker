@@ -12,6 +12,10 @@
 # Lines starting with "error:" / "warning:" appear in Xcode's Issue navigator. The full log is written to
 #   $BUILT_PRODUCTS_DIR/HCGExecutableMaker-build-logs/<configuration>.log
 # Nothing here publishes, uploads, tags or notarizes. Release signing is optional (HCG_CODESIGN_IDENTITY).
+#
+# Every dotnet command runs in a clean environment (clean_env below): Xcode passes all its build settings as
+# environment variables, and MSBuild reads environment variables as properties (case-insensitively), so e.g. Xcode's
+# TARGETNAME would become MSBuild's TargetName and break the build.
 set -uo pipefail
 
 ACTION="${ACTION:-build}"
@@ -41,14 +45,14 @@ fi
 # ── 1. Host and locations ────────────────────────────────────────────────────────────────────────────────────────
 if [ "$(uname -s)" != "Darwin" ]; then err "This project builds the macOS app and must run on macOS."; exit 1; fi
 if [ "$(uname -m)" != "arm64" ]; then warn "This Mac is $(uname -m); the app is built for Apple Silicon (osx-arm64) and needs Rosetta-free arm64 to run."; fi
-mkdir -p "$PRODUCTS" "$LOGS"
 if inside "$PRODUCTS" "$REPO"; then
     err "Xcode's build folder ($PRODUCTS) is inside the repository, which the build imports. Use the default Derived Data location (Xcode › Settings › Locations › Derived Data: Default, and File › Project Settings › Derived Data: Default Location)."
     exit 1
 fi
+mkdir -p "$PRODUCTS" "$LOGS"
 LOG="$LOGS/$CONFIGURATION.log"
-: > "$LOG"
-exec > >(tee -a "$LOG") 2>&1
+
+main() {
 echo "HCG Executable Maker — Xcode $ACTION, $CONFIGURATION, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "Repository: $REPO"
 echo "Products:   $PRODUCTS"
@@ -62,15 +66,20 @@ if [ -z "$DOTNET" ]; then
     err ".NET SDK not found. Install the .NET 10 SDK (Apple Silicon, arm64) from https://dotnet.microsoft.com/download/dotnet/10.0 — it installs to /usr/local/share/dotnet — then build again."
     exit 1
 fi
-export DOTNET_ROOT="$(dirname "$DOTNET")"
-export PATH="$DOTNET_ROOT:$PATH:/usr/bin:/bin:/usr/sbin:/sbin"
-export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+DOTNET_HOME_DIR="$(dirname "$DOTNET")"
+# Only what dotnet needs: no Xcode build settings (see the note at the top). Proxy and NuGet settings pass through.
+clean_env=(env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}"
+    PATH="$DOTNET_HOME_DIR:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin" DOTNET_ROOT="$DOTNET_HOME_DIR"
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1)
+for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy NUGET_PACKAGES NUGET_HTTP_CACHE_PATH SSL_CERT_FILE HCG_EXECUTABLE_MAKER_HOME; do
+    if [ -n "${!v:-}" ]; then clean_env+=("$v=${!v}"); fi
+done
 REQUIRED_SDK="$(sed -n 's/.*"version": *"\([0-9.]*\)".*/\1/p' "$REPO/global.json" | head -1)"
-if ! (cd "$REPO" && "$DOTNET" --version >/dev/null 2>&1); then
+if ! (cd "$REPO" && "${clean_env[@]}" "$DOTNET" --version >/dev/null 2>&1); then
     err "The .NET SDK at $DOTNET does not satisfy global.json (needs $REQUIRED_SDK or a later 10.0 feature band). Installed: $("$DOTNET" --list-sdks 2>/dev/null | tr '\n' ' ')"
     exit 1
 fi
-SDK_VERSION="$(cd "$REPO" && "$DOTNET" --version)"
+SDK_VERSION="$(cd "$REPO" && "${clean_env[@]}" "$DOTNET" --version)"
 echo ".NET SDK:   $SDK_VERSION ($DOTNET; global.json asks for $REQUIRED_SDK, rollForward latestFeature)"
 # No workloads are needed: the desktop app is a plain net10.0 Avalonia app (iOS/Android workloads are only for the
 # projects Maker builds, and Maker's Toolchains page reports them).
@@ -86,7 +95,7 @@ echo "Version:    $VERSION (Directory.Build.props), commit $COMMIT${DIRTY:++unco
 FINGERPRINT="$CONFIGURATION $VERSION $SDK_VERSION $(git -C "$REPO" rev-parse HEAD 2>/dev/null) $( (git -C "$REPO" diff HEAD; git -C "$REPO" ls-files --others --exclude-standard -s 2>/dev/null) | shasum -a 256 | cut -c1-64)"
 if [ -x "$APP/Contents/MacOS/$EXECUTABLE" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$FINGERPRINT" ]; then
     note "$APP_NAME.app is up to date ($CONFIGURATION, $VERSION, $COMMIT). Clean the build folder (⇧⌘K) to force a rebuild."
-    exit 0
+    return 0
 fi
 
 # ── 5. Build and package with the repository's own pipeline ──────────────────────────────────────────────────────
@@ -95,7 +104,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 ARGS=(run --no-cache "$REPO/tools/self-package/self-package.cs" -- "$REPO" "$STAGE/out" --targets osx-arm64 --version "$VERSION" --configuration "$CONFIGURATION")
 if [ "$CONFIGURATION" = "Release" ]; then ARGS+=(--dist "$STAGE/dist"); else ARGS+=(--app-only); fi
 echo "\$ dotnet ${ARGS[*]}"
-if ! (cd "$REPO" && "$DOTNET" "${ARGS[@]}"); then
+if ! (cd "$REPO" && "${clean_env[@]}" "$DOTNET" "${ARGS[@]}"); then
     err "The .NET build or packaging failed. The first error above is the cause; the full log is $LOG."
     exit 1
 fi
@@ -120,7 +129,7 @@ check "the app icon is in Resources" "ICON=\$(plutil -extract CFBundleIconFile r
 # The bundle carries the .NET SDK's ad-hoc signature on the app host only (Apple Silicon refuses unsigned code), unless
 # a Release build is signed below with HCG_CODESIGN_IDENTITY.
 check "the app host carries a valid code signature (ad hoc)" "codesign --verify '$APP/Contents/MacOS/$EXECUTABLE' 2>/dev/null"
-IDENTITY="$("$APP/Contents/MacOS/$EXECUTABLE" --version 2>/dev/null | head -1)"
+IDENTITY="$("${clean_env[@]}" "$APP/Contents/MacOS/$EXECUTABLE" --version 2>/dev/null | head -1)"
 check "the app starts and reports $VERSION ($IDENTITY)" "echo '$IDENTITY' | grep -q 'HCG Executable Maker $VERSION'"
 if [ $fail -ne 0 ]; then err "The app bundle is not valid; see the lines above and $LOG."; exit 1; fi
 
@@ -143,3 +152,8 @@ fi
 
 echo "$FINGERPRINT" > "$STAMP"
 echo "Built $APP ($IDENTITY)."
+}
+
+# The log is written as the build runs and shown in Xcode; the script's exit status is the build's.
+main 2>&1 | tee "$LOG"
+exit "${PIPESTATUS[0]}"

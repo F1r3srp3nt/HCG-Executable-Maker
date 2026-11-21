@@ -76,4 +76,16 @@ public class XcodeProjectFileTests
             Assert.DoesNotContain(forbidden, script, StringComparison.Ordinal);
         Assert.DoesNotContain("0.4.0", script, StringComparison.Ordinal); // no second copy of the version
     }
+
+    [Fact]
+    public void Every_dotnet_command_runs_without_Xcodes_build_settings_in_the_environment()
+    {
+        // Xcode passes its build settings as environment variables and MSBuild reads them as properties: TARGETNAME
+        // became TargetName and broke the build on the first macOS CI run. Every dotnet call goes through clean_env.
+        var script = File.ReadAllLines(Path.Combine(Dir, "Scripts", "build-app.sh"));
+        Assert.Contains(script, l => l.Contains("clean_env=(env -i ", StringComparison.Ordinal));
+        var calls = script.Where(l => l.Contains("\"$DOTNET\"", StringComparison.Ordinal) || l.Contains("/MacOS/$EXECUTABLE\" --version", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(calls);
+        Assert.All(calls, l => Assert.Contains("\"${clean_env[@]}\"", l, StringComparison.Ordinal));
+    }
 }
