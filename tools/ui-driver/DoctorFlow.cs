@@ -120,8 +120,10 @@ internal static partial class Program
     {
         foreach (var o in studio.Outputs) Log($"Output {o.Name}: {o.Status.Text}{(o.ShowReason ? " — " + o.ShortReason : "")}");
         if (studio.HasSharedOutputReason) Log($"Shared output reason: {studio.SharedOutputReasonScope} — {studio.SharedOutputReason}");
-        Check(studio.Outputs.Where(o => o.ShowReason).GroupBy(o => o.Reason).All(g => g.Count() == 1), "No output card repeats another card's reason");
-        Check(studio.Outputs.Where(o => o.HasReason && !o.ShowReason).All(o => o.Reason == studio.SharedOutputReasonFull), "Every hidden card reason is shown once in the shared note");
+        // Compared on the text a card displays (its first sentence), not the full reason in its tooltip.
+        Check(studio.Outputs.Where(o => o.ShowReason).GroupBy(o => o.ShortReason).All(g => g.Count() == 1), "No output card repeats another card's displayed reason");
+        Check(studio.Outputs.Where(o => o.HasReason && !o.ShowReason).All(o => o.ShortReason == studio.SharedOutputReason), "Every hidden card reason is shown once in the shared note");
+        Check(studio.Outputs.Where(o => o.ShowReason).All(o => o.ShortReason!.Length <= 220), "Displayed output reasons are short (details are in Build Doctor and the tooltip)");
     }
 
     private static void SelectIosSimulator(MobileBuildStudioViewModel studio)

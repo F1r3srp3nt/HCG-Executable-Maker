@@ -187,8 +187,8 @@ public static class MobileReadiness
         if (m.DotNetIos is { } dn)
         {
             items.Add(dn.OutsideWorkspace.Count > 0
-                ? new("Project references", ReadinessState.SetupRequired, true, $"{dn.ProjectPath} uses files outside the imported folder: {string.Join(", ", dn.OutsideWorkspace.Take(3))}.",
-                    "Import the repository root that contains them (HCG builds the whole repository, never a partial copy).")
+                ? new("Project references", ReadinessState.SetupRequired, true, OutsideSummary(dn.OutsideWorkspace) + $" Referenced from {dn.ProjectPath}: {string.Join(", ", dn.OutsideWorkspace.Take(3))}" + (dn.OutsideWorkspace.Count > 3 ? ", …" : "") + ".",
+                    "Import the repository root that contains them (HCG builds the whole repository, never a partial copy). Build Doctor offers this repair.")
                 : dn.MissingReferences.Count > 0
                     ? new("Project references", ReadinessState.SetupRequired, true, "Missing: " + string.Join("; ", dn.MissingReferences.Take(3)))
                     : new("Project references", ReadinessState.Ready, true, dn.ProjectReferences.Count == 0 ? "None." : $"{dn.ProjectReferences.Count} project(s), resolved from the repository: {string.Join(", ", dn.ProjectReferences.Select(Path.GetFileNameWithoutExtension))}."));
@@ -395,5 +395,13 @@ public static class MobileReadiness
                 items.Add(new(".NET MAUI workload", ReadinessState.NotNeeded, false, "Not a .NET MAUI project."));
                 break;
         }
+    }
+
+    /// <summary>One short sentence for an output card: how many files are outside the import, by name (paths follow).</summary>
+    internal static string OutsideSummary(IReadOnlyList<string> outside)
+    {
+        var names = outside.Select(Path.GetFileName).Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal).ToList();
+        var shown = string.Join(", ", names.Take(3)) + (names.Count > 3 ? $" and {names.Count - 3} more" : "");
+        return $"{outside.Count} file(s) the app needs are outside the imported folder ({shown}).";
     }
 }

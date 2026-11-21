@@ -336,11 +336,13 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
 
     private void GroupOutputReasons()
     {
-        var shared = Outputs.Where(o => !o.IsEnabled && o.Reason is not null).GroupBy(o => o.Reason!, StringComparer.Ordinal)
+        // Grouped by what a card displays (its first sentence): reasons that only differ further on would otherwise still
+        // show the same sentence on every card. Each card keeps its full reason in its tooltip.
+        var shared = Outputs.Where(o => !o.IsEnabled && o.ShortReason is not null).GroupBy(o => o.ShortReason!, StringComparer.Ordinal)
             .Where(g => g.Count() >= 2).OrderByDescending(g => g.Count()).FirstOrDefault();
-        foreach (var o in Outputs) o.ShowReason = o.HasReason && (shared is null || o.Reason != shared.Key);
-        SharedOutputReasonFull = shared?.Key;
-        SharedOutputReason = shared?.First().ShortReason;
+        foreach (var o in Outputs) o.ShowReason = o.HasReason && (shared is null || o.ShortReason != shared.Key);
+        SharedOutputReasonFull = shared is null ? null : string.Join("\n\n", shared.Select(o => $"{o.Name}: {o.Reason}").Distinct(StringComparer.Ordinal));
+        SharedOutputReason = shared?.Key;
         SharedOutputReasonScope = shared is null ? null
             : shared.Count() == Outputs.Count ? $"All {Outputs.Count} outputs are unavailable" : $"{shared.Count()} of {Outputs.Count} outputs are unavailable";
     }
