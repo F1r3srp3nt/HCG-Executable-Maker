@@ -130,7 +130,7 @@ public static partial class RootlessAppPackager
         foreach (var b in app.Binaries)
             foreach (var s in b.Slices)
             {
-                if (s.Platform == "iOS Simulator") problems.Add($"{b.RelativePath} is built for the iOS Simulator; only device builds can be packaged.");
+                if (s.Platform == "iOS Simulator") problems.Add($"Simulator build refused: {b.RelativePath} is built for the iOS Simulator; only device builds (iOS, arm64) can be packaged.");
                 else if (s.Platform is not null and not "iOS") problems.Add($"{b.RelativePath} ({s.Architecture}) is built for {s.Platform}, not iOS.");
                 if (s.Encrypted) problems.Add($"{b.RelativePath} is encrypted (an App Store binary); it cannot be repackaged.");
             }

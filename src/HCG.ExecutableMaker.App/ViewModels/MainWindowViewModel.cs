@@ -32,7 +32,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             new("history", "Build History", "Icon.History", typeof(BuildHistoryViewModel)),
             new("artifacts", "Artifacts", "Icon.Artifacts", typeof(ArtifactsViewModel)),
             new("ship", "Ship to Store", "Icon.Export", typeof(ShipToStoreViewModel)),
-            new("rootless", "Rootless package", "Icon.Mobile", typeof(RootlessPackageViewModel)),
+            new("unleashify", "Unleashify", "Icon.Mobile", typeof(UnleashifyViewModel)),
             new("toolchains", "Toolchains", "Icon.Toolchains", typeof(ToolchainsViewModel)),
             new("security", "Signing & Security", "Icon.Security", typeof(SigningViewModel)),
             new("ai", "AI assistance", "Icon.Ai", typeof(AiAssistantViewModel)),

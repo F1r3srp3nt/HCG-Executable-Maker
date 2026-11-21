@@ -95,7 +95,6 @@ internal static partial class Program
             firstError = studio.FirstError, log = studio.LastLogPath, artifacts = studio.BuiltArtifacts.Select(a => new { a.FormatName, a.Path }),
         }, new JsonSerializerOptions { WriteIndented = true }));
         if (studio.LastLogPath is { } log) File.Copy(log, Path.Combine(output, $"{_prefix}-build.log"), overwrite: true);
-        if (_args.ContainsKey("rootless") && succeeded) return await RootlessFromStudioAsync(main, studio, output);
         if (_args.ContainsKey("record-only")) return 0;
         Check(succeeded, $"Build produced verified artifacts ({studio.BuildStateTag.Text})");
         return Failures.Count == 0 ? 0 : 1;

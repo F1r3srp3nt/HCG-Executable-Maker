@@ -21,7 +21,8 @@ public sealed class RootlessAppWorkflow(IProcessRunner runner, TimeProvider time
         string? LdidPath,
         string? DeviceIosVersion = null,
         IReadOnlyList<(string Version, string Sha256)>? PublishedVersions = null,
-        bool ExportHandoff = true);
+        bool ExportHandoff = true,
+        HandoffContext? Context = null);
 
     public sealed record Outcome(
         Stage ReachedStage,
@@ -94,7 +95,7 @@ public sealed class RootlessAppWorkflow(IProcessRunner runner, TimeProvider time
 
         // Handoff.
         var folder = Path.Combine(r.OutputDir, $"{r.Spec.PackageId}_{r.Spec.Version.Replace(':', '_')}-candidate-handoff");
-        var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, r.Provenance, r.Texts, pkg.SignedFiles, time.GetUtcNow(), ct).ConfigureAwait(false);
+        var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, r.Provenance, r.Texts, pkg.SignedFiles, time.GetUtcNow(), ct, r.Context).ConfigureAwait(false);
         Log(Stage.Handoff, $"Exported {handoff.Files.Count} files to {folder}");
         foreach (var m in handoff.Missing) Log(Stage.Handoff, "MISSING " + m);
         return new(Stage.Done, true, null, app, pkg, val, handoff, log);

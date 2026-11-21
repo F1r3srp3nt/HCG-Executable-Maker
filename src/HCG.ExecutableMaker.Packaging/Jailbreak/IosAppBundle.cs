@@ -91,7 +91,7 @@ public sealed record IosAppBundle(
         var families = (info.GetValueOrDefault("UIDeviceFamily") as IEnumerable<object>)?.Select(f => Convert.ToInt64(f) switch { 1 => "iPhone", 2 => "iPad", var x => $"family {x}" }).ToList() ?? [];
         var platforms = (info.GetValueOrDefault("CFBundleSupportedPlatforms") as IEnumerable<object>)?.OfType<string>().ToList() ?? [];
         if (platforms.Any(p => p.Contains("Simulator", StringComparison.OrdinalIgnoreCase)))
-            problems.Add("Info.plist says this app was built for the iOS Simulator; a Simulator build cannot run on a device.");
+            problems.Add("Simulator build refused: Info.plist says this app was built for the iOS Simulator (x86_64/arm64 simulator code), which cannot run on an iPhone. Use a device build: an .xcarchive or .ipa for Generic iOS Device, or let Unleashify build one from the Xcode project.");
         var buildInfo = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var key in new[] { "DTXcode", "DTXcodeBuild", "DTSDKName", "DTSDKBuild", "DTPlatformName", "DTPlatformVersion", "DTCompiler", "BuildMachineOSBuild" })
             if (S(key) is { } v) buildInfo[key] = v;

@@ -92,6 +92,10 @@
                 <c:StatusChip Status="{Binding SupportTag}" />
               </StackPanel>
               <TextBlock Classes="muted" Text="{Binding SupportSummary}" TextWrapping="Wrap" />
+              <Button HorizontalAlignment="Left" Margin="0,6,0,0" Command="{Binding OpenUnleashifyCommand}" IsVisible="{Binding CanUnleashify}" IsEnabled="{Binding !IsBuilding}"
+                      ToolTip.Tip="Unleashify: build this iOS app (unchanged) as a rootless jailbreak app, validate the .deb and export the HCG Repo Candidate handoff. Nothing is installed or published.">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Unleashify…" /></StackPanel>
+              </Button>
             </StackPanel>
             <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="4" IsVisible="{Binding HasProject}">
               <ItemsControl ItemsSource="{Binding ProjectRows}">
@@ -385,9 +389,9 @@
                   ToolTip.Tip="Upload this build's verified files to HCG Store as a private draft. Nothing is published, and nothing is sent to TestFlight or any app store.">
             <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Export}" /><TextBlock Text="Ship to Store…" /></StackPanel>
           </Button>
-          <Button HorizontalAlignment="Left" Command="{Binding PackageRootlessCommand}" IsVisible="{Binding CanPackageRootless}"
-                  ToolTip.Tip="Package this device build as a rootless jailbreak .deb for HCG Repo Candidate: validate it and export the handoff. Nothing is installed or published.">
-            <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Rootless .deb (jailbreak)…" /></StackPanel>
+          <Button HorizontalAlignment="Left" Command="{Binding UnleashifyBuildCommand}" IsVisible="{Binding CanUnleashifyBuild}"
+                  ToolTip.Tip="Package this device build with Unleashify: a rootless jailbreak app for HCG Repo Candidate, validated and handed off. Nothing is installed or published.">
+            <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Unleashify this build…" /></StackPanel>
           </Button>
           <ItemsControl ItemsSource="{Binding BuiltArtifacts}" IsVisible="{Binding HasBuiltArtifacts}">
             <ItemsControl.ItemTemplate>

@@ -33,7 +33,32 @@ public sealed record CandidateTexts(
     IReadOnlyList<string> Changes,
     IReadOnlyList<string> KnownIssues,
     string ProductionAccess = "public",
-    string? DeviceTarget = null);
+    string? DeviceTarget = null,
+    string? OwnerApproval = null);
+
+/// <summary>
+/// What Unleashify knew when it exported: the mode, the scheme, the source revision and whether the imported copy was
+/// current, the installed-build check and each test device's compatibility. Recorded as measured; nothing is inferred.
+/// </summary>
+public sealed record HandoffContext(
+    string Mode,
+    string? Scheme,
+    ImportedRevision? Revision,
+    RevisionState? RevisionState,
+    string? RevisionDetail,
+    ConflictReport? InstalledCheck,
+    IReadOnlyList<DeviceCompatibility> Devices)
+{
+    /// <summary>A validated package is ready for a device test only when no installed build conflicts and the test phone can run it.</summary>
+    public bool ReadyForDeviceTesting => InstalledCheck?.State == ConflictState.Clear && Devices.Count > 0 && Devices[0].Compatible && RevisionState != Domain.RevisionState.Stale;
+
+    public string ReadinessText => RevisionState == Domain.RevisionState.Stale ? "Not ready: the imported source is stale (re-import and rebuild)."
+        : InstalledCheck is null || InstalledCheck.State == ConflictState.NotChecked ? "Not yet ready for device testing: the installed-build check has not been done."
+        : InstalledCheck.State == ConflictState.Conflict ? "Not ready: " + InstalledCheck.Summary
+        : Devices.Count == 0 ? "Not ready: no test device named."
+        : !Devices[0].Compatible ? $"Not ready: the test device ({Devices[0].Device.Name}, iOS {Devices[0].Device.IosVersion}) cannot run this build."
+        : $"Ready for device testing on {Devices[0].Device.Name} (iOS {Devices[0].Device.IosVersion}). Not yet device-tested.";
+}
 
 /// <summary>
 /// Exports everything HCG Repo needs to review a candidate build: the .deb, checksums, provenance, control, validation
@@ -47,7 +72,7 @@ public static class CandidateHandoff
     public sealed record Output(string Folder, IReadOnlyList<string> Files, bool ImportRequestComplete, IReadOnlyList<string> Missing);
 
     public static async Task<Output> ExportAsync(string folder, string debPath, IosAppBundle app, RootlessAppPackageSpec spec, RootlessAppDebValidator.Result validation,
-        PackageProvenance provenance, CandidateTexts texts, IReadOnlyList<string> signedFiles, DateTimeOffset now, CancellationToken ct)
+        PackageProvenance provenance, CandidateTexts texts, IReadOnlyList<string> signedFiles, DateTimeOffset now, CancellationToken ct, HandoffContext? context = null)
     {
         Directory.CreateDirectory(folder);
         var files = new List<string>();
@@ -88,6 +113,27 @@ public static class CandidateHandoff
             ["validation"] = new JsonArray(validation.Checks.Select(c => (JsonNode?)new JsonObject { ["check"] = c.Name, ["status"] = c.Status.ToString(), ["detail"] = c.Detail }).ToArray()),
             ["device_tested"] = false,
         };
+        if (context is not null)
+            prov["unleashify"] = new JsonObject
+            {
+                ["mode"] = context.Mode, ["scheme"] = context.Scheme,
+                ["source_revision"] = new JsonObject
+                {
+                    ["kind"] = context.Revision?.Kind, ["commit"] = context.Revision?.Commit, ["branch"] = context.Revision?.Branch,
+                    ["origin"] = context.Revision?.Origin, ["recorded_at"] = context.Revision?.CapturedAt.ToString("O"),
+                    ["state"] = context.RevisionState?.ToString(), ["detail"] = context.RevisionDetail,
+                },
+                ["installed_build_check"] = context.InstalledCheck is { } ic ? new JsonObject
+                {
+                    ["state"] = ic.State.ToString(), ["summary"] = ic.Summary, ["findings"] = new JsonArray(ic.Findings.Select(x => (JsonNode?)x).ToArray()),
+                } : null,
+                ["devices"] = new JsonArray(context.Devices.Select(d => (JsonNode?)new JsonObject
+                {
+                    ["name"] = d.Device.Name, ["ios"] = d.Device.IosVersion, ["compatible"] = d.Compatible, ["detail"] = d.Detail,
+                }).ToArray()),
+                ["ready_for_device_testing"] = context.ReadyForDeviceTesting,
+                ["readiness"] = context.ReadinessText,
+            };
         await Write("provenance.json", prov.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n").ConfigureAwait(false);
         await Write("control.txt", string.Join("\n", f.Control.Select(kv => $"{kv.Key}: {kv.Value}")) + "\n").ConfigureAwait(false);
         await Write("VALIDATION.txt", validation.Report).ConfigureAwait(false);
@@ -112,7 +158,8 @@ public static class CandidateHandoff
         if (app.LargestIcon() is { } icon) { File.Copy(icon, Path.Combine(folder, "icon.png"), overwrite: true); files.Add("icon.png"); }
         else missing.Add("icon.png: the app bundle has no loose AppIcon*.png (icons only in Assets.car); export a 180×180 PNG from the project's AppIcon set");
 
-        if (texts.ProductionAccess == "undecided") missing.Add("production access: not recorded for this product in HCG Repo; the owner decides it before any stable release (package.toml [access])");
+        if (texts.ProductionAccess == "undecided") missing.Add("production access: not recorded for this product in HCG Repo; package.toml uses HCG's default (connect) and the owner decides the production level before any stable release");
+        if (NeedsApproval(texts)) missing.Add($"owner approval: HCG Repo Candidate serves only free public builds, and the owner approves each version as a free public demo (HCG Repo docs/ACCESS.md). No approval of {spec.Version} is recorded, so package.toml leaves [access] exception commented out and HCG Repo's importer will refuse the package until the owner's approval is written there");
         // package.toml draft in HCG Repo's format.
         await Write("package.toml", PackageToml(spec, app, f, texts, issues)).ConfigureAwait(false);
 
@@ -122,10 +169,18 @@ public static class CandidateHandoff
         await Write(complete ? "import-request.toml" : "import-request.INCOMPLETE.toml", request).ConfigureAwait(false);
         if (!complete) missing.Add("import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact");
 
-        await Write("DEVICE-TEST.md", DeviceTest(spec, app, f)).ConfigureAwait(false);
-        await Write("README.md", Readme(spec, f, files, complete, missing)).ConfigureAwait(false);
+        await Write("DEVICE-TEST.md", DeviceTest(spec, app, f, context, debName)).ConfigureAwait(false);
+        await Write("README.md", Readme(spec, f, files, complete, missing, context)).ConfigureAwait(false);
         return new Output(folder, files, complete, missing);
     }
+
+    private static string TomlEscape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+    /// <summary>
+    /// HCG Repo Candidate serves only public builds, and an HCG package is public only by the owner's recorded approval of
+    /// that version (HCG Repo docs/ACCESS.md), whatever its production level. Maker never writes an approval it was not given.
+    /// </summary>
+    public static bool NeedsApproval(CandidateTexts texts) => texts.OwnerApproval is not { Length: > 0 };
 
     private static string Toml(string s) => "\"\"\"\n" + s.Replace("\\", "\\\\").Replace("\"\"\"", "\\\"\\\"\\\"") + "\n\"\"\"";
 
@@ -151,22 +206,26 @@ public static class CandidateHandoff
             : $"# Entitlements are embedded in: {string.Join(", ", f.Entitlements.Keys)} (see VALIDATION.txt). Review them before importing.");
         sb.AppendLine();
         sb.AppendLine("[access]");
-        if (texts.ProductionAccess == "public")
-            sb.AppendLine("level = \"public\"");
-        else if (texts.ProductionAccess == "undecided")
+        // HCG Repo (docs/ACCESS.md): HCG packages need HCG Connect sign-in by default; a build is free and public only by a
+        // recorded, per-version owner approval (exception + exception_versions), and only in the candidate channel.
+        var level = texts.ProductionAccess is "public" or "connect" or "paid" ? texts.ProductionAccess : "connect";
+        sb.AppendLine(texts.ProductionAccess == "undecided"
+            ? "# Production access for this product is NOT recorded in HCG Repo and was not decided here: HCG's default (connect) applies."
+            : $"# Production access: {level}. This file does not change it.");
+        sb.AppendLine($"level = \"{level}\"");
+        var exception = $"Free public beta demo (no sign-in, no payment) in HCG Repo Candidate only, under the owner's free-demo policy for approved candidate builds";
+        if (texts.OwnerApproval is { Length: > 0 } approval)
         {
-            sb.AppendLine("# Production access for this product is NOT recorded in HCG Repo and was not decided here. This build is a free public demo");
-            sb.AppendLine("# only in HCG Repo Candidate (owner's free-demo policy). The owner must decide production access before this package is");
-            sb.AppendLine("# promoted to stable; \"public\" below applies to this candidate build only.");
-            sb.AppendLine("level = \"public\"");
+            sb.AppendLine($"exception = \"{TomlEscape($"{exception}: {approval.Trim()}. For the versions in exception_versions only; production access is unchanged.")}\"");
+            sb.AppendLine($"exception_versions = [\"{spec.Version}\"]");
         }
         else
         {
-            sb.AppendLine($"# Production access stays \"{texts.ProductionAccess}\". This version is free only in HCG Repo Candidate, under the owner's");
-            sb.AppendLine("# free-demo policy for approved candidate builds; record the owner's approval of THIS version before importing.");
-            sb.AppendLine($"level = \"{texts.ProductionAccess}\"");
-            sb.AppendLine("exception = \"Free public demo (no sign-in, no payment) in HCG Repo Candidate under the owner's free-demo policy for approved candidate builds, for the versions in exception_versions only. Production access is unchanged.\"");
-            sb.AppendLine($"exception_versions = [\"{spec.Version}\"]");
+            sb.AppendLine($"# NOT IMPORTABLE YET: no owner approval of {spec.Version} as a free public demo is recorded (approval is per version,");
+            sb.AppendLine("# HCG Repo docs/ACCESS.md), and HCG Repo Candidate serves only public builds. Once the owner approves it, record who,");
+            sb.AppendLine("# when and their words, and uncomment:");
+            sb.AppendLine($"# exception = \"{exception}: approved by <owner> on <date>: '<their words>'. For the versions in exception_versions only; production access is unchanged.\"");
+            sb.AppendLine($"# exception_versions = [\"{spec.Version}\"]");
         }
         return sb.ToString();
     }
@@ -191,7 +250,7 @@ public static class CandidateHandoff
         return sb.ToString();
     }
 
-    public static string DeviceTest(RootlessAppPackageSpec spec, IosAppBundle app, RootlessAppDebValidator.Facts f) => $"""
+    public static string DeviceTest(RootlessAppPackageSpec spec, IosAppBundle app, RootlessAppDebValidator.Facts f, HandoffContext? context = null, string? debName = null) => $"""
         # {spec.Name} {spec.Version}: device test and recovery
 
         Package `{spec.PackageId}` · `iphoneos-arm64` · SHA-256 `{f.Sha256}` · {f.Size:N0} bytes.
@@ -200,10 +259,19 @@ public static class CandidateHandoff
         no respring is needed.
 
         ## Before you start
-        - Rootless jailbreak (Dopamine, palera1n rootless). Record: iPhone model, iOS version, jailbreak and version, package manager.
+        - Rootless jailbreak (Dopamine, palera1n rootless) on iOS {f.MinimumOS} or later. Record: iPhone model, iOS version, jailbreak and version, package manager.
         - `uikittools` (provides `uicache`) is installed or offered as a dependency.
+        - **No other build of the app is installed.** Over SSH: `uicache -l | grep {f.BundleId}` must print nothing (or only
+          `{f.AppPath}`). A build from Xcode or an IPA with bundle ID `{f.BundleId}` must be deleted first (Home Screen › Remove App);
+          its own data goes with it.{InstalledLine(context)}
 
-        ## Install (Zebra)
+        ## Install — before publication (this exact file)
+        1. Copy `{debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb"}` from this folder to the phone (e.g. `scp` to `/var/mobile/`).
+        2. Over SSH: `shasum -a 256 /var/mobile/{debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb"}` must print `{f.Sha256}`.
+        3. `sudo dpkg -i /var/mobile/{debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb"}` (or open the file in your package manager and install).
+        4. Expected: no errors, `dpkg -s {spec.PackageId}` shows `Status: install ok installed`, and the **{spec.Name}** icon appears.
+
+        ## Install — after publication (Zebra)
         1. Sources › Add (+) › `{CandidateSource}`, then refresh.
         2. Search **{spec.Name}**, check the version is **{spec.Version}**, tap Get/Install, confirm and install.
         3. Expected: the install finishes without errors and the **{spec.Name}** icon appears on the home screen.
@@ -214,7 +282,7 @@ public static class CandidateHandoff
         3. Record what you saw (works / crashes / icon missing) with the device details above.
 
         ## Uninstall
-        1. Zebra › Installed › **{spec.Name}** › Remove, confirm.
+        1. Zebra › Installed › **{spec.Name}** › Remove, confirm (or `sudo dpkg -r {spec.PackageId}` over SSH).
         2. Expected: the icon disappears and `{f.AppPath}` no longer exists.
 
         ## Recovery
@@ -227,10 +295,21 @@ public static class CandidateHandoff
 
         """.Replace("\r", "");
 
-    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing)
+    private static string InstalledLine(HandoffContext? context) =>
+        context?.InstalledCheck is { } ic ? "\n  Maker's check at export: " + ic.State + " — " + ic.Summary : "";
+
+    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context)
     {
         var sb = new StringBuilder($"# Candidate handoff: {spec.Name} {spec.Version} (Beta / Experimental)\n\n");
-        sb.Append($"`{spec.PackageId}` · `iphoneos-arm64` · {f.Size:N0} bytes · SHA-256 `{f.Sha256}`\n\n");
+        sb.Append($"`{spec.PackageId}` · `iphoneos-arm64` · {f.Size:N0} bytes ({f.Size} bytes) · SHA-256 `{f.Sha256}`\n\n");
+        if (context is not null)
+        {
+            sb.Append($"- Mode: {context.Mode}{(context.Scheme is null ? "" : $" · scheme `{context.Scheme}`")} · bundle ID `{f.BundleId}` · iOS {f.MinimumOS}+ · installs `{f.AppPath}`\n");
+            sb.Append($"- Source revision: {(context.Revision?.Commit is { } c ? $"`{c}`{(context.Revision.Branch is { } br ? $" ({br})" : "")}" : "not recorded")} — {context.RevisionDetail}\n");
+            sb.Append($"- Installed-build check: {context.InstalledCheck?.State.ToString() ?? "NotChecked"} — {context.InstalledCheck?.Summary}\n");
+            foreach (var d in context.Devices) sb.Append($"- {d.Device.Name}, iOS {d.Device.IosVersion}: {(d.Compatible ? "compatible" : "NOT compatible")} — {d.Detail}\n");
+            sb.Append($"- **{context.ReadinessText}**\n\n");
+        }
         sb.Append($"For HCG Repo Candidate (`{CandidateSource}`). Nothing has been published. Not device-tested.\n\n");
         sb.Append("Files:\n");
         foreach (var file in files.Append("README.md").Distinct()) sb.Append("- `").Append(file).Append("`\n");

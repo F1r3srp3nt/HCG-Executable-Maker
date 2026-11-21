@@ -28,17 +28,18 @@ test.
    rules), SHA-256 and size.
 4. **Handoff** — `<package>_<version>-candidate-handoff/`: the .deb, `SHA256SUMS`, `provenance.json` (app source repo
    and commit, CI run/artifact, Xcode/SDK, ldid-signed files, every check), `control.txt`, `VALIDATION.txt`,
-   `CHANGELOG.md`, `KNOWN-ISSUES.md`, `package.toml` (HCG Repo format; Beta; free public demo in Candidate; production
-   access unchanged), `icon.png`, `import-request.toml` (only when pinned to a CI run artifact, otherwise
+   `CHANGELOG.md`, `KNOWN-ISSUES.md`, `package.toml` (HCG Repo format; Beta; production access level; the free-demo
+   `[access] exception` only from the owner's recorded approval of this version, otherwise commented out), `icon.png`, `import-request.toml` (only when pinned to a CI run artifact, otherwise
    `import-request.INCOMPLETE.toml`), `DEVICE-TEST.md` (Zebra install, launch, uninstall, recovery).
 
 ## Where
 
-- **UI:** *Rootless package* page (sidebar), or **Rootless .deb (jailbreak)…** on a device archive/IPA result in Mobile
-  Build Studio. Shows each stage, the build log, every check and the resulting files.
+- **UI:** the **Unleashify** page in Mobile Build Studio ([UNLEASHIFY.md](UNLEASHIFY.md)): builds the device archive from
+  the Xcode project or takes an existing device build, then packages, validates and exports. Shows each stage, the build
+  log, every check and the resulting files.
 - **CLI:** `HCGExecutableMaker --rootless-deb <app|xcarchive|ipa> --package <id> --package-version <v> --name <n>
   --description <text> [--device-ios 16.5] [--repository … --commit … --ci-run … --ci-artifact … --ci-repository …
-  --ci-commit …] [--production-access public|connect|paid|undecided] [--out <dir>]`;
+  --ci-commit …] [--production-access public|connect|paid|undecided] [--owner-approval "<who> on <date>: '<words>'"] [--out <dir>]`;
   `HCGExecutableMaker --rootless-deb-validate <file.deb> [--package …] [--device-ios …] [--published <v>=<sha256>]`.
   Exit: 0 done, 2 usage, 4 inspection/prerequisite, 5 packaging, 6 validation.
 
@@ -49,7 +50,5 @@ test.
   (files replaced and removed, `uicache` called); ldid signing order and the missing-ldid prerequisite; Simulator,
   macOS and encrypted binaries refused; minimum iOS vs 16.5; unresolved and rootful libraries; privileged entitlements;
   published-version immutability; corrupt gzip and lzma members; IPA extraction; handoff and import-request pinning.
-- CI `rootless-app-deb` (macOS): HCG Sentinel archived from source in Mobile Build Studio (UI), packaged on the Rootless
-  package page (UI), packaged again with `--rootless-deb` (CLI) — byte-identical — re-validated, and installed/removed
-  with real `dpkg` in a sandbox. The `.deb` is uploaded as `hcg-sentinel-rootless-deb` for HCG Repo's importer.
+- CI `unleashify-sentinel` / `unleashify-artifact-roundtrip`: see [UNLEASHIFY.md](UNLEASHIFY.md#ci).
 - **Not verified:** installation and launch on a device.

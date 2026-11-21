@@ -93,7 +93,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public ObservableCollection<ProjectItem> MobileProjects { get; } = [];
     public ObservableCollection<SummaryRow> ProjectRows { get; } = [];
     public ObservableCollection<DiagnosticItem> Diagnostics { get; } = [];
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProject), nameof(IsArtifactProject))] private ProjectItem? _selectedProject;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProject), nameof(IsArtifactProject), nameof(CanUnleashify))] private ProjectItem? _selectedProject;
     [ObservableProperty] private bool _isImporting;
     [ObservableProperty] private string? _importError;
     [ObservableProperty] private StatusTag _supportTag = new("—", "neutral");
@@ -707,7 +707,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         foreach (var a in result.Artifacts) BuiltArtifacts.Add(new ArtifactItem(a, result));
         OnPropertyChanged(nameof(HasBuiltArtifacts));
         OnPropertyChanged(nameof(CanShipToStore));
-        OnPropertyChanged(nameof(CanPackageRootless));
+        OnPropertyChanged(nameof(CanUnleashifyBuild));
         UpdateBuildState(CreateOptions() is { } again && Mobile is { } mm ? MobileReadiness.Evaluate(mm, again.Output, again, _report) : null);
     }
 
@@ -781,18 +781,29 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public bool CanShipToStore => _lastResult is { } r && ShipFromBuild.From(r) is { Files.Count: > 0 };
 
     /// <summary>
-    /// The device build (an .xcarchive or .ipa, never a Simulator .app) that a rootless jailbreak .deb can be made from.
-    /// An unsigned archive verifies with warnings ("not code-signed"): that is the usual input, signed with ldid later.
+    /// The device build (an .xcarchive or .ipa, never a Simulator .app) that Unleashify can package as a rootless jailbreak
+    /// app. An unsigned archive verifies with warnings ("not code-signed"): that is the usual input, signed with ldid later.
     /// </summary>
-    private string? RootlessSource => _lastResult?.Artifacts
+    private string? UnleashifySource => _lastResult?.Artifacts
         .Where(a => (a.Verification is VerificationStatus.Passed or VerificationStatus.PassedWithWarnings) && (a.Format is PackagingFormat.IosArchive or PackagingFormat.IosIpa))
         .OrderBy(a => a.Format == PackagingFormat.IosArchive ? 0 : 1).Select(a => a.Path).FirstOrDefault();
-    public bool CanPackageRootless => RootlessSource is not null;
+    public bool CanUnleashifyBuild => UnleashifySource is not null;
 
+    /// <summary>Unleashify is offered for an imported native iOS project with an app target, or a device build artifact.</summary>
+    public bool CanUnleashify => Mobile is { } m && (m.Framework == MobileFramework.NativeIos && m.Ios?.AppTargets.Any() == true || m.ArtifactPath is not null && m.Framework is MobileFramework.NativeIos);
+
+    /// <summary>Opens Unleashify with this project, to build it from the Xcode project.</summary>
     [RelayCommand]
-    private void PackageRootless()
+    private void OpenUnleashify()
     {
-        if (RootlessSource is { } source) _navigation?.Navigate("rootless", source);
+        if (SelectedProject is { } p) _navigation?.Navigate("unleashify", new UnleashifyRequest(p.Project.Id, SelectedScheme, UnleashifySource));
+    }
+
+    /// <summary>Opens Unleashify with the device build this studio just produced (no rebuild).</summary>
+    [RelayCommand]
+    private void UnleashifyBuild()
+    {
+        if (UnleashifySource is { } source) _navigation?.Navigate("unleashify", new UnleashifyRequest(SelectedProject?.Project.Id, SelectedScheme, source, UseDeviceBuild: true));
     }
 
     [RelayCommand]

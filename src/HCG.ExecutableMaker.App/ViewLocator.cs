@@ -18,7 +18,7 @@ public sealed class ViewLocator : IDataTemplate
         [typeof(BuildHistoryViewModel)] = () => new BuildHistoryView(),
         [typeof(ArtifactsViewModel)] = () => new ArtifactsView(),
         [typeof(ShipToStoreViewModel)] = () => new ShipToStoreView(),
-        [typeof(RootlessPackageViewModel)] = () => new RootlessPackageView(),
+        [typeof(UnleashifyViewModel)] = () => new UnleashifyView(),
         [typeof(ToolchainsViewModel)] = () => new ToolchainsView(),
         [typeof(SigningViewModel)] = () => new SigningView(),
         [typeof(SettingsViewModel)] = () => new SettingsView(),

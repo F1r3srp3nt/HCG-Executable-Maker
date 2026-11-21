@@ -2,11 +2,21 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — Rootless packages for HCG Repo Candidate
+## [Unreleased] — Unleashify: rootless packages for HCG Repo Candidate
 
 ### Added
 - **Rootless package** workflow (UI page, Mobile Build Studio action, `--rootless-deb` / `--rootless-deb-validate`): an iOS app a build produced (device .app, .xcarchive or .ipa) → rootless `iphoneos-arm64` .deb with gzip members at `/var/jb/Applications` → full validation (paths, dependencies, Mach-O architecture/platform/minimum iOS/signature/entitlements/libraries, versions, gzip and complete extraction, SHA-256) → HCG Repo candidate handoff (provenance, changelog, known issues, package.toml, icon, import request, device test and recovery). The app is packaged unchanged: no added entitlements, privileged ones refused. See docs/ROOTLESS-PACKAGING.md.
-- CI `rootless-app-deb`: HCG Sentinel built from source and packaged through Mobile Build Studio and the Rootless package page, packaged again through the CLI (byte-identical), re-validated and dpkg-tested in a sandbox.
+- **Unleashify** in Mobile Build Studio (replaces the separate Rootless package page): source revision with a stale-copy warning, the three modes (Jailbreak App available; Jailbreak Tweak and App + Tweak shown as not available, with the reason), build from the Xcode project (scheme, bundle ID and deployment target shown and kept) or from an existing device build (Simulator builds refused), package ID/version, output, test-device compatibility (an iOS 13.3 device is explained as a separate target metadata cannot reach), an installed-build conflict check, **Build** and **Export Candidate Handoff**. See docs/UNLEASHIFY.md.
+- Import records the source revision (`import-revision.json`: Git commit/branch, or a GitHub ZIP's commit).
+- `tools/unleashify/hcgrepo-dry-run.py`: HCG Repo's own importer (`load_request` + `import_deb(dry_run=True)`) on the exact exported bytes, in a throwaway copy of HCG Repo.
+- CI `unleashify-sentinel` (HCGSentinelModern on macos-26, the full click path through the real views, byte-identical CLI and existing-build packages, validation, HCG Repo inspect and importer dry run, dpkg sandbox) and `unleashify-artifact-roundtrip` (the uploaded artifact is the manifest's exact bytes).
+
+### Changed
+- The handoff's `package.toml` follows HCG Repo's current access rules: the production level (`connect` when undecided) and a free-demo `[access] exception` only from the owner's recorded approval of that version (`--owner-approval`, or the field on the Unleashify page). Previously it wrote `level = "public"` (rejected by HCG Repo) or an exception no approval backed.
+- `DEVICE-TEST.md` adds installing the exact exported file before publication (SHA-256 check, `dpkg -i`) and a check that no other build of the app is installed.
+
+### Fixed
+- Validation resolves `@rpath` in embedded libraries through the main executable's run paths, as dyld does (an embedded Swift runtime library linking `@rpath/libswiftCore.dylib` was reported unresolved).
 
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
 

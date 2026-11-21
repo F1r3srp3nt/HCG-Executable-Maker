@@ -1099,24 +1099,33 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  rootless-app-deb:
-    name: Rootless .deb — HCG Sentinel archived in Mobile Build Studio, packaged on the Rootless package page (UI) and by --rootless-deb (CLI), validated, dpkg-tested
+  unleashify-sentinel:
+    name: Unleashify — HCG Sentinel (HCGSentinelModern) through Import → Unleashify → Build → Export Candidate Handoff; validated, dpkg-tested, HCG Repo importer dry-run
     needs: test
-    runs-on: macos-15
-    timeout-minutes: 60
+    # HCGSentinelModern (iOS 15.0) is Sentinel's route for current Xcode; Sentinel's docs/MAKER.md records it compiled with Xcode 26.6.
+    runs-on: macos-26
+    timeout-minutes: 75
     env:
-      OUT: ${{ github.workspace }}/rootless-out
-      # HCG-Sentinel main (merge of PR #6). The app is packaged as it is: no code, entitlement or capability changes.
+      OUT: ${{ github.workspace }}/unleashify-out
+      # HCG-Sentinel main (merge of PR #6). The app is packaged as it is: no code, entitlement, bundle ID or deployment-target change.
       SENTINEL_COMMIT: 490858c15343e9c24e6fe85a9a83f498d744a7af
       PKG: com.hakmicapitalgroup.hcgsentinel
       PKG_VERSION: 0.1.0~beta1
-      # For HCG Repo's importer: the run's repository and the commit this run built (a pull request's head, not its merge ref).
+      # The artifact the handoff's import request names; it holds exactly the handoff's .deb.
+      DEB_ARTIFACT: hcg-sentinel-unleashify-deb
+      # HCG Repo main (merge of PR #12) — the importer and validator the dry run uses. Nothing is written to HCG Repo.
+      HCG_REPO_COMMIT: cecfcf0192250242613fe3095613bed9118cb32a
+      # For HCG Repo's importer: the commit this run built (a pull request's head, not its merge ref).
       CI_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      DESCRIPTION: Toolkit for authorised testing of your own devices, networks and services. Candidate beta of the standard app, packaged for rootless jailbreaks.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: ldid (pseudo-signing for jailbroken devices) and dpkg (sandbox install test)
         run: |
           brew install ldid dpkg
@@ -1126,87 +1135,175 @@ jobs:
         run: |
           git clone --quiet https://github.com/F1r3srp3nt/HCG-Sentinel.git "$OUT/src/HCG-Sentinel"
           git -C "$OUT/src/HCG-Sentinel" checkout --quiet "$SENTINEL_COMMIT"
+          git -C "$OUT/src/HCG-Sentinel" log -1 --format='%H %s'
           xcodebuild -version
       - name: Build HCG and the UI driver
         run: |
           dotnet build tools/ui-driver -c Release
           dotnet build src/HCG.ExecutableMaker.App -c Release
-      - name: UI — Mobile Build Studio archives HCGSentinel (unsigned device build), then "Rootless .deb (jailbreak)…" packages, validates and exports the handoff
+      - name: A Simulator build of HCGSentinelModern (outside Maker) — Unleashify must refuse it
         run: |
-          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG-Sentinel" \
-            --mobile-output archive --scheme HCGSentinel --signing unsigned \
-            --rootless --rootless-package "$PKG" --rootless-version "$PKG_VERSION" --rootless-name "HCG Sentinel" \
-            --rootless-description "Toolkit for authorised testing of your own devices, networks and services. Candidate beta of the standard app, packaged for rootless jailbreaks." \
-            --rootless-repository F1r3srp3nt/HCG-Sentinel --rootless-commit "$SENTINEL_COMMIT" \
-            --rootless-ci-repository "${{ github.repository }}" --rootless-ci-commit "$CI_COMMIT" \
-            --rootless-ci-run "${{ github.run_id }}" --rootless-ci-artifact hcg-sentinel-rootless-deb \
-            --rootless-access undecided --rootless-device-ios 16.5 \
-            --rootless-change "First rootless candidate of HCG Sentinel 0.1.0 (the standard app, unchanged), built from source with Xcode." \
-            --rootless-known-issue "Sentinel's optional privileged helper exists only as a specification and is not part of this package; the app reports only what it implements." \
-            --rootless-out "$OUT/ui" --output "$OUT/ui-run" --screenshots "$OUT/screens" --prefix sentinel-rootless
-      - name: CLI — the same archive through --rootless-deb gives byte-identical output
+          xcodebuild -project "$OUT/src/HCG-Sentinel/HCGSentinel.xcodeproj" -scheme HCGSentinelModern -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$OUT/sim-dd" \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build -quiet
+          sim="$(find "$OUT/sim-dd/Build/Products" -maxdepth 2 -name HCGSentinelModern.app -type d | head -1)"
+          echo "Simulator app: $sim"; test -d "$sim"
+          echo "SIM_APP=$sim" >> "$GITHUB_ENV"
+      - name: UI — Import Sentinel → Mobile Build Studio → "Unleashify…" → HCGSentinelModern → Build → Export Candidate Handoff
         run: |
-          archive="$(find "$OUT/ui-run" -path '*hcg-data/builds/*' -name '*.xcarchive' -type d | head -1)"
-          echo "Archive: $archive"
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --unleashify --source "$OUT/src/HCG-Sentinel" --scheme HCGSentinelModern \
+            --expect-deployment-target 15.0 --unleashify-simulator-app "$SIM_APP" \
+            --unleashify-package "$PKG" --unleashify-version "$PKG_VERSION" --unleashify-name "HCG Sentinel" --unleashify-description "$DESCRIPTION" \
+            --unleashify-devices "iPhone 13 Pro (Dopamine, rootless), 16.5;iPhone 8, 13.3" \
+            --unleashify-repository F1r3srp3nt/HCG-Sentinel --unleashify-commit "$SENTINEL_COMMIT" \
+            --unleashify-ci-repository "${{ github.repository }}" --unleashify-ci-commit "$CI_COMMIT" \
+            --unleashify-ci-run "${{ github.run_id }}" --unleashify-ci-artifact "$DEB_ARTIFACT" --unleashify-access undecided \
+            --unleashify-change "First rootless candidate of HCG Sentinel 0.1.0 (the standard app, unchanged: scheme HCGSentinelModern, iOS 15.0+), built from source with Xcode by HCG Executable Maker's Unleashify." \
+            --unleashify-known-issue "Sentinel's optional privileged helper exists only as a specification and is not part of this package; the app reports only what it implements." \
+            --expect-readiness not-ready --unleashify-reuse-build \
+            --unleashify-out "$OUT/ui" --output "$OUT/ui-run" --screenshots "$OUT/screens" --prefix unleashify
+      - name: The handoff holds the exact package — SHA-256, size, provenance, import request
+        run: |
+          H="$(ls -d "$OUT/ui"/*-candidate-handoff)"; echo "HANDOFF=$H" >> "$GITHUB_ENV"
+          ls -la "$H"
+          deb="$(ls "$H"/*.deb)"; built="$(ls "$OUT/ui"/*.deb)"
+          cmp "$deb" "$built"
+          sha="$(shasum -a 256 < "$deb" | cut -d' ' -f1)"; size="$(stat -f%z "$deb")"
+          grep -q "^$sha  $(basename "$deb")$" "$H/SHA256SUMS"
+          grep -q "^sha256 = \"$sha\"$" "$H/import-request.toml"
+          grep -q "^artifact = \"$DEB_ARTIFACT\"$" "$H/import-request.toml"
+          grep -q "^run_id = ${{ github.run_id }}$" "$H/import-request.toml"
+          python3 - "$H/provenance.json" "$sha" "$size" <<'EOF'
+          import json, sys
+          p = json.load(open(sys.argv[1]))
+          u = p["unleashify"]
+          print(json.dumps({k: p.get(k) for k in ("package", "version", "sha256", "size", "source", "build")}, indent=1)[:1500])
+          print(json.dumps(u, indent=1)[:2500])
+          assert p["sha256"] == sys.argv[2] and str(p["size"]) == sys.argv[3], "provenance sha256/size"
+          assert u["scheme"] == "HCGSentinelModern" and u["mode"] == "Jailbreak App"
+          assert u["source_revision"]["commit"] == "${{ env.SENTINEL_COMMIT }}"
+          assert u["ready_for_device_testing"] is False   # nobody has checked the test phone for another Sentinel build
+          EOF
+          cat "$H/import-request.toml"
+          sed -n '/^\[access\]/,$p' "$H/package.toml"
+      - name: CLI — the same device archive through --rootless-deb gives byte-identical output
+        run: |
+          archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceBuild"])' "$OUT/ui-run/unleashify-unleashify.json")"
+          echo "Archive: $archive"; test -d "$archive"
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
-            --package "$PKG" --package-version "$PKG_VERSION" --name "HCG Sentinel" \
-            --description "Toolkit for authorised testing of your own devices, networks and services. Candidate beta of the standard app, packaged for rootless jailbreaks." \
+            --package "$PKG" --package-version "$PKG_VERSION" --name "HCG Sentinel" --description "$DESCRIPTION" \
             --device-ios 16.5 --repository F1r3srp3nt/HCG-Sentinel --commit "$SENTINEL_COMMIT" --no-handoff --out "$OUT/cli" | tee "$OUT/cli.log"
-          ui="$(ls "$OUT/ui"/*.deb)"; cli="$(ls "$OUT/cli"/*.deb)"
-          shasum -a 256 "$ui" "$cli" | tee "$OUT/sha256.txt"
+          ui="$(ls "$HANDOFF"/*.deb)"; cli="$(ls "$OUT/cli"/*.deb)"; reuse="$(ls "$OUT/ui-run/unleashify-from-device-build"/*.deb)"
+          shasum -a 256 "$ui" "$cli" "$reuse" | tee "$OUT/sha256.txt"
           [ "$(shasum -a 256 < "$ui")" = "$(shasum -a 256 < "$cli")" ] || { echo "UI and CLI packages differ"; exit 1; }
-      - name: Independent re-validation (--rootless-deb-validate) against iOS 16.5
+          [ "$(shasum -a 256 < "$ui")" = "$(shasum -a 256 < "$reuse")" ] || { echo "Existing-build input and Xcode input differ"; exit 1; }
+      - name: Package validation — independent re-validation (--rootless-deb-validate) for the iPhone 13 Pro on iOS 16.5
         run: |
-          deb="$(ls "$OUT/ui"/*.deb)"
+          deb="$(ls "$HANDOFF"/*.deb)"
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb-validate "$deb" \
             --package "$PKG" --package-version "$PKG_VERSION" --bundle-id com.hcg.sentinel --device-ios 16.5 | tee "$OUT/validate.txt"
-      - name: HCG Repo's own validator (bin/hcgrepo inspect, HCG-repo 6ff63fd) accepts the package
+          dpkg-deb -I "$deb" | tee "$OUT/control.txt"
+          dpkg-deb -c "$deb" | tee "$OUT/contents.txt"
+          grep -q "Depends: firmware (>= 15.0)" "$OUT/control.txt"
+          grep -q "Architecture: iphoneos-arm64" "$OUT/control.txt"
+          grep -q "./var/jb/Applications/HCGSentinelModern.app/HCGSentinelModern$" "$OUT/contents.txt"
+          x="$(mktemp -d)"; dpkg-deb -x "$deb" "$x"
+          bin="$x/var/jb/Applications/HCGSentinelModern.app/HCGSentinelModern"
+          lipo -archs "$bin" | tee "$OUT/archs.txt"
+          vtool -show-build "$bin" | grep -E "platform|minos" | tee -a "$OUT/archs.txt"
+          plutil -extract CFBundleIdentifier raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx com.hcg.sentinel
+          plutil -extract MinimumOSVersion raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx 15.0
+      - name: HCG Repo (cecfcf0) — bin/hcgrepo inspect, then the importer dry run on the exact exported bytes
         run: |
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo"
-          git -C "$OUT/hcg-repo" checkout --quiet 6ff63fd587ffcce762b1b097f9bb93902e78dbad
-          deb="$(ls "$OUT/ui"/*.deb)"
+          git -C "$OUT/hcg-repo" checkout --quiet "$HCG_REPO_COMMIT"
+          deb="$(ls "$HANDOFF"/*.deb)"
           (cd "$OUT/hcg-repo" && bin/hcgrepo inspect "$deb") | tee "$OUT/hcgrepo-inspect.txt"
           grep -q "^OK: package passes package-level validation" "$OUT/hcgrepo-inspect.txt"
+          PYTHONPATH="$OUT/hcg-repo/tools" python3 tools/unleashify/hcgrepo-dry-run.py --repo "$OUT/hcg-repo" --handoff "$HANDOFF" \
+            --hypothetical-approval --report "$OUT/hcgrepo-dry-run.json" | tee "$OUT/hcgrepo-dry-run.txt"
+          git -C "$OUT/hcg-repo" status --porcelain | tee "$OUT/hcg-repo-status.txt"; [ ! -s "$OUT/hcg-repo-status.txt" ]
       - name: dpkg sandbox — install, reinstall, remove and purge with real dpkg (not a device test)
         run: |
-          deb="$(ls "$OUT/ui"/*.deb)"; R="$OUT/dpkg"
+          deb="$(ls "$HANDOFF"/*.deb)"; R="$OUT/dpkg"
           mkdir -p "$R/root" "$R/admin/updates" "$R/admin/info" "$R/bin"; touch "$R/admin/status" "$R/admin/available"
           printf '#!/bin/sh\necho "uicache $*" >> "%s/uicache.log"\n' "$R" > "$R/bin/uicache"; chmod +x "$R/bin/uicache"
           D="dpkg --root=/ --instdir=$R/root --admindir=$R/admin --force-script-chrootless --force-architecture --force-depends --force-not-root"
           PATH="$R/bin:$PATH" $D -i "$deb"
           PATH="$R/bin:$PATH" $D -s "$PKG" | grep -E "^(Status|Version)"
           find "$R/root" -type f | sed "s|$R/root||" | sort > "$R/installed.txt"; wc -l < "$R/installed.txt"
+          head -5 "$R/installed.txt"
           PATH="$R/bin:$PATH" $D -i "$deb"     # reinstall of the same version (upgrade path)
           PATH="$R/bin:$PATH" $D -r "$PKG"
           left="$(find "$R/root" -type f | wc -l | tr -d ' ')"; echo "files left after removal: $left"; [ "$left" = 0 ]
           PATH="$R/bin:$PATH" $D -P "$PKG"
           cat "$R/uicache.log"
-          echo "### Rootless HCG Sentinel ($PKG $PKG_VERSION)" >> "$GITHUB_STEP_SUMMARY"
-          sed 's/^/- /' "$OUT/sha256.txt" >> "$GITHUB_STEP_SUMMARY"
-          grep -E "^\s+\[" "$OUT/validate.txt" | sed 's/^ */- /' >> "$GITHUB_STEP_SUMMARY"
-          echo "- dpkg sandbox: installed $(wc -l < "$R/installed.txt" | tr -d ' ') files, removed all; uicache calls: $(tr '\n' ';' < "$R/uicache.log")" >> "$GITHUB_STEP_SUMMARY"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Unleashify — HCG Sentinel ($PKG $PKG_VERSION, scheme HCGSentinelModern)"
+            echo "**Package validation**"; sed 's/^/- /' "$OUT/sha256.txt" 2>/dev/null
+            grep -E "^\s+\[" "$OUT/validate.txt" 2>/dev/null | sed 's/^ */- /'
+            sed 's/^/- /' "$OUT/archs.txt" 2>/dev/null
+            echo "- dpkg sandbox: installed $(wc -l < "$OUT/dpkg/installed.txt" 2>/dev/null | tr -d ' ') files, removed all; uicache calls: $(tr '\n' ';' < "$OUT/dpkg/uicache.log" 2>/dev/null)"
+            echo "**HCG Repo dry run (cecfcf0)**"; grep -E "^(importer|access|RESULT)" "$OUT/hcgrepo-dry-run.txt" 2>/dev/null | sed 's/^/- /'
+            echo "**Real device**: not run (no phone in CI) — see DEVICE-TEST.md in the handoff"
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
-          name: hcg-sentinel-rootless-deb
-          path: ${{ github.workspace }}/rootless-out/ui/*.deb
+          name: ${{ env.DEB_ARTIFACT }}
+          path: ${{ env.HANDOFF }}/*.deb
           if-no-files-found: error
           retention-days: 30
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: hcg-sentinel-rootless-handoff
+          name: hcg-sentinel-unleashify-handoff
           path: |
-            ${{ github.workspace }}/rootless-out/ui/*-candidate-handoff
-            ${{ github.workspace }}/rootless-out/ui/VALIDATION.txt
-            ${{ github.workspace }}/rootless-out/*.txt
-            ${{ github.workspace }}/rootless-out/*.log
-            ${{ github.workspace }}/rootless-out/dpkg/*.txt
-            ${{ github.workspace }}/rootless-out/dpkg/*.log
-            ${{ github.workspace }}/rootless-out/ui-run/*.json
-            ${{ github.workspace }}/rootless-out/ui-run/*.log
-            ${{ github.workspace }}/rootless-out/screens
+            ${{ github.workspace }}/unleashify-out/ui/*-candidate-handoff
+            ${{ github.workspace }}/unleashify-out/ui/VALIDATION.txt
+            ${{ github.workspace }}/unleashify-out/*.txt
+            ${{ github.workspace }}/unleashify-out/*.log
+            ${{ github.workspace }}/unleashify-out/*.json
+            ${{ github.workspace }}/unleashify-out/dpkg/*.txt
+            ${{ github.workspace }}/unleashify-out/dpkg/*.log
+            ${{ github.workspace }}/unleashify-out/ui-run/*.json
+            ${{ github.workspace }}/unleashify-out/ui-run/*.log
+            ${{ github.workspace }}/unleashify-out/screens
           if-no-files-found: warn
           retention-days: 30
+
+  unleashify-artifact-roundtrip:
+    name: Unleashify — the uploaded artifact is the manifest's exact bytes; HCG Repo importer dry run on the downloaded .deb
+    needs: unleashify-sentinel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEB_ARTIFACT: hcg-sentinel-unleashify-deb
+      HCG_REPO_COMMIT: cecfcf0192250242613fe3095613bed9118cb32a
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.DEB_ARTIFACT }}
+          path: downloaded
+      - uses: actions/download-artifact@v8
+        with:
+          name: hcg-sentinel-unleashify-handoff
+          path: handoff-artifact
+      - name: One .deb, with the manifest's SHA-256; importer dry run on the downloaded bytes
+        run: |
+          ls -la downloaded; [ "$(ls downloaded/*.deb | wc -l)" = 1 ]
+          H="$(find handoff-artifact -maxdepth 3 -type d -name '*-candidate-handoff' | head -1)"; echo "Handoff: $H"
+          sha="$(sha256sum downloaded/*.deb | cut -d' ' -f1)"; echo "downloaded sha256 $sha"
+          grep -q "^sha256 = \"$sha\"$" "$H/import-request.toml"
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git hcg-repo && git -C hcg-repo checkout --quiet "$HCG_REPO_COMMIT"
+          PYTHONPATH=hcg-repo/tools python3 tools/unleashify/hcgrepo-dry-run.py --repo hcg-repo --handoff "$H" --deb "$(ls downloaded/*.deb)" --hypothetical-approval
+          echo "Publication stays manual: after this run succeeds, HCG Repo's maintainer runs bin/hcgrepo import-request (with --dry-run first)."
 
   native-cpp:
     name: C/C++ — CMake and Make fixtures through the New Build wizard (${{ matrix.os }})

@@ -274,9 +274,9 @@ public class RootlessAppDebTests
         Assert.Contains("Missing prerequisite: ldid", wf.Failure);
     }
 
-    private RootlessAppWorkflow.Request Request(string source, string? ldid = "/usr/local/bin/ldid", string? device = "16.5", PackageProvenance? prov = null, string access = "public") =>
+    private RootlessAppWorkflow.Request Request(string source, string? ldid = "/usr/local/bin/ldid", string? device = "16.5", PackageProvenance? prov = null, string access = "public", string? approval = null) =>
         new(source, _t.Combine("wf-" + Guid.NewGuid().ToString("N")[..6]), Spec(), prov ?? new("F1r3srp3nt/HCG-Sentinel", new string('a', 40), false),
-            new("Toolkit for authorised testing of your own devices.", ["First rootless candidate of the standard app."], ["Sentinel's privileged helper is not part of this package."], access, "iPhone 13 Pro, iOS 16.5, Dopamine (rootless)"),
+            new("Toolkit for authorised testing of your own devices.", ["First rootless candidate of the standard app."], ["Sentinel's privileged helper is not part of this package."], access, "iPhone 13 Pro, iOS 16.5, Dopamine (rootless)", approval),
             ldid, device);
 
     [Fact]
@@ -347,6 +347,32 @@ public class RootlessAppDebTests
         var libs = v.Checks.Single(c => c.Name == "Dynamic libraries");
         Assert.Equal(VerificationStatus.Passed, libs.Status);
         Assert.True(libs.Detail.Contains("3 system libraries"), libs.Detail); // libSystem, UIKit (framework) and libswift_Concurrency via /usr/lib/swift
+    }
+
+    [Fact]
+    public async Task An_embedded_Swift_runtime_library_resolves_its_rpath_through_the_main_executable()
+    {
+        // CI run 44063361930 (HCGSentinel, iOS 14.7): Xcode embeds libswift_Concurrency.dylib, which loads
+        // @rpath/libswiftCore.dylib and has no LC_RPATH of its own; dyld finds it through the main executable's
+        // /usr/lib/swift rpath. That is a system library, not a missing one.
+        var app = MachOFixture.App(_t.Combine("concurrency"));
+        File.WriteAllBytes(Path.Combine(app, "HCGSentinel"), MachOFixture.Build(
+            dylibs: ["/usr/lib/libSystem.B.dylib", "@rpath/libswift_Concurrency.dylib", "@rpath/SentinelCore.framework/SentinelCore"],
+            rpaths: ["/usr/lib/swift", "@executable_path/Frameworks"]));
+        File.WriteAllBytes(Path.Combine(app, "Frameworks", "libswift_Concurrency.dylib"), MachOFixture.Build(MachOFixture.Dylib,
+            dylibs: ["/usr/lib/libSystem.B.dylib", "@rpath/libswiftCore.dylib"]));
+        var (pkg, _) = await Package(app);
+        var v = await RootlessAppDebValidator.ValidateAsync(pkg.DebPath, new(), CancellationToken.None);
+        var libs = v.Checks.Single(c => c.Name == "Dynamic libraries");
+        Assert.True(libs.Status == VerificationStatus.Passed, libs.Detail);
+
+        // Without the main executable's OS rpath the same library is reported as missing.
+        File.WriteAllBytes(Path.Combine(app, "HCGSentinel"), MachOFixture.Build(
+            dylibs: ["/usr/lib/libSystem.B.dylib", "@rpath/libswift_Concurrency.dylib", "@rpath/SentinelCore.framework/SentinelCore"],
+            rpaths: ["@executable_path/Frameworks"]));
+        var (pkg2, _) = await Package(app);
+        var v2 = await RootlessAppDebValidator.ValidateAsync(pkg2.DebPath, new(), CancellationToken.None);
+        Assert.Contains("libswiftCore.dylib", v2.Checks.Single(c => c.Name == "Dynamic libraries").Detail);
     }
 
     [Fact]
@@ -436,7 +462,8 @@ public class RootlessAppDebTests
         var appDir = MachOFixture.App(_t.Combine("h"));
         var steps = new List<RootlessAppWorkflow.Stage>();
         var pinned = await new RootlessAppWorkflow(runner, TimeProvider.System).RunAsync(
-            Request(appDir, prov: new("F1r3srp3nt/HCG-Sentinel", new string('b', 40), false, 44012345678, "hcg-sentinel-rootless-deb", BuiltWith: "Xcode 16.4"), access: "connect"),
+            Request(appDir, prov: new("F1r3srp3nt/HCG-Sentinel", new string('b', 40), false, 44012345678, "hcg-sentinel-rootless-deb", BuiltWith: "Xcode 16.4"), access: "connect",
+                approval: "approved by the owner on 21 Nov 2026: 'test approval'"),
             (s, _) => steps.Add(s), CancellationToken.None);
         Assert.True(pinned.Succeeded, pinned.Failure + "\n" + string.Join("\n", pinned.Log));
         Assert.Equal([RootlessAppWorkflow.Stage.Inspect, RootlessAppWorkflow.Stage.Package, RootlessAppWorkflow.Stage.Validate, RootlessAppWorkflow.Stage.Handoff], steps.Distinct().ToArray());
@@ -451,6 +478,8 @@ public class RootlessAppDebTests
         var toml = File.ReadAllText(Path.Combine(h.Folder, "package.toml"));
         Assert.Contains("level = \"connect\"", toml);                         // production access unchanged
         Assert.Contains("exception_versions = [\"1.4.0~beta1\"]", toml);       // free only for this candidate version
+        Assert.Contains("approved by the owner on 21 Nov 2026: 'test approval'", toml);
+        Assert.DoesNotContain(h.Missing, m => m.StartsWith("owner approval", StringComparison.Ordinal));
         Assert.Contains("still require their own HCG sign-in", toml);
         Assert.Contains("\"device_tested\": false", File.ReadAllText(Path.Combine(h.Folder, "provenance.json")));
 
@@ -466,6 +495,16 @@ public class RootlessAppDebTests
         Assert.Contains(new string('c', 40), File.ReadAllText(Path.Combine(cross.Handoff.Folder, "provenance.json")));
         Assert.Contains("Not yet device-tested", File.ReadAllText(Path.Combine(h.Folder, "KNOWN-ISSUES.md")));
         Assert.Contains("uicache -p /var/jb/Applications/HCGSentinel.app", File.ReadAllText(Path.Combine(h.Folder, "DEVICE-TEST.md")));
+
+        // Without the owner's approval of this version, the exception stays commented out — never invented — and is listed as missing.
+        var crossToml = File.ReadAllText(Path.Combine(cross.Handoff.Folder, "package.toml"));
+        Assert.Contains("level = \"public\"", crossToml);
+        Assert.Contains("# NOT IMPORTABLE YET: no owner approval of 1.4.0~beta1", crossToml);
+        Assert.Contains("# exception_versions = [\"1.4.0~beta1\"]", crossToml);
+        Assert.DoesNotContain("\nexception", crossToml);
+        Assert.Contains(cross.Handoff.Missing, m => m.StartsWith("owner approval", StringComparison.Ordinal));
+        var undecided = await new RootlessAppWorkflow(runner, TimeProvider.System).RunAsync(Request(MachOFixture.App(_t.Combine("h4")), access: "undecided"), null, CancellationToken.None);
+        Assert.Contains("level = \"connect\"", File.ReadAllText(Path.Combine(undecided.Handoff!.Folder, "package.toml")));
 
         var local = await new RootlessAppWorkflow(runner, TimeProvider.System).RunAsync(Request(MachOFixture.App(_t.Combine("h2"))), null, CancellationToken.None);
         Assert.False(local.Handoff!.ImportRequestComplete);

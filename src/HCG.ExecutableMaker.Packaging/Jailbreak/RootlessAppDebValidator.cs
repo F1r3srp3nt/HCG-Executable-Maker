@@ -180,6 +180,12 @@ public static class RootlessAppDebValidator
             var signProblems = new List<string>();
             var entProblems = new List<string>();
             var systemLibs = new SortedSet<string>(StringComparer.Ordinal);
+            // dyld searches @rpath in the loading image's LC_RPATHs and then in those of the images that loaded it — for
+            // every library in an app, ultimately the main executable's (Xcode puts /usr/lib/swift and
+            // @executable_path/Frameworks there; an embedded libswift_Concurrency.dylib has none of its own).
+            var mainExePath = exe is null ? null : Path.Combine(appDir, exe);
+            var mainRpaths = mainExePath is not null && File.Exists(mainExePath) && MachOLinkage.IsMachO(mainExePath)
+                ? MachOLinkage.Read(mainExePath).SelectMany(x => x.RPaths).Distinct(StringComparer.Ordinal).ToList() : [];
             report.AppendLine().AppendLine("Mach-O files:");
             foreach (var file in machos)
             {
@@ -217,7 +223,8 @@ public static class RootlessAppDebValidator
                         if (SystemLibraryPrefixes.Any(p => d.Path.StartsWith(p, StringComparison.Ordinal))) { systemLibs.Add(d.Path); continue; }
                         if (d.Path.StartsWith('@'))
                         {
-                            var resolved = Resolve(d.Path, installed, s.RPaths, installPath + "/" + exe);
+                            var resolved = Resolve(d.Path, installed, s.RPaths, installPath + "/" + exe)
+                                .Concat(Resolve(d.Path, installPath + "/" + exe, mainRpaths, installPath + "/" + exe)).Distinct(StringComparer.Ordinal).ToList();
                             if (resolved.Any(payloadFiles.Contains)) continue;
                             // An rpath into the OS (Xcode adds /usr/lib/swift for Swift apps): the library comes from iOS itself.
                             if (resolved.FirstOrDefault(r => SystemLibraryPrefixes.Any(p => r.StartsWith(p, StringComparison.Ordinal))) is { } sys) { systemLibs.Add(sys); continue; }

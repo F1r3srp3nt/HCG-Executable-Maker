@@ -22,6 +22,7 @@ internal static class RootlessDebCommand
               [--entitlements <the project's .entitlements>] [--ldid <path>] [--device-ios <x.y>] [--published <version>=<sha256>]...
               [--repository <owner/name> --commit <40-char sha> [--dirty] [--ci-run <id> --ci-artifact <name> --ci-run-url <url> [--ci-repository <owner/name> --ci-commit <sha the run built>]] [--built-with <text>]]
               [--summary <text>] [--change <text>]... [--known-issue <text>]... [--production-access public|connect|paid|undecided] [--device-target <text>]
+              [--owner-approval "<who> on <date>: '<their words>'"] (the owner's recorded approval of this version as a free public candidate demo; without it the handoff is not importable)
               [--timestamp <ISO 8601>] [--no-handoff]
           HCGExecutableMaker --rootless-deb-validate <file.deb> [--package <id>] [--package-version <v>] [--bundle-id <id>] [--device-ios <x.y>] [--published <version>=<sha256>]...
         """;
@@ -66,7 +67,7 @@ internal static class RootlessDebCommand
         var prov = new PackageProvenance(Arg("--repository"), Arg("--commit"), args.Contains("--dirty") ? true : Arg("--commit") is null ? null : false,
             long.TryParse(Arg("--ci-run"), out var run) ? run : null, Arg("--ci-artifact"), Arg("--ci-run-url"), Arg("--built-with"), HostInfo.BuildIdentity,
             Arg("--ci-repository"), Arg("--ci-commit"));
-        var texts = new CandidateTexts(Arg("--summary") ?? description.Split('\n')[0], All("--change"), All("--known-issue"), Arg("--production-access") ?? "public", Arg("--device-target"));
+        var texts = new CandidateTexts(Arg("--summary") ?? description.Split('\n')[0], All("--change"), All("--known-issue"), Arg("--production-access") ?? "undecided", Arg("--device-target"), Arg("--owner-approval"));
         var outDir = Path.GetFullPath(Arg("--out") ?? Path.Combine(Environment.CurrentDirectory, "rootless-deb"));
 
         var workflow = new RootlessAppWorkflow(services.GetRequiredService<IProcessRunner>(), TimeProvider.System);
