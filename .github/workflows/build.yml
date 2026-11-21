@@ -226,6 +226,53 @@ jobs:
         shell: bash
         run: bash tools/ci/verify-packaged-hcg-connect.sh "${{ runner.temp }}/dist" "$VERSION" "$GITHUB_SHA"
 
+      # What a user downloads: the .app.zip extracted with ditto (as Finder does), the bundle complete, and the real app
+      # started from it with an empty data folder until its window is on screen.
+      - name: macOS — the distributed .app.zip extracts to the complete app, which launches and opens its window
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          D="${{ runner.temp }}/dist"; X="$RUNNER_TEMP/zip-check"; rm -rf "$X"; mkdir -p "$X/screens"
+          ZIP="$D/HCG-Executable-Maker-$VERSION-osx-arm64.app.zip"
+          ls -la "$D"; test -f "$ZIP"
+          ditto -x -k "$ZIP" "$X"
+          APP="$X/HCG Executable Maker.app"; EXE="$APP/Contents/MacOS/HCGExecutableMaker"
+          test -x "$EXE" && echo "✓ executable"
+          lipo -archs "$EXE" | grep -qw arm64 && echo "✓ arm64"
+          test -f "$APP/Contents/MacOS/libcoreclr.dylib" && echo "✓ .NET runtime bundled"
+          test -f "$APP/Contents/Resources/AppIcon.icns" && echo "✓ icon"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = com.hakmicapital.executablemaker && echo "✓ bundle identifier"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION" && echo "✓ version $VERSION"
+          codesign --verify "$EXE" && echo "✓ app host signature (ad hoc)"
+          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --version
+          swiftc -O tools/ci/window-of-pid.swift -o "$X/window-of-pid"
+          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" > "$X/app.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 60); do
+            if "$X/window-of-pid" $PID > "$X/windows.txt" 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$X/app.log"; exit 1; fi
+            sleep 2
+          done
+          test -s "$X/windows.txt" && echo "✓ window: $(head -1 "$X/windows.txt")"
+          sleep 8
+          screencapture -x -o -l "$(head -1 "$X/windows.txt" | cut -d' ' -f1)" "$X/screens/release-app-window.png"
+          kill -0 $PID && echo "✓ still running"
+          kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
+          j="$X/screens/release-app-window.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-window.png" --out "$j" >/dev/null
+          echo "=====BEGIN-IMG release-app-window.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
+
+      - name: Build manifest, checksums and installation instructions
+        shell: bash
+        run: |
+          D="${{ runner.temp }}/dist"
+          if [ "${{ matrix.name }}" = macos ]; then cp tools/release/INSTALL-macOS.md "$D/INSTALL-macOS.md"; fi
+          PY=$(command -v python3 || command -v python); "$PY" tools/release/manifest.py "$D" "$VERSION" "$GITHUB_SHA" "${{ matrix.name }}" "$GITHUB_RUN_ID" "$GITHUB_RUN_NUMBER" > "$D/build-manifest-${{ matrix.name }}.json"
+          cat "$D/build-manifest-${{ matrix.name }}.json"
+          (cd "$D" && if command -v sha256sum >/dev/null; then sha256sum *; else shasum -a 256 *; fi) > "${{ runner.temp }}/SHA256SUMS-${{ matrix.name }}.txt"
+          mv "${{ runner.temp }}/SHA256SUMS-${{ matrix.name }}.txt" "$D/"
+          cat "$D/SHA256SUMS-${{ matrix.name }}.txt"
+
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
@@ -269,7 +316,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: hcg-executable-maker-windows-setup
+          # Not "hcg-executable-maker-*": the release job publishes those, and this test installer is a fixed 0.3.0 build.
+          name: installer-test-windows
           path: ${{ runner.temp }}/dist/*
           if-no-files-found: warn
           retention-days: 7
@@ -970,11 +1018,14 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      OUT: ${{ runner.temp }}/xcode-out
       PROJ: macOS Xcode Project/HCGExecutableMaker.xcodeproj
-      # The launched app keeps its data in a throwaway folder, not the runner's home.
-      HCG_EXECUTABLE_MAKER_HOME: ${{ runner.temp }}/xcode-out/app-home
     steps:
+      # Outside the repository (the build imports it; upload-artifact also rejects '..' paths). The runner context is
+      # only available inside steps, so the paths are set here. The launched app keeps its data in a throwaway folder.
+      - name: Output folders
+        run: |
+          echo "OUT=$RUNNER_TEMP/xcode-out" >> "$GITHUB_ENV"
+          echo "HCG_EXECUTABLE_MAKER_HOME=$RUNNER_TEMP/xcode-out/app-home" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
