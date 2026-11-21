@@ -1113,6 +1113,8 @@ jobs:
       PKG_VERSION: 0.1.0~beta1
       # The artifact the handoff's import request names; it holds exactly the handoff's .deb.
       DEB_ARTIFACT: hcg-sentinel-unleashify-deb
+      # The owner's recorded approval of 0.1.0~beta1 (preparation and validation only; no publication), typed into the page's field.
+      OWNER_APPROVAL_FILE: tools/unleashify/approvals/com.hakmicapitalgroup.hcgsentinel_0.1.0~beta1.txt
       # HCG Repo main (merge of PR #12) — the importer and validator the dry run uses. Nothing is written to HCG Repo.
       HCG_REPO_COMMIT: cecfcf0192250242613fe3095613bed9118cb32a
       # For HCG Repo's importer: the commit this run built (a pull request's head, not its merge ref).
@@ -1158,6 +1160,7 @@ jobs:
             --unleashify-repository F1r3srp3nt/HCG-Sentinel --unleashify-commit "$SENTINEL_COMMIT" \
             --unleashify-ci-repository "${{ github.repository }}" --unleashify-ci-commit "$CI_COMMIT" \
             --unleashify-ci-run "${{ github.run_id }}" --unleashify-ci-artifact "$DEB_ARTIFACT" --unleashify-access undecided \
+            --unleashify-owner-approval-file "$OWNER_APPROVAL_FILE" \
             --unleashify-change "First rootless candidate of HCG Sentinel 0.1.0 (the standard app, unchanged: scheme HCGSentinelModern, iOS 15.0+), built from source with Xcode by HCG Executable Maker's Unleashify." \
             --unleashify-known-issue "Sentinel's optional privileged helper exists only as a specification and is not part of this package; the app reports only what it implements." \
             --expect-readiness not-ready --unleashify-reuse-build \
@@ -1186,6 +1189,10 @@ jobs:
           EOF
           cat "$H/import-request.toml"
           sed -n '/^\[access\]/,$p' "$H/package.toml"
+          # The owner's genuine approval, for this version only — never a placeholder.
+          grep -q '^exception = ".*I approve HCG Sentinel 0.1.0~beta1 as a free demonstration candidate for controlled testing' "$H/package.toml"
+          grep -qx 'exception_versions = \["0.1.0~beta1"\]' "$H/package.toml"
+          if grep -rIl -e HYPOTHETICAL -e '<owner>' -e 'NOT IMPORTABLE YET' "$H"; then echo "placeholder approval in the handoff"; exit 1; fi
       - name: CLI — the same device archive through --rootless-deb gives byte-identical output
         run: |
           archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceBuild"])' "$OUT/ui-run/unleashify-unleashify.json")"
@@ -1221,7 +1228,8 @@ jobs:
           (cd "$OUT/hcg-repo" && bin/hcgrepo inspect "$deb") | tee "$OUT/hcgrepo-inspect.txt"
           grep -q "^OK: package passes package-level validation" "$OUT/hcgrepo-inspect.txt"
           PYTHONPATH="$OUT/hcg-repo/tools" python3 tools/unleashify/hcgrepo-dry-run.py --repo "$OUT/hcg-repo" --handoff "$HANDOFF" \
-            --hypothetical-approval --report "$OUT/hcgrepo-dry-run.json" | tee "$OUT/hcgrepo-dry-run.txt"
+            --require-genuine-approval --report "$OUT/hcgrepo-dry-run.json" | tee "$OUT/hcgrepo-dry-run.txt"
+          grep -q "^RESULT       VALIDATED:" "$OUT/hcgrepo-dry-run.txt"
           git -C "$OUT/hcg-repo" status --porcelain | tee "$OUT/hcg-repo-status.txt"; [ ! -s "$OUT/hcg-repo-status.txt" ]
       - name: Summary
         if: always()
@@ -1232,7 +1240,7 @@ jobs:
             grep -E "^\s+\[" "$OUT/validate.txt" 2>/dev/null | sed 's/^ */- /'
             sed 's/^/- /' "$OUT/archs.txt" 2>/dev/null
             echo "- dpkg sandbox: in unleashify-artifact-roundtrip (Linux dpkg, on the uploaded artifact's bytes)"
-            echo "**HCG Repo dry run (cecfcf0)**"; grep -E "^(importer|access|RESULT)" "$OUT/hcgrepo-dry-run.txt" 2>/dev/null | sed 's/^/- /'
+            echo "**HCG Repo dry run (cecfcf0), owner's recorded approval**"; grep -E "^(importer|access|RESULT)" "$OUT/hcgrepo-dry-run.txt" 2>/dev/null | sed 's/^/- /'
             echo "**Real device**: not run (no phone in CI) — see DEVICE-TEST.md in the handoff"
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
@@ -1285,7 +1293,8 @@ jobs:
           sha="$(sha256sum downloaded/*.deb | cut -d' ' -f1)"; echo "downloaded sha256 $sha"
           grep -q "^sha256 = \"$sha\"$" "$H/import-request.toml"
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git hcg-repo && git -C hcg-repo checkout --quiet "$HCG_REPO_COMMIT"
-          PYTHONPATH=hcg-repo/tools python3 tools/unleashify/hcgrepo-dry-run.py --repo hcg-repo --handoff "$H" --deb "$(ls downloaded/*.deb)" --hypothetical-approval
+          PYTHONPATH=hcg-repo/tools python3 tools/unleashify/hcgrepo-dry-run.py --repo hcg-repo --handoff "$H" --deb "$(ls downloaded/*.deb)" --require-genuine-approval | tee dry-run.txt
+          grep -q "^RESULT       VALIDATED:" dry-run.txt
           echo "Publication stays manual: after this run succeeds, HCG Repo's maintainer runs bin/hcgrepo import-request (with --dry-run first)."
       # On Linux: macOS (26) refuses dpkg's backup hard links inside an installed .app bundle, an artefact of the host, not of the package.
       - name: dpkg sandbox — install, reinstall, remove and purge the downloaded bytes with real dpkg (not a device test)

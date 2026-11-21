@@ -250,53 +250,107 @@ public static class CandidateHandoff
         return sb.ToString();
     }
 
-    public static string DeviceTest(RootlessAppPackageSpec spec, IosAppBundle app, RootlessAppDebValidator.Facts f, HandoffContext? context = null, string? debName = null) => $"""
-        # {spec.Name} {spec.Version}: device test and recovery
+    public static string DeviceTest(RootlessAppPackageSpec spec, IosAppBundle app, RootlessAppDebValidator.Facts f, HandoffContext? context = null, string? debName = null)
+    {
+        var deb = debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb";
+        var exe = app.Executable;
+        return $"""
+        # {spec.Name} {spec.Version}: device test and rollback
 
         Package `{spec.PackageId}` · `iphoneos-arm64` · SHA-256 `{f.Sha256}` · {f.Size:N0} bytes.
         Installs only `{f.AppPath}` (bundle ID `{f.BundleId}`, iOS {f.MinimumOS} or later). The postinst and postrm scripts only
-        register or unregister the app with `uicache`. Nothing runs at boot, nothing is injected into other processes, and
-        no respring is needed.
+        register or unregister the app with `uicache`. Nothing runs at boot, nothing is injected into other processes, nothing
+        outside `{f.AppPath}` is written, and no respring is needed.
 
-        ## Before you start
-        - Rootless jailbreak (Dopamine, palera1n rootless) on iOS {f.MinimumOS} or later. Record: iPhone model, iOS version, jailbreak and version, package manager.
-        - `uikittools` (provides `uicache`) is installed or offered as a dependency.
-        - **No other build of the app is installed.** Over SSH: `uicache -l | grep {f.BundleId}` must print nothing (or only
-          `{f.AppPath}`). A build from Xcode or an IPA with bundle ID `{f.BundleId}` must be deleted first (Home Screen › Remove App);
-          its own data goes with it.{InstalledLine(context)}
+        Run every step only with the owner's go-ahead for this device. Commands are run over SSH as the `mobile` user
+        (`sudo` where shown). Paste each command's output into the result record at the end.
 
-        ## Install — before publication (this exact file)
-        1. Copy `{debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb"}` from this folder to the phone (e.g. `scp` to `/var/mobile/`).
-        2. Over SSH: `shasum -a 256 /var/mobile/{debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb"}` must print `{f.Sha256}`.
-        3. `sudo dpkg -i /var/mobile/{debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb"}` (or open the file in your package manager and install).
-        4. Expected: no errors, `dpkg -s {spec.PackageId}` shows `Status: install ok installed`, and the **{spec.Name}** icon appears.
+        ## 0 · Device
+        - Rootless jailbreak (Dopamine, palera1n rootless) on iOS {f.MinimumOS} or later; `/var/jb` exists (`ls -d /var/jb`).
+        - Record: iPhone model, iOS version, jailbreak and version, package manager and version.
+        - `uikittools` installed (`dpkg -s uikittools | grep Status`); it provides `uicache`.
+        - **Stop** if iOS is below {f.MinimumOS} or there is no `/var/jb`: the package does not apply to this device.
 
-        ## Install — after publication (Zebra)
-        1. Sources › Add (+) › `{CandidateSource}`, then refresh.
-        2. Search **{spec.Name}**, check the version is **{spec.Version}**, tap Get/Install, confirm and install.
-        3. Expected: the install finishes without errors and the **{spec.Name}** icon appears on the home screen.
+        ## 1 · Detect existing {spec.Name} installations (before anything is installed)
+        ```
+        uicache -l | grep -i -e {f.BundleId} -e sentinel
+        dpkg -l | grep -i sentinel
+        ls -d /var/jb/Applications/*.app | grep -i sentinel
+        ls -d /var/containers/Bundle/Application/*/*.app 2>/dev/null | grep -i sentinel
+        ```
+        - Nothing printed: no other build is installed; continue.
+        - `{f.BundleId}` at a path under `/var/containers/Bundle/Application/`: a **sideloaded / Xcode / TestFlight build**. Two
+          apps with one bundle ID cannot both be registered. **Stop** and ask the owner: removing it (Home Screen › Remove App)
+          deletes that build *and its data*; rollback then means reinstalling it from its original source (Xcode, IPA, TestFlight).
+        - `{spec.PackageId}` already in `dpkg -l`: an earlier copy of this package. Same version: reinstall; older: upgrade;
+          **newer: stop** (that would be a downgrade).
+        - Another package or path containing "sentinel": record it; **stop** if it is another build of the same app.
+        - Paste the output into Maker's Unleashify page (*Test devices and installed builds*) to have it checked.{InstalledLine(context)}
 
-        ## Check
-        1. Launch **{spec.Name}** from the home screen. Expected: it opens to its first screen without crashing.
-        2. Optional over SSH: `dpkg -s {spec.PackageId}` shows `Status: install ok installed` and Version {spec.Version}.
-        3. Record what you saw (works / crashes / icon missing) with the device details above.
+        ## 2 · Snapshot for rollback
+        ```
+        dpkg -l > /var/mobile/sentinel-test-before-dpkg.txt
+        uicache -l > /var/mobile/sentinel-test-before-uicache.txt
+        ```
 
-        ## Uninstall
-        1. Zebra › Installed › **{spec.Name}** › Remove, confirm (or `sudo dpkg -r {spec.PackageId}` over SSH).
-        2. Expected: the icon disappears and `{f.AppPath}` no longer exists.
+        ## 3 · Install this exact file (before publication)
+        1. Copy `{deb}` from this folder to the phone: `scp {deb} mobile@<phone>:/var/mobile/`.
+        2. `shasum -a 256 /var/mobile/{deb}` must print `{f.Sha256}`. **Stop** if it differs.
+        3. `sudo dpkg -i /var/mobile/{deb}`
+        4. Expected: no `dpkg: error`; dependency notes for `firmware`/`uikittools` are satisfied by the jailbreak.
+           **Stop and roll back** (step 7) on any error.
 
-        ## Recovery
-        - **Icon missing after install:** run `uicache -p {f.AppPath}` (or `uicache -a`), or respring.
-        - **Icon stays after removal:** run `uicache -a`, or respring.
-        - **The app crashes on launch:** it only affects this app. Copy the crash report (Settings › Privacy & Security › Analytics
-          & Improvements › Analytics Data, entries starting with `{app.Executable}`), then remove the package as above.
-        - **The package manager cannot remove it:** over SSH, `sudo dpkg -r {spec.PackageId}`, then `uicache -a`.
-        - Nothing in this package changes SpringBoard or system files, so a safe-mode reboot is not needed for this package.
+        ## 4 · Verify the installation
+        ```
+        dpkg -s {spec.PackageId} | grep -E '^(Status|Version)'
+        dpkg -L {spec.PackageId}
+        uicache -l | grep {f.BundleId}
+        ```
+        Expected: `Status: install ok installed`, `Version: {spec.Version}`; every listed path is under `{f.AppPath}` (plus its
+        parent folders); `{f.BundleId}` is registered at `{f.AppPath}` and nowhere else. The **{spec.Name}** icon is on the home screen.
+
+        ## 5 · Launch
+        1. Open **{spec.Name}** from the home screen. Expected: it opens to its first screen without crashing.
+        2. Use it briefly as you would the standard app. It has the standard app's features only; record anything that fails.
+        3. On a crash: Settings › Privacy & Security › Analytics & Improvements › Analytics Data → entries starting with `{exe}`; keep the newest.
+
+        ## 6 · Remove
+        1. `sudo dpkg -r {spec.PackageId}` (or Zebra › Installed › **{spec.Name}** › Remove).
+        2. Expected: `ls {f.AppPath}` → "No such file or directory"; `uicache -l | grep {f.BundleId}` prints nothing; the icon is gone.
+        3. `sudo dpkg -P {spec.PackageId}` purges dpkg's record.
+        4. `dpkg -l > /var/mobile/sentinel-test-after-dpkg.txt; diff /var/mobile/sentinel-test-before-dpkg.txt /var/mobile/sentinel-test-after-dpkg.txt`
+           Expected: no difference.
+
+        ## 7 · Rollback and recovery
+        - **Install failed or the app misbehaves:** `sudo dpkg -r {spec.PackageId}`; `sudo dpkg -P {spec.PackageId}`; `uicache -a`.
+          The phone is then back to the snapshot in step 2 (compare with `diff` as in step 6).
+        - **Icon missing after install:** `uicache -p {f.AppPath}` (or `uicache -a`), or respring.
+        - **Icon stays after removal:** `uicache -a`, or respring.
+        - **dpkg reports a half-installed package:** `sudo dpkg --configure -a`, then `sudo dpkg -r {spec.PackageId}`.
+        - **A build removed in step 1:** reinstall it from its original source (Xcode, IPA, TestFlight); its earlier data does not return.
+        - The app's own data container (`/var/mobile/Containers/Data/Application/…`) is not removed by dpkg; delete it from
+          Settings › General › iPhone Storage if needed.
+        - Nothing in this package changes SpringBoard, daemons or system files, so a safe-mode reboot is not needed for this package.
+
+        ## Install after publication (only if the owner publishes it)
+        Zebra › Sources › Add `{CandidateSource}`, refresh, install **{spec.Name}** {spec.Version}; then steps 4–7.
+
+        ## Result record
+        ```
+        Device: <model> · iOS <x.y> · <jailbreak and version> · <package manager>
+        Step 1 detection output: <paste>
+        Install (step 3): pass / fail — <output>
+        Verify (step 4): pass / fail — <output>
+        Launch (step 5): opens / crashes / icon missing — <notes>
+        Remove (step 6): pass / fail — <diff output>
+        Tester, date: <name>, <date>
+        ```
 
         """.Replace("\r", "");
+    }
 
     private static string InstalledLine(HandoffContext? context) =>
-        context?.InstalledCheck is { } ic ? "\n  Maker's check at export: " + ic.State + " — " + ic.Summary : "";
+        context?.InstalledCheck is { } ic ? "\n- Maker's check at export: " + ic.State + " — " + ic.Summary : "";
 
     private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context)
     {

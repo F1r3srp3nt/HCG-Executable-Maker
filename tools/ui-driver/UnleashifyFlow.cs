@@ -12,7 +12,7 @@ namespace HCG.ExecutableMaker.UiDriver;
 /// Options: --unleashify --scheme S --unleashify-package ID --unleashify-version V [--unleashify-name N --unleashify-description D
 /// --unleashify-out DIR --unleashify-devices "Name, 16.5;Name, 13.3" --unleashify-installed FILE --unleashify-tester-confirmed
 /// --unleashify-repository O/N --unleashify-commit SHA --unleashify-ci-run ID --unleashify-ci-artifact NAME --unleashify-ci-repository O/N
-/// --unleashify-ci-commit SHA --unleashify-access public|connect|paid --unleashify-change TEXT --unleashify-known-issue TEXT
+/// --unleashify-ci-commit SHA --unleashify-owner-approval-file FILE --unleashify-access public|connect|paid --unleashify-change TEXT --unleashify-known-issue TEXT
 /// --unleashify-simulator-app PATH (checks that a Simulator build is refused) --expect-deployment-target X.Y --expect-readiness ready|not-ready].
 /// </summary>
 internal static partial class Program
@@ -92,10 +92,18 @@ internal static partial class Program
         page.ProductionAccess = Arg("unleashify-access", page.ProductionAccess);
         page.Changes = Arg("unleashify-change", "");
         page.KnownIssues = Arg("unleashify-known-issue", "");
+        if (Arg("unleashify-owner-approval-file") is { } approvalFile)
+        {
+            // The owner's recorded approval, typed into the page's "Owner's approval" field exactly as recorded.
+            page.OwnerApproval = string.Join(" ", File.ReadAllLines(approvalFile).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#')));
+            Log("Owner approval (from the record): " + page.OwnerApproval);
+            Check(page.OwnerApproval.Length > 0, "Owner approval entered on the Unleashify page");
+        }
         foreach (var d in page.Devices) Log($"Device {d.Name} iOS {d.Ios}: [{d.Tag.Text}] {d.Detail}");
         Log($"Installed builds: [{page.InstalledTag.Text}] {page.InstalledSummary}");
         Shot("unleashify-panel");
         ShotAt("PACKAGE", "unleashify-package");
+        if (page.OwnerApproval.Length > 0) ShotAt("CANDIDATE AND PROVENANCE", "unleashify-owner-approval");
 
         // Build (after trust).
         Check(!page.BuildCommand.CanExecute(null), "Build refused before trust is confirmed");
@@ -128,6 +136,14 @@ internal static partial class Program
         ShotAt("BUILD OUTPUT", "unleashify-handoff");
         ShotScrolledToEnd("unleashify-log");
         Check(page.HandoffFolder is not null && Directory.Exists(page.HandoffFolder), "Candidate handoff exported");
+        if (_args.ContainsKey("unleashify-owner-approval-file"))
+        {
+            Check(!page.Missing.Any(m => m.StartsWith("owner approval", StringComparison.Ordinal)), "The handoff no longer lists the owner approval as missing");
+            var toml = File.ReadAllText(Path.Combine(page.HandoffFolder!, "package.toml"));
+            Check(toml.Contains("\nexception = \"", StringComparison.Ordinal) && toml.Contains($"\nexception_versions = [\"{page.PackageVersion}\"]", StringComparison.Ordinal),
+                "package.toml records the approval as [access] exception for this version only");
+            Check(!toml.Contains("HYPOTHETICAL", StringComparison.Ordinal) && !toml.Contains("<owner>", StringComparison.Ordinal), "No placeholder approval in package.toml");
+        }
         if (Arg("expect-readiness") is { } readiness)
             Check(readiness == "ready" ? page.ReadinessTag.Tone == "success" : page.ReadinessTag.Tone != "success", $"Device-testing readiness: {page.ReadinessTag.Text} (expected {readiness})");
         File.WriteAllText(Path.Combine(output, $"{_prefix}-unleashify.json"), JsonSerializer.Serialize(new
@@ -136,7 +152,7 @@ internal static partial class Program
             packageVersion = page.PackageVersion, deploymentTarget = page.DeploymentTarget, bundleId = page.BundleId, app = page.AppSummary,
             modes = page.Modes.Select(m => new { m.Label, m.Available, m.Reason }), validation = page.ValidationTag.Text, result = page.Result,
             devices = page.Devices.Select(d => new { d.Name, d.Ios, d.Compatible, d.Detail }), installed = page.InstalledTag.Text,
-            installedSummary = page.InstalledSummary, readiness = page.ReadinessTag.Text, readinessText = page.ReadinessText,
+            installedSummary = page.InstalledSummary, ownerApproval = page.OwnerApproval, readiness = page.ReadinessTag.Text, readinessText = page.ReadinessText,
             deviceBuild = page.DeviceBuild, handoff = page.HandoffFolder, handoffState = page.HandoffTag.Text, missing = page.Missing,
             stages = page.Stages.Select(s => new { s.Name, state = s.Tag.Text }),
             checks = page.Checks.Select(c => new { c.Name, status = c.Status.Text, c.Detail }), log = page.Log,

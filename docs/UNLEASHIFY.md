@@ -73,6 +73,15 @@ PYTHONPATH=<hcg-repo>/tools python3 tools/unleashify/hcgrepo-dry-run.py --repo <
 Verdicts: `VALIDATED` (importable as exported), `BYTES VALIDATED, NOT YET IMPORTABLE` (only the owner's approval is
 missing), `REJECTED`. Nothing is written to HCG Repo.
 
+With the owner's approval recorded, `--require-genuine-approval` (never combined with `--hypothetical-approval`) requires the
+approval in the handoff's own `package.toml` — an uncommented `[access] exception` that is not a placeholder, with
+`exception_versions` naming only this version — and requires `VALIDATED`.
+
+**Recorded approvals** live in `tools/unleashify/approvals/<package>_<version>.txt` (the non-comment line is what is entered
+in the page's *Owner's approval* field). HCG Sentinel 0.1.0~beta1: approved by the owner on 21 Nov 2026 as a free
+demonstration candidate for controlled testing — preparation and validation only; publication, public distribution,
+production deployment and installation on the owner's devices each need separate authorization.
+
 ## CI
 
 - `unleashify-sentinel` (macos-26): HCG-Sentinel at a pinned commit; a Simulator build (outside Maker) refused in the UI;
@@ -86,4 +95,5 @@ missing), `REJECTED`. Nothing is written to HCG Repo.
 
 ## Not verified here
 
-Installation, launch and removal on a real device (no phone in CI): follow the handoff's `DEVICE-TEST.md`.
+Installation, launch and removal on a real device (no phone in CI): follow the handoff's `DEVICE-TEST.md` (detection of existing
+installations, snapshot, install of the exact file, verification, launch, removal, rollback, result record).

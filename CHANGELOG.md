@@ -13,7 +13,8 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 
 ### Changed
 - The handoff's `package.toml` follows HCG Repo's current access rules: the production level (`connect` when undecided) and a free-demo `[access] exception` only from the owner's recorded approval of that version (`--owner-approval`, or the field on the Unleashify page). Previously it wrote `level = "public"` (rejected by HCG Repo) or an exception no approval backed.
-- `DEVICE-TEST.md` adds installing the exact exported file before publication (SHA-256 check, `dpkg -i`) and a check that no other build of the app is installed.
+- `DEVICE-TEST.md` is a complete procedure: detection of existing installations (uicache, dpkg, sideloaded bundles), a dpkg/uicache snapshot, install of the exact exported file (SHA-256 checked), verification, launch, removal with a before/after diff, rollback and a result record.
+- HCG Sentinel 0.1.0~beta1: the owner's approval (21 Nov 2026, preparation and validation only) is recorded in `tools/unleashify/approvals/` and entered on the Unleashify page in CI; the HCG Repo dry run uses `--require-genuine-approval` (no placeholder) in both Unleashify jobs.
 
 ### Fixed
 - Validation resolves `@rpath` in embedded libraries through the main executable's run paths, as dyld does (an embedded Swift runtime library linking `@rpath/libswiftCore.dylib` was reported unresolved).

@@ -43,6 +43,8 @@ def main() -> int:
     ap.add_argument("--product-key", help="config/products.toml product the package belongs to, if HCG Repo does not list it yet")
     ap.add_argument("--hypothetical-approval", action="store_true",
                     help="also run with a labelled, hypothetical [access] exception in the throwaway copy (never an approval)")
+    ap.add_argument("--require-genuine-approval", action="store_true",
+                    help="require the owner's recorded approval in the handoff's package.toml (no placeholder), and an importable result")
     ap.add_argument("--report", type=Path, help="write the result as JSON")
     a = ap.parse_args()
 
@@ -71,6 +73,25 @@ def main() -> int:
         problems.append(f"the .deb's SHA-256 differs from the handoff's SHA256SUMS ({sums[0]})")
     if deb != debs[0].resolve() and sha256(debs[0]) != actual:
         problems.append("the .deb given differs from the handoff's .deb")
+
+    approval = None
+    if a.require_genuine_approval:
+        if a.hypothetical_approval:
+            print("REFUSED: --require-genuine-approval cannot be combined with --hypothetical-approval")
+            return 2
+        access = tomllib.loads((handoff / "package.toml").read_text(encoding="utf-8")).get("access", {})
+        approval = access.get("exception")
+        if not approval:
+            problems.append("package.toml has no [access] exception: the owner's approval is not recorded")
+        elif any(p in approval for p in ("HYPOTHETICAL", "<owner>", "<date>", "<their words>")):
+            problems.append("package.toml's [access] exception is a placeholder, not the owner's approval")
+        if req["version"] not in access.get("exception_versions", []):
+            problems.append(f"package.toml's exception_versions does not list {req['version']}")
+        if set(access.get("exception_versions", [])) - {req["version"]}:
+            problems.append(f"package.toml's exception_versions lists other versions: {access.get('exception_versions')}")
+        print(f"approval     {approval}")
+        print(f"             exception_versions = {access.get('exception_versions')} (recorded in the handoff's package.toml; not a placeholder)"
+              if not problems else "             NOT a genuine recorded approval")
 
     from hcgrepo import importer  # noqa: E402 (from the HCG Repo checkout on PYTHONPATH)
     from hcgrepo.config import load_config, load_lock, load_package_meta
@@ -159,6 +180,9 @@ def main() -> int:
     }
     for p in problems:
         print("PROBLEM      " + p)
+    if a.require_genuine_approval and not problems and not result["importable_as_exported"]:
+        problems.append("the owner's approval is recorded but HCG Repo would not import the package as exported")
+    result["genuine_approval"] = approval if a.require_genuine_approval else None
     if problems:
         verdict = "REJECTED"
     elif result["importable_as_exported"]:

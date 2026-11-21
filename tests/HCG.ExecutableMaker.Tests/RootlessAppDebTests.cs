@@ -494,7 +494,13 @@ public class RootlessAppDebTests
         Assert.Contains($"# App source: F1r3srp3nt/HCG-Sentinel commit {new string('c', 40)}", crossReq);
         Assert.Contains(new string('c', 40), File.ReadAllText(Path.Combine(cross.Handoff.Folder, "provenance.json")));
         Assert.Contains("Not yet device-tested", File.ReadAllText(Path.Combine(h.Folder, "KNOWN-ISSUES.md")));
-        Assert.Contains("uicache -p /var/jb/Applications/HCGSentinel.app", File.ReadAllText(Path.Combine(h.Folder, "DEVICE-TEST.md")));
+        var deviceTest = File.ReadAllText(Path.Combine(h.Folder, "DEVICE-TEST.md"));
+        Assert.Contains("uicache -p /var/jb/Applications/HCGSentinel.app", deviceTest);
+        Assert.Contains("## 1 · Detect existing HCG Sentinel installations", deviceTest);       // sideloaded / packaged / other builds
+        Assert.Contains("uicache -l | grep -i -e com.hcg.sentinel -e sentinel", deviceTest);
+        Assert.Contains("dpkg -l > /var/mobile/sentinel-test-before-dpkg.txt", deviceTest);     // snapshot for rollback
+        Assert.Contains($"must print `{pinned.Validation!.Facts.Sha256}`", deviceTest);         // the exact file is checked before install
+        Assert.Contains("## 7 · Rollback and recovery", deviceTest);
 
         // Without the owner's approval of this version, the exception stays commented out — never invented — and is listed as missing.
         var crossToml = File.ReadAllText(Path.Combine(cross.Handoff.Folder, "package.toml"));

@@ -1,0 +1,6 @@
+# Owner approval record for HCG Sentinel 0.1.0~beta1 (com.hakmicapitalgroup.hcgsentinel), recorded 21 Nov 2026.
+# The non-comment line below is entered verbatim in the Unleashify page's "Owner's approval" field (CI: --unleashify-owner-approval-file)
+# and becomes package.toml [access] exception for this version only (exception_versions = ["0.1.0~beta1"]).
+# Scope, as the owner stated it: preparation and validation only. It does NOT authorize automatic publication, public distribution,
+# production deployment, or installation on the owner's physical devices; each of those needs the owner's separate authorization.
+approved by the owner on 21 Nov 2026: 'I approve HCG Sentinel 0.1.0~beta1 as a free demonstration candidate for controlled testing.' Scope stated by the owner: preparation and validation only; not automatic publication, public distribution, production deployment, or installation on the owner's physical devices, each of which needs separate authorization
