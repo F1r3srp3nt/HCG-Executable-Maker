@@ -279,7 +279,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             ProjectRows.Add(new("App", $"{dn.ApplicationTitle} · {dn.ApplicationId} · {dn.DisplayVersion ?? "version not known (its props are outside the import)"} ({dn.BuildNumber}) · iOS {dn.MinimumOS}+{(dn.Entitlements is { } e ? " · entitlements " + e : "")}"));
             ProjectRows.Add(new("Shared projects", dn.ProjectReferences.Count == 0 ? "none" : string.Join(", ", dn.ProjectReferences)));
             if (dn.OutsideWorkspace.Count > 0) ProjectRows.Add(new("Outside the import", string.Join(", ", dn.OutsideWorkspace) + " — import the repository root"));
-            ProjectRows.Add(new("Toolchain pins", $".NET SDK {dn.GlobalJsonSdk ?? "(no global.json)"} · iOS workload {dn.WorkloadPin ?? "(not pinned)"}{(dn.WorkloadPinFile is { } pinFile ? $" ({pinFile})" : "")}"));
+            ProjectRows.Add(new("Toolchain pins", $".NET SDK {dn.GlobalJsonSdk ?? "(no global.json)"} · iOS workload {dn.WorkloadPin ?? "(not pinned)"}{(dn.WorkloadPinFile is { } pinFile ? $" ({pinFile})" : "")}{(dn.RequiredXcode is { } xc ? $" · Xcode {xc}" : "")}"));
         }
         if (m.ArtifactPath is { } artifact) ProjectRows.Add(new("Artifact", artifact));
         Diagnostics.Clear();

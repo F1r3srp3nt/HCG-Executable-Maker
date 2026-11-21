@@ -1,0 +1,12 @@
+<Project>
+  <!--
+    The toolchain HCG Mail for iOS is built and verified with. scripts/doctor.sh, the build scripts and CI read
+    these values; change them here only, together with scripts/workload-rollback.json.
+  -->
+  <PropertyGroup>
+    <HcgRequiredXcode>26.3</HcgRequiredXcode>
+    <HcgIosWorkloadManifest>26.2.10233</HcgIosWorkloadManifest>
+    <HcgMinimumIos>16.0</HcgMinimumIos>
+    <HcgMinimumDotnetSdk>10.0.100</HcgMinimumDotnetSdk>
+  </PropertyGroup>
+</Project>

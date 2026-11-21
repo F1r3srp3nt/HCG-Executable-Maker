@@ -382,11 +382,11 @@ public static class MobileReadiness
                 items.Add(ios is not { IsAvailable: true }
                     ? new(".NET iOS workload", r.Host.Platform == TargetPlatform.MacOS ? ReadinessState.NotFound : ReadinessState.OtherHost, true,
                         ios?.Detail ?? "The .NET iOS workload is not installed.",
-                        pin is null ? "Run: dotnet workload install ios (HCG never installs workloads)." : $"Run: dotnet workload install ios --from-rollback-file \"{m.DotNetIos!.WorkloadPinFile}\" — the version the project pins ({pin}). HCG never installs workloads.",
+                        pin is null ? "Run: dotnet workload install ios (HCG never installs workloads)." : $"Run: {m.DotNetIos!.WorkloadInstallCommand} — the version the project pins ({pin}, {m.DotNetIos.WorkloadPinFile}). HCG never installs workloads without your approval.",
                         SetupUrl: "https://learn.microsoft.com/dotnet/core/tools/dotnet-workload-install")
                     : pin is not null && ios.Version is { } installed && !pin.StartsWith(installed.Split('/')[0], StringComparison.Ordinal)
                         ? new(".NET iOS workload", ReadinessState.IncompatibleVersion, true, $"Installed {installed}; the project pins {pin} ({m.DotNetIos!.WorkloadPinFile}). Each workload version requires a specific Xcode.",
-                            $"Install the pinned version: dotnet workload install ios --from-rollback-file \"{m.DotNetIos.WorkloadPinFile}\", or update the project's pin deliberately.", Version: installed)
+                            $"Install the pinned version: {m.DotNetIos.WorkloadInstallCommand}, or update the project's pin deliberately.", Version: installed)
                         : new(".NET iOS workload", ReadinessState.Ready, true, ios.Detail ?? "Installed" + (pin is null ? "" : $"; matches the project's pin {pin}"), Version: ios.Version));
                 items.Add(new("Flutter SDK", ReadinessState.NotNeeded, false, "Not a Flutter project."));
                 break;

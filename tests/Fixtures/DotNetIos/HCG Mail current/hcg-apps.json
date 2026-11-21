@@ -1,0 +1,53 @@
+{
+  "$comment": "Machine-readable index of the applications in this repository, for build tools such as HCG Executable Maker. Paths are relative to the repository root. One code base: the iOS app references the shared projects listed under 'sharedRoot'; do not copy a single folder out of the checkout.",
+  "schema": "hcg-apps/1",
+  "repository": "HCG-Mail",
+  "applications": [
+    {
+      "id": "hcg-mail-desktop",
+      "name": "HCG Mail (desktop)",
+      "platforms": ["windows", "macos", "linux"],
+      "project": "Windows-executable-Application/src/HCG.Mail.App/HCG.Mail.App.csproj",
+      "solution": "Windows-executable-Application/HCG.Mail.sln",
+      "targetFramework": "net10.0",
+      "outputType": "WinExe",
+      "buildHost": ["windows", "macos", "linux"],
+      "build": "dotnet publish Windows-executable-Application/src/HCG.Mail.App/HCG.Mail.App.csproj -c Release -r win-x64 --self-contained",
+      "docs": "Windows-executable-Application/docs/WINDOWS_BUILD.md"
+    },
+    {
+      "id": "hcg-mail-ios",
+      "name": "HCG Mail for iPhone and iPad",
+      "platforms": ["ios"],
+      "project": "iOS App Store Submission/src/HCG.Mail.iOS/HCG.Mail.iOS.csproj",
+      "solution": "iOS App Store Submission/HCG.Mail.iOS.sln",
+      "workingDirectory": "iOS App Store Submission",
+      "targetFramework": "net10.0-ios",
+      "outputType": "Exe",
+      "bundleId": "com.hakmicapitalgroup.hcgmail",
+      "buildHost": ["macos"],
+      "toolchain": "iOS App Store Submission/toolchain.props",
+      "sharedRoot": "Windows-executable-Application",
+      "sharedRootOverride": "-p:HcgSharedRoot=<absolute path to Windows-executable-Application> or environment HCG_SHARED_ROOT",
+      "check": "iOS App Store Submission/scripts/doctor.sh",
+      "build": {
+        "simulator": "iOS App Store Submission/scripts/build-simulator.sh Debug",
+        "device": "dotnet build \"iOS App Store Submission/src/HCG.Mail.iOS/HCG.Mail.iOS.csproj\" -c Release -f net10.0-ios -r ios-arm64 -p:CodesignKey=<identity> -p:CodesignProvision=<profile>",
+        "ipa": "iOS App Store Submission/scripts/export-ipa.sh"
+      },
+      "docs": "iOS App Store Submission/README.md"
+    }
+  ],
+  "libraries": [
+    "Windows-executable-Application/src/HCG.Mail.Core/HCG.Mail.Core.csproj",
+    "Windows-executable-Application/src/HCG.Mail.Email/HCG.Mail.Email.csproj",
+    "Windows-executable-Application/src/HCG.Mail.Infrastructure/HCG.Mail.Infrastructure.csproj",
+    "Windows-executable-Application/src/HCG.Mail.Presentation/HCG.Mail.Presentation.csproj",
+    "iOS App Store Submission/src/HCG.Mail.Mobile/HCG.Mail.Mobile.csproj"
+  ],
+  "tests": [
+    "Windows-executable-Application/tests/HCG.Mail.Tests/HCG.Mail.Tests.csproj",
+    "Windows-executable-Application/tests/HCG.Mail.App.Tests/HCG.Mail.App.Tests.csproj",
+    "iOS App Store Submission/tests/HCG.Mail.Mobile.Tests/HCG.Mail.Mobile.Tests.csproj"
+  ]
+}

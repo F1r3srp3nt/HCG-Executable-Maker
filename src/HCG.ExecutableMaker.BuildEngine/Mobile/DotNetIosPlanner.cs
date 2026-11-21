@@ -25,7 +25,7 @@ public static class DotNetIosPlanner
             throw new BuildValidationException($"{p.ProjectPath} uses files outside the imported folder ({string.Join(", ", p.OutsideWorkspace.Take(3))}). Import the repository root that contains them.");
         var dotnet = input.Toolchains.Find(ToolchainIds.DotNetSdk) is { IsAvailable: true, ExecutablePath: { } d } ? d : throw new BuildValidationException("The .NET SDK was not found.");
         if (input.Toolchains.Find(ToolchainIds.DotNetIosWorkload) is not { IsAvailable: true })
-            throw new BuildValidationException("The .NET iOS workload is not installed." + (p.WorkloadPinFile is { } pin ? $" The project pins its version: dotnet workload install ios --from-rollback-file \"{pin}\"." : " Run: dotnet workload install ios.") + " HCG never installs workloads.");
+            throw new BuildValidationException("The .NET iOS workload is not installed." + (p.WorkloadPin is { } pin ? $" The project pins {pin} ({p.WorkloadPinFile}): {p.WorkloadInstallCommand}." : " Run: dotnet workload install ios.") + " HCG never installs workloads.");
         var project = MobileArgs.Inside(input.SourceDirectory, p.ProjectPath);
         var projectDir = Path.GetDirectoryName(project)!;
         MobileArgs.RequireToken(p.TargetFramework, "target framework", out var tfm, @"^net\d+\.\d+-ios[\d.]*$");
