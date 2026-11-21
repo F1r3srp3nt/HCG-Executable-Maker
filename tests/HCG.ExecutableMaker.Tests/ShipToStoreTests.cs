@@ -198,6 +198,68 @@ public sealed class ShipToStoreTests : IDisposable
         return ZipBytes(name, [.. entries]);
     }
 
+    /// <summary>Answers every request with one fixed response (or throws), to see how Maker names the problem.</summary>
+    private sealed class OneAnswer(Func<HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) => Task.FromResult(answer());
+    }
+
+    private static async Task<(StoreProblem Problem, string Label, string Explanation)> Diagnose(HttpMessageHandler handler)
+    {
+        var origin = new Uri("https://store.hakmicapitalgroup.com/");
+        var client = new HcgStoreClient(new HttpClient(handler), origin, _ => Task.FromResult<string?>("token"));
+        var ex = await Assert.ThrowsAsync<HcgStoreException>(() => client.WhoAmIAsync());
+        return StoreDiagnosis.Classify(ex, origin);
+    }
+
+    private static HttpResponseMessage Html(HttpStatusCode status)
+    {
+        var r = new HttpResponseMessage(status) { Content = new StringContent("<!DOCTYPE html><html><body>404 File not found</body></html>", System.Text.Encoding.UTF8, "text/html") };
+        r.Headers.Server.ParseAdd("GitHub.com");
+        return r;
+    }
+
+    private static HttpResponseMessage Json(HttpStatusCode status, string code, string message) =>
+        new(status) { Content = new StringContent($"{{\"error\":{{\"code\":\"{code}\",\"message\":\"{message}\"}}}}", System.Text.Encoding.UTF8, "application/json") };
+
+    [Fact]
+    public async Task A_static_site_at_the_store_address_is_reported_as_no_store_server_not_as_publishing_unavailable()
+    {
+        // store.hakmicapitalgroup.com is configured as the static storefront (GitHub Pages): GET /api/v1/publishing/whoami → 404 HTML.
+        var (problem, label, explanation) = await Diagnose(new OneAnswer(() => Html(HttpStatusCode.NotFound)));
+        Assert.Equal(StoreProblem.NotStoreServer, problem);
+        Assert.Equal("No HCG Store server at this address", label);
+        Assert.Contains("web page (text/html, server GitHub.com)", explanation, StringComparison.Ordinal);
+        Assert.Contains("HCG Store server must be deployed", explanation, StringComparison.Ordinal);
+        Assert.Equal(StoreProblem.NotStoreServer, (await Diagnose(new OneAnswer(() => Html(HttpStatusCode.MethodNotAllowed)))).Problem);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "publishing_disabled", StoreProblem.PublishingDisabled, "switched off")]
+    [InlineData(HttpStatusCode.NotFound, "not_found", StoreProblem.EndpointMissing, "no HCG Store publishing API v1")]
+    [InlineData(HttpStatusCode.MethodNotAllowed, "method_not_allowed", StoreProblem.EndpointMissing, "no HCG Store publishing API v1")]
+    [InlineData(HttpStatusCode.Unauthorized, "unauthorized", StoreProblem.SignInRejected, "Sign in with HCG again")]
+    [InlineData(HttpStatusCode.Forbidden, "not_publisher", StoreProblem.NoPermission, "buying a product does not grant it")]
+    [InlineData(HttpStatusCode.InternalServerError, "internal", StoreProblem.ServerError, "not a refusal")]
+    [InlineData(HttpStatusCode.BadGateway, "bad_gateway", StoreProblem.ServerError, "HTTP 502")]
+    public async Task Store_answers_are_named_precisely(HttpStatusCode status, string code, StoreProblem expected, string says)
+    {
+        var (problem, _, explanation) = await Diagnose(new OneAnswer(() => Json(status, code, "m")));
+        Assert.Equal(expected, problem);
+        Assert.Contains(says, explanation, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(HttpRequestError.NameResolutionError, StoreProblem.DnsFailure, "does not resolve (DNS)")]
+    [InlineData(HttpRequestError.SecureConnectionError, StoreProblem.TlsFailure, "secure (HTTPS) connection")]
+    [InlineData(HttpRequestError.ConnectionError, StoreProblem.ConnectionFailed, "no connection")]
+    public async Task Network_failures_are_named_and_never_a_refusal(HttpRequestError error, StoreProblem expected, string says)
+    {
+        var (problem, _, explanation) = await Diagnose(new OneAnswer(() => throw new HttpRequestException(error, "boom")));
+        Assert.Equal(expected, problem);
+        Assert.Contains(says, explanation, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Simulator_builds_are_recognised_in_every_form_and_never_offered_as_installable()
     {
