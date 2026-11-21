@@ -12,7 +12,8 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ### Fixed
 - MSBuild evaluation: properties and imports are evaluated in order with their conditions, undefined properties are empty, MSBuild path functions are evaluated, imports guarded by property conditions are followed, the environment is never read. HCG Mail's shared projects (HcgSharedDir) now resolve when the repository is imported.
 - .NET iOS toolchain pins are read from toolchain props (HcgIosWorkloadManifest, HcgRequiredXcode) as well as rollback files; the exact pinned install command is shown.
-- Output cards show the first sentence of an unavailable reason (full text in the tooltip and in Build Doctor) instead of repeating long blocks.
+- Output cards no longer repeat the same orange block: a reason shared by several unavailable outputs is shown once above them, other cards show only the first sentence of their own reason (full text in the tooltip and in Build Doctor). The "outside the imported folder" reason names the files instead of listing long relative paths.
+- After a repair is approved and applied, the review closes (it cannot be approved twice); the outcome, verification and log stay visible.
 
 ## [Unreleased] — Unleashify: rootless packages for HCG Repo Candidate
 
