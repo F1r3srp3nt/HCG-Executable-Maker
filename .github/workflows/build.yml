@@ -1028,6 +1028,18 @@ jobs:
           print("readiness after repair:", d["readiness"]); print("outcome:", d["repairOutcome"])
           assert not [f for f in d["findings"] if f["severity"] == "Error"], d["findings"]
           EOF
+      - name: Build Doctor screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*doctor-*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
       - uses: actions/upload-artifact@v7
         if: always()
         with:
