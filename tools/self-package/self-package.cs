@@ -9,6 +9,7 @@
 // Usage:
 //   dotnet run --no-cache tools/self-package/self-package.cs -- <repo-root> <output-dir> [--targets osx-arm64,win-x64,...]
 //                                                    [--version 0.1.0] [--dist <dir>] [--installer]
+//                                                    [--configuration Debug|Release] [--app-only]
 //
 // <output-dir> must be outside the repository (the repository is what gets imported).
 // --no-cache matters: file-based apps do not notice changes in #:project sources and would run a stale engine.
@@ -16,6 +17,8 @@
 // Formats are chosen per target from PackagingCatalog: macOS → .app (+ .dmg when this host can make one),
 // Windows/Linux → portable ZIP; --installer adds a Windows Setup.exe (Inno Setup; Windows host with ISCC required —
 // the build fails with the reason instead of silently skipping it). Exit code is non-zero if any build fails.
+// --configuration (default Release) and --app-only (macOS: the .app bundle without a .dmg) serve the Xcode project in
+// "macOS Xcode Project/", whose Debug builds use the same pipeline as releases.
 using HCG.ExecutableMaker.BuildEngine;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -56,6 +59,12 @@ var targets = (Option("--targets") ?? "osx-arm64,osx-x64,win-x64").Split(',', St
 var version = Option("--version") ?? "0.1.0";
 var dist = Option("--dist") is { } d ? Path.GetFullPath(d) : null;
 var installer = args.Contains("--installer");
+var appOnly = args.Contains("--app-only");
+if (!Enum.TryParse<BuildConfigurationKind>(Option("--configuration") ?? "Release", ignoreCase: true, out var configuration))
+{
+    Console.Error.WriteLine("--configuration must be Debug or Release.");
+    return 2;
+}
 if (PathGuard.IsWithin(repo, output) || (dist is not null && PathGuard.IsWithin(repo, dist)))
 {
     Console.Error.WriteLine("Choose output and dist directories outside the repository (they would be imported on the next run).");
@@ -94,7 +103,7 @@ foreach (var rid in targets)
 {
     var (platform, arch) = ParseRid(rid);
     var options = PackagingCatalog.Evaluate(new PackagingContext(platform, report.Host, report, IsGuiApplication: true));
-    PackagingFormat[] wanted = platform == TargetPlatform.MacOS ? [PackagingFormat.MacAppBundle, PackagingFormat.MacDmg] : [PackagingFormat.PortableZip];
+    PackagingFormat[] wanted = platform == TargetPlatform.MacOS ? (appOnly ? [PackagingFormat.MacAppBundle] : [PackagingFormat.MacAppBundle, PackagingFormat.MacDmg]) : [PackagingFormat.PortableZip];
     var formats = wanted.Where(f => options.Any(o => o.Format == f && o.IsAvailable)).ToList();
     if (installer && platform == TargetPlatform.Windows)
     {
@@ -113,6 +122,7 @@ foreach (var rid in targets)
         Platform = platform,
         Architecture = arch,
         OutputDirectory = output,
+        Configuration = configuration,
         Identity = new AppIdentity
         {
             ApplicationName = "HCG Executable Maker", Publisher = "Hakmi Capital Group", Version = version,

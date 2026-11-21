@@ -964,6 +964,118 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  xcode-project:
+    name: macOS Xcode project — xcodebuild builds the real .NET app (Debug and Release), Run starts it, window screenshot
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/../xcode-out
+      PROJ: macOS Xcode Project/HCGExecutableMaker.xcodeproj
+      # The launched app keeps its data in a throwaway folder, not the runner's home.
+      HCG_EXECUTABLE_MAKER_HOME: ${{ github.workspace }}/../xcode-out/app-home
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: The project and its schemes as Xcode sees them
+        run: |
+          mkdir -p "$OUT/screens"
+          xcodebuild -version
+          xcodebuild -list -project "$PROJ"
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker" -showBuildSettings -configuration Debug | grep -E ' (BUILT_PRODUCTS_DIR|SDKROOT|ARCHS|MACOSX_DEPLOYMENT_TARGET) = '
+
+      - name: Build — Debug (scheme "HCG Executable Maker", as ⌘B does)
+        run: |
+          set -o pipefail
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker" -configuration Debug -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-debug.log" | grep -E "error:|warning: |note: |✓|Built |BUILD (SUCCEEDED|FAILED)|\*\* "
+
+      - name: The Debug app bundle is the real HCG Executable Maker 0.4.0
+        run: |
+          P="$OUT/dd/Build/Products/Debug"; APP="$P/HCG Executable Maker.app"
+          ls -la "$P"
+          plutil -p "$APP/Contents/Info.plist"
+          V=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -1)
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$V"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = "com.hakmicapital.executablemaker"
+          lipo -archs "$APP/Contents/MacOS/HCGExecutableMaker" | grep -qw arm64
+          "$APP/Contents/MacOS/HCGExecutableMaker" --version | tee "$OUT/version.txt"
+          grep -q "HCG Executable Maker $V" "$OUT/version.txt"
+          test -x "$P/RunHCGExecutableMaker"
+
+      - name: A second build without changes is up to date (no rebuild)
+        run: |
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker" -configuration Debug -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-debug-2.log" | grep -E "up to date|BUILD (SUCCEEDED|FAILED)"
+          grep -q "is up to date" "$OUT/xcodebuild-debug-2.log"
+
+      - name: Run — start the "Run HCG Executable Maker" product as Xcode's Run does; the real window opens
+        run: |
+          swiftc -O tools/ci/window-of-pid.swift -o "$OUT/window-of-pid"
+          "$OUT/dd/Build/Products/Debug/RunHCGExecutableMaker" > "$OUT/run.log" 2>&1 &
+          PID=$!
+          echo "launcher pid $PID (after execv it is the app)"
+          for i in $(seq 1 60); do
+            if "$OUT/window-of-pid" $PID > "$OUT/windows.txt" 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$OUT/run.log"; exit 1; fi
+            sleep 2
+          done
+          cat "$OUT/windows.txt"
+          test -s "$OUT/windows.txt"
+          ps -o pid=,command= -p $PID | tee "$OUT/process.txt"
+          grep -q "HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" "$OUT/process.txt"
+          sleep 8
+          screencapture -x -o -l "$(head -1 "$OUT/windows.txt" | cut -d' ' -f1)" "$OUT/screens/xcode-run-window.png"
+          screencapture -x "$OUT/screens/xcode-run-screen.png"
+          kill -0 $PID && echo "Still running after the window appeared"
+          kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
+          echo "--- app output (Xcode's console shows the same) ---"; cat "$OUT/run.log"
+
+      - name: Build — Release (scheme "HCG Executable Maker (Release)"), checksum, no publishing
+        run: |
+          set -o pipefail
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker (Release)" -configuration Release -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-release.log" | grep -E "error:|warning: |note: |✓|Release archive|SHA-256|BUILD (SUCCEEDED|FAILED)"
+          P="$OUT/dd/Build/Products/Release"
+          ls -la "$P"
+          cd "$P" && shasum -a 256 -c HCG-Executable-Maker-*-osx-arm64.app.zip.sha256
+          "$P/HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" --version
+
+      - name: Failures are reported as Xcode errors with the cause (build folder inside the repository)
+        run: |
+          set +e
+          ACTION=build CONFIGURATION=Debug BUILT_PRODUCTS_DIR="$PWD/build-inside-repo" bash "macOS Xcode Project/Scripts/build-app.sh" > "$OUT/inside.log" 2>&1
+          code=$?
+          cat "$OUT/inside.log"
+          test $code -ne 0 && grep -q "^error: Xcode's build folder .* is inside the repository" "$OUT/inside.log"
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: xcode-project
+          path: |
+            ${{ github.workspace }}/../xcode-out/*.log
+            ${{ github.workspace }}/../xcode-out/*.txt
+            ${{ github.workspace }}/../xcode-out/screens
+            ${{ github.workspace }}/../xcode-out/dd/Build/Products/*/HCGExecutableMaker-build-logs
+          if-no-files-found: warn
+          retention-days: 7
+
   hcg-mail-ios:
     name: HCG Mail iOS — Build Doctor (folder import → repository import → MSBuild evaluation) and Simulator build; known-good .NET iOS sample
     needs: test

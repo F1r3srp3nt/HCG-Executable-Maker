@@ -2,6 +2,13 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Xcode project for the macOS app
+
+### Added
+- **`macOS Xcode Project/HCGExecutableMaker.xcodeproj`**: open HCG Executable Maker in Xcode, choose the **HCG Executable Maker** scheme and press Run. An External Build System target runs `Scripts/build-app.sh`, which builds the real .NET/Avalonia app for osx-arm64 with the repository's own self-packaging pipeline (no second build system), validates the bundle (Info.plist, bundle ID `com.hakmicapital.executablemaker`, version from `Directory.Build.props`, arm64, bundled .NET runtime, icon, signature, `--version`), and skips rebuilding when nothing changed. A small Swift launcher target makes Run start the real app in place (its output in Xcode's console, Stop quits it). Debug and Release schemes; Release adds a `.app.zip` and SHA-256 and optional Developer ID signing (`HCG_CODESIGN_IDENTITY`); nothing is published or notarized. See `macOS Xcode Project/README.md`.
+- `self-package.cs`: `--configuration Debug|Release` and `--app-only`.
+- CI `xcode-project`: xcodebuild Debug and Release builds on macOS 26 (arm64), bundle checks, an up-to-date second build, Run as Xcode does with a screenshot of the app's window, and a failure-path check; `XcodeProjectFileTests` checks the project file and schemes on every platform.
+
 ## [0.4.0] — 2026-11-21 (release candidate; publication requires the owner's approval) — Build Doctor and Unleashify
 
 Identify this build with `--version` (or the Account page footer): `HCG Executable Maker 0.4.0… (commit …)`.
