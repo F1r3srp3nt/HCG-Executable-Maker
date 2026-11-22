@@ -161,10 +161,12 @@ public sealed partial class ShipToStoreViewModel(
         {
             (Connection, ConnectionTone) = decision.State switch
             {
-                FeatureAccessState.NotPermitted => ("No publishing permission", "warning"),
-                FeatureAccessState.NotAvailableYet => ("Publishing not available", "warning"),
-                FeatureAccessState.SignInRequired => ("Not accepted", "error"),
-                FeatureAccessState.Unavailable => ("Unreachable", "error"),
+                FeatureAccessState.NotPermitted => (StorePublishingAuthority.Label(decision) ?? "No publishing permission", "warning"),
+                // The precise cause (Store server not deployed here, publishing switched off, API missing, …), never a
+                // generic "not available".
+                FeatureAccessState.NotAvailableYet => (StorePublishingAuthority.Label(decision) ?? "Publishing not available", "warning"),
+                FeatureAccessState.SignInRequired => (StorePublishingAuthority.Label(decision) ?? "Not accepted", "error"),
+                FeatureAccessState.Unavailable => (StorePublishingAuthority.Label(decision) ?? "Unreachable", "error"),
                 _ => (decision.StateLabel, "warning"),
             };
             ConnectionDetail = decision.Explanation + (decision.RemedyText is { Length: > 0 } r ? " " + r : "");

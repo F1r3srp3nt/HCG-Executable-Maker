@@ -2,6 +2,10 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Ship to Store diagnostics
+
+### Fixed
+- Ship to Store names the exact reason publishing cannot be used instead of "Publishing not available": no HCG Store server at the address (a web page answered — today's case for store.hakmicapitalgroup.com, which serves the static storefront), publishing switched off on the Store, publishing API not found, sign-in not accepted, no publishing permission, server error, DNS failure, TLS failure, connection failure or timeout. Network problems and server errors are never shown as refusals. See docs/SHIP-TO-STORE.md.
 ## [Unreleased] — Project detection
 
 ### Fixed
