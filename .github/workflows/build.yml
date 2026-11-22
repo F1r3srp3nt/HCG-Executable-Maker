@@ -226,6 +226,53 @@ jobs:
         shell: bash
         run: bash tools/ci/verify-packaged-hcg-connect.sh "${{ runner.temp }}/dist" "$VERSION" "$GITHUB_SHA"
 
+      # What a user downloads: the .app.zip extracted with ditto (as Finder does), the bundle complete, and the real app
+      # started from it with an empty data folder until its window is on screen.
+      - name: macOS — the distributed .app.zip extracts to the complete app, which launches and opens its window
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          D="${{ runner.temp }}/dist"; X="$RUNNER_TEMP/zip-check"; rm -rf "$X"; mkdir -p "$X/screens"
+          ZIP="$D/HCG-Executable-Maker-$VERSION-osx-arm64.app.zip"
+          ls -la "$D"; test -f "$ZIP"
+          ditto -x -k "$ZIP" "$X"
+          APP="$X/HCG Executable Maker.app"; EXE="$APP/Contents/MacOS/HCGExecutableMaker"
+          test -x "$EXE" && echo "✓ executable"
+          lipo -archs "$EXE" | grep -qw arm64 && echo "✓ arm64"
+          test -f "$APP/Contents/MacOS/libcoreclr.dylib" && echo "✓ .NET runtime bundled"
+          test -f "$APP/Contents/Resources/AppIcon.icns" && echo "✓ icon"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = com.hakmicapital.executablemaker && echo "✓ bundle identifier"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION" && echo "✓ version $VERSION"
+          cp "$EXE" "$X/exe-copy" && codesign --verify "$X/exe-copy" && echo "✓ app host signature (ad hoc; verified on a copy, codesign treats a bundle's executable as the bundle)"
+          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --version
+          swiftc -O tools/ci/window-of-pid.swift -o "$X/window-of-pid"
+          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" > "$X/app.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 60); do
+            if "$X/window-of-pid" $PID > "$X/windows.txt" 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$X/app.log"; exit 1; fi
+            sleep 2
+          done
+          test -s "$X/windows.txt" && echo "✓ window: $(head -1 "$X/windows.txt")"
+          sleep 8
+          screencapture -x -o -l "$(head -1 "$X/windows.txt" | cut -d' ' -f1)" "$X/screens/release-app-window.png"
+          kill -0 $PID && echo "✓ still running"
+          kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
+          j="$X/screens/release-app-window.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-window.png" --out "$j" >/dev/null
+          echo "=====BEGIN-IMG release-app-window.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
+
+      - name: Build manifest, checksums and installation instructions
+        shell: bash
+        run: |
+          D="${{ runner.temp }}/dist"
+          if [ "${{ matrix.name }}" = macos ]; then cp tools/release/INSTALL-macOS.md "$D/INSTALL-macOS.md"; fi
+          PY=$(command -v python3 || command -v python); "$PY" tools/release/manifest.py "$D" "$VERSION" "$GITHUB_SHA" "${{ matrix.name }}" "$GITHUB_RUN_ID" "$GITHUB_RUN_NUMBER" > "$D/build-manifest-${{ matrix.name }}.json"
+          cat "$D/build-manifest-${{ matrix.name }}.json"
+          (cd "$D" && if command -v sha256sum >/dev/null; then sha256sum *; else shasum -a 256 *; fi) > "${{ runner.temp }}/SHA256SUMS-${{ matrix.name }}.txt"
+          mv "${{ runner.temp }}/SHA256SUMS-${{ matrix.name }}.txt" "$D/"
+          cat "$D/SHA256SUMS-${{ matrix.name }}.txt"
+
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
@@ -269,7 +316,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: hcg-executable-maker-windows-setup
+          # Not "hcg-executable-maker-*": the release job publishes those, and this test installer is a fixed 0.3.0 build.
+          name: installer-test-windows
           path: ${{ runner.temp }}/dist/*
           if-no-files-found: warn
           retention-days: 7
@@ -961,6 +1009,126 @@ jobs:
             ${{ github.workspace }}/nexus-out/*/artifacts/**/*.deb
             ${{ github.workspace }}/nexus-out/*/artifacts/**/*.txt
             ${{ github.workspace }}/nexus-out/*/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  xcode-project:
+    name: macOS Xcode project — xcodebuild builds the real .NET app (Debug and Release), Run starts it, window screenshot
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      PROJ: macOS Xcode Project/HCGExecutableMaker.xcodeproj
+    steps:
+      # Outside the repository (the build imports it; upload-artifact also rejects '..' paths). The runner context is
+      # only available inside steps, so the paths are set here. The launched app keeps its data in a throwaway folder.
+      - name: Output folders
+        run: |
+          echo "OUT=$RUNNER_TEMP/xcode-out" >> "$GITHUB_ENV"
+          echo "HCG_EXECUTABLE_MAKER_HOME=$RUNNER_TEMP/xcode-out/app-home" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: The project and its schemes as Xcode sees them
+        run: |
+          mkdir -p "$OUT/screens"
+          xcodebuild -version
+          xcodebuild -list -project "$PROJ"
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker" -showBuildSettings -configuration Debug | grep -E ' (BUILT_PRODUCTS_DIR|SDKROOT|ARCHS|MACOSX_DEPLOYMENT_TARGET) = '
+
+      - name: Build — Debug (scheme "HCG Executable Maker", as ⌘B does)
+        run: |
+          set -o pipefail
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker" -configuration Debug -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-debug.log" | grep -E "error:|ERROR:|warning: |note: |✓|Built |BUILD (SUCCEEDED|FAILED|INTERRUPTED)|\*\* "
+
+      - name: The Debug app bundle is the real HCG Executable Maker 0.4.0
+        run: |
+          P="$OUT/dd/Build/Products/Debug"; APP="$P/HCG Executable Maker.app"
+          ls -la "$P"
+          plutil -p "$APP/Contents/Info.plist"
+          V=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -1)
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$V"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = "com.hakmicapital.executablemaker"
+          lipo -archs "$APP/Contents/MacOS/HCGExecutableMaker" | grep -qw arm64
+          "$APP/Contents/MacOS/HCGExecutableMaker" --version | tee "$OUT/version.txt"
+          grep -q "HCG Executable Maker $V" "$OUT/version.txt"
+          test -x "$P/RunHCGExecutableMaker"
+
+      - name: A second build without changes is up to date (no rebuild)
+        run: |
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker" -configuration Debug -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-debug-2.log" | grep -E "up to date|BUILD (SUCCEEDED|FAILED)"
+          grep -q "is up to date" "$OUT/xcodebuild-debug-2.log"
+
+      - name: Run — start the "Run HCG Executable Maker" product as Xcode's Run does; the real window opens
+        run: |
+          swiftc -O tools/ci/window-of-pid.swift -o "$OUT/window-of-pid"
+          "$OUT/dd/Build/Products/Debug/RunHCGExecutableMaker" > "$OUT/run.log" 2>&1 &
+          PID=$!
+          echo "launcher pid $PID (after execv it is the app)"
+          for i in $(seq 1 60); do
+            if "$OUT/window-of-pid" $PID > "$OUT/windows.txt" 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$OUT/run.log"; exit 1; fi
+            sleep 2
+          done
+          cat "$OUT/windows.txt"
+          test -s "$OUT/windows.txt"
+          ps -o pid=,command= -p $PID | tee "$OUT/process.txt"
+          grep -q "HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" "$OUT/process.txt"
+          sleep 8
+          screencapture -x -o -l "$(head -1 "$OUT/windows.txt" | cut -d' ' -f1)" "$OUT/screens/xcode-run-window.png"
+          screencapture -x "$OUT/screens/xcode-run-screen.png"
+          kill -0 $PID && echo "Still running after the window appeared"
+          kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
+          echo "--- app output (Xcode's console shows the same) ---"; cat "$OUT/run.log"
+
+      - name: Build — Release (scheme "HCG Executable Maker (Release)"), checksum, no publishing
+        run: |
+          set -o pipefail
+          xcodebuild -project "$PROJ" -scheme "HCG Executable Maker (Release)" -configuration Release -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$OUT/dd" build 2>&1 | tee "$OUT/xcodebuild-release.log" | grep -E "error:|ERROR:|warning: |note: |✓|Release archive|SHA-256|BUILD (SUCCEEDED|FAILED)"
+          P="$OUT/dd/Build/Products/Release"
+          ls -la "$P"
+          cd "$P" && shasum -a 256 -c HCG-Executable-Maker-*-osx-arm64.app.zip.sha256
+          "$P/HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" --version
+
+      - name: Failures are reported as Xcode errors with the cause (build folder inside the repository)
+        run: |
+          set +e
+          ACTION=build CONFIGURATION=Debug BUILT_PRODUCTS_DIR="$PWD/build-inside-repo" bash "macOS Xcode Project/Scripts/build-app.sh" > "$OUT/inside.log" 2>&1
+          code=$?
+          cat "$OUT/inside.log"
+          test $code -ne 0 && grep -q "^error: Xcode's build folder .* is inside the repository" "$OUT/inside.log"
+
+      - name: On failure — the end of the build script's log (the .NET build output)
+        if: failure()
+        run: |
+          for f in "$OUT"/dd/Build/Products/*/HCGExecutableMaker-build-logs/*.log; do echo "=== $f"; tail -120 "$f"; done
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: xcode-project
+          path: |
+            ${{ runner.temp }}/xcode-out/*.log
+            ${{ runner.temp }}/xcode-out/*.txt
+            ${{ runner.temp }}/xcode-out/screens
+            ${{ runner.temp }}/xcode-out/dd/Build/Products/*/HCGExecutableMaker-build-logs
           if-no-files-found: warn
           retention-days: 7
 

@@ -1,0 +1,277 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0F1266642AC66E871A8204D9 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24C255AA4F2594454C24C890 /* main.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B0CE9AD110DC1F5D8270B9A4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DDD2B1FE427BDB864B6EEAD3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FF8316468AD81A546CA63EDF;
+			remoteInfo = "HCG Executable Maker (.NET)";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		EA992C3C56F4FA67A033C469 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		6F95CF8FF9F7BAF822D746E0 /* build-app.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-app.sh"; sourceTree = "<group>"; };
+		24C255AA4F2594454C24C890 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		239EB6438BF48A9D5E1CF2F7 /* RunHCGExecutableMaker */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = RunHCGExecutableMaker; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		09AFCD06CD1A3CE8A3022558 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		09E3B537EFD78EE4B295CCC7 = {
+			isa = PBXGroup;
+			children = (
+				EA992C3C56F4FA67A033C469 /* README.md */,
+				941BA1156959969CEC8045E5 /* Scripts */,
+				255441720312940802DF427E /* Launcher */,
+				974F038F393E0FFDB1BA4C3D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		941BA1156959969CEC8045E5 /* Scripts */ = {
+			isa = PBXGroup;
+			children = (
+				6F95CF8FF9F7BAF822D746E0 /* build-app.sh */,
+			);
+			path = Scripts;
+			sourceTree = "<group>";
+		};
+		255441720312940802DF427E /* Launcher */ = {
+			isa = PBXGroup;
+			children = (
+				24C255AA4F2594454C24C890 /* main.swift */,
+			);
+			path = Launcher;
+			sourceTree = "<group>";
+		};
+		974F038F393E0FFDB1BA4C3D /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				239EB6438BF48A9D5E1CF2F7 /* RunHCGExecutableMaker */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXLegacyTarget section */
+		FF8316468AD81A546CA63EDF /* HCG Executable Maker (.NET) */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "\"$(PROJECT_DIR)/Scripts/build-app.sh\" $(ACTION)";
+			buildConfigurationList = 98183EAA6ADA82901F27777E /* Build configuration list for PBXLegacyTarget "HCG Executable Maker (.NET)" */;
+			buildPhases = (
+			);
+			buildToolPath = /bin/bash;
+			buildWorkingDirectory = "$(PROJECT_DIR)";
+			dependencies = (
+			);
+			name = "HCG Executable Maker (.NET)";
+			passBuildSettingsInEnvironment = 1;
+			productName = "HCG Executable Maker";
+		};
+/* End PBXLegacyTarget section */
+
+/* Begin PBXNativeTarget section */
+		295026B6F4A16D2F0BDAD201 /* Run HCG Executable Maker */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F53624D260A59C390C3BEEC2 /* Build configuration list for PBXNativeTarget "Run HCG Executable Maker" */;
+			buildPhases = (
+				7580A26BBF10B663712CB6DF /* Sources */,
+				09AFCD06CD1A3CE8A3022558 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D53D3E3882A5B87D5DE0C8BF /* PBXTargetDependency */,
+			);
+			name = "Run HCG Executable Maker";
+			productName = RunHCGExecutableMaker;
+			productReference = 239EB6438BF48A9D5E1CF2F7 /* RunHCGExecutableMaker */;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DDD2B1FE427BDB864B6EEAD3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					FF8316468AD81A546CA63EDF = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					295026B6F4A16D2F0BDAD201 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = 66CD00388BEA62533EF339AA /* Build configuration list for PBXProject "HCGExecutableMaker" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 09E3B537EFD78EE4B295CCC7;
+			productRefGroup = 974F038F393E0FFDB1BA4C3D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FF8316468AD81A546CA63EDF /* HCG Executable Maker (.NET) */,
+				295026B6F4A16D2F0BDAD201 /* Run HCG Executable Maker */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7580A26BBF10B663712CB6DF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0F1266642AC66E871A8204D9 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D53D3E3882A5B87D5DE0C8BF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FF8316468AD81A546CA63EDF /* HCG Executable Maker (.NET) */;
+			targetProxy = B0CE9AD110DC1F5D8270B9A4 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		AF27FD1010DDFCB30F174DC3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		73B3CC36B78E233507739761 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				MACOSX_DEPLOYMENT_TARGET = 12.0;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 5.0;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		D7118CE4F86AA703940EBD36 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "HCG Executable Maker";
+			};
+			name = Debug;
+		};
+		B99BDDB5AD4ED40C9B6DD5D9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "HCG Executable Maker";
+			};
+			name = Release;
+		};
+		9CE9CC7DFFA315A7A2EECBFB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = RunHCGExecutableMaker;
+			};
+			name = Debug;
+		};
+		808B8B3A2A2D9610377C412A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = RunHCGExecutableMaker;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		66CD00388BEA62533EF339AA /* Build configuration list for PBXProject "HCGExecutableMaker" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF27FD1010DDFCB30F174DC3 /* Debug */,
+				73B3CC36B78E233507739761 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		98183EAA6ADA82901F27777E /* Build configuration list for PBXLegacyTarget "HCG Executable Maker (.NET)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7118CE4F86AA703940EBD36 /* Debug */,
+				B99BDDB5AD4ED40C9B6DD5D9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F53624D260A59C390C3BEEC2 /* Build configuration list for PBXNativeTarget "Run HCG Executable Maker" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9CE9CC7DFFA315A7A2EECBFB /* Debug */,
+				808B8B3A2A2D9610377C412A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = DDD2B1FE427BDB864B6EEAD3 /* Project object */;
+}
