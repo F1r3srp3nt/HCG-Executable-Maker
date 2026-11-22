@@ -244,7 +244,7 @@ jobs:
           test -f "$APP/Contents/Resources/AppIcon.icns" && echo "✓ icon"
           test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = com.hakmicapital.executablemaker && echo "✓ bundle identifier"
           test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION" && echo "✓ version $VERSION"
-          codesign --verify "$EXE" && echo "✓ app host signature (ad hoc)"
+          cp "$EXE" "$X/exe-copy" && codesign --verify "$X/exe-copy" && echo "✓ app host signature (ad hoc; verified on a copy, codesign treats a bundle's executable as the bundle)"
           HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --version
           swiftc -O tools/ci/window-of-pid.swift -o "$X/window-of-pid"
           HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" > "$X/app.log" 2>&1 &

@@ -126,9 +126,12 @@ check "the executable exists and is executable" "[ -x '$APP/Contents/MacOS/$EXEC
 check "the executable is arm64" "lipo -archs '$APP/Contents/MacOS/$EXECUTABLE' 2>/dev/null | grep -qw arm64"
 check "the .NET runtime is bundled (self-contained)" "[ -f '$APP/Contents/MacOS/libcoreclr.dylib' ]"
 check "the app icon is in Resources" "ICON=\$(plutil -extract CFBundleIconFile raw '$PLIST' 2>/dev/null) && ls '$APP/Contents/Resources/'\"\${ICON%.icns}\".icns >/dev/null 2>&1"
-# The bundle carries the .NET SDK's ad-hoc signature on the app host only (Apple Silicon refuses unsigned code), unless
-# a Release build is signed below with HCG_CODESIGN_IDENTITY.
-check "the app host carries a valid code signature (ad hoc)" "codesign --verify '$APP/Contents/MacOS/$EXECUTABLE' 2>/dev/null"
+# The app host carries the .NET SDK's ad-hoc signature (Apple Silicon refuses unsigned code); the bundle as a whole is
+# not signed unless a Release build is signed below with HCG_CODESIGN_IDENTITY. codesign treats a bundle's main
+# executable as the bundle, so the executable's own signature is verified on a standalone copy.
+SIGCHECK="$(mktemp -d)"; cp "$APP/Contents/MacOS/$EXECUTABLE" "$SIGCHECK/$EXECUTABLE"
+check "the app host carries a valid code signature (ad hoc)" "codesign --verify '$SIGCHECK/$EXECUTABLE' 2>/dev/null"
+rm -rf "$SIGCHECK"
 IDENTITY="$("${clean_env[@]}" "$APP/Contents/MacOS/$EXECUTABLE" --version 2>/dev/null | head -1)"
 check "the app starts and reports $VERSION ($IDENTITY)" "echo '$IDENTITY' | grep -q 'HCG Executable Maker $VERSION'"
 if [ $fail -ne 0 ]; then err "The app bundle is not valid; see the lines above and $LOG."; exit 1; fi
