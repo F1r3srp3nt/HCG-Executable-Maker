@@ -2,7 +2,7 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [Unreleased] — Xcode projects that only wrap another build (HCG Mail)
 
 ### Fixed
 - **HCG Mail's iOS app is found again when its repository contains `HCGMail.xcodeproj`.** That project only runs the
@@ -13,6 +13,71 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - The analysis names the wrapper in an Info diagnostic.
   - Real iOS app projects, which have a native target, are unaffected.
   - The "HCG Mail like" fixture now includes the project.
+
+## [Unreleased] — Xcode project for the macOS app
+
+### Added
+- **`macOS Xcode Project/HCGExecutableMaker.xcodeproj`**: open HCG Executable Maker in Xcode, choose the **HCG Executable Maker** scheme and press Run. An External Build System target runs `Scripts/build-app.sh`, which builds the real .NET/Avalonia app for osx-arm64 with the repository's own self-packaging pipeline (no second build system), validates the bundle (Info.plist, bundle ID `com.hakmicapital.executablemaker`, version from `Directory.Build.props`, arm64, bundled .NET runtime, icon, signature, `--version`), and skips rebuilding when nothing changed. A small Swift launcher target makes Run start the real app in place (its output in Xcode's console, Stop quits it). Debug and Release schemes; Release adds a `.app.zip` and SHA-256 and optional Developer ID signing (`HCG_CODESIGN_IDENTITY`); nothing is published or notarized. See `macOS Xcode Project/README.md`.
+- `self-package.cs`: `--configuration Debug|Release` and `--app-only`.
+- CI `xcode-project`: xcodebuild Debug and Release builds on macOS 26 (arm64), bundle checks, an up-to-date second build, Run as Xcode does with a screenshot of the app's window, and a failure-path check; `XcodeProjectFileTests` checks the project file and schemes on every platform.
+## [Unreleased] — Ship to Store diagnostics
+
+### Fixed
+- Ship to Store names the exact reason publishing cannot be used instead of "Publishing not available": no HCG Store server at the address (a web page answered — today's case for store.hakmicapitalgroup.com, which serves the static storefront), publishing switched off on the Store, publishing API not found, sign-in not accepted, no publishing permission, server error, DNS failure, TLS failure, connection failure or timeout. Network problems and server errors are never shown as refusals. See docs/SHIP-TO-STORE.md.
+## [Unreleased] — Project detection
+
+### Fixed
+- Projects inside test-fixture folders (`Fixtures`, `__fixtures__`, `testdata`, …) are never offered as a repository's app. Importing HCG Executable Maker itself into Mobile Build Studio offered a test fixture (0.3.1: `tests/Fixtures/DotNetIos/HCG Mail like`; 0.4.0: `HelloDotNetIos`) as "the" iOS app, and attached a Theos route and an Electron note from fixtures. It is now reported as an Avalonia desktop app (built in New Build), with its fixture mobile projects listed as test samples.
+- "No iOS application target was found in the Xcode project" now says what the project contains and what to do: an unreadable `project.pbxproj` (invalid project), a project without native targets, only frameworks/extensions/tests (each target listed with its kind and SDK), a macOS application (New Build or Porting Studio), or a Capacitor app without its iOS project.
+
+## [0.4.0] — 2026-11-21 (release candidate; publication requires the owner's approval) — Build Doctor and Unleashify
+
+Identify this build with `--version` (or the Account page footer): `HCG Executable Maker 0.4.0… (commit …)`.
+
+Highlights:
+- **Build Doctor** in Mobile Build Studio: dependency diagnostics across the project graph (references, MSBuild
+  properties and imports, source files, SDK/global.json, target framework, iOS workload and its pin, Xcode, restore,
+  runtime identifier, bundle ID, entitlements, signing and provisioning), each with root cause, affected file,
+  severity, repair mode and verification.
+- **Approved repair workflows**: review → approval → backup → apply → re-check → rollback; nothing is installed or
+  changed without approval.
+- **Multi-project (monorepo) import**: an app that references sibling folders is offered an import of the repository
+  root, keeping its layout (HCG Mail's iOS app now builds for the Simulator).
+- **iOS workload detection**: the pinned .NET iOS workload and Xcode version are read from the project
+  (rollback file or toolchain props) and shown with the exact install command, run only on approval.
+- **Mobile Build Studio UI**: readiness summary, actions and expandable findings instead of repeated error blocks.
+- **Unleashify**: rootless `.deb` generation for jailbroken devices from an iOS build, full validation, and the
+  existing **HCG Repo Candidate handoff** (publication to HCG Repo stays a separate owner decision).
+
+### Build Doctor
+
+#### Added
+- **Build Doctor** in Mobile Build Studio: structured findings (problem, root cause, affected file, severity, repair, approval mode, verification) for project references, MSBuild properties and imports, source files, import scope (monorepos), SDK and global.json, target framework, workload and its pin, Xcode, NuGet restore, runtime identifier, bundle identifier, entitlements, signing and provisioning, and the host. Readiness summary ("3 unresolved project references", "1 missing workload"…) with Run Build Doctor, Review proposed repairs, Install missing workload, Configure signing and Recheck actions; findings expand to technical detail. See docs/BUILD_DOCTOR.md.
+- Repairs with review → approval → backup → apply → re-validation → rollback: import the repository root for monorepo apps, reconnect an unambiguous broken reference, restore NuGet packages, install the pinned .NET iOS workload. Evaluate with MSBuild (`dotnet msbuild -getProperty/-getItem`, after trust) confirms every reference.
+- Known-good .NET for iOS sample (tests/Fixtures/DotNetIos/HelloDotNetIos) and the current HCG Mail build files as a fixture.
+
+#### Fixed
+- MSBuild evaluation: properties and imports are evaluated in order with their conditions, undefined properties are empty, MSBuild path functions are evaluated, imports guarded by property conditions are followed, the environment is never read. HCG Mail's shared projects (HcgSharedDir) now resolve when the repository is imported.
+- .NET iOS toolchain pins are read from toolchain props (HcgIosWorkloadManifest, HcgRequiredXcode) as well as rollback files; the exact pinned install command is shown.
+- Output cards no longer repeat the same orange block: a reason shared by several unavailable outputs is shown once above them, other cards show only the first sentence of their own reason (full text in the tooltip and in Build Doctor). The "outside the imported folder" reason names the files instead of listing long relative paths.
+- After a repair is approved and applied, the review closes (it cannot be approved twice); the outcome, verification and log stay visible.
+
+### Unleashify: rootless packages for HCG Repo Candidate
+
+#### Added
+- **Rootless package** workflow (UI page, Mobile Build Studio action, `--rootless-deb` / `--rootless-deb-validate`): an iOS app a build produced (device .app, .xcarchive or .ipa) → rootless `iphoneos-arm64` .deb with gzip members at `/var/jb/Applications` → full validation (paths, dependencies, Mach-O architecture/platform/minimum iOS/signature/entitlements/libraries, versions, gzip and complete extraction, SHA-256) → HCG Repo candidate handoff (provenance, changelog, known issues, package.toml, icon, import request, device test and recovery). The app is packaged unchanged: no added entitlements, privileged ones refused. See docs/ROOTLESS-PACKAGING.md.
+- **Unleashify** in Mobile Build Studio (replaces the separate Rootless package page): source revision with a stale-copy warning, the three modes (Jailbreak App available; Jailbreak Tweak and App + Tweak shown as not available, with the reason), build from the Xcode project (scheme, bundle ID and deployment target shown and kept) or from an existing device build (Simulator builds refused), package ID/version, output, test-device compatibility (an iOS 13.3 device is explained as a separate target metadata cannot reach), an installed-build conflict check, **Build** and **Export Candidate Handoff**. See docs/UNLEASHIFY.md.
+- Import records the source revision (`import-revision.json`: Git commit/branch, or a GitHub ZIP's commit).
+- `tools/unleashify/hcgrepo-dry-run.py`: HCG Repo's own importer (`load_request` + `import_deb(dry_run=True)`) on the exact exported bytes, in a throwaway copy of HCG Repo.
+- CI `unleashify-sentinel` (HCGSentinelModern on macos-26, the full click path through the real views, byte-identical CLI and existing-build packages, validation, HCG Repo inspect and importer dry run) and `unleashify-artifact-roundtrip` (the uploaded artifact is the manifest's exact bytes; importer dry run and dpkg sandbox on the downloaded bytes).
+
+#### Changed
+- The handoff's `package.toml` follows HCG Repo's current access rules: the production level (`connect` when undecided) and a free-demo `[access] exception` only from the owner's recorded approval of that version (`--owner-approval`, or the field on the Unleashify page). Previously it wrote `level = "public"` (rejected by HCG Repo) or an exception no approval backed.
+- `DEVICE-TEST.md` is a complete procedure: detection of existing installations (uicache, dpkg, sideloaded bundles), a dpkg/uicache snapshot, install of the exact exported file (SHA-256 checked), verification, launch, removal with a before/after diff, rollback and a result record.
+- HCG Sentinel 0.1.0~beta1: the owner's approval (21 Nov 2026, preparation and validation only) is recorded in `tools/unleashify/approvals/` and entered on the Unleashify page in CI; the HCG Repo dry run uses `--require-genuine-approval` (no placeholder) in both Unleashify jobs.
+
+#### Fixed
+- Validation resolves `@rpath` in embedded libraries through the main executable's run paths, as dyld does (an embedded Swift runtime library linking `@rpath/libswiftCore.dylib` was reported unresolved).
 
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  The only entitlement HCG Mail needs. The first group is the app's own (where HCG Mail stores IMAP/SMTP passwords,
+	  the default for new Keychain items); the second is the group MSAL for iOS uses for Microsoft sign-in tokens.
+	  No iCloud, push notifications, background modes, app groups or associated domains are requested.
+	-->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(CFBundleIdentifier)</string>
+		<string>$(AppIdentifierPrefix)com.microsoft.adalcache</string>
+	</array>
+</dict>
+</plist>

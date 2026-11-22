@@ -1,0 +1,27 @@
+<Project InitialTargets="HcgCheckBuildInputs">
+  <!-- Same build-time privacy rule as the desktop projects (no Avalonia build telemetry). -->
+  <Import Project="$(HcgSharedDir)Directory.Build.targets" Condition="'$(HcgSharedRootFound)' == 'true'" />
+
+  <!--
+    Build diagnostics, each with its own code so the cause is never confused:
+      HCG001  shared HCG Mail sources missing (incomplete checkout or folder copied on its own)
+      HCG002  iOS app built on a machine that is not a Mac (Apple's iOS SDK only exists on macOS)
+      HCG003  minimum iOS version below what HCG Mail supports
+      HCG004  device build without code signing settings (informational: the SDK may pick an identity itself)
+    SDK/workload and Xcode problems are reported by the .NET SDK itself (NETSDK1147, "requires Xcode …");
+    scripts/doctor.sh checks all categories up front.
+  -->
+  <Target Name="HcgCheckBuildInputs">
+    <Error Code="HCG001" Condition="'$(HcgSharedRootFound)' != 'true'"
+           Text="HCG Mail's shared sources were not found at '$(HcgSharedDir)'. The iOS app references the mail engine and view models from Windows-executable-Application/ in the same HCG-Mail checkout. Build from a complete clone of the repository, or pass -p:HcgSharedRoot=&lt;path to Windows-executable-Application&gt; (environment variable HCG_SHARED_ROOT)." />
+    <Error Code="HCG002"
+           Condition="'$(TargetPlatformIdentifier)' == 'ios' And !$([MSBuild]::IsOSPlatform('OSX')) And '$(HcgAllowNonMacEvaluation)' != 'true'"
+           Text="HCG.Mail.iOS can only be built on macOS with Xcode $(HcgRequiredXcode) and the .NET iOS workload $(HcgIosWorkloadManifest): Apple's iOS SDK, simulators and signing tools do not exist on $([System.Runtime.InteropServices.RuntimeInformation]::OSDescription). On this machine build and test the platform-neutral parts instead: dotnet test &quot;iOS App Store Submission/tests/HCG.Mail.Mobile.Tests&quot;." />
+    <Error Code="HCG003"
+           Condition="'$(TargetPlatformIdentifier)' == 'ios' And '$(SupportedOSPlatformVersion)' != '' And $([System.Version]::Parse('$(SupportedOSPlatformVersion)').CompareTo($([System.Version]::Parse('$(HcgMinimumIos)')))) &lt; 0"
+           Text="SupportedOSPlatformVersion $(SupportedOSPlatformVersion) is below the minimum iOS version HCG Mail supports and is tested on ($(HcgMinimumIos))." />
+    <Message Importance="high"
+             Condition="'$(TargetPlatformIdentifier)' == 'ios' And $(RuntimeIdentifier.StartsWith('ios-')) And '$(CodesignKey)' == '' And '$(EnableCodeSigning)' != 'false'"
+             Text="HCG004: device build without CodesignKey/CodesignProvision. The iOS SDK will try to pick an Apple Development identity and profile from this Mac's keychain; if none fits it fails with 'No valid iOS code signing keys'. See README › Run on your own iPhone or iPad, or use scripts/export-ipa.sh." />
+  </Target>
+</Project>

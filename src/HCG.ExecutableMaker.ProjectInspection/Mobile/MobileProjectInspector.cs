@@ -17,6 +17,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
     /// </summary>
     public int Match(SourceIndex index)
     {
+        index = index.WithoutTestFixtures();
         var mauiProjects = MauiAnalyzer.Find(index);
         var markers = new List<(string Path, int Score)>();
         markers.AddRange(FlutterAnalyzer.FindPubspecs(index).Select(p => (p, 110)));
@@ -54,7 +55,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
     }
 
     /// <summary>The .NET iOS app analysis, for attaching to another inspector's result (a repository with desktop and iOS heads).</summary>
-    public static MobileAnalysis? AnalyzeDotNetIos(SourceIndex index) => DotNetIosAnalyzer.Find(index).FirstOrDefault() is { } ios
+    public static MobileAnalysis? AnalyzeDotNetIos(SourceIndex index) => DotNetIosAnalyzer.Find(index.WithoutTestFixtures()).FirstOrDefault() is { } ios
         ? new MobileAnalysis { Framework = MobileFramework.DotNetIos, Platforms = [TargetPlatform.IOS], DotNetIos = ios, ApplicationIds = ios.ApplicationId is { } id ? [id] : [] }
         : null;
 
@@ -63,6 +64,7 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
 
     public ProjectAnalysis Inspect(SourceIndex index, ToolchainReport? toolchains)
     {
+        index = index.WithoutTestFixtures();
         var diagnostics = new List<AnalysisDiagnostic>();
         var mobile = Analyze(index, diagnostics);
         var options = MobileCapabilities.Evaluate(mobile, toolchains);
@@ -153,8 +155,26 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
         };
     }
 
+    /// <summary>
+    /// Mobile app projects that exist only inside test-fixture folders (e.g. tests/Fixtures/…): reported, never offered as
+    /// the app. Empty when the tree has none.
+    /// </summary>
+    public static IReadOnlyList<string> FixtureAppProjects(SourceIndex index)
+    {
+        var fixtures = index.Files.Where(SourceIndex.IsTestFixture).ToList();
+        if (fixtures.Count == 0) return [];
+        var found = new List<string>();
+        found.AddRange(DotNetIosAnalyzer.Find(index).Select(p => p.ProjectPath));
+        found.AddRange(XcodeProjectAnalyzer.FindMobileProjects(index));
+        found.AddRange(AndroidGradleAnalyzer.FindRoots(index).Select(r => r.Length == 0 ? "build.gradle" : r));
+        found.AddRange(FlutterAnalyzer.FindPubspecs(index));
+        found.AddRange(MauiAnalyzer.Find(index).Select(m => m.ProjectPath));
+        return found.Where(SourceIndex.IsTestFixture).Distinct(StringComparer.Ordinal).ToList();
+    }
+
     public static MobileAnalysis Analyze(SourceIndex index, List<AnalysisDiagnostic> diagnostics)
     {
+        index = index.WithoutTestFixtures();
         // Capacitor first: its android/ and ios/ folders are native projects that only build after npm installs @capacitor/*.
         if (CapacitorAnalyzer.FindRoots(index).FirstOrDefault() is { } capRoot)
         {

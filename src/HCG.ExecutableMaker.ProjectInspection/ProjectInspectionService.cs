@@ -38,9 +38,12 @@ public sealed class ProjectInspectionService(IEnumerable<IProjectInspector> insp
         var others = ranked.Skip(1).Select(r => r.Inspector).ToList();
         var extra = new List<AnalysisDiagnostic>();
         // Node.js projects are reported whichever ecosystem leads, so an Electron app inside another repository is visible.
-        if (analysis.Node is null && index.Named("package.json").Any())
+        // Projects inside test-fixture folders (tests/Fixtures/…) are samples for the repository's own tests: they are listed
+        // once below and never attached as this repository's mobile app, Electron app or Theos package.
+        var own = index.WithoutTestFixtures();
+        if (analysis.Node is null && own.Named("package.json").Any())
         {
-            var node = Node.NodeProjectInspector.Analyze(index);
+            var node = Node.NodeProjectInspector.Analyze(own);
             if (node.Projects.Count > 0)
             {
                 analysis = analysis with { Node = node };
@@ -58,7 +61,7 @@ public sealed class ProjectInspectionService(IEnumerable<IProjectInspector> insp
         }
         // A Theos jailbreak project in a folder led by another project (HCG Nexus: HCGNexus.xcodeproj next to the tweak's
         // Makefile and control): attached, so New Build offers both routes and builds either with its own planner.
-        if (analysis.Native is null && BuildRoutes.TheosProjects(Native.NativeProjectInspector.Analyze(index)) is { Count: > 0 } theos)
+        if (analysis.Native is null && BuildRoutes.TheosProjects(Native.NativeProjectInspector.Analyze(own)) is { Count: > 0 } theos)
         {
             analysis = analysis with { Native = new NativeAnalysis { Projects = theos } };
             var lead = BuildRoutes.Lead(analysis);
@@ -66,9 +69,12 @@ public sealed class ProjectInspectionService(IEnumerable<IProjectInspector> insp
                 extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info,
                     $"Theos project {p.Name} in {p.DisplayDirectory} ({p.Theos!.Summary}). In New Build, choose “{BuildRoutes.TheosDebLabel}” under Build route to build its .deb; “{lead.Label}” builds the {analysis.Framework} project.", p.ManifestPath));
             // The note below lists what is not built: the C/C++ inspector only when it found more than Theos projects.
-            if (Native.NativeProjectInspector.Analyze(index).Projects.All(p => p.Kind == NativeProjectKind.Theos))
+            if (Native.NativeProjectInspector.Analyze(own).Projects.All(p => p.Kind == NativeProjectKind.Theos))
                 others.RemoveAll(i => i.Id == "native");
         }
+        if (analysis.Mobile is null && Mobile.MobileProjectInspector.FixtureAppProjects(index) is { Count: > 0 } fixtureApps)
+            extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info,
+                $"{fixtureApps.Count} mobile project(s) inside test-fixture folders ({string.Join(", ", fixtureApps.Take(3))}{(fixtureApps.Count > 3 ? ", …" : "")}) are samples for this repository's tests, not its app. They are not offered in Mobile Build Studio; import a fixture folder on its own to build it."));
         var otherNames = others.Select(i => i.DisplayName).Distinct().ToList();
         if (otherNames.Count > 0)
             extra.Add(new AnalysisDiagnostic(DiagnosticSeverity.Info, $"Also found files for: {string.Join(", ", otherNames)}. These are not part of this build."));

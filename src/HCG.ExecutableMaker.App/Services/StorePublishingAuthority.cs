@@ -33,17 +33,22 @@ public sealed class StorePublishingAuthority(StoreClientFactory stores) : IStore
 
     private static string Source(Uri origin) => $"HCG Store ({origin.Host})";
 
-    internal static FeatureDecision Decide(MakerFeature feature, HcgStoreException ex, Uri origin) => (ex.Status, ex.Code) switch
+    internal static FeatureDecision Decide(MakerFeature feature, HcgStoreException ex, Uri origin)
     {
-        (401, _) or (_, "sign_in_required") => new(feature, FeatureAccessState.SignInRequired,
-            "HCG Store did not accept your HCG session. Sign in with HCG again.", FeatureRemedy.SignIn, Source: Source(origin)),
-        (403, _) => StaffOnly(feature, ex.Message, origin),
-        (404, _) => new(feature, FeatureAccessState.NotAvailableYet,
-            $"HCG Store at {origin.Host} does not answer publishing requests (HTTP 404: {ex.Message}). Publishing is off there, or the HCG Store server is not running at that address.",
-            FeatureRemedy.WaitForHcg, Source: Source(origin)),
-        _ => new(feature, FeatureAccessState.Unavailable,
-            $"HCG Store at {origin.Host} could not decide right now ({ex.Message}). This is not a refusal.", FeatureRemedy.TryAgain, Source: Source(origin)),
-    };
+        var (problem, label, explanation) = StoreDiagnosis.Classify(ex, origin);
+        var reason = problem.ToString();
+        return problem switch
+        {
+            StoreProblem.SignInRejected => new(feature, FeatureAccessState.SignInRequired, explanation, FeatureRemedy.SignIn, Reason: reason, Source: Source(origin)),
+            StoreProblem.NoPermission => StaffOnly(feature, ex.Message, origin) with { Reason = reason },
+            StoreProblem.PublishingDisabled or StoreProblem.NotStoreServer or StoreProblem.EndpointMissing =>
+                new(feature, FeatureAccessState.NotAvailableYet, explanation, FeatureRemedy.WaitForHcg, Reason: reason, Source: Source(origin)),
+            _ => new(feature, FeatureAccessState.Unavailable, explanation, FeatureRemedy.TryAgain, Reason: reason, Source: Source(origin)),
+        };
+    }
+
+    /// <summary>The short status label for a decision: the precise Store problem when there is one.</summary>
+    public static string? Label(FeatureDecision d) => Enum.TryParse<StoreProblem>(d.Reason, out var p) ? StoreDiagnosis.Label(p) : null;
 
     private static FeatureDecision StaffOnly(MakerFeature feature, string why, Uri origin) => new(feature, FeatureAccessState.NotPermitted,
         why + " Publishing is a staff permission granted by HCG.", FeatureRemedy.AskAdministrator, Source: Source(origin));

@@ -1,0 +1,34 @@
+<Project>
+  <!--
+    The iOS app is one head of the single HCG Mail code base. The mail engine and view models live in the desktop
+    folder and are referenced, never copied. Their location is resolved here, once, from this file's own position:
+
+      HcgSharedRoot    (input) folder containing Directory.Build.props, Directory.Packages.props and src/ of the shared code
+                       (default: ../Windows-executable-Application next to this folder in a full HCG-Mail checkout)
+      HcgSharedDir     the resolved, normalised folder; HcgSharedSource = $(HcgSharedDir)src/  – used by every ProjectReference in the iOS projects
+
+    Build tools that copy this folder elsewhere (for example HCG Executable Maker) can pass
+    -p:HcgSharedRoot=<path to Windows-executable-Application> or set the HCG_SHARED_ROOT environment variable.
+    If the shared code is not found, the build stops with HCG001 instead of an unrelated SDK error.
+  -->
+  <PropertyGroup>
+    <!-- HcgSharedRoot may be a global (command-line) property, which cannot be changed, so the normalised
+         absolute path with a trailing slash is kept in HcgSharedDir. -->
+    <HcgSharedDir Condition="'$(HcgSharedRoot)' != ''">$(HcgSharedRoot)</HcgSharedDir>
+    <HcgSharedDir Condition="'$(HcgSharedDir)' == '' And '$(HCG_SHARED_ROOT)' != ''">$(HCG_SHARED_ROOT)</HcgSharedDir>
+    <HcgSharedDir Condition="'$(HcgSharedDir)' == ''">$(MSBuildThisFileDirectory)../Windows-executable-Application/</HcgSharedDir>
+    <HcgSharedDir>$([MSBuild]::NormalizeDirectory('$(HcgSharedDir)'))</HcgSharedDir>
+    <HcgSharedSource>$(HcgSharedDir)src/</HcgSharedSource>
+    <HcgSharedRootFound Condition="Exists('$(HcgSharedDir)Directory.Build.props') And Exists('$(HcgSharedDir)Directory.Packages.props') And Exists('$(HcgSharedSource)HCG.Mail.Core/HCG.Mail.Core.csproj')">true</HcgSharedRootFound>
+    <!-- Versions, minimum iOS and pinned tool versions in one place (also read by scripts/ and CI). -->
+    <HcgIosToolchainFile>$(MSBuildThisFileDirectory)toolchain.props</HcgIosToolchainFile>
+  </PropertyGroup>
+
+  <Import Project="$(HcgSharedDir)Directory.Build.props" Condition="'$(HcgSharedRootFound)' == 'true'" />
+  <Import Project="$(HcgIosToolchainFile)" />
+
+  <!-- Only so the project evaluates far enough to report HCG001 clearly. -->
+  <PropertyGroup Condition="'$(HcgSharedRootFound)' != 'true'">
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>

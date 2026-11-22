@@ -179,16 +179,16 @@ public static class MobileReadiness
         var sdkName = simulator ? "iphonesimulator" : "iphoneos";
         if (m.Framework is MobileFramework.NativeIos or MobileFramework.Capacitor)
         {
-            if (m.Ios is not { } ios || !ios.AppTargets.Any())
-                items.Add(new("iOS app target", ReadinessState.SetupRequired, true, "No iOS application target was found in the Xcode project."));
-            else if (ios.UsesCocoaPods && ios.WorkspacePath is null)
+            if (XcodeProjectAnalyzer.MissingAppTarget(m.Ios, m.Framework == MobileFramework.Capacitor) is { } missing)
+                items.Add(new("iOS app target", ReadinessState.SetupRequired, true, missing.Detail, missing.Remedy));
+            else if (m.Ios is { } ios && ios.UsesCocoaPods && ios.WorkspacePath is null)
                 items.Add(new("CocoaPods workspace", ReadinessState.SetupRequired, true, "The project uses CocoaPods but has no .xcworkspace.", "Run `pod install` in the project, then re-import."));
         }
         if (m.DotNetIos is { } dn)
         {
             items.Add(dn.OutsideWorkspace.Count > 0
-                ? new("Project references", ReadinessState.SetupRequired, true, $"{dn.ProjectPath} uses files outside the imported folder: {string.Join(", ", dn.OutsideWorkspace.Take(3))}.",
-                    "Import the repository root that contains them (HCG builds the whole repository, never a partial copy).")
+                ? new("Project references", ReadinessState.SetupRequired, true, OutsideSummary(dn.OutsideWorkspace) + $" Referenced from {dn.ProjectPath}: {string.Join(", ", dn.OutsideWorkspace.Take(3))}" + (dn.OutsideWorkspace.Count > 3 ? ", …" : "") + ".",
+                    "Import the repository root that contains them (HCG builds the whole repository, never a partial copy). Build Doctor offers this repair.")
                 : dn.MissingReferences.Count > 0
                     ? new("Project references", ReadinessState.SetupRequired, true, "Missing: " + string.Join("; ", dn.MissingReferences.Take(3)))
                     : new("Project references", ReadinessState.Ready, true, dn.ProjectReferences.Count == 0 ? "None." : $"{dn.ProjectReferences.Count} project(s), resolved from the repository: {string.Join(", ", dn.ProjectReferences.Select(Path.GetFileNameWithoutExtension))}."));
@@ -382,11 +382,11 @@ public static class MobileReadiness
                 items.Add(ios is not { IsAvailable: true }
                     ? new(".NET iOS workload", r.Host.Platform == TargetPlatform.MacOS ? ReadinessState.NotFound : ReadinessState.OtherHost, true,
                         ios?.Detail ?? "The .NET iOS workload is not installed.",
-                        pin is null ? "Run: dotnet workload install ios (HCG never installs workloads)." : $"Run: dotnet workload install ios --from-rollback-file \"{m.DotNetIos!.WorkloadPinFile}\" — the version the project pins ({pin}). HCG never installs workloads.",
+                        pin is null ? "Run: dotnet workload install ios (HCG never installs workloads)." : $"Run: {m.DotNetIos!.WorkloadInstallCommand} — the version the project pins ({pin}, {m.DotNetIos.WorkloadPinFile}). HCG never installs workloads without your approval.",
                         SetupUrl: "https://learn.microsoft.com/dotnet/core/tools/dotnet-workload-install")
                     : pin is not null && ios.Version is { } installed && !pin.StartsWith(installed.Split('/')[0], StringComparison.Ordinal)
                         ? new(".NET iOS workload", ReadinessState.IncompatibleVersion, true, $"Installed {installed}; the project pins {pin} ({m.DotNetIos!.WorkloadPinFile}). Each workload version requires a specific Xcode.",
-                            $"Install the pinned version: dotnet workload install ios --from-rollback-file \"{m.DotNetIos.WorkloadPinFile}\", or update the project's pin deliberately.", Version: installed)
+                            $"Install the pinned version: {m.DotNetIos.WorkloadInstallCommand}, or update the project's pin deliberately.", Version: installed)
                         : new(".NET iOS workload", ReadinessState.Ready, true, ios.Detail ?? "Installed" + (pin is null ? "" : $"; matches the project's pin {pin}"), Version: ios.Version));
                 items.Add(new("Flutter SDK", ReadinessState.NotNeeded, false, "Not a Flutter project."));
                 break;
@@ -395,5 +395,13 @@ public static class MobileReadiness
                 items.Add(new(".NET MAUI workload", ReadinessState.NotNeeded, false, "Not a .NET MAUI project."));
                 break;
         }
+    }
+
+    /// <summary>One short sentence for an output card: how many files are outside the import, by name (paths follow).</summary>
+    internal static string OutsideSummary(IReadOnlyList<string> outside)
+    {
+        var names = outside.Select(Path.GetFileName).Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal).ToList();
+        var shown = string.Join(", ", names.Take(3)) + (names.Count > 3 ? $" and {names.Count - 3} more" : "");
+        return $"{outside.Count} file(s) the app needs are outside the imported folder ({shown}).";
     }
 }

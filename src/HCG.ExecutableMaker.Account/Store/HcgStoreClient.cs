@@ -147,7 +147,15 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
             try { response = await http.SendAsync(request, ct).ConfigureAwait(false); }
             catch (HttpRequestException ex)
             {
-                throw new HcgStoreException("store_unreachable", $"HCG Store ({Origin.Host}) could not be reached: {ex.Message}", 0);
+                var (code, what) = ex.HttpRequestError switch
+                {
+                    HttpRequestError.NameResolutionError => ("dns_failure", $"the name {Origin.Host} does not resolve (DNS)"),
+                    HttpRequestError.SecureConnectionError => ("tls_failure", $"a secure (HTTPS) connection to {Origin.Host} failed; the certificate may be missing or invalid"),
+                    HttpRequestError.ConnectionError => ("connection_failed", $"no connection to {Origin.Host} could be made (refused, or no network)"),
+                    HttpRequestError.ProxyTunnelError => ("proxy_failure", $"the proxy refused the connection to {Origin.Host}"),
+                    _ => ("store_unreachable", $"{Origin.Host} could not be reached"),
+                };
+                throw new HcgStoreException(code, $"HCG Store could not be reached: {what} ({ex.Message}).", 0);
             }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
@@ -168,6 +176,75 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
             }
         }
     }
+}
+
+/// <summary>Why HCG Store publishing cannot be used right now, precisely (never a vague "not available").</summary>
+public enum StoreProblem
+{
+    /// <summary>Sign in again: HCG Store did not accept the HCG session.</summary>
+    SignInRejected,
+    /// <summary>HCG has not given this account the publishing permission.</summary>
+    NoPermission,
+    /// <summary>The HCG Store server runs there, but its publishing feature is switched off.</summary>
+    PublishingDisabled,
+    /// <summary>A web page answered (a static site, e.g. the storefront on GitHub Pages): no HCG Store server at that address.</summary>
+    NotStoreServer,
+    /// <summary>A JSON service answered, but it has no publishing API v1 (older Store, or another service).</summary>
+    EndpointMissing,
+    /// <summary>The Store failed (HTTP 5xx).</summary>
+    ServerError,
+    DnsFailure,
+    TlsFailure,
+    ConnectionFailed,
+    Timeout,
+    /// <summary>An answer Maker cannot read (unexpected body or status).</summary>
+    UnexpectedResponse,
+}
+
+public static class StoreDiagnosis
+{
+    public static string Label(StoreProblem p) => p switch
+    {
+        StoreProblem.SignInRejected => "Sign-in not accepted",
+        StoreProblem.NoPermission => "No publishing permission",
+        StoreProblem.PublishingDisabled => "Publishing switched off",
+        StoreProblem.NotStoreServer => "No HCG Store server at this address",
+        StoreProblem.EndpointMissing => "Publishing API not found",
+        StoreProblem.ServerError => "HCG Store server error",
+        StoreProblem.DnsFailure => "Store address not found (DNS)",
+        StoreProblem.TlsFailure => "Secure connection failed",
+        StoreProblem.ConnectionFailed => "HCG Store unreachable",
+        StoreProblem.Timeout => "HCG Store did not answer",
+        _ => "Unexpected answer from HCG Store",
+    };
+
+    /// <summary>The precise problem, a short label, and an explanation with what to do. Never a refusal for an outage.</summary>
+    public static (StoreProblem Problem, string Label, string Explanation) Classify(HcgStoreException ex, Uri origin)
+    {
+        var (problem, explanation) = Explain(ex, origin.Host);
+        return (problem, Label(problem), explanation);
+    }
+
+    private static (StoreProblem, string) Explain(HcgStoreException ex, string host) => (ex.Status, ex.Code) switch
+    {
+        (401, _) or (_, "sign_in_required") => (StoreProblem.SignInRejected,
+            $"HCG Store at {host} did not accept your HCG session. Sign in with HCG again on the Account page."),
+        (403, _) => (StoreProblem.NoPermission,
+            $"{ex.Message} Publishing is a staff permission granted by HCG; buying a product does not grant it."),
+        (_, "publishing_disabled") => (StoreProblem.PublishingDisabled,
+            $"The HCG Store server at {host} is running, but publishing is switched off there (HCG_STORE_PUBLISHING). An HCG Store administrator enables it; nothing on this Mac needs fixing."),
+        (_, "not_store_api") => (StoreProblem.NotStoreServer,
+            $"{host} answered {ex.Message}. That address serves a website (the static storefront), not the HCG Store server that handles sign-in and publishing. The HCG Store server must be deployed at this address, or Settings must point to where it runs."),
+        (404, _) or (405, _) => (StoreProblem.EndpointMissing,
+            $"{host} has no HCG Store publishing API v1 (HTTP {ex.Status}: {ex.Message}). It may run an older HCG Store, or another service answers at this address."),
+        ( >= 500, _) => (StoreProblem.ServerError,
+            $"HCG Store at {host} failed (HTTP {ex.Status}: {ex.Message}). This is not a refusal; try again later."),
+        (_, "dns_failure") => (StoreProblem.DnsFailure, ex.Message + " Check the HCG Store address in Settings."),
+        (_, "tls_failure") => (StoreProblem.TlsFailure, ex.Message),
+        (_, "connection_failed" or "proxy_failure" or "store_unreachable") => (StoreProblem.ConnectionFailed, ex.Message + " This is not a refusal."),
+        (_, "store_timeout") => (StoreProblem.Timeout, ex.Message + " This is not a refusal."),
+        _ => (StoreProblem.UnexpectedResponse, $"HCG Store at {host} answered HTTP {ex.Status} ({ex.Code}): {ex.Message}"),
+    };
 }
 
 public sealed class HcgStoreException(string code, string message, int status) : Exception(message)
@@ -191,7 +268,14 @@ internal sealed record StoreError(string Code, string Message)
             var message = Str(root, "message") is { Length: > 0 } m ? m : Str(doc.RootElement, "message");
             return new(code, message.Length > 0 ? message : $"HTTP {(int)r.StatusCode}");
         }
-        catch (JsonException) { return new("http_" + (int)r.StatusCode, $"HCG Store answered HTTP {(int)r.StatusCode}."); }
+        catch (JsonException)
+        {
+            var type = r.Content.Headers.ContentType?.MediaType ?? "no content type";
+            var server = r.Headers.Server.ToString() is { Length: > 0 } s ? $", server {s}" : "";
+            return type.Contains("html", StringComparison.OrdinalIgnoreCase)
+                ? new("not_store_api", $"HTTP {(int)r.StatusCode} with a web page ({type}{server}), not HCG Store's API")
+                : new("http_" + (int)r.StatusCode, $"HCG Store answered HTTP {(int)r.StatusCode} ({type}{server}).");
+        }
     }
 }
 

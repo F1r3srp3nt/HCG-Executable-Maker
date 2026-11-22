@@ -1,0 +1,239 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.UnleashifyView"
+             x:DataType="vm:UnleashifyViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="16">
+      <Border Classes="callout">
+        <TextBlock FontSize="12.5" TextWrapping="Wrap"
+                   Text="Unleashify packages the iOS app this project builds as a rootless jailbreak app (/var/jb/Applications) for HCG Repo Candidate. The app's code, features, bundle ID and deployment target are kept: Maker adds no entitlements and refuses privileged ones. Nothing is installed, uploaded or published; a validated package is not a device test, and publication to HCG Repo stays manual." />
+      </Border>
+
+      <!-- SOURCE -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="SOURCE" />
+          <TextBlock FontSize="12.5" Text="{Binding ProjectSummary}" TextWrapping="Wrap" />
+          <Grid ColumnDefinitions="150,*,Auto">
+            <TextBlock Classes="muted" Text="Source revision" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Column="1" Classes="mono" FontSize="12" Text="{Binding RevisionText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <c:StatusChip Grid.Column="2" Margin="10,0,0,0" Status="{Binding RevisionTag}" VerticalAlignment="Center" />
+          </Grid>
+          <Border Classes="callout warning" Padding="12" IsVisible="{Binding RevisionIsStale}">
+            <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="The imported copy is older than the original folder. Re-import the project in Mobile Build Studio before building, or the package will not contain the latest source." />
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <!-- MODE -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="MODE" />
+          <ItemsControl ItemsSource="{Binding Modes}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ModeItem">
+                <Border Classes="inset" Margin="0,0,10,0" Padding="14" Opacity="{Binding Opacity}">
+                  <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <RadioButton GroupName="unleashify-mode" IsChecked="{Binding IsSelected}" IsEnabled="{Binding Available}" />
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Label}" VerticalAlignment="Center" />
+                      <c:StatusChip Status="{Binding Tag}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Description}" TextWrapping="Wrap" />
+                    <TextBlock Classes="warning" FontSize="12" Text="{Binding Reason}" TextWrapping="Wrap" IsVisible="{Binding Reason, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- INPUT -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="INPUT" />
+          <RadioButton GroupName="unleashify-input" IsChecked="{Binding BuildFromXcode}" IsEnabled="{Binding Project, Converter={x:Static ObjectConverters.IsNotNull}}"
+                       Content="Build from the Xcode project (unsigned Release device archive, generic/platform=iOS)" />
+          <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,6,Auto" Margin="28,0,0,0" IsVisible="{Binding BuildFromXcode}">
+            <TextBlock Classes="muted" Text="Scheme" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding Schemes}" SelectedItem="{Binding SelectedScheme}" MinWidth="280" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Classes="muted" FontSize="12" Text="{Binding SchemeDetail}" TextWrapping="Wrap" />
+          </Grid>
+          <RadioButton GroupName="unleashify-input" IsChecked="{Binding UseDeviceBuild}" Content="Use an existing device build (.app, .xcarchive or .ipa — Simulator builds are refused)" />
+          <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="28,0,0,0" IsVisible="{Binding UseDeviceBuild}">
+            <TextBox Text="{Binding DeviceBuild}" PlaceholderText="…/HCGSentinelModern.xcarchive, …/HCGSentinelModern.app or …/HCGSentinel.ipa" />
+            <Button Grid.Column="1" Margin="8,0,0,0" Content="App or archive…" Command="{Binding BrowseDeviceBuildCommand}" />
+            <Button Grid.Column="2" Margin="8,0,0,0" Content="IPA…" Command="{Binding BrowseIpaCommand}" />
+            <Button Grid.Column="3" Margin="8,0,0,0" Classes="ghost" Content="Inspect" Command="{Binding InspectInputCommand}" />
+          </Grid>
+          <SelectableTextBlock FontSize="12.5" Text="{Binding AppSummary}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding LdidStatus}" TextWrapping="Wrap" />
+          <Border Classes="callout warning" Padding="14" IsVisible="{Binding BuildFromXcode}">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="h3" Text="{Binding TrustTitle}" />
+              <TextBlock Classes="body secondary" FontSize="12.5" TextWrapping="Wrap" Text="Building runs code from this project with your user's permissions (Xcode run-script phases and package plug-ins). Only build projects you trust." />
+              <CheckBox IsChecked="{Binding TrustAcknowledged}">
+                <TextBlock Text="I trust this project and want to run its build on this computer." TextWrapping="Wrap" FontWeight="SemiBold" />
+              </CheckBox>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Border>
+
+      <!-- PACKAGE -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="PACKAGE" />
+          <Grid ColumnDefinitions="150,*,12,150,*" RowDefinitions="Auto,8,Auto,8,Auto,8,Auto">
+            <TextBlock Classes="muted" Text="Package ID" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding PackageId}" PlaceholderText="com.hakmicapitalgroup.example" />
+            <TextBlock Grid.Column="3" Classes="muted" Text="Package version" VerticalAlignment="Center" />
+            <TextBox Grid.Column="4" Text="{Binding PackageVersion}" PlaceholderText="Debian version, e.g. 0.1.0~beta1" />
+            <TextBlock Grid.Row="2" Classes="muted" Text="Display name" VerticalAlignment="Center" />
+            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding AppName}" />
+            <TextBlock Grid.Row="2" Grid.Column="3" Classes="muted" Text="Bundle ID (kept)" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="2" Grid.Column="4" Classes="mono" FontSize="12" Text="{Binding BundleId}" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="4" Classes="muted" Text="Deployment target" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="4" Grid.Column="1" FontSize="12.5" Text="{Binding DeploymentTarget}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="4" Grid.Column="3" Classes="muted" Text="Output folder" VerticalAlignment="Center" />
+            <TextBox Grid.Row="4" Grid.Column="4" Text="{Binding OutputDir}" />
+            <TextBlock Grid.Row="6" Classes="muted" Text="Description" VerticalAlignment="Top" Margin="0,6,0,0" />
+            <TextBox Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="4" Text="{Binding Description}" PlaceholderText="First line is the summary" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" />
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="Use the package ID HCG Repo records for the product. A published version is immutable: changed bytes need a new version." />
+        </StackPanel>
+      </Border>
+
+      <!-- DEVICES -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="TEST DEVICES AND INSTALLED BUILDS" />
+          <Grid ColumnDefinitions="*,16,*">
+            <StackPanel Spacing="8">
+              <TextBox Text="{Binding TestDevices}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56" PlaceholderText="One device per line: name, iOS version" />
+              <ItemsControl ItemsSource="{Binding Devices}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:DeviceItem">
+                    <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                      <c:StatusChip Status="{Binding Tag}" VerticalAlignment="Top" />
+                      <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                        <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="8">
+              <TextBox Text="{Binding InstalledListing}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56" Classes="mono"
+                       PlaceholderText="Paste the test phone's `uicache -l` or `dpkg -l` output" />
+              <CheckBox IsChecked="{Binding TesterConfirmedNoOtherBuild}">
+                <TextBlock TextWrapping="Wrap" FontSize="12.5" Text="I checked the test phone: no other build of this app (sideloaded, TestFlight or another package) is installed." />
+              </CheckBox>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <c:StatusChip Status="{Binding InstalledTag}" />
+              </StackPanel>
+              <TextBlock FontSize="12" Text="{Binding InstalledSummary}" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding InstalledFindings}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String">
+                    <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- PROVENANCE -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="CANDIDATE AND PROVENANCE" />
+          <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,8,Auto,8,Auto,8,Auto">
+            <ComboBox Grid.Row="0" Grid.Column="0" ItemsSource="{Binding AccessLevels}" SelectedItem="{Binding ProductionAccess}" HorizontalAlignment="Stretch" ToolTip.Tip="The product's production access. It stays unchanged; the candidate version is a free public demo only in HCG Repo Candidate." />
+            <TextBox Grid.Row="0" Grid.Column="2" Text="{Binding Repository}" PlaceholderText="Source repository, e.g. F1r3srp3nt/HCG-Sentinel" />
+            <TextBox Grid.Row="2" Grid.Column="0" Text="{Binding Commit}" PlaceholderText="Exact source commit (40 characters)" />
+            <TextBox Grid.Row="2" Grid.Column="2" Text="{Binding CiRun}" PlaceholderText="CI run ID (needed for an importable request)" />
+            <TextBox Grid.Row="4" Grid.Column="0" Text="{Binding CiArtifact}" PlaceholderText="CI artifact name holding the exact .deb" />
+            <TextBox Grid.Row="4" Grid.Column="2" Text="{Binding CiRepository}" PlaceholderText="CI run's repository, if not the source repository" />
+            <TextBox Grid.Row="6" Grid.Column="0" Text="{Binding CiCommit}" PlaceholderText="Commit that CI run built (40 characters)" />
+          </Grid>
+          <TextBox Text="{Binding OwnerApproval}" TextWrapping="Wrap"
+                   PlaceholderText="Owner's approval of this version as a free public candidate demo: who, when and their words. Leave empty until it is given."
+                   ToolTip.Tip="HCG Repo Candidate serves only free public builds, and the owner approves each version (HCG Repo docs/ACCESS.md). Without an approval the handoff's package.toml keeps the exception commented out and HCG Repo's importer refuses the package." />
+          <Grid ColumnDefinitions="*,12,*">
+            <TextBox Text="{Binding Changes}" PlaceholderText="Beta changelog, one change per line" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" />
+            <TextBox Grid.Column="2" Text="{Binding KnownIssues}" PlaceholderText="Known issues, one per line" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- BUILD AND EXPORT -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="BUILD OUTPUT" />
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Button Classes="primary" Command="{Binding BuildCommand}" IsVisible="{Binding SelectedMode.Available, FallbackValue=False}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Play}" /><TextBlock Text="Build" /></StackPanel>
+            </Button>
+            <Button Command="{Binding ExportHandoffCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Export}" /><TextBlock Text="Export Candidate Handoff" /></StackPanel>
+            </Button>
+            <Button Classes="ghost" Content="Open output folder" Command="{Binding OpenOutputCommand}" />
+          </StackPanel>
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+          <ItemsControl ItemsSource="{Binding Stages}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="14" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:StageItem">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock FontWeight="SemiBold" Text="{Binding Name}" VerticalAlignment="Center" />
+                  <c:StatusChip Status="{Binding Tag}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <WrapPanel Orientation="Horizontal">
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,16,6"><TextBlock Classes="muted" Text="Package" VerticalAlignment="Center" /><c:StatusChip Status="{Binding ValidationTag}" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,16,6"><TextBlock Classes="muted" Text="Device testing" VerticalAlignment="Center" /><c:StatusChip Status="{Binding ReadinessTag}" /></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,16,6"><TextBlock Classes="muted" Text="Handoff" VerticalAlignment="Center" /><c:StatusChip Status="{Binding HandoffTag}" /></StackPanel>
+          </WrapPanel>
+          <SelectableTextBlock FontSize="12" Text="{Binding ReadinessText}" TextWrapping="Wrap" />
+          <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding Result}" TextWrapping="Wrap" IsVisible="{Binding Result, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding HandoffFolder, StringFormat='Handoff: {0}'}" TextWrapping="Wrap" IsVisible="{Binding HandoffFolder, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <ItemsControl ItemsSource="{Binding Missing}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock Classes="warning" FontSize="12" Text="{Binding StringFormat='Missing: {0}'}" TextWrapping="Wrap" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <ItemsControl ItemsSource="{Binding Checks}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:CheckItem">
+                <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                  <c:StatusChip Status="{Binding Status}" VerticalAlignment="Top" />
+                  <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                    <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="label" Text="BUILD LOG" />
+          <Border Classes="inset" Padding="10">
+            <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding Log}" TextWrapping="Wrap" MaxHeight="420" />
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -23,6 +23,10 @@ public sealed partial class MobileOutputItem(MobileOutputOption option) : Observ
     public string Description => Option.Description;
     public string? Reason => Option.Reason;
     public bool HasReason => Option.Reason is not null;
+    /// <summary>False when the same reason applies to every unavailable output: it is then shown once above the list.</summary>
+    [ObservableProperty] private bool _showReason = option.Reason is not null;
+    /// <summary>The first sentence of the reason; the full text is in the tooltip and in Build Doctor.</summary>
+    public string? ShortReason => Option.Reason is { } r && r.IndexOf(". ", StringComparison.Ordinal) is var i and > 0 ? r[..(i + 1)] : Option.Reason;
     public bool IsEnabled => Option.IsAvailable;
     public StatusTag Status => Option.IsAvailable ? new StatusTag("Available", "success") : new StatusTag("Unavailable", "warning");
     [ObservableProperty] private bool _isSelected;
@@ -54,6 +58,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private readonly IAppPaths _paths;
     private readonly IDialogService _dialogs;
     private readonly IPlatformShell _shell;
+    private readonly IProcessRunner? _runner;
     private readonly ConcurrentQueue<BuildLogLine> _pendingLog = new();
     private readonly DispatcherTimer _uiTimer;
     private readonly Stopwatch _clock = new();
@@ -62,9 +67,11 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     private bool _loading;
 
     public MobileBuildStudioViewModel(ProjectService projectService, IProjectRepository projects, MobileBuildService builder, MobileArtifactVerifier verifier,
-        IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, NavigationService? navigation = null)
+        IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, NavigationService? navigation = null,
+        IProcessRunner? runner = null)
     {
         _navigation = navigation;
+        _runner = runner;
         _projectService = projectService;
         _projects = projects;
         _builder = builder;
@@ -93,7 +100,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public ObservableCollection<ProjectItem> MobileProjects { get; } = [];
     public ObservableCollection<SummaryRow> ProjectRows { get; } = [];
     public ObservableCollection<DiagnosticItem> Diagnostics { get; } = [];
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProject), nameof(IsArtifactProject))] private ProjectItem? _selectedProject;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProject), nameof(IsArtifactProject), nameof(CanUnleashify))] private ProjectItem? _selectedProject;
     [ObservableProperty] private bool _isImporting;
     [ObservableProperty] private string? _importError;
     [ObservableProperty] private StatusTag _supportTag = new("—", "neutral");
@@ -279,7 +286,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             ProjectRows.Add(new("App", $"{dn.ApplicationTitle} · {dn.ApplicationId} · {dn.DisplayVersion ?? "version not known (its props are outside the import)"} ({dn.BuildNumber}) · iOS {dn.MinimumOS}+{(dn.Entitlements is { } e ? " · entitlements " + e : "")}"));
             ProjectRows.Add(new("Shared projects", dn.ProjectReferences.Count == 0 ? "none" : string.Join(", ", dn.ProjectReferences)));
             if (dn.OutsideWorkspace.Count > 0) ProjectRows.Add(new("Outside the import", string.Join(", ", dn.OutsideWorkspace) + " — import the repository root"));
-            ProjectRows.Add(new("Toolchain pins", $".NET SDK {dn.GlobalJsonSdk ?? "(no global.json)"} · iOS workload {dn.WorkloadPin ?? "(not pinned)"}{(dn.WorkloadPinFile is { } pinFile ? $" ({pinFile})" : "")}"));
+            ProjectRows.Add(new("Toolchain pins", $".NET SDK {dn.GlobalJsonSdk ?? "(no global.json)"} · iOS workload {dn.WorkloadPin ?? "(not pinned)"}{(dn.WorkloadPinFile is { } pinFile ? $" ({pinFile})" : "")}{(dn.RequiredXcode is { } xc ? $" · Xcode {xc}" : "")}"));
         }
         if (m.ArtifactPath is { } artifact) ProjectRows.Add(new("Artifact", artifact));
         Diagnostics.Clear();
@@ -307,14 +314,37 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     [ObservableProperty] private PlatformChoice? _selectedPlatform;
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand))] private MobileOutputItem? _selectedOutput;
     public bool HasOutputs => Outputs.Count > 0;
+    /// <summary>
+    /// The reason shared by two or more unavailable outputs, shown once above them instead of repeated on every card
+    /// (first sentence; the full text is in the tooltip and in Build Doctor). Outputs with their own reason keep it.
+    /// </summary>
+    [ObservableProperty] private string? _sharedOutputReason;
+    [ObservableProperty] private string? _sharedOutputReasonFull;
+    [ObservableProperty] private string? _sharedOutputReasonScope;
+    public bool HasSharedOutputReason => SharedOutputReason is not null;
+    partial void OnSharedOutputReasonChanged(string? value) => OnPropertyChanged(nameof(HasSharedOutputReason));
 
     partial void OnSelectedPlatformChanged(PlatformChoice? value)
     {
         Outputs.Clear();
         if (value is not null)
             foreach (var o in _allOptions.Where(o => o.Platform == value.Platform)) Outputs.Add(new MobileOutputItem(o));
+        GroupOutputReasons();
         OnPropertyChanged(nameof(HasOutputs));
         SelectOutput(Outputs.FirstOrDefault(o => o.IsEnabled));
+    }
+
+    private void GroupOutputReasons()
+    {
+        // Grouped by what a card displays (its first sentence): reasons that only differ further on would otherwise still
+        // show the same sentence on every card. Each card keeps its full reason in its tooltip.
+        var shared = Outputs.Where(o => !o.IsEnabled && o.ShortReason is not null).GroupBy(o => o.ShortReason!, StringComparer.Ordinal)
+            .Where(g => g.Count() >= 2).OrderByDescending(g => g.Count()).FirstOrDefault();
+        foreach (var o in Outputs) o.ShowReason = o.HasReason && (shared is null || o.ShortReason != shared.Key);
+        SharedOutputReasonFull = shared is null ? null : string.Join("\n\n", shared.Select(o => $"{o.Name}: {o.Reason}").Distinct(StringComparer.Ordinal));
+        SharedOutputReason = shared?.Key;
+        SharedOutputReasonScope = shared is null ? null
+            : shared.Count() == Outputs.Count ? $"All {Outputs.Count} outputs are unavailable" : $"{shared.Count()} of {Outputs.Count} outputs are unavailable";
     }
 
     [RelayCommand]
@@ -612,6 +642,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     {
         Summary.Clear();
         UpdateReadiness(CreateOptions());
+        RunDoctorQuietly();
         if (CreateOptions() is not { } o) return;
         var s = CreateSettings(o);
         var m = Mobile!;
@@ -707,6 +738,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         foreach (var a in result.Artifacts) BuiltArtifacts.Add(new ArtifactItem(a, result));
         OnPropertyChanged(nameof(HasBuiltArtifacts));
         OnPropertyChanged(nameof(CanShipToStore));
+        OnPropertyChanged(nameof(CanUnleashifyBuild));
         UpdateBuildState(CreateOptions() is { } again && Mobile is { } mm ? MobileReadiness.Evaluate(mm, again.Output, again, _report) : null);
     }
 
@@ -778,6 +810,32 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     /// <summary>The last build succeeded with at least one verified file (an IPA, an APK…): "Ship to Store" is offered.
     /// A Simulator .app is a folder and is never offered (it cannot be installed on a device).</summary>
     public bool CanShipToStore => _lastResult is { } r && ShipFromBuild.From(r) is { Files.Count: > 0 };
+
+    /// <summary>
+    /// The device build (an .xcarchive or .ipa, never a Simulator .app) that Unleashify can package as a rootless jailbreak
+    /// app. An unsigned archive verifies with warnings ("not code-signed"): that is the usual input, signed with ldid later.
+    /// </summary>
+    private string? UnleashifySource => _lastResult?.Artifacts
+        .Where(a => (a.Verification is VerificationStatus.Passed or VerificationStatus.PassedWithWarnings) && (a.Format is PackagingFormat.IosArchive or PackagingFormat.IosIpa))
+        .OrderBy(a => a.Format == PackagingFormat.IosArchive ? 0 : 1).Select(a => a.Path).FirstOrDefault();
+    public bool CanUnleashifyBuild => UnleashifySource is not null;
+
+    /// <summary>Unleashify is offered for an imported native iOS project with an app target, or a device build artifact.</summary>
+    public bool CanUnleashify => Mobile is { } m && (m.Framework == MobileFramework.NativeIos && m.Ios?.AppTargets.Any() == true || m.ArtifactPath is not null && m.Framework is MobileFramework.NativeIos);
+
+    /// <summary>Opens Unleashify with this project, to build it from the Xcode project.</summary>
+    [RelayCommand]
+    private void OpenUnleashify()
+    {
+        if (SelectedProject is { } p) _navigation?.Navigate("unleashify", new UnleashifyRequest(p.Project.Id, SelectedScheme, UnleashifySource));
+    }
+
+    /// <summary>Opens Unleashify with the device build this studio just produced (no rebuild).</summary>
+    [RelayCommand]
+    private void UnleashifyBuild()
+    {
+        if (UnleashifySource is { } source) _navigation?.Navigate("unleashify", new UnleashifyRequest(SelectedProject?.Project.Id, SelectedScheme, source, UseDeviceBuild: true));
+    }
 
     [RelayCommand]
     private void ShipToStore()

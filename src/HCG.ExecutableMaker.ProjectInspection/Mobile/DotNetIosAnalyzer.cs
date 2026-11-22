@@ -64,8 +64,23 @@ public static class DotNetIosAnalyzer
             }
         }
         var avalonia = file.PackageReferences.FirstOrDefault(p => p.Name.Equals("Avalonia.iOS", StringComparison.OrdinalIgnoreCase));
-        var (pin, pinFile) = WorkloadPin(index, rel);
         string? Clean(string? v) => v is null || v.Contains("$(", StringComparison.Ordinal) ? null : v;
+        var (pin, pinFile) = WorkloadPin(index, rel);
+        var pinIsRollback = pin is not null;
+        var globalSdk = GlobalJsonSdk(index, rel);
+        // A toolchain props file may declare the iOS workload manifest instead of shipping a rollback file
+        // (HCG projects: HcgIosWorkloadManifest / HcgRequiredXcode / HcgMinimumDotnetSdk in toolchain.props).
+        if (pin is null && Clean(file.Get("HcgIosWorkloadManifest")) is { } manifest)
+        {
+            var sdk = Clean(file.Get("HcgMinimumDotnetSdk")) ?? globalSdk;
+            var band = sdk is null ? null : FeatureBand(sdk);
+            pin = band is null ? manifest : $"{manifest}/{band}";
+            pinFile = Relative(index, file.Imports.FirstOrDefault(i => File.Exists(i) && File.ReadAllText(i).Contains("HcgIosWorkloadManifest", StringComparison.Ordinal)));
+            pinIsRollback = false;
+        }
+        string? install = pin is null ? "dotnet workload install ios"
+            : pinIsRollback ? $"dotnet workload install ios --from-rollback-file \"{pinFile}\""
+            : pin.Contains('/') ? $"dotnet workload install ios --from-rollback-file <a file containing {{\"microsoft.net.sdk.ios\": \"{pin}\"}}>" : null;
         var entitlements = Clean(file.Get("CodesignEntitlements"));
         return new DotNetIosProjectInfo
         {
@@ -74,9 +89,20 @@ public static class DotNetIosAnalyzer
             DisplayVersion = Clean(file.Get("ApplicationDisplayVersion")) ?? Clean(file.Get("Version")), BuildNumber = Clean(file.Get("ApplicationVersion")),
             MinimumOS = Clean(file.Get("SupportedOSPlatformVersion")), UiFramework = avalonia is not null ? "Avalonia" : null, UiFrameworkVersion = Clean(avalonia?.Version),
             Entitlements = entitlements, ProjectReferences = refs, OutsideWorkspace = outside.ToList(), MissingReferences = missing,
-            WorkloadPin = pin, WorkloadPinFile = pinFile, GlobalJsonSdk = GlobalJsonSdk(index, rel),
+            WorkloadPin = pin, WorkloadPinFile = pinFile, WorkloadPinIsRollbackFile = pinIsRollback, WorkloadInstallCommand = install,
+            RequiredXcode = Clean(file.Get("HcgRequiredXcode")), GlobalJsonSdk = globalSdk,
         };
     }
+
+    /// <summary>"10.0.114" → "10.0.100" (the SDK feature band a workload manifest belongs to).</summary>
+    public static string? FeatureBand(string sdkVersion)
+    {
+        var parts = sdkVersion.Split('-')[0].Split('.');
+        return parts.Length >= 3 && int.TryParse(parts[2], out var patch) ? $"{parts[0]}.{parts[1]}.{patch / 100 * 100}" : null;
+    }
+
+    private static string? Relative(SourceIndex index, string? full) =>
+        full is null ? null : Path.GetRelativePath(Path.GetFullPath(index.Root), full).Replace('\\', '/');
 
     /// <summary>A workload rollback file ({"microsoft.net.sdk.ios": "26.2.10233/10.0.100"}) nearest to the project.</summary>
     private static (string? Pin, string? File) WorkloadPin(SourceIndex index, string projectRel)

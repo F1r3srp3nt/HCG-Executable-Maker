@@ -1,0 +1,32 @@
+<Project>
+  <!--
+    OAuth client registrations for mailbox sign-in (Microsoft and Google). Imported by Directory.Build.props, so every
+    build gets the same values: dotnet run (Debug), dotnet publish (Release), the macOS .app, the iOS app and its
+    Xcode archive (the iOS folder imports this repository's Directory.Build.props), CI and HCG Executable Maker.
+
+    Where a value comes from, first match wins:
+      1. -p:Name=value on the command line
+      2. environment variables (CI, Maker, publish scripts):
+           HCG_MICROSOFT_CLIENT_ID, HCG_GOOGLE_CLIENT_ID, HCG_GOOGLE_CLIENT_SECRET
+      3. oauth-clients.local.props next to this file (NOT committed; see oauth-clients.local.props.example)
+      4. the committed public client IDs below
+
+    Client IDs are public identifiers, not secrets; once HCG has registered the apps (docs/MICROSOFT_ACCOUNTS.md,
+    docs/GOOGLE_ACCOUNTS.md) they can be committed below. The Google "Desktop app" client secret is not confidential
+    for installed apps but must still never be committed: it is read only from 1–3. Never invent values here:
+    without a value the app shows that sign-in is not set up. Builds print which providers are configured (HCG020).
+  -->
+  <PropertyGroup>
+    <HcgMicrosoftClientId Condition="'$(HcgMicrosoftClientId)' == ''">$(HCG_MICROSOFT_CLIENT_ID)</HcgMicrosoftClientId>
+    <HcgGoogleClientId Condition="'$(HcgGoogleClientId)' == ''">$(HCG_GOOGLE_CLIENT_ID)</HcgGoogleClientId>
+    <HcgGoogleClientSecret Condition="'$(HcgGoogleClientSecret)' == ''">$(HCG_GOOGLE_CLIENT_SECRET)</HcgGoogleClientSecret>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)oauth-clients.local.props" Condition="Exists('$(MSBuildThisFileDirectory)oauth-clients.local.props')" />
+
+  <PropertyGroup>
+    <!-- Committed public client IDs (fill in after registration; leave empty until then). -->
+    <HcgMicrosoftClientId Condition="'$(HcgMicrosoftClientId)' == ''"></HcgMicrosoftClientId>
+    <HcgGoogleClientId Condition="'$(HcgGoogleClientId)' == ''"></HcgGoogleClientId>
+  </PropertyGroup>
+</Project>

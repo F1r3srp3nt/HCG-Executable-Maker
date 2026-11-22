@@ -36,6 +36,7 @@ public static partial class XcodeProjectAnalyzer
         var targets = new List<IosTargetInfo>();
         var configurations = new List<string>();
         var usesPackages = false;
+        string? parseError = null;
         try
         {
             var root = (Dictionary<string, object>)OpenStepPlist.Parse(AndroidGradleAnalyzer.Read(index, pbxPath));
@@ -74,11 +75,13 @@ public static partial class XcodeProjectAnalyzer
                     DeploymentTarget = settings.GetValueOrDefault("IPHONEOS_DEPLOYMENT_TARGET"),
                     DevelopmentTeam = settings.GetValueOrDefault("DEVELOPMENT_TEAM") is { Length: > 0 } t ? t : null,
                     CodeSignStyle = settings.GetValueOrDefault("CODE_SIGN_STYLE"),
+                    SdkRoot = settings.GetValueOrDefault("SDKROOT"),
                 });
             }
         }
         catch (Exception ex) when (ex is FormatException or KeyNotFoundException or InvalidCastException)
         {
+            parseError = ex.Message;
             diagnostics.Add(new(DiagnosticSeverity.Error, $"project.pbxproj could not be parsed: {ex.Message}", pbxPath));
         }
 
@@ -104,7 +107,7 @@ public static partial class XcodeProjectAnalyzer
 
         var appTargets = targets.Where(t => t.IsApplication).ToList();
         if (appTargets.Count == 0 && targets.Count > 0)
-            diagnostics.Add(new(DiagnosticSeverity.Warning, "No iOS application target (only frameworks, extensions or tests).", pbxPath));
+            diagnostics.Add(new(DiagnosticSeverity.Warning, "No iOS application target. " + TargetList(targets) + ".", pbxPath));
         if (schemes.Count == 0 && appTargets.Count > 0)
             diagnostics.Add(new(DiagnosticSeverity.Info, "No shared schemes committed; Xcode auto-creates one per target (named after the target).", projectPath));
 
@@ -117,7 +120,37 @@ public static partial class XcodeProjectAnalyzer
             Configurations = configurations.Count > 0 ? configurations : ["Debug", "Release"],
             UsesSwiftPackages = usesPackages,
             UsesCocoaPods = usesPods,
+            ParseError = parseError,
         };
+    }
+
+    private static string TargetList(IEnumerable<IosTargetInfo> targets) =>
+        "Targets: " + string.Join(", ", targets.Select(t => $"{t.Name} ({t.Kind}{(t.SdkRoot is { Length: > 0 } s ? ", " + s : "")})"));
+
+    /// <summary>
+    /// Why an iOS project offers nothing to build, precisely: no Xcode project, an unreadable project file, a project
+    /// without native targets, only frameworks/extensions/tests, or only macOS applications. Null when it has an iOS app.
+    /// </summary>
+    public static (string Detail, string Remedy)? MissingAppTarget(IosProjectInfo? ios, bool capacitor = false)
+    {
+        if (ios is null)
+            return capacitor
+                ? ("The Capacitor app has no iOS Xcode project (ios/App/App.xcodeproj).", "Add the iOS platform in the project (`npx cap add ios`), commit it, and re-import.")
+                : ("No Xcode project (.xcodeproj) was found.", "Import the folder that contains the .xcodeproj or .xcworkspace.");
+        if (ios.ProjectPath is null) return null; // Swift Playgrounds app package: reported separately.
+        if (ios.ParseError is { } err)
+            return ($"{ios.ProjectPath} is not a valid Xcode project: project.pbxproj could not be read ({err}).",
+                "Open the project in Xcode: it repairs or reports a damaged project file. A project file merged with conflict markers is a common cause.");
+        if (ios.Targets.Count == 0)
+            return ($"{ios.ProjectPath} contains no native targets (an empty project, or only aggregate or external-build targets).",
+                "Add an iOS App target in Xcode, or import the project that builds the app.");
+        if (ios.AppTargets.Any() && ios.AppTargets.All(t => t.IsMacOnly))
+            return ($"{ios.ProjectPath} builds a macOS application, not an iOS one. {TargetList(ios.Targets)}.",
+                "Build macOS apps in New Build, or create an iPhone and iPad version in Porting Studio (macOS → iOS).");
+        if (!ios.AppTargets.Any())
+            return ($"{ios.ProjectPath} has no iOS application target. {TargetList(ios.Targets)}.",
+                "Mobile Build Studio builds app targets; frameworks, extensions and tests are built as part of the app that uses them. Import the app's project or workspace.");
+        return null;
     }
 
     private static IEnumerable<string> WorkspaceReferences(SourceIndex index, string workspace)

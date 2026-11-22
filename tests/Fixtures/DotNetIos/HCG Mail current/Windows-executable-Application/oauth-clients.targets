@@ -1,0 +1,21 @@
+<Project>
+  <!--
+    Imported by the application projects (desktop HCG.Mail.App, iOS HCG.Mail.iOS). Reports which mailbox sign-in
+    providers this build is configured for (never the secret itself) and warns about malformed values, so a build
+    made by CI, Xcode archiving or HCG Executable Maker shows whether the registration values reached it.
+  -->
+  <Target Name="HcgReportOAuthConfiguration" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_HcgMicrosoftState Condition="'$(HcgMicrosoftClientId)' == ''">not configured (Microsoft sign-in will say it is not set up)</_HcgMicrosoftState>
+      <_HcgMicrosoftState Condition="'$(HcgMicrosoftClientId)' != ''">client ID $(HcgMicrosoftClientId)</_HcgMicrosoftState>
+      <_HcgGoogleState Condition="'$(HcgGoogleClientId)' == ''">not configured (Google sign-in will say it is not set up)</_HcgGoogleState>
+      <_HcgGoogleState Condition="'$(HcgGoogleClientId)' != '' And '$(HcgGoogleClientSecret)' == ''">client ID $(HcgGoogleClientId), client secret MISSING (Google sign-in will say it is not set up)</_HcgGoogleState>
+      <_HcgGoogleState Condition="'$(HcgGoogleClientId)' != '' And '$(HcgGoogleClientSecret)' != ''">client ID $(HcgGoogleClientId), client secret present</_HcgGoogleState>
+    </PropertyGroup>
+    <Message Importance="high" Text="HCG020: $(MSBuildProjectName) mailbox sign-in — Microsoft: $(_HcgMicrosoftState); Google: $(_HcgGoogleState)." />
+    <Warning Code="HCG021" Condition="'$(HcgMicrosoftClientId)' != '' And !$([System.Text.RegularExpressions.Regex]::IsMatch('$(HcgMicrosoftClientId)', '^\s*[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\s*$'))"
+             Text="HcgMicrosoftClientId '$(HcgMicrosoftClientId)' is not a GUID; the app will treat Microsoft sign-in as not set up. Use the Application (client) ID from Microsoft Entra." />
+    <Warning Code="HCG022" Condition="'$(HcgGoogleClientId)' != '' And !$([System.Text.RegularExpressions.Regex]::IsMatch('$(HcgGoogleClientId)', '^\s*[0-9]+-[0-9a-z]+\.apps\.googleusercontent\.com\s*$'))"
+             Text="HcgGoogleClientId '$(HcgGoogleClientId)' does not look like a Google OAuth client ID (…apps.googleusercontent.com); the app will treat Google sign-in as not set up." />
+  </Target>
+</Project>
