@@ -238,13 +238,17 @@ jobs:
           ls -la "$D"; test -f "$ZIP"
           ditto -x -k "$ZIP" "$X"
           APP="$X/HCG Executable Maker.app"; EXE="$APP/Contents/MacOS/HCGExecutableMaker"
-          test -x "$EXE" && echo "✓ executable"
-          lipo -archs "$EXE" | grep -qw arm64 && echo "✓ arm64"
-          test -f "$APP/Contents/MacOS/libcoreclr.dylib" && echo "✓ .NET runtime bundled"
-          test -f "$APP/Contents/Resources/AppIcon.icns" && echo "✓ icon"
-          test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = com.hakmicapital.executablemaker && echo "✓ bundle identifier"
-          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION" && echo "✓ version $VERSION"
-          cp "$EXE" "$X/exe-copy" && codesign --verify "$X/exe-copy" && echo "✓ app host signature (ad hoc; verified on a copy, codesign treats a bundle's executable as the bundle)"
+          # Each check fails the step when false ("cmd && echo ✓" would not: set -e ignores a failing left-hand side).
+          check() { if eval "$2"; then echo "✓ $1"; else echo "::error::Release ZIP check failed: $1"; exit 1; fi; }
+          BUNDLE_VERSION="${VERSION%%-*}"   # Apple's numeric form: 0.4.0-ci.163 is written to Info.plist as 0.4.0
+          check "executable" 'test -x "$EXE"'
+          check "arm64" 'lipo -archs "$EXE" | grep -qw arm64'
+          check ".NET runtime bundled" 'test -f "$APP/Contents/MacOS/libcoreclr.dylib"'
+          check "icon" 'test -f "$APP/Contents/Resources/AppIcon.icns"'
+          check "bundle identifier com.hakmicapital.executablemaker" 'test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = com.hakmicapital.executablemaker'
+          check "bundle version $BUNDLE_VERSION (from $VERSION)" 'test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$BUNDLE_VERSION"'
+          check "app host signature (ad hoc; verified on a copy, codesign treats a bundle's executable as the bundle)" 'cp "$EXE" "$X/exe-copy" && codesign --verify "$X/exe-copy"'
+          check "the app reports $VERSION" '"$EXE" --version | grep -q "HCG Executable Maker $VERSION "' 
           HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --version
           swiftc -O tools/ci/window-of-pid.swift -o "$X/window-of-pid"
           HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" > "$X/app.log" 2>&1 &
@@ -254,10 +258,10 @@ jobs:
             if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$X/app.log"; exit 1; fi
             sleep 2
           done
-          test -s "$X/windows.txt" && echo "✓ window: $(head -1 "$X/windows.txt")"
+          check "window on screen: $(head -1 "$X/windows.txt" 2>/dev/null)" 'test -s "$X/windows.txt"' 
           sleep 8
           screencapture -x -o -l "$(head -1 "$X/windows.txt" | cut -d' ' -f1)" "$X/screens/release-app-window.png"
-          kill -0 $PID && echo "✓ still running"
+          check "still running after the window appeared" 'kill -0 $PID' 
           kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
           j="$X/screens/release-app-window.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-window.png" --out "$j" >/dev/null
           echo "=====BEGIN-IMG release-app-window.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
