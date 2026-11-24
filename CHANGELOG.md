@@ -2,6 +2,18 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Xcode projects that only wrap another build (HCG Mail)
+
+### Fixed
+- **HCG Mail's iOS app is found again when its repository contains `HCGMail.xcodeproj`.** That project only runs the
+  .NET build through External Build System targets. Mobile Build Studio treated it as the iOS app, found "no iOS
+  application target", and blocked every iOS output.
+  - An `.xcodeproj` whose targets are all External Build System or aggregate targets (no native target) now only wraps
+    another build. It no longer leads detection, and the .NET iOS project it wraps is attached as before.
+  - The analysis names the wrapper in an Info diagnostic.
+  - Real iOS app projects, which have a native target, are unaffected.
+  - The "HCG Mail like" fixture now includes the project.
+
 ## [Unreleased] — Xcode project for the macOS app
 
 ### Added

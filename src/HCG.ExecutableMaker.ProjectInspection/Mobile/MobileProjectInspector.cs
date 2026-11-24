@@ -235,6 +235,8 @@ public sealed class MobileProjectInspector(TimeProvider time) : IProjectInspecto
             foreach (var m in dn.MissingReferences.Take(6))
                 diagnostics.Add(new(DiagnosticSeverity.Error, $"Project reference not found: {m}.", dn.ProjectPath));
             diagnostics.Add(new(DiagnosticSeverity.Info, $"{dn.ProjectPath}: .NET for iOS app ({dn.TargetFramework}{(dn.UiFramework is { } ui ? $", {ui} {dn.UiFrameworkVersion}" : "")}). No .xcodeproj is needed: the .NET iOS workload drives Xcode's SDK, actool, ibtool and codesign.", dn.ProjectPath));
+            foreach (var wrapper in XcodeProjectAnalyzer.FindExternalBuildWrappers(index).Take(3))
+                diagnostics.Add(new(DiagnosticSeverity.Info, $"{wrapper} only runs another build (External Build System targets, no app target); HCG builds {dn.ProjectPath} directly.", wrapper));
             return dotnetIos;
         }
 
