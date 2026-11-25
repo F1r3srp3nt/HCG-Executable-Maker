@@ -132,3 +132,12 @@ public sealed record IpaReport
         Nested.OrderByDescending(b => b.Depth).ThenBy(b => b.Kind == BundleKind.Dylib ? 0 : 1).ThenBy(b => b.RelativePath, StringComparer.Ordinal)
             .Concat(App is null ? [] : [App]).ToList();
 }
+
+public static class DeviceFamiliesText
+{
+    /// <summary>"iPhone, iPad" — how Apple names the families.</summary>
+    public static string Display(this DeviceFamilies f) => string.Join(", ", Enum.GetValues<DeviceFamilies>().Where(x => x != DeviceFamilies.None && f.HasFlag(x)).Select(x => x switch
+    {
+        DeviceFamilies.IPhone => "iPhone", DeviceFamilies.IPad => "iPad", DeviceFamilies.AppleTv => "Apple TV", DeviceFamilies.Watch => "Apple Watch", _ => "Apple Vision",
+    }));
+}

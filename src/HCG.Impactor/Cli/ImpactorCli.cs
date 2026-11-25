@@ -104,7 +104,7 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
         if (r.App is { } a)
         {
             W($"  App: {a.Name} · {a.BundleIdentifier}");
-            W($"  Version {a.ShortVersion} (build {a.BuildNumber}) · minimum iOS {a.MinimumOSVersion ?? "not stated"} · devices {r.Families}");
+            W($"  Version {a.ShortVersion} (build {a.BuildNumber}) · minimum iOS {a.MinimumOSVersion ?? "not stated"} · devices {r.Families.Display()}");
             W($"  Architectures: {string.Join(", ", a.Slices.Select(s => s.Architecture + (s.Platform is null ? "" : $" [{s.Platform}]") + (s.Encrypted ? " ENCRYPTED" : "")))}");
             if (r.RequiredCapabilities.Count > 0) W($"  Required capabilities: {string.Join(", ", r.RequiredCapabilities)}");
             PrintSignature("  ", a);

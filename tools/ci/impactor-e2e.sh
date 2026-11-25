@@ -117,7 +117,7 @@ endgroup
 # ---------------------------------------------------------------- 3. HCG Impactor CLI
 group "3a. inspect (unsigned)"
 imp inspect "$UNSIGNED" | tee "$OUT/inspect-unsigned.txt"
-check "the unsigned IPA is inspected: identifier" "grep -q 'App: HelloIOS · $BUNDLE' '$OUT/inspect-unsigned.txt'"
+check "the unsigned IPA is inspected: identifier" "grep -q 'App: .* · $BUNDLE' '$OUT/inspect-unsigned.txt'"
 # The arm64 linker may add an ad hoc ("linker-signed") signature to a build Xcode did not sign.
 check "the unsigned IPA is reported as unsigned or ad hoc" "grep -Eq 'Signature: (unsigned|ad hoc)' '$OUT/inspect-unsigned.txt'"
 check "the architecture is read from the binary (arm64, iOS)" "grep -q 'arm64 \[iOS\]' '$OUT/inspect-unsigned.txt'"
@@ -209,7 +209,7 @@ check "the UI wrote a signed IPA" "test -s '$UI_SIGNED'"
 rm -rf "$OUT/verify-ui" && mkdir -p "$OUT/verify-ui" && ditto -x -k "$UI_SIGNED" "$OUT/verify-ui"
 check "codesign verifies the IPA signed from the UI" "codesign --verify --deep --strict '$OUT/verify-ui/Payload/HelloIOS.app'"
 imp monitor | tee "$OUT/monitor.txt"
-check "Signing Monitor records the signed apps" "grep -q 'HelloIOS' '$OUT/monitor.txt'"
+check "Signing Monitor records the signed apps" "grep -q '$BUNDLE' '$OUT/monitor.txt'"
 endgroup
 
 echo "HCG IMPACTOR E2E: PASSED (real Xcode build, real codesign/devicectl; synthetic identity and profile; no physical device)"

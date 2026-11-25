@@ -114,7 +114,7 @@ public static class ImpactorReport
         {
             sb.AppendLine("## IPA").AppendLine();
             sb.AppendLine($"| | |\n|---|---|\n| App | {app.Name} |\n| Version | {app.ShortVersion} ({app.BuildNumber}) |\n| Bundle identifier | {app.BundleIdentifier} |");
-            sb.AppendLine($"| Minimum iOS | {app.MinimumOSVersion} |\n| Architectures | {string.Join(", ", app.Architectures)} |\n| Devices | {ipa.Families} |");
+            sb.AppendLine($"| Minimum iOS | {app.MinimumOSVersion} |\n| Architectures | {string.Join(", ", app.Architectures)} |\n| Devices | {ipa.Families.Display()} |");
             sb.AppendLine($"| Signed by | {(app.Signature.Present ? app.Signature.AdHoc ? "ad hoc" : app.Signature.Signer?.CommonName : "unsigned")} |");
             sb.AppendLine($"| Embedded profile | {app.EmbeddedProfile?.Profile?.Name ?? "none"} |\n| SHA-256 | `{ipa.Sha256}` |").AppendLine();
             foreach (var b in ipa.Nested) sb.AppendLine($"- {b.Kind}: `{b.RelativePath}` {b.BundleIdentifier}");
