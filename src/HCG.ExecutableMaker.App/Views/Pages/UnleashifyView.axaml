@@ -24,6 +24,15 @@
           <Border Classes="callout warning" Padding="12" IsVisible="{Binding RevisionIsStale}">
             <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="The imported copy is older than the original folder. Re-import the project in Mobile Build Studio before building, or the package will not contain the latest source." />
           </Border>
+          <TextBlock Classes="muted" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap"
+                     Text="Build from a pinned commit: Maker clones your trusted local repository into a new folder, checks out exactly this commit (no local changes), imports it and records the commit. The repository itself is only read." />
+          <Grid ColumnDefinitions="*,Auto,8,220,8,Auto">
+            <TextBox Text="{Binding PinRepository}" PlaceholderText="Local git repository, e.g. ~/Developer/HCG-Signal-Contractor" />
+            <Button Grid.Column="1" Margin="8,0,0,0" Content="Folder…" Command="{Binding BrowsePinRepositoryCommand}" />
+            <TextBox Grid.Column="3" Classes="mono" Text="{Binding PinCommit}" PlaceholderText="Commit (SHA, tag or branch)" />
+            <Button Grid.Column="5" Content="Check out and import" Command="{Binding ImportPinnedCommitCommand}" />
+          </Grid>
+          <SelectableTextBlock FontSize="12" Text="{Binding PinStatus}" TextWrapping="Wrap" IsVisible="{Binding PinStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
       </Border>
 
@@ -160,14 +169,29 @@
             <ComboBox Grid.Row="0" Grid.Column="0" ItemsSource="{Binding AccessLevels}" SelectedItem="{Binding ProductionAccess}" HorizontalAlignment="Stretch" ToolTip.Tip="The product's production access. It stays unchanged; the candidate version is a free public demo only in HCG Repo Candidate." />
             <TextBox Grid.Row="0" Grid.Column="2" Text="{Binding Repository}" PlaceholderText="Source repository, e.g. F1r3srp3nt/HCG-Sentinel" />
             <TextBox Grid.Row="2" Grid.Column="0" Text="{Binding Commit}" PlaceholderText="Exact source commit (40 characters)" />
-            <TextBox Grid.Row="2" Grid.Column="2" Text="{Binding CiRun}" PlaceholderText="CI run ID (needed for an importable request)" />
-            <TextBox Grid.Row="4" Grid.Column="0" Text="{Binding CiArtifact}" PlaceholderText="CI artifact name holding the exact .deb" />
-            <TextBox Grid.Row="4" Grid.Column="2" Text="{Binding CiRepository}" PlaceholderText="CI run's repository, if not the source repository" />
-            <TextBox Grid.Row="6" Grid.Column="0" Text="{Binding CiCommit}" PlaceholderText="Commit that CI run built (40 characters)" />
+            <CheckBox Grid.Row="2" Grid.Column="2" IsChecked="{Binding IsLocalBuild}" Content="Built on this computer (no CI run, no artifact)" />
+          </Grid>
+          <Grid ColumnDefinitions="150,*,12,150,*" RowDefinitions="Auto,8,Auto" IsVisible="{Binding IsLocalBuild}">
+            <TextBlock Classes="muted" Text="Source visibility" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding Visibilities}" SelectedItem="{Binding SourceVisibility}" HorizontalAlignment="Stretch"
+                      ToolTip.Tip="Recorded in HCG Repo's provenance. A private source stays private: only the package, the repository name and the commit go to HCG Repo." />
+            <TextBlock Grid.Column="3" Classes="muted" Text="Build host" VerticalAlignment="Center" />
+            <TextBox Grid.Column="4" Text="{Binding HostLabel}" ToolTip.Tip="Default: operating system and architecture only (no computer or user name)." />
+            <TextBlock Grid.Row="2" Classes="muted" Text="Toolchain" VerticalAlignment="Center" />
+            <SelectableTextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" FontSize="12.5" Text="{Binding ToolchainText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          </Grid>
+          <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,8,Auto" IsVisible="{Binding !IsLocalBuild}">
+            <TextBox Grid.Row="0" Grid.Column="0" Text="{Binding CiRun}" PlaceholderText="CI run ID (needed for an importable request)" />
+            <TextBox Grid.Row="0" Grid.Column="2" Text="{Binding CiArtifact}" PlaceholderText="CI artifact name holding the exact .deb" />
+            <TextBox Grid.Row="2" Grid.Column="0" Text="{Binding CiRepository}" PlaceholderText="CI run's repository, if not the source repository" />
+            <TextBox Grid.Row="2" Grid.Column="2" Text="{Binding CiCommit}" PlaceholderText="Commit that CI run built (40 characters)" />
           </Grid>
           <TextBox Text="{Binding OwnerApproval}" TextWrapping="Wrap"
                    PlaceholderText="Owner's approval of this version as a free public candidate demo: who, when and their words. Leave empty until it is given."
                    ToolTip.Tip="HCG Repo Candidate serves only free public builds, and the owner approves each version (HCG Repo docs/ACCESS.md). Without an approval the handoff's package.toml keeps the exception commented out and HCG Repo's importer refuses the package." />
+          <TextBox Classes="mono" Text="{Binding ApprovedSha256}"
+                   PlaceholderText="SHA-256 of the exact .deb the owner approved (64 hex characters). A local build's approval counts only for these bytes."
+                   ToolTip.Tip="If the package is rebuilt, its SHA-256 changes and the approval no longer applies: the handoff then leaves the exception out and says why." />
           <Grid ColumnDefinitions="*,12,*">
             <TextBox Text="{Binding Changes}" PlaceholderText="Beta changelog, one change per line" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" />
             <TextBox Grid.Column="2" Text="{Binding KnownIssues}" PlaceholderText="Known issues, one per line" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" />
@@ -215,6 +239,23 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          <Border Classes="inset" Padding="12" IsVisible="{Binding HandoffFolder, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <StackPanel Spacing="8">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Classes="label" Text="HCG REPO IMPORT PREVIEW" VerticalAlignment="Center" />
+                <c:StatusChip Status="{Binding PreviewTag}" />
+              </StackPanel>
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Runs HCG Repo's own importer (dry run) on the handoff's exact bytes, in a throwaway copy of your HCG Repo checkout. Nothing is committed, pushed, imported or published. It runs HCG Repo's code: use your own trusted checkout." />
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBox Text="{Binding HcgRepoCheckout}" PlaceholderText="HCG Repo checkout (with local-file import support)" />
+                <Button Grid.Column="1" Margin="8,0,0,0" Content="Folder…" Command="{Binding BrowseHcgRepoCommand}" />
+                <Button Grid.Column="2" Margin="8,0,0,0" Content="Preview import" Command="{Binding PreviewImportCommand}" />
+              </Grid>
+              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding PreviewText}" TextWrapping="Wrap" MaxHeight="320"
+                                   IsVisible="{Binding PreviewText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+          </Border>
           <ItemsControl ItemsSource="{Binding Checks}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:CheckItem">

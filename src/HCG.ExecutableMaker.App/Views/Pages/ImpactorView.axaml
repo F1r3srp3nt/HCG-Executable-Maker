@@ -300,6 +300,8 @@
               </Grid>
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Classes="primary" Content="Diagnose" Command="{Binding RunDoctorCommand}" />
+                <CheckBox IsChecked="{Binding ProvisionRegisterDevice}" Content="Register the connected device" VerticalAlignment="Center"
+                          ToolTip.Tip="Off by default. When on, Xcode may add the connected iPhone/iPad to your team's devices (-allowProvisioningDeviceRegistration)." />
                 <Button Content="Create profile with Xcode…" Command="{Binding CreateProfileCommand}" IsEnabled="{Binding CanCreateProfile}"
                         ToolTip.Tip="Uses the Apple Account signed in to Xcode: a throwaway stub app is built once with xcodebuild -allowProvisioningUpdates to register the App ID (and the connected device) and download a Development profile. Asks for your approval first." />
               </StackPanel>

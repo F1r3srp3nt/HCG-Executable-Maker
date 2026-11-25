@@ -117,22 +117,25 @@ writes a throwaway stub iOS project into HCG's data folder (`impactor/provisioni
 the team and the app's entitlements, and builds it once:
 
 - Xcode registers the App ID if needed and enables the capabilities for the entitlements.
-- Xcode registers the connected device (unless you turn that off) and downloads an "iOS Team Provisioning Profile"
-  for the bundle ID.
+- Xcode registers the connected device **only if you tick "Register the connected device"** (off by default; command
+  line `--register-device`) and downloads an "iOS Team Provisioning Profile" for the bundle ID.
 - The Signing Doctor then runs again and shows the new profile as usable.
 - The stub is never installed or distributed. HCG never revokes certificates or deletes profiles.
-- Each run asks for approval, because it changes your Apple Developer account.
+- Each run asks for approval, because it changes your Apple Developer account. The confirmation names the App ID
+  that may be registered and whether a device is registered.
 - An App Store Connect API key can be used instead of the Xcode account (`--api-key/--api-key-id/--api-issuer`; the
   key file is read by `xcodebuild` only).
 
 Failures are explained: no Xcode account, bundle ID owned by another team, no registered device, no team, capability
 not available to the team (for example a Personal Team), no usable certificate, Apple unreachable.
 
-For **HCG Mail** (`com.hakmicapitalgroup.hcgmail`) on your iPhone 16 Pro Max:
+For **HCG Mail** (`com.hakmicapitalgroup.hcgmail`; the Unleashed variant is `com.hakmicapitalgroup.hcgmail.unleashed`,
+with its own App ID and profile) on your iPhone 16 Pro Max:
 
 1. Mobile Build Studio › HCG Mail › **Signing Doctor…**. It opens with the bundle ID and HCG Mail's `.entitlements`.
 2. Read why each of the eight profiles fails.
-3. **Create profile with Xcode…** for your team (the iPhone connected and unlocked).
+3. **Create profile with Xcode…** for your team (the iPhone connected and unlocked; tick "Register the connected
+   device" only if the iPhone is not yet registered in the team).
 4. Build HCG Mail for the device.
 
 The manual route (developer.apple.com › Identifiers, Devices, Profiles) is listed in the next steps too.

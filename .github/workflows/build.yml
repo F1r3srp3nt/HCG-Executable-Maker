@@ -1471,6 +1471,38 @@ jobs:
           vtool -show-build "$bin" | grep -E "platform|minos" | tee -a "$OUT/archs.txt"
           plutil -extract CFBundleIdentifier raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx com.hcg.sentinel
           plutil -extract MinimumOSVersion raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx 15.0
+      - name: Local build (no CI run) — the same archive through --rootless-deb --local → local-file request, lifecycle, hcg-repo/, HCG Repo importer preview
+        env:
+          # HCG Repo branch maker/local-file-imports (PR #20): kind = "local-file". Nothing is written to HCG Repo.
+          HCG_REPO_LOCAL_COMMIT: 43238f6f2439edb425739bcdc453142f45700e0d
+          # HCG Repo already holds 0.1.0~beta1; this dry run uses a version that exists only in its throwaway copy.
+          LOCAL_VERSION: 0.1.0~beta1.local1
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo-local"
+          git -C "$OUT/hcg-repo-local" checkout --quiet "$HCG_REPO_LOCAL_COMMIT"
+          archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceBuild"])' "$OUT/ui-run/unleashify-unleashify.json")"
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
+            --package "$PKG" --package-version "$LOCAL_VERSION" --name "HCG Sentinel" --description "$DESCRIPTION" --production-access undecided \
+            --device-ios 16.5 --repository F1r3srp3nt/HCG-Sentinel --commit "$SENTINEL_COMMIT" \
+            --local --source-visibility public --host "GitHub-hosted macOS runner (CI test of the local path)" \
+            --hcg-repo "$OUT/hcg-repo-local" --out "$OUT/local" | tee "$OUT/local.log"
+          H="$(ls -d "$OUT/local"/*-candidate-handoff)"
+          cat "$H/import-request.toml"
+          grep -q '^kind = "local-file"$' "$H/import-request.toml"
+          grep -q "^commit = \"$SENTINEL_COMMIT\"$" "$H/import-request.toml"
+          grep -q '^toolchain = "Xcode ' "$H/import-request.toml"                       # read from the app's DTXcode
+          grep -q 'lifecycle passed' "$H/import-request.toml"
+          if grep -Eq '^(run_id|artifact) =' "$H/import-request.toml"; then echo "a local build must not claim a CI run or artifact"; exit 1; fi
+          grep -q "^Lifecycle: lifecycle passed" "$OUT/local.log"
+          grep -q "^Import preview: BYTES VALIDATED, NOT YET IMPORTABLE" "$OUT/local.log"   # blocked only by the owner's approval of these bytes
+          # Same packager: the local path and the CI path give the same bytes for the same input and version.
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
+            --package "$PKG" --package-version "$LOCAL_VERSION" --name "HCG Sentinel" --description "$DESCRIPTION" --no-handoff --out "$OUT/local-ci" > /dev/null
+          local="$(ls "$H"/*.deb)"; staged="$(ls "$H"/hcg-repo/imports/local/*.deb)"
+          cmp "$local" "$(ls "$OUT/local-ci"/*.deb)" || { echo "the local path packaged different bytes"; exit 1; }
+          cmp "$local" "$staged"
+          test -f "$H/hcg-repo/imports/$PKG-0.1.0-beta1.local1.toml" && test -f "$H/hcg-repo/packages/$PKG/package.toml"
+          git -C "$OUT/hcg-repo-local" status --porcelain | tee "$OUT/hcg-repo-local-status.txt"; [ ! -s "$OUT/hcg-repo-local-status.txt" ]
       - name: HCG Repo (cecfcf0) — bin/hcgrepo inspect, then the importer dry run on the exact exported bytes
         run: |
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo"

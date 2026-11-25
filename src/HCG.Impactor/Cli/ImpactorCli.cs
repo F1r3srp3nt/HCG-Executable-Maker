@@ -35,7 +35,7 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
                                                      Validate and install (optionally sign first); several --device = batch.
           doctor --bundle-id <id> [--device <id|name|usb>] [--entitlements <file.entitlements>|--ipa <ipa>] [--method …] [--team <TEAMID>]
                                                      Signing Doctor: exactly why each installed profile can or cannot sign the app.
-          provision --bundle-id <id> --team <TEAMID> [--entitlements <file>] [--min-ios 17.0] [--no-device-registration]
+          provision --bundle-id <id> --team <TEAMID> [--entitlements <file>] [--min-ios 17.0] [--register-device]
                     [--api-key <AuthKey.p8> --api-key-id <ID> --api-issuer <UUID>] --yes
                                                      Create the App ID and a Development profile with Xcode's automatic signing
                                                      (your Xcode account), via a throwaway stub project. Changes your Apple
@@ -127,11 +127,17 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
         PrintFindings(r.Findings);
     }
 
+    /// <summary>The signature's team; when it records none (codesign does that for non-Apple certificates), the certificate's, labelled.</summary>
+    private static string TeamText(string? signatureTeam, string? certificateTeam) =>
+        signatureTeam is { Length: > 0 } t ? t
+        : certificateTeam is { Length: > 0 } c ? $"{c} (from the certificate; the signature records no team — codesign records one only for Apple-issued certificates)"
+        : "none recorded";
+
     private void PrintSignature(string pad, BundleInfo b)
     {
         var s = b.Signature;
         W(pad + "Signature: " + (!s.Present ? "unsigned" : s.AdHoc ? "ad hoc (no certificate)" :
-            $"{s.Signer?.CommonName} · team {s.TeamId} · expires {s.Signer?.NotAfter:yyyy-MM-dd}" + (s.SigningTime is { } t ? $" · signed {t:yyyy-MM-dd HH:mm}" : "")) + (s.HashType is null ? "" : $" · {s.HashType}"));
+            $"{s.Signer?.CommonName} · team {TeamText(s.TeamId, s.Signer?.TeamId)} · expires {s.Signer?.NotAfter:yyyy-MM-dd}" + (s.SigningTime is { } t ? $" · signed {t:yyyy-MM-dd HH:mm}" : "")) + (s.HashType is null ? "" : $" · {s.HashType}"));
         if (s.Chain.Count > 1) W(pad + "  Chain: " + string.Join(" ← ", s.Chain));
         if (s.Entitlements.Count > 0) W(pad + "  Entitlements: " + string.Join("; ", s.Entitlements.Select(kv => $"{kv.Key}={kv.Value}")));
         if (b.EmbeddedProfile is { } ep)
@@ -313,7 +319,7 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
         {
             W($"\n  Signed IPA: {result.OutputIpa}\n  SHA-256: {result.OutputSha256}\n  codesign --verify: {result.Verification?.Split('\n').LastOrDefault()}");
             if (result.Reinspection?.App is { } app)
-                W($"  Re-inspected: {app.BundleIdentifier} signed by {app.Signature.Signer?.CommonName} (team {app.Signature.TeamId}), profile \"{app.EmbeddedProfile?.Profile?.Name}\"");
+                W($"  Re-inspected: {app.BundleIdentifier} signed by {app.Signature.Signer?.CommonName} (team {TeamText(app.Signature.TeamId, app.Signature.Signer?.TeamId)}), profile \"{app.EmbeddedProfile?.Profile?.Name}\"");
         }
         else if (result.Failure is { } f) PrintDiagnosis(f);
         return result;
@@ -436,7 +442,7 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
         var req = new HCG.Impactor.MacOS.ProvisioningRequest
         {
             BundleIdentifier = bundleId, TeamId = team, Entitlements = RequestedEntitlements(), MinimumIos = Arg("--min-ios") ?? "16.0",
-            RegisterConnectedDevices = !Flag("--no-device-registration"),
+            RegisterConnectedDevices = Flag("--register-device"), // registering a device in the team is opt-in
             ApiKey = Arg("--api-key") is { } k && Arg("--api-key-id") is { } kid && Arg("--api-issuer") is { } iss ? (k, kid, iss) : null,
         };
         W($"\nCreate the App ID and a Development profile for {bundleId} in team {team} with Xcode's automatic signing:");

@@ -262,7 +262,7 @@ public sealed partial class ImpactorViewModel : PageViewModel
         foreach (var f in r.Findings.OrderByDescending(f => f.Severity)) IpaFindings.Add(ImpFindingItem.From(f));
     }
 
-    private static string Sig(CodeSignatureInfo s) => !s.Present ? "Unsigned" : s.AdHoc ? "Ad hoc (no certificate)" : $"{s.Signer?.CommonName ?? "certificate"} · team {s.TeamId}";
+    private static string Sig(CodeSignatureInfo s) => !s.Present ? "Unsigned" : s.AdHoc ? "Ad hoc (no certificate)" : $"{s.Signer?.CommonName ?? "certificate"} · team {(s.TeamId is { Length: > 0 } t ? t : s.Signer?.TeamId is { Length: > 0 } c ? c + " (certificate; none in the signature)" : "none recorded")}";
 
     // ------------------------------------------------------------------ inventory: certificates & profiles
 
@@ -455,6 +455,8 @@ public sealed partial class ImpactorViewModel : PageViewModel
     [ObservableProperty] private string _doctorSummary = "Enter the app's bundle identifier and run the Signing Doctor.";
     [ObservableProperty] private bool _doctorHasResult;
     [ObservableProperty] private bool _canCreateProfile;
+    /// <summary>Off by default: registering a device in the team is its own, explicit choice.</summary>
+    [ObservableProperty] private bool _provisionRegisterDevice;
     [ObservableProperty] private string? _provisionResult;
     public ObservableCollection<ImpDoctorProfile> DoctorProfiles { get; } = [];
     public ObservableCollection<string> DoctorSteps { get; } = [];
@@ -514,11 +516,14 @@ public sealed partial class ImpactorViewModel : PageViewModel
         if (_provisioning is null || DoctorBundleId is null || string.IsNullOrWhiteSpace(DoctorTeam)) { ProvisionResult = "Choose the team first."; return; }
         IReadOnlyDictionary<string, object> ent = !string.IsNullOrWhiteSpace(DoctorEntitlementsPath) && File.Exists(DoctorEntitlementsPath)
             ? ImpactorService.ReadEntitlements(DoctorEntitlementsPath) : new Dictionary<string, object>();
-        var req = new HCG.Impactor.MacOS.ProvisioningRequest { BundleIdentifier = DoctorBundleId, TeamId = DoctorTeam.Trim(), Entitlements = ent, MinimumIos = Inspection?.App?.MinimumOSVersion ?? "16.0" };
+        var req = new HCG.Impactor.MacOS.ProvisioningRequest { BundleIdentifier = DoctorBundleId, TeamId = DoctorTeam.Trim(), Entitlements = ent, MinimumIos = Inspection?.App?.MinimumOSVersion ?? "16.0", RegisterConnectedDevices = ProvisionRegisterDevice };
         var ok = await _dialogs.ConfirmAsync("Create a profile with your Xcode account?",
             $"HCG will build a throwaway stub app with bundle ID {req.BundleIdentifier} for team {req.TeamId} using Xcode's automatic signing:\n\n" +
             string.Join(' ', HCG.Impactor.MacOS.XcodeProvisioningAssistant.Arguments("<stub folder>", req)) +
-            "\n\nXcode uses the Apple Account signed in to Xcode › Settings › Accounts. It may register the App ID, enable capabilities for the entitlements, register the connected iPhone/iPad and download a Development profile. " +
+            "\n\nXcode uses the Apple Account signed in to Xcode › Settings › Accounts. Approving this allows Xcode to:\n" +
+            $"• register the App ID {req.TeamId}.{req.BundleIdentifier} if your team does not have it yet, and enable the capabilities for its entitlements;\n" +
+            (req.RegisterConnectedDevices ? "• register the connected iPhone/iPad in your team (you ticked \"Register the connected device\");\n" : "• NOT register any device (\"Register the connected device\" is off; a device that is not registered yet stays unregistered and the profile will not include it);\n") +
+            "• download an iOS Team Provisioning Profile.\n\n" +
             "This changes your Apple Developer account. Nothing is revoked, no installed app is touched, and the stub is never installed.", "Create profile");
         if (!ok) return;
         IsBusy = true;

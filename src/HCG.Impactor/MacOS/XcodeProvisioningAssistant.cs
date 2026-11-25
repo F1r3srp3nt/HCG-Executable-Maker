@@ -16,7 +16,7 @@ public sealed record ProvisioningRequest
     public IReadOnlyDictionary<string, object> Entitlements { get; init; } = new Dictionary<string, object>();
     public string MinimumIos { get; init; } = "16.0";
     /// <summary>Also register the connected device(s) with the team (-allowProvisioningDeviceRegistration).</summary>
-    public bool RegisterConnectedDevices { get; init; } = true;
+    public bool RegisterConnectedDevices { get; init; }
     /// <summary>
     /// Optional App Store Connect API key (.p8 path, key ID, issuer ID) for xcodebuild's -authenticationKey* options —
     /// used instead of the Xcode account. The key file is read by xcodebuild only; HCG never copies or stores it.

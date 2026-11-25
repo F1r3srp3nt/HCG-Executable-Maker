@@ -20,7 +20,8 @@ public sealed record PackageProvenance(
     string? BuiltWith = null,
     string? PackagedBy = null,
     string? CiRepository = null,
-    string? CiCommit = null)
+    string? CiCommit = null,
+    LocalBuildInfo? Local = null)
 {
     /// <summary>The run's repository and commit: given explicitly, or the app's own when its repository built it.</summary>
     public string? ImportRepository => CiRepository ?? Repository;
@@ -34,7 +35,8 @@ public sealed record CandidateTexts(
     IReadOnlyList<string> KnownIssues,
     string ProductionAccess = "public",
     string? DeviceTarget = null,
-    string? OwnerApproval = null);
+    string? OwnerApproval = null,
+    string? ApprovedSha256 = null);
 
 /// <summary>
 /// What Unleashify knew when it exported: the mode, the scheme, the source revision and whether the imported copy was
@@ -110,6 +112,12 @@ public static class CandidateHandoff
                 ["ldid_signed"] = new JsonArray(signedFiles.Select(s => (JsonNode?)s).ToArray()),
                 ["entitlements_files"] = new JsonArray(f.Entitlements.Keys.Select(s => (JsonNode?)s).ToArray()),
             },
+            ["local_build"] = provenance.Local is { } lb ? new JsonObject
+            {
+                ["built_by"] = lb.BuiltBy, ["toolchain"] = lb.Toolchain, ["built_at"] = lb.BuiltAt.ToString("O"), ["host"] = lb.Host,
+                ["source_visibility"] = lb.SourceVisibility, ["validation"] = lb.Validation,
+                ["note"] = "Built on the owner's computer, not by a CI run: there is no run ID or artifact.",
+            } : null,
             ["validation"] = new JsonArray(validation.Checks.Select(c => (JsonNode?)new JsonObject { ["check"] = c.Name, ["status"] = c.Status.ToString(), ["detail"] = c.Detail }).ToArray()),
             ["device_tested"] = false,
         };
@@ -141,7 +149,7 @@ public static class CandidateHandoff
         // Changelog and known issues.
         var changelog = new StringBuilder($"# {spec.Name} changelog\n\n## {spec.Version}\n\n");
         changelog.Append($"Candidate beta (Beta / Experimental) for device testing");
-        if (provenance.Commit is { } c) changelog.Append($" ({provenance.Repository ?? "source"} commit `{c[..Math.Min(7, c.Length)]}`{(provenance.CiRunId is { } run ? $", CI run {run}" : "")})");
+        if (provenance.Commit is { } c) changelog.Append($" ({provenance.Repository ?? "source"} commit `{c[..Math.Min(7, c.Length)]}`{(provenance.CiRunId is { } run ? $", CI run {run}" : "")}{(provenance.Local is { } lbc ? $", built locally{(lbc.Toolchain is { } tc ? " with " + tc : "")}" : "")})");
         changelog.Append(".\n\n");
         foreach (var line in texts.Changes) changelog.Append("- ").Append(line).Append('\n');
         changelog.Append("- Packaged as a rootless app (`iphoneos-arm64`, `").Append(f.AppPath).Append("`) with gzip members.\n");
@@ -159,18 +167,44 @@ public static class CandidateHandoff
         else missing.Add("icon.png: the app bundle has no loose AppIcon*.png (icons only in Assets.car); export a 180×180 PNG from the project's AppIcon set");
 
         if (texts.ProductionAccess == "undecided") missing.Add("production access: not recorded for this product in HCG Repo; package.toml uses HCG's default (connect) and the owner decides the production level before any stable release");
+        if (LocalBuild.ApprovalProblem(texts, provenance, f.Sha256) is { } approvalProblem)
+        {
+            missing.Add("owner approval NOT recorded: " + approvalProblem);
+            texts = texts with { OwnerApproval = null };
+        }
         if (NeedsApproval(texts)) missing.Add($"owner approval: HCG Repo Candidate serves only free public builds, and the owner approves each version as a free public demo (HCG Repo docs/ACCESS.md). No approval of {spec.Version} is recorded, so package.toml leaves [access] exception commented out and HCG Repo's importer will refuse the package until the owner's approval is written there");
         // package.toml draft in HCG Repo's format.
         await Write("package.toml", PackageToml(spec, app, f, texts, issues)).ConfigureAwait(false);
 
         // Import request: only a pinned, immutable source can be imported.
-        var complete = provenance is { ImportRepository: { Length: > 0 }, CiRunId: not null, CiArtifact: { Length: > 0 }, ImportCommit.Length: 40 };
-        var request = ImportRequest(spec, provenance, f.Sha256, complete);
+        var local = provenance.Local is not null;
+        var complete = local ? LocalBuild.IsPinned(provenance)
+            : provenance is { ImportRepository: { Length: > 0 }, CiRunId: not null, CiArtifact: { Length: > 0 }, ImportCommit.Length: 40 };
+        var request = ImportRequest(spec, provenance, f.Sha256, complete, debName);
         await Write(complete ? "import-request.toml" : "import-request.INCOMPLETE.toml", request).ConfigureAwait(false);
-        if (!complete) missing.Add("import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact");
+        if (!complete)
+            missing.Add(local
+                ? "import-request.toml: the local build is not pinned to its source; build from a pinned commit (repository OWNER/NAME, the full 40-character commit, no local changes)"
+                : "import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact");
+        if (local && complete)
+        {
+            // The files to add to an HCG Repo checkout, at their paths there (the .deb is the exact bytes validated above).
+            var repoDir = Path.Combine(folder, "hcg-repo");
+            var localDir = Path.Combine(repoDir, "imports", "local");
+            var pkgDir = Path.Combine(repoDir, "packages", spec.PackageId);
+            Directory.CreateDirectory(localDir);
+            Directory.CreateDirectory(pkgDir);
+            File.Copy(dest, Path.Combine(localDir, debName), overwrite: true);
+            File.Copy(Path.Combine(folder, "import-request.toml"), Path.Combine(repoDir, "imports", LocalBuild.RequestFileName(spec)), overwrite: true);
+            foreach (var n in new[] { "package.toml", "CHANGELOG.md", "icon.png" })
+                if (File.Exists(Path.Combine(folder, n))) File.Copy(Path.Combine(folder, n), Path.Combine(pkgDir, n), overwrite: true);
+            files.Add($"hcg-repo/imports/{LocalBuild.RequestFileName(spec)}");
+            files.Add($"hcg-repo/{LocalBuild.LocalImportsDir}/{debName}");
+            files.AddRange(new[] { "package.toml", "CHANGELOG.md", "icon.png" }.Where(n => File.Exists(Path.Combine(pkgDir, n))).Select(n => $"hcg-repo/packages/{spec.PackageId}/{n}"));
+        }
 
         await Write("DEVICE-TEST.md", DeviceTest(spec, app, f, context, debName)).ConfigureAwait(false);
-        await Write("README.md", Readme(spec, f, files, complete, missing, context)).ConfigureAwait(false);
+        await Write("README.md", Readme(spec, f, files, complete, missing, context, provenance.Local is not null)).ConfigureAwait(false);
         return new Output(folder, files, complete, missing);
     }
 
@@ -216,7 +250,8 @@ public static class CandidateHandoff
         var exception = $"Free public beta demo (no sign-in, no payment) in HCG Repo Candidate only, under the owner's free-demo policy for approved candidate builds";
         if (texts.OwnerApproval is { Length: > 0 } approval)
         {
-            sb.AppendLine($"exception = \"{TomlEscape($"{exception}: {approval.Trim()}. For the versions in exception_versions only; production access is unchanged.")}\"");
+            var forBytes = texts.ApprovedSha256 is { Length: > 0 } approvedSha ? $" Approved package SHA-256: {approvedSha.Trim().ToLowerInvariant()}." : "";
+            sb.AppendLine($"exception = \"{TomlEscape($"{exception}: {approval.Trim()}. For the versions in exception_versions only; production access is unchanged.{forBytes}")}\"");
             sb.AppendLine($"exception_versions = [\"{spec.Version}\"]");
         }
         else
@@ -230,10 +265,32 @@ public static class CandidateHandoff
         return sb.ToString();
     }
 
-    public static string ImportRequest(RootlessAppPackageSpec spec, PackageProvenance p, string sha256, bool complete)
+    public static string ImportRequest(RootlessAppPackageSpec spec, PackageProvenance p, string sha256, bool complete, string? debName = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {spec.Name} {spec.Version}, rootless. Exported by HCG Executable Maker.");
+        if (p.Local is { } lb)
+        {
+            string Q(string? v) => $"\"{TomlEscape(v ?? "")}\"";
+            if (!complete)
+                sb.AppendLine("# INCOMPLETE: not importable yet. The local build is not pinned to a source repository and a full, clean commit.");
+            sb.AppendLine("# Built on the owner's computer (no CI run). HCG Repo receives only this .deb, the source's name and commit;");
+            sb.AppendLine("# the source stays private. Commit the .deb at `path` together with this file (see hcg-repo/ in the handoff).");
+            sb.AppendLine().AppendLine("[request]");
+            sb.AppendLine($"package = \"{spec.PackageId}\"").AppendLine($"version = \"{spec.Version}\"").AppendLine($"architecture = \"{RootlessAppPackager.Architecture}\"").AppendLine("channel = \"candidate\"");
+            sb.AppendLine().AppendLine("[source]").AppendLine("kind = \"local-file\"");
+            sb.AppendLine($"path = {Q($"{LocalBuild.LocalImportsDir}/{debName ?? $"{spec.PackageId}_{spec.Version}_{RootlessAppPackager.Architecture}.deb"}")}");
+            sb.AppendLine($"sha256 = \"{sha256}\"");
+            sb.AppendLine(p.Repository is { Length: > 0 } repo ? $"repository = {Q(repo)}" : "# repository = (OWNER/NAME of the app's source)");
+            sb.AppendLine(p.Commit is { Length: 40 } commit ? $"commit = \"{commit}\"" : "# commit = (the full 40-character commit the package was built from)");
+            sb.AppendLine($"built_by = {Q(lb.BuiltBy)}");
+            if (lb.Toolchain is { Length: > 0 } tc) sb.AppendLine($"toolchain = {Q(tc)}");
+            sb.AppendLine($"built_at = \"{lb.BuiltAt.ToUniversalTime():yyyy-MM-ddTHH:mm:ssZ}\"");
+            if (lb.Host is { Length: > 0 } host) sb.AppendLine($"host = {Q(host)}");
+            sb.AppendLine($"source_visibility = {Q(lb.SourceVisibility)}");
+            if (lb.Validation is { Length: > 0 } v) sb.AppendLine($"validation = {Q(v)}");
+            return sb.ToString();
+        }
         if (!complete)
             sb.AppendLine("# INCOMPLETE: not importable yet. The .deb was not produced by a CI run with an uploaded artifact, so there is no immutable")
               .AppendLine("# source to pin. Build it in CI (or attach it to a tagged release), then fill in the source and rename this file.");
@@ -352,7 +409,7 @@ public static class CandidateHandoff
     private static string InstalledLine(HandoffContext? context) =>
         context?.InstalledCheck is { } ic ? "\n- Maker's check at export: " + ic.State + " — " + ic.Summary : "";
 
-    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context)
+    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context, bool local = false)
     {
         var sb = new StringBuilder($"# Candidate handoff: {spec.Name} {spec.Version} (Beta / Experimental)\n\n");
         sb.Append($"`{spec.PackageId}` · `iphoneos-arm64` · {f.Size:N0} bytes ({f.Size} bytes) · SHA-256 `{f.Sha256}`\n\n");
@@ -367,7 +424,11 @@ public static class CandidateHandoff
         sb.Append($"For HCG Repo Candidate (`{CandidateSource}`). Nothing has been published. Not device-tested.\n\n");
         sb.Append("Files:\n");
         foreach (var file in files.Append("README.md").Distinct()) sb.Append("- `").Append(file).Append("`\n");
-        sb.Append(complete
+        sb.Append(complete && local
+            ? "\nTo submit (local build): copy the contents of `hcg-repo/` onto an HCG Repo checkout (it holds `imports/" + LocalBuild.RequestFileName(spec) + "`, the .deb under `imports/local/` and `packages/" + spec.PackageId + "/`), " +
+              "merge `package.toml` with an existing one if HCG Repo already has the package, push a branch; **Prepare packages** checks the committed .deb's SHA-256 against the request. " +
+              "Nothing from the app's source is included. Publishing stays a separate, manual step after the owner approves this exact SHA-256.\n"
+            : complete
             ? "\nTo submit: copy `import-request.toml` to HCG Repo `imports/`, `package.toml`, `CHANGELOG.md` and `icon.png` to `packages/" + spec.PackageId + "/`, push a branch; **Prepare packages** fetches and checks the pinned artifact.\n"
             : "\n**Not importable yet:** see `import-request.INCOMPLETE.toml`.\n");
         if (missing.Count > 0) { sb.Append("\nMissing:\n"); foreach (var m in missing) sb.Append("- ").Append(m).Append('\n'); }

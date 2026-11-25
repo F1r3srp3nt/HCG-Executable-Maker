@@ -126,9 +126,10 @@ public sealed class SigningDoctorTests
         Assert.False(ent.ContainsKey("application-identifier")); // Xcode fills identity entitlements itself
         Assert.Equal([$"{SigningFixtures.Team}.{Mail}"], ((List<object>)ent["keychain-access-groups"]).Cast<string>());
 
-        var args = XcodeProvisioningAssistant.Arguments(folder, req);
+        var args = XcodeProvisioningAssistant.Arguments(folder, req with { RegisterConnectedDevices = true });
         Assert.Contains("-allowProvisioningUpdates", args);
         Assert.Contains("-allowProvisioningDeviceRegistration", args);
+        Assert.DoesNotContain("-allowProvisioningDeviceRegistration", XcodeProvisioningAssistant.Arguments(folder, req)); // opt-in only
         Assert.Contains($"DEVELOPMENT_TEAM={SigningFixtures.Team}", args);
         Assert.Contains("CODE_SIGN_STYLE=Automatic", args);
         Assert.DoesNotContain(args, a => a.Contains("revoke", StringComparison.OrdinalIgnoreCase));

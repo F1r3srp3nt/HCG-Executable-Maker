@@ -154,7 +154,10 @@ VAPP="$OUT/verify/Payload/HelloIOS.app"
 codesign --verify --deep --strict --verbose=2 "$VAPP"
 codesign -dvvv "$VAPP" > "$OUT/codesign-d.txt" 2>&1; cat "$OUT/codesign-d.txt"
 check "signed by the chosen identity" "grep -q 'Authority=$CN' '$OUT/codesign-d.txt'"
-check "team identifier recorded" "grep -q 'TeamIdentifier=$TEAM' '$OUT/codesign-d.txt'"
+# codesign records a TeamIdentifier only for identities issued by Apple's WWDR CA (it reads the team from Apple's
+# certificate); for this synthetic, self-signed identity it reports "not set" even with OU=$TEAM. On a real Apple
+# Development certificate it is the team. The team still reaches the app through the profile's entitlements (below).
+check "team identifier as codesign records it for a non-Apple identity (not set)" "grep -Eq 'TeamIdentifier=(not set|$TEAM)' '$OUT/codesign-d.txt'"
 check "identifier is the bundle identifier" "grep -q 'Identifier=$BUNDLE' '$OUT/codesign-d.txt'"
 (codesign -d --entitlements - --xml "$VAPP" 2>/dev/null || codesign -d --entitlements :- "$VAPP" 2>/dev/null) > "$OUT/entitlements.xml"; cat "$OUT/entitlements.xml"; echo
 check "application-identifier entitlement" "grep -q '$TEAM.$BUNDLE' '$OUT/entitlements.xml'"
@@ -198,10 +201,10 @@ check "the Signing Doctor explains why no profile fits com.hakmicapitalgroup.hcg
 check "the Signing Doctor proposes Xcode's automatic provisioning for the team" "grep -q 'allowProvisioningUpdates' '$OUT/doctor-mail.txt'"
 imp doctor --bundle-id "$BUNDLE" | tee "$OUT/doctor-hello.txt"
 check "the Signing Doctor finds the matching profile for the CI app" "grep -q 'USABLE \"HCG CI Development\"' '$OUT/doctor-hello.txt'"
-imp provision --bundle-id com.hakmicapitalgroup.hcgmail --team "$TEAM" --no-device-registration > "$OUT/provision-noyes.txt" 2>&1 || true
+imp provision --bundle-id com.hakmicapitalgroup.hcgmail --team "$TEAM" > "$OUT/provision-noyes.txt" 2>&1 || true
 check "profile creation does nothing without approval (--yes)" "grep -q 'Not run: add --yes to approve' '$OUT/provision-noyes.txt'"
 # The runner has no Apple Account in Xcode: the real xcodebuild -allowProvisioningUpdates must fail with an explanation.
-imp provision --bundle-id com.hakmicapitalgroup.hcgmail --team "$TEAM" --no-device-registration --yes > "$OUT/provision.txt" 2>&1 || true
+imp provision --bundle-id com.hakmicapitalgroup.hcgmail --team "$TEAM" --yes > "$OUT/provision.txt" 2>&1 || true
 cat "$OUT/provision.txt"
 check "without an Xcode account, automatic provisioning is explained (not unknown)" "grep -Eq 'Xcode is not signed in to this team|No usable signing certificate|No registered device|No team selected' '$OUT/provision.txt'"
 STUB="$(ls -d "$HCG_EXECUTABLE_MAKER_HOME"/impactor/provisioning/com.hakmicapitalgroup.hcgmail-* | tail -1)"

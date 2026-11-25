@@ -53,7 +53,8 @@ public sealed partial class UnleashifyViewModel(
     IPlatformShell shell,
     IProjectRepository projects,
     MobileBuildService mobileBuilder,
-    IAppPaths paths) : PageViewModel
+    IAppPaths paths,
+    ProjectService projectService) : PageViewModel
 {
     public override string Title => "Unleashify";
     public override string Subtitle => "Mobile Build Studio · an iOS app as a rootless jailbreak package for HCG Repo Candidate — built, validated and handed off, never published.";
@@ -101,6 +102,25 @@ public sealed partial class UnleashifyViewModel(
     [ObservableProperty] private string _changes = "";
     [ObservableProperty] private string _knownIssues = "";
     [ObservableProperty] private string _ownerApproval = "";
+    /// <summary>The exact .deb SHA-256 the owner approved. An approval of a local build counts only for these bytes.</summary>
+    [ObservableProperty] private string _approvedSha256 = "";
+
+    // Local build (no CI run): provenance measured here; the source can stay private.
+    public static IReadOnlyList<string> Visibilities { get; } = ["private", "public"];
+    [ObservableProperty] private bool _isLocalBuild = true;
+    [ObservableProperty] private string _sourceVisibility = "private";
+    [ObservableProperty] private string _hostLabel = LocalBuild.DefaultHostLabel();
+    [ObservableProperty] private string _toolchainText = "Read from the app after the build (DTXcode, DTXcodeBuild, DTSDKName).";
+
+    // Pinned source: one exact commit of a trusted local repository, checked out into a new folder and imported.
+    [ObservableProperty] private string _pinRepository = "";
+    [ObservableProperty] private string _pinCommit = "";
+    [ObservableProperty] private string _pinStatus = "";
+
+    // HCG Repo import preview (HCG Repo's own importer, dry run, on a throwaway copy of a checkout).
+    [ObservableProperty] private string _hcgRepoCheckout = "";
+    [ObservableProperty] private StatusTag _previewTag = new("Not previewed", "neutral");
+    [ObservableProperty] private string _previewText = "";
 
     // Devices and installed builds.
     [ObservableProperty] private string _testDevices = "iPhone 13 Pro (Dopamine, rootless), 16.5\niPhone 8, 13.3";
@@ -114,20 +134,21 @@ public sealed partial class UnleashifyViewModel(
 
     // Run state.
     [ObservableProperty] private string? _ldid;
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(BuildCommand), nameof(ExportHandoffCommand))] private bool _isBusy;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(BuildCommand), nameof(ExportHandoffCommand), nameof(PreviewImportCommand), nameof(ImportPinnedCommitCommand))] private bool _isBusy;
     [ObservableProperty] private string _log = "";
     [ObservableProperty] private string _appSummary = "No app inspected yet.";
     [ObservableProperty] private string? _result;
     [ObservableProperty] private StatusTag _validationTag = new("Not built", "neutral");
     [ObservableProperty] private StatusTag _readinessTag = new("Not built", "neutral");
     [ObservableProperty] private string _readinessText = "";
-    [ObservableProperty] private string? _handoffFolder;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(PreviewImportCommand))] private string? _handoffFolder;
     [ObservableProperty] private StatusTag _handoffTag = new("Not exported", "neutral");
     public ObservableCollection<StageItem> Stages { get; } = [new("Archive"), new("Inspect"), new("Package"), new("Validate"), new("Handoff")];
     public ObservableCollection<CheckItem> Checks { get; } = [];
     public ObservableCollection<string> Missing { get; } = [];
     public string LdidStatus => Ldid is null ? "ldid not found: needed to pseudo-sign the unsigned Mach-O files of a device build (macOS: brew install ldid)." : "ldid: " + Ldid;
     private RootlessAppWorkflow.Outcome? _outcome;
+    private DateTimeOffset? _builtAt;
     private string? _builtFrom;
     private string? _archiveFailure;
 
@@ -301,6 +322,73 @@ public sealed partial class UnleashifyViewModel(
         }
     }
 
+    [RelayCommand]
+    private async Task BrowsePinRepositoryAsync()
+    {
+        if (await shell.PickFolderAsync("Choose the app's local git repository (it is only read)") is { } folder) PinRepository = folder;
+    }
+
+    [RelayCommand]
+    private async Task BrowseHcgRepoAsync()
+    {
+        if (await shell.PickFolderAsync("Choose an HCG Repo checkout (copied for the preview; never written)") is { } folder) HcgRepoCheckout = folder;
+    }
+
+    /// <summary>Checks out one exact commit of a trusted local repository into a new folder, imports it and selects it.</summary>
+    [RelayCommand]
+    private async Task ImportPinnedCommitAsync()
+    {
+        var git = new ExecutableLocator().Find("git");
+        if (git is null) { PinStatus = "git was not found (install the Xcode Command Line Tools)."; return; }
+        if (PinRepository.Trim().Length == 0 || PinCommit.Trim().Length == 0) { PinStatus = "Choose the repository folder and name the commit."; return; }
+        IsBusy = true;
+        try
+        {
+            PinStatus = $"Checking out {PinCommit.Trim()}…";
+            var dest = Path.Combine(paths.Root, "pinned-sources", $"{new DirectoryInfo(PinRepository.Trim()).Name}-{PinCommit.Trim()[..Math.Min(12, PinCommit.Trim().Length)]}-{DateTime.UtcNow:yyyyMMddHHmmss}");
+            var r = await Task.Run(() => PinnedSource.CheckoutAsync(runner, git, PinRepository.Trim(), PinCommit.Trim(), dest, CancellationToken.None));
+            if (!r.Succeeded) { PinStatus = "Not imported: " + r.Failure; return; }
+            var import = await projectService.ImportDirectoryAsync(r.Folder!, null, CancellationToken.None);
+            LoadProject(import.Project, null);
+            Commit = r.Commit!;
+            if (r.Repository is { } name) Repository = name;
+            BuildFromXcode = true;
+            PinStatus = $"Imported commit {r.Commit} ({import.FileCount} files) from a clean checkout. {string.Join(" ", r.Notes)}"
+                        + (r.Repository is null ? " The repository has no GitHub origin: type OWNER/NAME under Provenance." : $" Repository: {r.Repository}.");
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            PinStatus = "Not imported: " + ex.Message;
+        }
+        finally { IsBusy = false; }
+    }
+
+    private bool CanPreview() => !IsBusy && HandoffFolder is not null;
+
+    /// <summary>Runs HCG Repo's importer on the handoff's exact bytes (dry run on a throwaway copy of the checkout).</summary>
+    [RelayCommand(CanExecute = nameof(CanPreview))]
+    private async Task PreviewImportAsync()
+    {
+        if (HandoffFolder is not { } folder) return;
+        if (HcgRepoCheckout.Trim().Length == 0) { PreviewTag = new("Choose a checkout", "warning"); PreviewText = "Choose an HCG Repo checkout (with local-file import support) first."; return; }
+        var python = new ExecutableLocator().Find("python3");
+        if (python is null) { PreviewTag = new("python3 missing", "error"); PreviewText = "python3 was not found; HCG Repo's importer needs Python 3.11 or later."; return; }
+        IsBusy = true;
+        try
+        {
+            PreviewTag = new("Running", "info");
+            var genuine = OwnerApproval.Trim().Length > 0 && !Missing.Any(m => m.StartsWith("owner approval", StringComparison.Ordinal));
+            var r = await Task.Run(() => HcgRepoImportPreview.RunAsync(runner, python, HcgRepoCheckout.Trim(), folder, hypotheticalApproval: !genuine, requireGenuineApproval: genuine, null, CancellationToken.None));
+            PreviewText = r.Verdict + "\n\n" + r.Output.Trim();
+            PreviewTag = !r.Ran ? new("Not run", "error")
+                : r.Verdict.StartsWith("VALIDATED", StringComparison.Ordinal) ? new("Importable as exported", "success")
+                : r.Verdict.StartsWith("BYTES VALIDATED", StringComparison.Ordinal) ? new("Blocked only by the owner's approval", "warning")
+                : new("Rejected", "error");
+            Log += "\n[Preview] " + r.Verdict;
+        }
+        finally { IsBusy = false; }
+    }
+
     private bool CanBuild() => !IsBusy && SelectedMode?.Available == true && (!BuildFromXcode || (TrustAcknowledged && Project is not null));
 
     /// <summary>Build: an unsigned device archive from the Xcode project (or the chosen device build) → package → validate.</summary>
@@ -341,7 +429,11 @@ public sealed partial class UnleashifyViewModel(
             }, CancellationToken.None));
             await Dispatcher.UIThread.InvokeAsync(() => { });
             _outcome = outcome;
+            _builtAt = DateTimeOffset.UtcNow;
             foreach (var c in outcome.Validation?.Checks ?? []) Checks.Add(new CheckItem(c));
+            foreach (var c in outcome.Lifecycle?.Checks ?? []) Checks.Add(new CheckItem(c with { Name = "Lifecycle · " + c.Name }));
+            if (outcome.App is { } builtApp)
+                ToolchainText = LocalBuild.ToolchainFrom(builtApp) is { } tc ? tc + " (from the app's Info.plist)" : "Not recorded in the app's Info.plist (no DTXcode).";
             for (var k = 1; k <= 3; k++)
                 Stages[k].Tag = k - 1 < (int)outcome.ReachedStage || outcome.Succeeded ? new("Done", "success")
                     : k - 1 == (int)outcome.ReachedStage ? new("Failed", "error") : new("Not run", "neutral");
@@ -410,10 +502,15 @@ public sealed partial class UnleashifyViewModel(
         var prov = new PackageProvenance(Repository.Trim() is { Length: > 0 } r ? r : null, Commit.Trim() is { Length: > 0 } sha ? sha : null,
             _revision?.State == RevisionState.Stale ? true : Commit.Trim().Length > 0 ? false : null,
             long.TryParse(CiRun.Trim(), out var run) ? run : null, CiArtifact.Trim() is { Length: > 0 } a ? a : null, null, null, HostInfo.BuildIdentity,
-            CiRepository.Trim() is { Length: > 0 } cr ? cr : null, CiCommit.Trim() is { Length: > 0 } cc ? cc : null);
+            CiRepository.Trim() is { Length: > 0 } cr ? cr : null, CiCommit.Trim() is { Length: > 0 } cc ? cc : null,
+            IsLocalBuild && CiRun.Trim().Length == 0
+                ? new LocalBuildInfo($"{HostInfo.BuildIdentity} · Unleashify, local", _outcome?.App is { } built ? LocalBuild.ToolchainFrom(built) : null,
+                    _builtAt ?? DateTimeOffset.UtcNow, HostLabel.Trim() is { Length: > 0 } h ? h : null, SourceVisibility, null)
+                : null);
         var primary = ParsedDevices().FirstOrDefault();
         var texts = new CandidateTexts(Description.Split('\n')[0].Trim(), Split(Changes), Split(KnownIssues), ProductionAccess,
-            primary is null ? null : $"{primary.Name}, iOS {primary.IosVersion}", OwnerApproval.Trim() is { Length: > 0 } ok ? ok : null);
+            primary is null ? null : $"{primary.Name}, iOS {primary.IosVersion}", OwnerApproval.Trim() is { Length: > 0 } ok ? ok : null,
+            ApprovedSha256.Trim() is { Length: > 0 } approvedSha ? approvedSha.ToLowerInvariant() : null);
         return new RootlessAppWorkflow.Request(source, OutputDir.Length > 0 ? OutputDir : Path.Combine(Path.GetTempPath(), "unleashify"), spec, prov, texts, Ldid,
             primary?.IosVersion, ExportHandoff: exportHandoff, Context: Context());
     }
@@ -430,12 +527,15 @@ public sealed partial class UnleashifyViewModel(
         {
             var r = WorkflowRequest(_builtFrom ?? DeviceBuild, exportHandoff: true);
             var folder = Path.Combine(r.OutputDir, $"{r.Spec.PackageId}_{r.Spec.Version.Replace(':', '_')}-candidate-handoff");
-            var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, r.Provenance, r.Texts, pkg.SignedFiles, DateTimeOffset.UtcNow, CancellationToken.None, r.Context);
+            var prov = RootlessAppWorkflow.Complete(r.Provenance, app, val, _outcome.Lifecycle, r.DeviceIosVersion);
+            var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, prov, r.Texts, pkg.SignedFiles, DateTimeOffset.UtcNow, CancellationToken.None, r.Context);
             HandoffFolder = handoff.Folder;
             Missing.Clear();
             foreach (var m in handoff.Missing) Missing.Add(m);
             Stages[4].Tag = new("Done", "success");
-            HandoffTag = handoff.ImportRequestComplete ? new("Handoff exported · import request pinned", "success") : new("Handoff exported · import request incomplete", "warning");
+            HandoffTag = handoff.ImportRequestComplete ? new(prov.Local is null ? "Handoff exported · import request pinned" : "Handoff exported · local-file request (hcg-repo/)", "success") : new("Handoff exported · import request incomplete", "warning");
+            PreviewTag = new("Not previewed", "neutral");
+            PreviewText = "";
             Log += $"\n[Handoff] {handoff.Files.Count} files in {handoff.Folder}";
         }
         finally { IsBusy = false; }

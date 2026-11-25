@@ -5,6 +5,28 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ## [Unreleased] — HCG Impactor
 
 ### Added
+- **Unleashify on your Mac, without GitHub Actions** (`docs/UNLEASHIFY-LOCAL.md`). This uses the same packager,
+  validator and handoff as CI.
+  - **Pinned commit:** a clean checkout of one exact commit of your local repository (read only), imported and
+    recorded.
+  - **Lifecycle simulation:** install → configure → upgrade → remove in a throwaway folder; Maker's scripts run with a
+    recording `uicache`.
+  - **Local provenance:** built by, toolchain read from the app's `DTXcode`, time, host label without computer or user
+    names, source visibility, validation. No CI run or artifact is recorded.
+  - **HCG Repo `local-file` import request** with an `hcg-repo/` folder laid out for an HCG Repo branch.
+  - **Owner approval bound to the exact SHA-256.**
+  - **HCG Repo import preview:** HCG Repo's own importer, dry run, on a throwaway copy of your checkout.
+  - The same in the CLI: `--rootless-deb … --local --source-visibility … [--approved-sha256 …] [--hcg-repo …]`.
+- `IBuildHost` / `LocalBuildHost`: the seam for a future owner-authorized HCG Server build host (proposal in
+  `docs/BUILD-HOSTS.md`).
+
+### Changed
+- Creating a profile with the Xcode account registers a device only when you tick **Register the connected device**
+  (command line `--register-device`). The approval dialog names the App ID and device registration.
+- Impactor labels the team when a signature records none (codesign records a team only for Apple-issued
+  certificates).
+- Windows installer test: a `taskkill` child that had already exited no longer fails the test.
+
 - **HCG Impactor** (sidebar › HCG Impactor; `--impactor` on the command line): inspect, sign, install and diagnose iOS
   and iPadOS apps on your own devices. Flow: Drop IPA → Inspect → Sign → Select device → Install. See `docs/IMPACTOR.md`.
   - **IPA Inspector** (all platforms): identity, version and build, minimum iOS, device families, architectures,
