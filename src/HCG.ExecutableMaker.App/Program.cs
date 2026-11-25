@@ -29,6 +29,12 @@ internal static class Program
         // `HCGExecutableMaker --rootless-deb …`: package an iOS app a build produced as a rootless jailbreak .deb (see RootlessDebCommand).
         if (args.Contains("--rootless-deb") || args.Contains("--rootless-deb-validate"))
             return RootlessDebCommand.Run(args);
+        // `HCGExecutableMaker --xcode-mac <folder|zip> …`: native macOS Xcode builds without the UI (see XcodeMacCommand).
+        if (args.Contains("--xcode-mac"))
+            return XcodeMacCommand.Run(args);
+        // `HCGExecutableMaker --mac-signing-doctor <App.app>`: read-only signing report of a macOS app.
+        if (args.Contains("--mac-signing-doctor"))
+            return XcodeMacCommand.SigningDoctor(args);
         // `HCGExecutableMaker --impactor <command> …`: HCG Impactor (inspect, sign, devices, install, diagnose) without the UI.
         if (args.Contains("--impactor"))
             return ImpactorCommand.Run(args);

@@ -19,8 +19,9 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
     /// </summary>
     public int Match(SourceIndex index)
     {
+        var local = MacXcode.MacXcodeProjectAnalyzer.LocalPackageManifests(index);
         var manifests = SwiftPackageScanner.FindManifests(index)
-            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m)).ToList();
+            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m) && !local.Contains(m)).ToList();
         // macOS Xcode projects with an app target belong to "Native macOS app — Xcode"; only the others are explained here.
         var macProjects = XcodeProjectAnalyzer.FindProjects(index).Where(p => XcodeProjectAnalyzer.IsMacOnlyProject(index, p))
             .Where(p => manifests.Count > 0 || MacXcode.MacXcodeProjectAnalyzer.Analyze(index, p).AppTargets.Count == 0).ToList();
@@ -36,8 +37,10 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
 
     public ProjectAnalysis Inspect(SourceIndex index, ToolchainReport? toolchains)
     {
+        // A local package of a macOS Xcode app is that app's dependency: building it with swift build would not build the app.
+        var local = MacXcode.MacXcodeProjectAnalyzer.LocalPackageManifests(index);
         var packages = SwiftPackageScanner.FindManifests(index)
-            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m))
+            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m) && !local.Contains(m))
             .Select(m => SwiftPackageScanner.Scan(index, m)).ToList();
         var macProjects = XcodeProjectAnalyzer.FindProjects(index).Where(p => XcodeProjectAnalyzer.IsMacOnlyProject(index, p)).ToList();
         var diagnostics = new List<AnalysisDiagnostic>();

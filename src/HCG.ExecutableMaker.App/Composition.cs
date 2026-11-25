@@ -67,6 +67,7 @@ public static class Composition
         // Native macOS apps built with Xcode (the project's own .app) before the generic packagers.
         services.AddSingleton<IPackager, XcodeAppBundlePackager>();
         services.AddSingleton<IPackager, XcodeAppZipPackager>();
+        services.AddSingleton<IPackager, XcodeArchivePackager>();
         services.AddSingleton<IPackager, PortableFolderPackager>();
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();

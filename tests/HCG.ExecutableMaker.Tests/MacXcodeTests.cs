@@ -29,7 +29,7 @@ public sealed class MacXcodeTests : IDisposable
 
     private static string FixtureDir => Path.Combine(Fixtures.RepoRoot, "tests", "Fixtures", "MacXcode", "DeskLoop");
 
-    private static ProjectInspectionService Service() => new(
+    internal static ProjectInspectionService Service() => new(
         new IProjectInspector[]
         {
             new DotNetProjectInspector(TimeProvider.System), new MobileProjectInspector(TimeProvider.System),
@@ -40,6 +40,9 @@ public sealed class MacXcodeTests : IDisposable
 
     /// <summary>A Mac with Xcode selected: a fake developer directory with usr/bin/xcodebuild and a macOS SDK with SDKSettings.json.</summary>
     private ToolchainReport Mac(string sdk = "26.5", string macOS = "26.1", string[]? archs = null, XcodeState state = XcodeState.Ready, bool commandLineTools = false,
+        TargetArchitecture host = TargetArchitecture.Arm64) => MacReport(_t, sdk, macOS, archs, state, commandLineTools, host);
+
+    internal static ToolchainReport MacReport(TempDir _t, string sdk = "26.5", string macOS = "26.1", string[]? archs = null, XcodeState state = XcodeState.Ready, bool commandLineTools = false,
         TargetArchitecture host = TargetArchitecture.Arm64)
     {
         var dev = _t.Combine(commandLineTools ? "CommandLineTools" : "Xcode_26.6.app", "Contents", "Developer");
@@ -280,10 +283,12 @@ public sealed class MacXcodeTests : IDisposable
         var layout = MacXcodeBuildPlanner.PrepareLayout(s, _t.Combine("build"), source);
         var steps = MacXcodeBuildPlanner.Plan(s, layout, source, "/Applications/Xcode_26.6.app/Contents/Developer/usr/bin/xcodebuild", null, new Dictionary<string, string> { ["PATH"] = "/usr/bin" });
 
-        Assert.Equal(3, steps.Count);
+        // Copy, discover (-list), read settings, build.
+        Assert.Equal(4, steps.Count);
         Assert.Equal("/usr/bin/ditto", steps[0].Process.Executable);
         Assert.Equal([source, layout.SourceCopy], steps[0].Process.Arguments);
-        var build = steps[2].Process;
+        Assert.Contains("-list", steps[1].Process.Arguments);
+        var build = steps[3].Process;
         Assert.EndsWith("xcodebuild", build.Executable, StringComparison.Ordinal);
         var args = build.Arguments.ToList();
         // On the copy, never on the imported source; derived data, result bundle and packages in HCG's build folder.
@@ -299,8 +304,8 @@ public sealed class MacXcodeTests : IDisposable
         Assert.Equal(["ARCHS=arm64", "ONLY_ACTIVE_ARCH=NO", "COMPILER_INDEX_STORE_ENABLE=NO"], settingsArgs);
         Assert.DoesNotContain(steps, st => st.Process.Arguments.Any(a => a.EndsWith(".command", StringComparison.Ordinal)));
         Assert.Equal("YES", build.Environment!["NSUnbufferedIO"]);
-        Assert.True(steps[1].CaptureStdout);
-        Assert.Contains("-showBuildSettings", steps[1].Process.Arguments);
+        Assert.True(steps[2].CaptureStdout);
+        Assert.Contains("-showBuildSettings", steps[2].Process.Arguments);
     }
 
     [Fact]
@@ -354,7 +359,8 @@ public sealed class MacXcodeTests : IDisposable
     public void Packaging_offers_app_zip_and_dmg_on_a_Mac_and_nothing_buildable_elsewhere()
     {
         var mac = PackagingCatalog.Evaluate(new PackagingContext(TargetPlatform.MacOS, Mac().Host, Mac(), true) { IsMacXcode = true });
-        Assert.Equal([PackagingFormat.MacAppBundle, PackagingFormat.PortableZip, PackagingFormat.MacDmg], mac.Where(o => o.IsAvailable).Select(o => o.Format));
+        Assert.Equal([PackagingFormat.MacAppBundle, PackagingFormat.PortableZip, PackagingFormat.MacDmg, PackagingFormat.MacPkg, PackagingFormat.MacXcodeArchive],
+            mac.Where(o => o.IsAvailable).Select(o => o.Format));
         var linux = PackagingCatalog.Evaluate(new PackagingContext(TargetPlatform.MacOS, Linux().Host, Linux(), true) { IsMacXcode = true });
         Assert.DoesNotContain(linux, o => o.IsAvailable);
         Assert.All(linux.Where(o => o.Format is PackagingFormat.MacAppBundle or PackagingFormat.PortableZip or PackagingFormat.MacDmg),

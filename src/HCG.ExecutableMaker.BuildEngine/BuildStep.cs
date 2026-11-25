@@ -22,6 +22,10 @@ public sealed record BuildStep(BuildStage Stage, string Title, ProcessSpec Proce
     public IReadOnlyList<(string Path, string Message)> RequiredFiles { get; init; } = [];
     /// <summary>The tool writes progress to stderr (npm, electron-builder): such lines are logged as output, not errors.</summary>
     public bool StdErrIsProgress { get; init; }
+    /// <summary>With <see cref="CaptureStdout"/>: the step's output is also kept under this key, apart from other steps' (e.g. "xcode-list").</summary>
+    public string? CaptureKey { get; init; }
+    /// <summary>Run on the step's captured output after it succeeds; a message fails the build with it (e.g. "scheme X does not exist").</summary>
+    public Func<IReadOnlyList<string>, string?>? Check { get; init; }
 }
 
 public sealed record BuildLogLine(DateTimeOffset Timestamp, BuildLogKind Kind, string Text);

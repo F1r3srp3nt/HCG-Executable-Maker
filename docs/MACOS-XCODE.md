@@ -4,7 +4,10 @@ HCG Executable Maker imports a macOS app's Xcode project (a source ZIP or a fold
 Mac, and delivers the project's own `.app`, a ZIP of it, an optional DMG, SHA-256 checksums, the project's licence
 files and a build report. It is shown as **Native macOS app — Xcode** in New Build.
 
-Acceptance case: MotionWallpaper 1.0.5 (`MotionWallpaper-master.zip`, commit `ab038f7`, GPL-3.0).
+Acceptance cases: MotionWallpaper 1.0.5 (`MotionWallpaper-master.zip`, commit `ab038f7`, GPL-3.0), and HCG Offensive
+Frontier (private): an Xcode 16 project (objectVersion 77, synchronized folders) with a local Swift package, a shared
+scheme whose Test action runs the package's tests, and Debug/Release configurations that differ in bundle ID and App
+Sandbox. See *Native build provider* below.
 
 ## What happens
 
@@ -75,3 +78,114 @@ stored in this repository), then through the real wizard (headless):
   Accessibility), relaunch so the app starts its desktop renderer, and compare two screenshots to show the video
   playing on the desktop. Lock-screen replacement, the native wallpaper and *Launch at login* are never touched: they
   stay explicit actions in the app.
+
+## Native build provider (Xcode 16 projects, tests, archives, diagnostics)
+
+The provider builds the project with the installed Xcode and treats it as an Xcode project. A local Swift package
+inside it (`Packages/…`) is a dependency of the app: it is not offered as a separate Swift package build.
+
+**Inspection** (static) also reads:
+
+- `.xcworkspace` files next to the project or elsewhere in the import that reference it (`group:`, `container:`,
+  `self:`, relative paths). The workspace is built when there is one.
+- Xcode 16 synchronized folders (`PBXFileSystemSynchronizedRootGroup`) and the project format version.
+- Swift package references: local (in the source; no download; an error when `Package.swift` is missing) and remote
+  (URL and version requirement), each target's package products, and the pins in `Package.resolved`.
+- Per configuration: bundle ID, signing identity, style and team, entitlements file, App Sandbox
+  (`ENABLE_APP_SANDBOX` and the entitlements), hardened runtime, compilation conditions, architectures, and whether
+  Info.plist is generated (`GENERATE_INFOPLIST_FILE`, `INFOPLIST_KEY_*`) or a file.
+- Asset catalogs and the app-icon images that exist, and each entitlements file with its keys.
+- Each shared scheme's Test action (the test targets it runs and their configuration) and its Archive configuration.
+
+**Steps.** Every step is an `xcodebuild` call on a copy of the source in HCG's build folder. HCG adds nothing to the
+project and runs none of its scripts.
+
+| Step | Command | Fails the build when |
+|---|---|---|
+| Discover | `xcodebuild -list -json` | the chosen scheme or configuration is not listed |
+| Resolve dependencies (remote packages only) | `-resolvePackageDependencies -clonedSourcePackagesDirPath <build>` | resolution fails (shown as a *dependency* error) |
+| Build settings | `-showBuildSettings -json` | — (the product's real name and path come from here) |
+| Compile | `build` with the result bundle | xcodebuild fails; the Swift/clang errors are listed with file, line and target |
+| Test (optional) | `test -destination platform=macOS,arch=<this Mac>` | a test fails (XCTest and Swift Testing) |
+| Archive (optional, or when *Xcode archive* is chosen) | `archive -archivePath <build>/<scheme>.xcarchive` | archiving fails |
+
+The `.app` is taken from the build settings' product path and validated (identity, architectures, minimum macOS,
+icon, signature). Then it is packaged.
+
+**Outputs:**
+
+| Format | What it is |
+|---|---|
+| `.app` | the app exactly as Xcode built and signed it |
+| ZIP | `ditto -c -k --keepParent` of the app |
+| DMG | the app, an Applications shortcut and the licence files |
+| PKG | an installer for `/Applications` (pkgbuild/productbuild, no scripts). It is **unsigned**: an Xcode build never signs the installer, so it is for local testing, and Gatekeeper blocks it on other Macs. |
+| Xcode archive | the `.xcarchive` (Info.plist, `Products/Applications/<app>`, dSYMs) as a ZIP. It is not exported and not uploaded. |
+
+**Signing Doctor** (read only; `--mac-signing-doctor <App.app>`) classifies the app and every piece of embedded code
+(frameworks, dylibs, helpers, XPC services, app extensions, login items). Each one is:
+
+- unsigned;
+- ad hoc;
+- development (Apple Development);
+- Developer ID;
+- Developer ID and notarized (Gatekeeper's *Notarized Developer ID*, plus `stapler validate` for the ticket);
+- App Store.
+
+It also reports the team, entitlements, App Sandbox, hardened runtime, secure timestamp and `codesign --verify --deep
+--strict`. Findings name problems such as unsigned nested code, a team mismatch, ad hoc code inside a Developer ID
+app, `get-task-allow` or `cs.*` exceptions. It changes nothing.
+
+Signing with a new identity and notarization are separate, explicitly approved operations. They are never part of a
+build, and HCG never edits the project's signing or sandbox settings.
+
+**Reports.** These are written next to `build.log` for every build, and copied to the outputs on success:
+
+- `XCODE-DIAGNOSTICS.md` and `xcode-diagnostics.json` (`hcg.build-diagnostics` v1, schema in
+  `docs/contracts/build-diagnostics-v1.schema.json`). They contain:
+  - the status (a failed build is reported as failed);
+  - compiler errors and warnings with file, line, column and target, plus the source lines around each error;
+  - failed targets and the commands xcodebuild listed as failed;
+  - dependency, signing, linker and project errors, each named as such;
+  - test failures;
+  - duration;
+  - the complete log path and result bundles.
+
+  Authentication data is redacted. In the app: Results › *Xcode build diagnostics* (View report, Copy report for an
+  agent, Open folder). In the CLI, the report is printed when a build fails.
+- `native-build-request.json` and `native-build-result.json`: the shared native build-provider contract (below).
+- `SIGNING-DOCTOR.txt`.
+- `<file>.release-passport.json` for each ZIP, DMG, PKG and Xcode archive (Release Passport v1 build half). It holds:
+  - the exact SHA-256 and size;
+  - the source commit as Git states it;
+  - provider `executable-maker-local`;
+  - the Xcode version and macOS SDK;
+  - the architecture;
+  - `code_signing` from the Signing Doctor, including notarization;
+  - the artifact checks and the test result.
+
+  Ship to Store reads it for the exact file and submits a **private draft** only. `repository_signing` is never filled
+  by Maker.
+
+**CLI**
+
+```
+HCGExecutableMaker --xcode-mac <folder|zip> --inspect-only
+HCGExecutableMaker --xcode-mac <folder|zip> --trust [--scheme S] [--configuration Release] [--arch arm64|x86_64|universal]
+    [--test] [--archive] [--formats app,zip,dmg,pkg,xcarchive] [--sign-ad-hoc] [--out DIR] [--timeout MIN]
+HCGExecutableMaker --mac-signing-doctor <App.app>
+```
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | built, or inspected |
+| 2 | usage error, or not trusted (`--trust` is required to build) |
+| 4 | not a buildable macOS Xcode app on this computer |
+| 6 | the build failed; the diagnostics report is printed |
+
+The Xcode used is the one selected for HCG (Toolchains page), then `DEVELOPER_DIR`, then `xcode-select`.
+
+**Native build-provider contract.** `docs/contracts/NATIVE-BUILD-PROVIDER.md` describes it. Maker's local provider
+needs no GitHub Actions. An HCG Server build host would implement the same request and result.

@@ -200,3 +200,50 @@ public sealed class XcodeAppZipPackager(IProcessRunner runner) : IPackager
         return [new PackagedOutput(Format, ArtifactKind.File, zip, checks)];
     }
 }
+
+/// <summary>
+/// The .xcarchive xcodebuild archive produced for the same scheme and configuration, delivered as a ZIP made with ditto
+/// (keeps the bundle structure, the app's signature and the dSYM). Checked by expanding it again: the archive's
+/// Info.plist and its Products/Applications app must be there.
+/// </summary>
+public sealed class XcodeArchivePackager(IProcessRunner runner) : IPackager
+{
+    public const string StagedSuffix = ".xcarchive";
+    public PackagingFormat Format => PackagingFormat.MacXcodeArchive;
+    public bool Handles(BuildSettings settings) => settings.MacXcode is not null;
+
+    public async Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken)
+    {
+        if (request.Host.Platform != TargetPlatform.MacOS) throw new InvalidOperationException("Xcode archives are made on a Mac.");
+        var staged = Directory.EnumerateDirectories(request.PublishDirectory, "*" + StagedSuffix).FirstOrDefault()
+                     ?? throw new InvalidOperationException("xcodebuild archive produced no .xcarchive in this build.");
+        var zip = Path.Combine(request.OutputRoot, request.ArtifactBaseName + ".xcarchive.zip");
+        if (File.Exists(zip)) File.Delete(zip);
+        log.Info($"Creating {Path.GetFileName(zip)} from {Path.GetFileName(staged)} with ditto -c -k --keepParent");
+        var r = await runner.RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = ["-c", "-k", "--keepParent", staged, zip], Timeout = TimeSpan.FromMinutes(15) },
+            (_, l) => log.Info(l), cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        var checks = new List<VerificationCheck>();
+        if (!r.Succeeded || !File.Exists(zip))
+            return [new PackagedOutput(Format, ArtifactKind.File, zip, [new VerificationCheck("Archive created", VerificationStatus.Failed, $"ditto exited with code {r.ExitCode}.")])];
+        checks.Add(new VerificationCheck("Archive created", VerificationStatus.Passed, $"{new FileInfo(zip).Length:N0} bytes."));
+        var expand = Path.Combine(Path.GetTempPath(), "hcg-xcarchive-" + Guid.NewGuid().ToString("N")[..10]);
+        try
+        {
+            var x = await runner.RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = ["-x", "-k", zip, expand], Timeout = TimeSpan.FromMinutes(15) }, (_, _) => { }, cancellationToken).ConfigureAwait(false);
+            var root = Path.Combine(expand, Path.GetFileName(staged));
+            var apps = Directory.Exists(Path.Combine(root, "Products", "Applications")) ? Directory.GetDirectories(Path.Combine(root, "Products", "Applications"), "*.app") : [];
+            var dsyms = Directory.Exists(Path.Combine(root, "dSYMs")) ? Directory.GetDirectories(Path.Combine(root, "dSYMs"), "*.dSYM").Length : 0;
+            checks.Add(!x.Succeeded || !File.Exists(Path.Combine(root, "Info.plist"))
+                ? new VerificationCheck("Archive structure", VerificationStatus.Failed, "The expanded ZIP has no .xcarchive Info.plist.")
+                : apps.Length == 0
+                ? new VerificationCheck("Archive structure", VerificationStatus.Failed, "The archive holds no app in Products/Applications (is the target's SKIP_INSTALL set to YES?).")
+                : new VerificationCheck("Archive structure", VerificationStatus.Passed, $"Info.plist, {string.Join(", ", apps.Select(Path.GetFileName))} in Products/Applications, {dsyms} dSYM(s)."));
+        }
+        finally
+        {
+            try { if (Directory.Exists(expand)) Directory.Delete(expand, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        return [new PackagedOutput(Format, ArtifactKind.File, zip, checks)];
+    }
+}

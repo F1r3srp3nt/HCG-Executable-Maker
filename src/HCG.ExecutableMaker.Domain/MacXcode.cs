@@ -25,6 +25,16 @@ public sealed record MacXcodeTargetInfo
     public IReadOnlyList<string> Frameworks { get; init; } = [];
     public string? Entitlements { get; init; }
     public bool HardenedRuntime { get; init; }
+    /// <summary>ENABLE_APP_SANDBOX (Xcode 15+ build setting; Xcode generates the entitlement), null when not set.</summary>
+    public bool? AppSandbox { get; init; }
+    /// <summary>GENERATE_INFOPLIST_FILE = YES: Xcode writes Info.plist from INFOPLIST_KEY_* settings (no file in the project).</summary>
+    public bool GeneratedInfoPlist { get; init; }
+    /// <summary>Swift package products the target links (XCSwiftPackageProductDependency).</summary>
+    public IReadOnlyList<string> PackageProducts { get; init; } = [];
+    /// <summary>Folders Xcode 16 keeps in sync with the file system (PBXFileSystemSynchronizedRootGroup), relative to the project folder.</summary>
+    public IReadOnlyList<string> SynchronizedFolders { get; init; } = [];
+    /// <summary>The target's settings in every build configuration, as the project file sets them (project level, then target).</summary>
+    public IReadOnlyList<MacXcodeConfigurationFacts> ConfigurationFacts { get; init; } = [];
     public bool IsApplication => ProductType == "com.apple.product-type.application";
 
     /// <summary>How the project signs: what a person sees before building.</summary>
@@ -35,6 +45,42 @@ public sealed record MacXcodeTargetInfo
         var id => $"\"{id}\"{(DevelopmentTeam is null ? "" : $", team {DevelopmentTeam}")}{(CodeSignStyle is { } s ? $" ({s.ToLowerInvariant()})" : "")}",
     };
 }
+
+/// <summary>
+/// One build configuration of a target as the project file states it. Debug and Release often differ in what matters for
+/// distribution: bundle ID, App Sandbox, entitlements, compilation conditions and signing.
+/// </summary>
+public sealed record MacXcodeConfigurationFacts
+{
+    public required string Name { get; init; }
+    public string? BundleIdentifier { get; init; }
+    public string? CodeSignIdentity { get; init; }
+    public string? CodeSignStyle { get; init; }
+    public string? DevelopmentTeam { get; init; }
+    public string? Entitlements { get; init; }
+    public bool? AppSandbox { get; init; }
+    public bool HardenedRuntime { get; init; }
+    /// <summary>SWIFT_ACTIVE_COMPILATION_CONDITIONS without $(inherited) (e.g. DEBUG, feature flags).</summary>
+    public IReadOnlyList<string> CompilationConditions { get; init; } = [];
+    /// <summary>ENABLE_USER_SELECTED_FILES etc.: sandbox resource access Xcode turns into entitlements.</summary>
+    public IReadOnlyDictionary<string, string> SandboxAccess { get; init; } = new Dictionary<string, string>();
+    public string? Architectures { get; init; }
+    public bool GeneratedInfoPlist { get; init; }
+    public string? InfoPlistFile { get; init; }
+}
+
+/// <summary>A Swift package the Xcode project depends on.</summary>
+/// <param name="Kind">"local" (XCLocalSwiftPackageReference: a folder in the source) or "remote" (XCRemoteSwiftPackageReference: a URL).</param>
+/// <param name="Location">The relative path (local) or repository URL (remote).</param>
+/// <param name="Requirement">A remote package's version rule (e.g. "upToNextMajorVersion 1.2.0"), null for local packages.</param>
+/// <param name="ManifestPath">The local package's Package.swift, relative to the workspace source; null when it is missing.</param>
+public sealed record MacXcodePackageReference(string Kind, string Location, string? Requirement, string? ManifestPath)
+{
+    public bool IsLocal => Kind == "local";
+}
+
+/// <summary>A pinned package from Package.resolved (the exact version or revision the project last resolved).</summary>
+public sealed record MacXcodePackagePin(string Identity, string Location, string? Version, string? Revision);
 
 /// <summary>A macOS-only Xcode project found in the workspace (static analysis; xcodebuild is never run to inspect).</summary>
 public sealed record MacXcodeProjectInfo
@@ -58,6 +104,18 @@ public sealed record MacXcodeProjectInfo
     public IReadOnlyList<string> HelperScripts { get; init; } = [];
     /// <summary>The asset catalog's app icon set, when present.</summary>
     public string? AppIconSet { get; init; }
+    /// <summary>Asset catalogs (.xcassets) next to the project, relative paths.</summary>
+    public IReadOnlyList<string> AssetCatalogs { get; init; } = [];
+    /// <summary>App icon images the icon set names and the folder actually contains (empty: an icon set with no images).</summary>
+    public IReadOnlyList<string> AppIconImages { get; init; } = [];
+    /// <summary>Swift packages the project references (local folders and remote repositories).</summary>
+    public IReadOnlyList<MacXcodePackageReference> PackageReferences { get; init; } = [];
+    /// <summary>Package.resolved pins (the workspace's shared copy), when committed.</summary>
+    public IReadOnlyList<MacXcodePackagePin> ResolvedPackages { get; init; } = [];
+    /// <summary>Entitlements files next to the project with their keys (path → keys).</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> EntitlementFiles { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
+    /// <summary>project.pbxproj objectVersion (77 = Xcode 16 format with synchronized folders).</summary>
+    public int? ObjectVersion { get; init; }
     public string? ParseError { get; init; }
     public string Directory => ProjectPath.Contains('/') ? ProjectPath[..ProjectPath.LastIndexOf('/')] : "";
     public string Container => WorkspacePath ?? ProjectPath;
@@ -129,4 +187,8 @@ public sealed record MacXcodeBuildOptions
     public bool SignLocallyAdHoc { get; init; }
     /// <summary>Licence/attribution files (relative to the source) shipped next to the app and inside the DMG.</summary>
     public IReadOnlyList<string> LicenseFiles { get; init; } = [];
+    /// <summary>Run the scheme's test action (xcodebuild test) after the build. A failed test fails the build.</summary>
+    public bool RunTests { get; init; }
+    /// <summary>Also produce an .xcarchive (xcodebuild archive) of the same scheme and configuration.</summary>
+    public bool CreateArchive { get; init; }
 }

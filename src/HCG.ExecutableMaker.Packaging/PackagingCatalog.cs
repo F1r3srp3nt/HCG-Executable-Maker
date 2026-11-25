@@ -159,7 +159,10 @@ public static class PackagingCatalog
         else
             add(PackagingFormat.MacDmg, "Compressed disk image with the .app, an Applications shortcut and the project's licence files.", PackagingAvailability.Available, null, null);
         add(PackagingFormat.PortableFolder, "Loose executable.", PackagingAvailability.NotApplicable, "A macOS app runs from inside its .app bundle.", null);
-        add(PackagingFormat.MacPkg, "Installer package.", PackagingAvailability.NotImplemented, "Not offered for Xcode-built apps in this version; distribute the ZIP or DMG.", null);
+        var (pkgAvailability, pkgReason) = MacDistribution.MacDistributionCatalog.Pkg(ctx with { IsGuiApplication = true }, dotNet: false);
+        add(PackagingFormat.MacPkg, MacDistribution.MacDistributionCatalog.PkgDescription, pkgAvailability, pkgReason, null);
+        add(PackagingFormat.MacXcodeArchive, "Xcode archive (.xcarchive, made by xcodebuild archive with the same scheme and configuration), as a ZIP. It keeps the app and its debug symbols (dSYM) for later export or crash symbolication.",
+            offMac ? PackagingAvailability.RequiresDifferentHost : PackagingAvailability.Available, offMac ? mac : null, null);
         add(PackagingFormat.MacAppStore, "Mac App Store.", PackagingAvailability.NotImplemented, "Mac App Store preparation is not offered for Xcode-built apps in this version.", null);
     }
 

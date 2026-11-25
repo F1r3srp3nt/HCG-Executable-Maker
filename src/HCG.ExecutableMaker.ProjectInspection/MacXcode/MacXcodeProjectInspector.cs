@@ -26,7 +26,9 @@ public sealed class MacXcodeProjectInspector(TimeProvider time) : IProjectInspec
         var depth = apps.Min(SourceIndex.Depth);
         var dotnetDepth = index.WithExtension(".csproj", ".fsproj", ".vbproj", ".sln", ".slnx").Select(SourceIndex.Depth).DefaultIfEmpty(int.MaxValue).Min();
         if (dotnetDepth < depth) return 84;
-        var packageDepth = SwiftPackageScanner.FindManifests(index).Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m))
+        // A package the app uses as a local Swift package is a dependency, not a competing project.
+        var local = MacXcodeProjectAnalyzer.LocalPackageManifests(index);
+        var packageDepth = SwiftPackageScanner.FindManifests(index).Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m) && !local.Contains(m))
             .Select(SourceIndex.Depth).DefaultIfEmpty(int.MaxValue).Min();
         return packageDepth < depth ? 101 : 104;
     }
@@ -57,11 +59,27 @@ public sealed class MacXcodeProjectInspector(TimeProvider time) : IProjectInspec
                 diagnostics.Add(new(DiagnosticSeverity.Info, "No shared scheme is committed; xcodebuild creates one per target, named after the target.", p.ProjectPath));
             if (p.UsesCocoaPods && !index.Files.Any(f => f.StartsWith(AppendSlash(p.Directory) + "Pods/", StringComparison.Ordinal)))
                 diagnostics.Add(new(DiagnosticSeverity.Warning, "Podfile found but Pods/ is not present. Run `pod install` yourself before building (HCG never runs it).", p.Directory));
-            if (p.UsesSwiftPackages)
-                diagnostics.Add(new(DiagnosticSeverity.Info, "The project uses Swift packages; xcodebuild resolves them during the build (network access required).", p.ProjectPath));
+            foreach (var r in p.PackageReferences.Where(r => r.IsLocal))
+                diagnostics.Add(r.ManifestPath is null
+                    ? new(DiagnosticSeverity.Error, $"Local Swift package {r.Location} is referenced by the project but its Package.swift is not in the imported source: the build cannot resolve it.", p.ProjectPath)
+                    : new(DiagnosticSeverity.Info, $"Local Swift package {r.Location} (in the source; no download). xcodebuild builds it as part of the app; it is not built as an app of its own.", r.ManifestPath));
+            var remote = p.PackageReferences.Where(r => !r.IsLocal).ToList();
+            if (remote.Count > 0)
+                diagnostics.Add(new(DiagnosticSeverity.Info,
+                    $"Remote Swift packages: {string.Join(", ", remote.Select(r => r.Location + (r.Requirement is { } q ? $" ({q})" : "")))}. xcodebuild resolves them in a separate step into the build folder (network access required)." +
+                    (p.ResolvedPackages.Count > 0 ? $" Package.resolved pins {p.ResolvedPackages.Count}: {string.Join(", ", p.ResolvedPackages.Select(x => $"{x.Identity} {x.Version ?? x.Revision?[..Math.Min(7, x.Revision.Length)]}"))}." : " No Package.resolved is committed: versions are chosen at resolution time."),
+                    p.ProjectPath));
+            if (p.AppIconSet is { } iconSet && p.AppIconImages.Count == 0)
+                diagnostics.Add(new(DiagnosticSeverity.Warning, $"{iconSet} has no images: the app will show the generic application icon.", iconSet));
+            foreach (var (file, keys) in p.EntitlementFiles)
+                diagnostics.Add(new(DiagnosticSeverity.Info, $"Entitlements file {SourceIndex.FileName(file)}: {(keys.Count == 0 ? "no entitlements" : string.Join(", ", keys))}.", file));
             foreach (var t in p.AppTargets)
+            {
                 diagnostics.Add(new(DiagnosticSeverity.Info,
                     $"Target {t.Name}: signing {t.SigningDescription}. HCG keeps the project's signing (Xcode signs during the build); for a Developer ID build, set your Developer ID identity in the project. Notarization is a separate step.", p.ProjectPath));
+                if (t.ConfigurationFacts.Count > 1)
+                    diagnostics.Add(new(DiagnosticSeverity.Info, $"Target {t.Name} by configuration — " + string.Join("; ", t.ConfigurationFacts.Select(Describe)) + ".", p.ProjectPath));
+            }
             if (p.LicenseFiles.Count > 0)
                 diagnostics.Add(new(DiagnosticSeverity.Info, $"Licence/attribution: {string.Join(", ", p.LicenseFiles.Select(SourceIndex.FileName))}. Shipped unchanged next to the app and inside the DMG; the app keeps its own name, bundle ID and icon.", p.Directory));
         }
@@ -97,6 +115,14 @@ public sealed class MacXcodeProjectInspector(TimeProvider time) : IProjectInspec
             AnalyzedAt = time.GetUtcNow(),
         };
     }
+
+    /// <summary>One configuration in a line: bundle ID, sandbox, hardened runtime, entitlements, compilation conditions.</summary>
+    public static string Describe(MacXcodeConfigurationFacts c) =>
+        $"{c.Name}: {c.BundleIdentifier ?? "bundle ID from build settings"}, App Sandbox {(c.AppSandbox switch { true => "on", false => "off", _ => "not set" })}" +
+        $", hardened runtime {(c.HardenedRuntime ? "on" : "off")}" +
+        (c.Entitlements is { } e ? $", entitlements {e}" : "") +
+        (c.SandboxAccess.Count > 0 ? ", " + string.Join(", ", c.SandboxAccess.Select(kv => $"{kv.Key}={kv.Value}")) : "") +
+        (c.CompilationConditions.Count > 0 ? ", conditions " + string.Join(" ", c.CompilationConditions) : "");
 
     private static string AppendSlash(string dir) => dir.Length == 0 ? "" : dir + "/";
 }

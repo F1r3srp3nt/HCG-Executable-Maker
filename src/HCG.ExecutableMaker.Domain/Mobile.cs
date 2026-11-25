@@ -102,6 +102,10 @@ public sealed record IosSchemeInfo(string Name, string File, bool Shared)
     public IReadOnlyList<string> ArchiveTargets { get; init; } = [];
     /// <summary>The configuration the Archive action uses (usually Release).</summary>
     public string? ArchiveConfiguration { get; init; }
+    /// <summary>Test bundles the scheme's Test action runs (BlueprintName), including Swift package test targets.</summary>
+    public IReadOnlyList<string> TestTargets { get; init; } = [];
+    /// <summary>The configuration the Test action uses (usually Debug).</summary>
+    public string? TestConfiguration { get; init; }
 }
 
 /// <summary>

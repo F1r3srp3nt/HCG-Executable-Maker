@@ -108,6 +108,9 @@ public static class MacXcodeBuildReport
         return [mdPath, jsonPath];
     }
 
+    /// <summary>The imported archive's ZIP comment (GitHub writes the commit there), when the project came from a ZIP.</summary>
+    public static string? ArchiveComment(ProjectRecord project) => Source(project).Comment;
+
     private static (string? ArchiveSha256, string? Comment) Source(ProjectRecord project)
     {
         var archive = project.PreservedArchivePath is { } p && File.Exists(p) ? p

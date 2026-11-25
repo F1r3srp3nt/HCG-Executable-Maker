@@ -918,6 +918,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             Summary.Add(new("Overrides", string.Join(" ", MacXcodeBuildPlanner.Overrides(mx, SelectedXcodeTarget?.Architectures).Select(x => $"{x.Setting}={(x.Value.Length == 0 ? "\"\"" : x.Value)}"))));
             Summary.Add(new("Signing", mx.SignLocallyAdHoc ? "Ad hoc, to run on this Mac (override chosen in HCG). Not Developer ID signed, not notarized."
                 : $"As the project signs ({SelectedXcodeTarget?.SigningDescription}). Notarization is not part of the build."));
+            Summary.Add(new("Steps", string.Join(" → ", new[] { "xcodebuild -list", SelectedXcodeProject?.PackageReferences.Any(r => !r.IsLocal) == true ? "resolve Swift packages" : null,
+                "read build settings", "build", mx.RunTests ? "test" : null, mx.CreateArchive || s.PackagingFormats.Contains(PackagingFormat.MacXcodeArchive) ? "archive" : null, "validate the .app", "package" }.OfType<string>())));
+            Summary.Add(new("Reports", "Diagnostics (errors, warnings, files, lines, failed targets), Signing Doctor, native build request/result and a Release Passport for each distributable file."));
             Summary.Add(new("Not run", "Scripts that ship with the project (HCG runs xcodebuild directly). The app is not launched by the build."));
         }
         else if (s.Swift is { } sw)
@@ -1150,6 +1153,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                                   : "Not code-signed: HCG does not sign C/C++ executables on this platform.") +
                   " HCG did not run the program. Runtime libraries are listed in RUNTIME-DEPENDENCIES.txt; a binary is portable only if every non-system library it needs ships with it."
                : build.Settings.Electron is not null ? "Built with the project's electron-builder workflow" + (build.Settings.Platform == TargetPlatform.MacOS ? "; signed as its configuration says (see each artifact's Code signature check)." : ".")
+               : build.Settings.MacXcode is not null ? (build.Messages.FirstOrDefault(m => m.Code == BuildService.SigningStatusCode)?.Text ?? "Code signing: not inspected.") + " Nothing was signed with a new identity, notarized or published."
                : build.Settings.Swift is null ? "Artifacts are unsigned (ad-hoc)."
                : build.Settings.MacDistribution.SigningMode == MacSigningMode.DeveloperId
                    ? notarized ? "Developer ID signed and notarized (see each artifact's checks)." : "Developer ID signed; not notarized yet (Notarize below)."
@@ -1157,6 +1161,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
               (build.Settings.Native is not null ? "" : build.Settings.Electron is null ? " Installation and launch are tested only when you run Test install." : " Launching the app is not part of the build.")
             : build.FailureReason ?? "The build did not complete.";
         _ = PrepareDistributionActionsAsync(build);
+        LoadXcodeDiagnostics(build);
         ResultDuration = Format.Duration(build.Duration);
         ResultOutput = build.Artifacts.Count > 0 ? BuildService.OutputRootFor(build.Settings) : "No output produced";
         ResultArtifacts.Clear();

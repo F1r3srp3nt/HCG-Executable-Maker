@@ -205,6 +205,40 @@ Highlights:
 - CI job `xcode-macos`: MotionWallpaper 1.0.5 (pinned commit, checked against the uploaded ZIP) through the wizard —
   build verification with Apple's tools, Universal build, cancellation, and runtime checks (launch, MP4 import, desktop
   playback) on the runner's disposable session.
+- **Native build provider for Xcode 16 projects** (docs/MACOS-XCODE.md › Native build provider):
+  - **Inspection:** synchronized folders (objectVersion 77); local and remote Swift packages with `Package.resolved`
+    pins; workspaces that reference the project from another folder; per-configuration facts (bundle ID, signing,
+    team, entitlements, App Sandbox, hardened runtime, compilation conditions, generated Info.plist); asset catalogs,
+    icon images and entitlement files; each scheme's Test action.
+  - **Steps:** `xcodebuild -list -json` checks the scheme and configuration; packages are resolved
+    (`-resolvePackageDependencies`, remote packages only); the build follows; then the optional `test` (on this Mac's
+    architecture) and `archive`.
+  - **Outputs:** PKG installer (unsigned) and Xcode archive (zipped `.xcarchive` with dSYMs), alongside .app, ZIP and
+    DMG.
+  - **Signing Doctor** for macOS apps (`--mac-signing-doctor`, read only). It tells unsigned, ad hoc, development,
+    Developer ID, notarized and App Store signatures apart, for the app and each embedded framework, helper and
+    extension. It reports team, entitlements, sandbox, hardened runtime, Gatekeeper and the stapled ticket.
+  - **Build diagnostics** (`hcg.build-diagnostics` v1): compiler errors and warnings with file, line, column and
+    target, source excerpts, failed targets and commands, dependency, signing, linker and test failures, and duration.
+    Written for every build and redacted. Results › *Xcode build diagnostics* views it, copies it for an agent, or
+    opens its folder.
+  - **Native build-provider contract** (`hcg.native-build-request` / `-result` v1, docs/contracts/): the approval,
+    source provenance, isolated workspace and limits, then every step's exit code and the artifacts. It runs locally
+    without GitHub Actions and is proposed for an HCG Server build host.
+  - **Release Passport** build half for each ZIP, DMG, PKG and Xcode archive. Ship to Store reads it for the exact file
+    and creates private drafts only.
+  - **Wizard:** dependencies, configuration facts, *Run the scheme's tests* and *Also create an Xcode archive*.
+  - **CLI:** `--xcode-mac <folder|zip> [--inspect-only] [--test] [--archive] [--formats …] --trust`.
+- Regression tests: a synthetic project shaped like an Xcode 16 SwiftUI app with a local package, plus an opt-in check
+  of the real HCG Offensive Frontier checkout (`HCG_OFFENSIVE_FRONTIER_CHECKOUT`). Diagnostics are parsed from real
+  xcodebuild output shapes. Schemas are validated for diagnostics, request and result.
+
+### Fixed
+- Inspection no longer skips folders named `Packages`. Only a NuGet `packages/` folder (repositories.config or
+  `.nupkg` files) is skipped, so an Xcode app's local Swift package is seen and the project is no longer shown as
+  unsupported.
+- A Swift package that belongs to an Xcode app (referenced by its project) is no longer offered as a separate Swift
+  package build.
 
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
 

@@ -14,7 +14,48 @@ namespace HCG.ExecutableMaker.BuildEngine.MacXcode;
 /// </summary>
 public static class MacXcodeBuildPlanner
 {
-    public sealed record Layout(string WorkRoot, string SourceCopy, string Container, bool IsWorkspace, string DerivedData, string ResultBundle, string SourcePackages);
+    public sealed record Layout(string WorkRoot, string SourceCopy, string Container, bool IsWorkspace, string DerivedData, string ResultBundle, string SourcePackages)
+    {
+        public string TestResultBundle => ResultBundle[..^".xcresult".Length] + "-Tests.xcresult";
+        public string ArchivePath => ResultBundle[..^".xcresult".Length] + ".xcarchive";
+    }
+
+    public const string ListKey = "xcode-list", SettingsKey = "xcode-settings";
+
+    /// <summary>What xcodebuild -list -json reports for a project or a workspace.</summary>
+    public sealed record ListInfo(string Name, IReadOnlyList<string> Schemes, IReadOnlyList<string> Targets, IReadOnlyList<string> Configurations);
+
+    /// <summary>Parses <c>xcodebuild -list -json</c> ({"project": {...}} or {"workspace": {...}}); null with the reason when unreadable.</summary>
+    public static (ListInfo? Info, string? Problem) ParseList(IEnumerable<string> captured)
+    {
+        var text = string.Join('\n', captured);
+        var start = text.IndexOf('{');
+        if (start < 0) return (null, "xcodebuild -list did not print JSON.");
+        try
+        {
+            using var doc = JsonDocument.Parse(text[start..(text.LastIndexOf('}') + 1)]);
+            var root = doc.RootElement;
+            var node = root.TryGetProperty("project", out var p) ? p : root.TryGetProperty("workspace", out var w) ? w : default;
+            if (node.ValueKind != JsonValueKind.Object) return (null, "xcodebuild -list printed neither a project nor a workspace.");
+            IReadOnlyList<string> Arr(string key) => node.TryGetProperty(key, out var a) && a.ValueKind == JsonValueKind.Array
+                ? a.EnumerateArray().Select(x => x.GetString()).OfType<string>().ToList() : [];
+            return (new ListInfo(node.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "", Arr("schemes"), Arr("targets"), Arr("configurations")), null);
+        }
+        catch (JsonException ex) { return (null, "xcodebuild -list printed JSON that could not be read: " + ex.Message); }
+    }
+
+    /// <summary>The scheme and configuration must be ones xcodebuild itself lists for the container.</summary>
+    public static string? CheckList(IReadOnlyList<string> captured, MacXcodeBuildOptions o)
+    {
+        var (info, problem) = ParseList(captured);
+        if (info is null) return problem;
+        if (!info.Schemes.Contains(o.Scheme))
+            return $"xcodebuild does not list the scheme {o.Scheme} for {info.Name} (it lists: {string.Join(", ", info.Schemes.DefaultIfEmpty("none"))}). " +
+                   "Share the scheme in Xcode (Product › Scheme › Manage Schemes › Shared) and commit it, or choose a listed scheme.";
+        if (info.Configurations.Count > 0 && !info.Configurations.Contains(o.Configuration))
+            return $"The project has no configuration {o.Configuration} (it has: {string.Join(", ", info.Configurations)}).";
+        return null;
+    }
 
     /// <summary>A setting HCG passes to xcodebuild, why, and what the project itself says.</summary>
     public sealed record Override(string Setting, string Value, string Reason);
@@ -76,7 +117,10 @@ public static class MacXcodeBuildPlanner
             Path.Combine(work, "DerivedData"), Path.Combine(work, PathGuard.SanitizeFileName(o.Scheme, "Build") + ".xcresult"), Path.Combine(work, "SourcePackages"));
     }
 
-    public static IReadOnlyList<BuildStep> Plan(BuildSettings s, Layout layout, string sourceDir, string xcodebuild, string? projectArchs, IReadOnlyDictionary<string, string> environment)
+    /// <param name="resolvePackages">The project references Swift packages: resolve them in their own step (clear dependency errors).</param>
+    /// <param name="hostArch">This Mac's architecture (arm64 or x86_64): tests run on it.</param>
+    public static IReadOnlyList<BuildStep> Plan(BuildSettings s, Layout layout, string sourceDir, string xcodebuild, string? projectArchs, IReadOnlyDictionary<string, string> environment,
+        bool resolvePackages = false, string hostArch = "arm64")
     {
         var o = s.MacXcode!;
         // xcodebuild buffers its output when it is not a terminal unless told otherwise; live logs need it unbuffered.
@@ -92,16 +136,37 @@ public static class MacXcodeBuildPlanner
         ];
         var overrides = Overrides(o, projectArchs).Select(x => $"{x.Setting}={x.Value}").ToList();
         var workDir = Path.GetDirectoryName(layout.Container)!;
-        return
-        [
-            new BuildStep(BuildStage.Preparing, "Copy the imported source into the build folder (the original is not built in or written to)",
+        List<string> container = [layout.IsWorkspace ? "-workspace" : "-project", layout.Container];
+        var steps = new List<BuildStep>
+        {
+            new(BuildStage.Preparing, "Copy the imported source into the build folder (the original is not built in or written to)",
                 new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = [sourceDir, layout.SourceCopy], Environment = env, Timeout = TimeSpan.FromMinutes(10) }),
-            new BuildStep(BuildStage.Restoring, "Resolve build settings (xcodebuild -showBuildSettings)",
-                new ProcessSpec { Executable = xcodebuild, Arguments = [.. common, .. overrides, "-showBuildSettings", "-json"], WorkingDirectory = workDir, Environment = env, Timeout = TimeSpan.FromMinutes(10) },
-                CaptureStdout: true),
-            new BuildStep(BuildStage.Compiling, $"Build {o.Scheme} ({o.Configuration}, {o.Architecture.Label()}) with xcodebuild",
-                new ProcessSpec { Executable = xcodebuild, Arguments = [.. common, "-resultBundlePath", layout.ResultBundle, .. overrides, "build"], WorkingDirectory = workDir, Environment = env }),
-        ];
+            new(BuildStage.Preparing, "Discover schemes, targets and configurations (xcodebuild -list)",
+                new ProcessSpec { Executable = xcodebuild, Arguments = [.. container, "-list", "-json"], WorkingDirectory = workDir, Environment = env, Timeout = TimeSpan.FromMinutes(5) },
+                CaptureStdout: true) { CaptureKey = ListKey, Check = captured => CheckList(captured, o) },
+        };
+        if (resolvePackages)
+            steps.Add(new(BuildStage.Restoring, "Resolve Swift package dependencies (xcodebuild -resolvePackageDependencies)",
+                new ProcessSpec { Executable = xcodebuild, Arguments = [.. container, "-scheme", o.Scheme, "-derivedDataPath", layout.DerivedData, "-clonedSourcePackagesDirPath", layout.SourcePackages, "-resolvePackageDependencies"],
+                    WorkingDirectory = workDir, Environment = env, Timeout = TimeSpan.FromMinutes(20) }));
+        steps.Add(new(BuildStage.Restoring, "Resolve build settings (xcodebuild -showBuildSettings)",
+            new ProcessSpec { Executable = xcodebuild, Arguments = [.. common, .. overrides, "-showBuildSettings", "-json"], WorkingDirectory = workDir, Environment = env, Timeout = TimeSpan.FromMinutes(10) },
+            CaptureStdout: true) { CaptureKey = SettingsKey });
+        steps.Add(new(BuildStage.Compiling, $"Build {o.Scheme} ({o.Configuration}, {o.Architecture.Label()}) with xcodebuild",
+            new ProcessSpec { Executable = xcodebuild, Arguments = [.. common, "-resultBundlePath", layout.ResultBundle, .. overrides, "build"], WorkingDirectory = workDir, Environment = env }));
+        if (o.RunTests)
+        {
+            // The scheme's Test action, with its own configuration (usually Debug), on this Mac's architecture.
+            var testOverrides = Overrides(o, projectArchs).Where(x => x.Setting is not ("ARCHS" or "ONLY_ACTIVE_ARCH")).Select(x => $"{x.Setting}={x.Value}");
+            steps.Add(new(BuildStage.Compiling, $"Run the tests of {o.Scheme} (xcodebuild test)",
+                new ProcessSpec { Executable = xcodebuild, Arguments = [.. container, "-scheme", o.Scheme, "-destination", $"platform=macOS,arch={hostArch}",
+                    "-derivedDataPath", layout.DerivedData, "-clonedSourcePackagesDirPath", layout.SourcePackages, "-resultBundlePath", layout.TestResultBundle, .. testOverrides, "test"],
+                    WorkingDirectory = workDir, Environment = env }));
+        }
+        if (o.CreateArchive || s.PackagingFormats.Contains(PackagingFormat.MacXcodeArchive))
+            steps.Add(new(BuildStage.Packaging, $"Archive {o.Scheme} ({o.Configuration}) into an .xcarchive (xcodebuild archive)",
+                new ProcessSpec { Executable = xcodebuild, Arguments = [.. common, "-archivePath", layout.ArchivePath, .. overrides, "archive"], WorkingDirectory = workDir, Environment = env }));
+        return steps;
     }
 
     /// <summary>

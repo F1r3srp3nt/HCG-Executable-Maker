@@ -846,6 +846,115 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  xcode-native-provider:
+    name: Native macOS Xcode provider (Xcode 16 project with a local package — genuine compile error, then .app/ZIP/DMG/PKG/XCArchive with tests)
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}/native-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Mac and Xcode on this runner (the newest Xcode is used through DEVELOPER_DIR; the system setting is unchanged)
+        run: |
+          sw_vers; uname -m
+          x="$(ls -d /Applications/Xcode_26*.app /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)"
+          echo "DEVELOPER_DIR=${x:-/Applications/Xcode.app}/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="${x:-/Applications/Xcode.app}/Contents/Developer" xcodebuild -version
+
+      - name: Build HCG Executable Maker
+        run: dotnet build src/HCG.ExecutableMaker.App -c Release
+
+      - name: Inspect — scheme, test action, local package, configurations (static; nothing is run)
+        run: |
+          mkdir -p "$OUT"
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac tests/Fixtures/MacXcode/FieldKit --inspect-only | tee "$OUT/inspect.txt"
+          grep -q "(xcode-macos) — Supported" "$OUT/inspect.txt"
+          grep -q "Schemes: FieldKit (shared) \[tests: FieldKitCoreTests\]" "$OUT/inspect.txt"
+          grep -q "Swift packages: Packages/FieldKitCore (local)" "$OUT/inspect.txt"
+          grep -q "Release: org.example.fieldkit, App Sandbox on" "$OUT/inspect.txt"
+
+      - name: Genuine compile error — the failure is reported as failed, with the Swift compiler's own error, file and line
+        run: |
+          mkdir -p "$OUT/broken" && cp -R tests/Fixtures/MacXcode/FieldKit "$OUT/broken/FieldKit"
+          # A real defect: a member the package does not have (line 5 of ContentView.swift).
+          sed -i '' 's/private let summary = FieldSummary(readings: \[12.5, 13.0, 11.75\])/private let summary = FieldSummary(readings: [12.5, 13.0, 11.75]).missingMedian/' "$OUT/broken/FieldKit/FieldKit/ContentView.swift"
+          set +e
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac "$OUT/broken/FieldKit" --trust --formats app,zip --out "$OUT/broken-out" > "$OUT/broken.txt" 2>&1
+          code=$?
+          set -e
+          tail -80 "$OUT/broken.txt"
+          [ "$code" = 6 ] || { echo "expected exit code 6 (build failed), got $code"; exit 1; }
+          grep -q "^Result: FAILED" "$OUT/broken.txt"
+          json="$(sed -n 's/^Diagnostics: .* (JSON: \(.*\))$/\1/p' "$OUT/broken.txt" | head -1)"
+          cp "$json" "$OUT/broken-diagnostics.json"; cp "$(dirname "$json")/XCODE-DIAGNOSTICS.md" "$OUT/BROKEN-XCODE-DIAGNOSTICS.md"
+          python3 - "$json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          assert d["format"] == "hcg.build-diagnostics" and d["status"] == "Failed", d["status"]
+          errs = [i for i in d["issues"] if i["severity"] == "error" and i["category"] == "compiler"]
+          assert errs, d["issues"]
+          e = errs[0]
+          print("Compiler error:", e)
+          assert e["file"].endswith("FieldKit/ContentView.swift") and e["line"] == 5 and "missingMedian" in e["message"], e
+          assert "FieldKit" in d["failedTargets"], d["failedTargets"]
+          assert any("BUILD FAILED" in r for r in d["xcodebuildResults"]), d["xcodebuildResults"]
+          PY
+          ! ls "$OUT/broken-out"/*/FieldKit.app 2>/dev/null || { echo "a failed build left an app"; exit 1; }
+
+      - name: Fixed source — build, run the scheme's tests, archive, package as .app, ZIP, DMG, PKG and XCArchive
+        run: |
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac tests/Fixtures/MacXcode/FieldKit --trust --test \
+            --formats app,zip,dmg,pkg,xcarchive --out "$OUT/ok" 2>&1 | tee "$OUT/ok.txt"
+          grep -q "^Result: SUCCEEDED" "$OUT/ok.txt"
+          grep -q "TEST SUCCEEDED" "$OUT/ok.txt"
+          dir="$(dirname "$(sed -n 's/^Artifact: \(.*\.zip\) · .*/\1/p' "$OUT/ok.txt" | head -1)")"
+          echo "OK_DIR=$dir" >> "$GITHUB_ENV"
+          ls -la "$dir"
+
+      - name: Verify the outputs with Apple's tools (independent of HCG)
+        run: |
+          app="$OK_DIR/FieldKit.app"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Contents/Info.plist" | grep -qx org.example.fieldkit
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" | grep -qx 0.3.0
+          lipo -archs "$app/Contents/MacOS/FieldKit"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --entitlements - --xml "$app" | plutil -p - | tee "$OUT/entitlements.txt"
+          grep -q "com.apple.security.app-sandbox" "$OUT/entitlements.txt"
+          codesign -dv "$app" 2>&1 | grep -E "Signature=adhoc|flags=.*runtime"
+          ls "$OK_DIR"/*.zip "$OK_DIR"/*.dmg "$OK_DIR"/*.pkg
+          hdiutil verify "$(ls "$OK_DIR"/*.dmg | head -1)"
+          pkgutil --payload-files "$(ls "$OK_DIR"/*.pkg | head -1)" | grep -q "FieldKit.app/Contents/MacOS/FieldKit"
+          archive_zip="$(ls "$OK_DIR"/*.xcarchive.zip | head -1)"
+          mkdir -p "$OUT/xcarchive" && ditto -x -k "$archive_zip" "$OUT/xcarchive"
+          find "$OUT/xcarchive" -maxdepth 4 -name "FieldKit.app" -path "*Products/Applications*" | grep -q .
+          (cd "$OK_DIR" && shasum -a 256 -c SHA256SUMS.txt)
+          for f in "$OK_DIR"/*.release-passport.json; do
+            python3 -c "import json,sys; p=json.load(open(sys.argv[1])); print(sys.argv[1].split('/')[-1], p['architecture'], p['code_signing']['status'], p['build']['provider'], p['build']['toolchain']); assert p['code_signing']['status']=='ad-hoc' and p['validation']['tests']['result']=='passed', p['validation']" "$f"
+          done
+          test -f "$OK_DIR/SIGNING-DOCTOR.txt" && cat "$OK_DIR/SIGNING-DOCTOR.txt"
+          test -f "$OK_DIR/native-build-result.json" && python3 -c "import json; r=json.load(open('$OK_DIR/native-build-result.json')); print(r['status'], [s['title'] for s in r['steps']]); assert r['status']=='succeeded'"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcode-native-provider-reports
+          path: |
+            ${{ env.OUT }}/*.txt
+            ${{ env.OUT }}/*.json
+            ${{ env.OUT }}/*.md
+            ${{ env.OUT }}/ok/**/*.md
+            ${{ env.OUT }}/ok/**/*.json
+            ${{ env.OUT }}/ok/**/*.txt
+          if-no-files-found: warn
+          retention-days: 7
+
   xcode-macos:
     name: Native macOS app — Xcode (MotionWallpaper ZIP → .app/ZIP/DMG through the wizard; build and runtime checks)
     needs: test

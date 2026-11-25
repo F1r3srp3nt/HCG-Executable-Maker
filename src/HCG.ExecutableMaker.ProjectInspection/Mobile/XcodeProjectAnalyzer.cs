@@ -24,7 +24,14 @@ public static partial class XcodeProjectAnalyzer
             var doc = XDocument.Parse(AndroidGradleAnalyzer.Read(index, file));
             var archive = doc.Descendants("BuildActionEntry").Where(e => (string?)e.Attribute("buildForArchiving") == "YES")
                 .Select(e => (string?)e.Descendants("BuildableReference").FirstOrDefault()?.Attribute("BlueprintName")).OfType<string>().ToList();
-            return info with { ArchiveTargets = archive, ArchiveConfiguration = (string?)doc.Descendants("ArchiveAction").FirstOrDefault()?.Attribute("buildConfiguration") };
+            var test = doc.Descendants("TestAction").FirstOrDefault();
+            var tests = test?.Descendants("TestableReference").Where(t => (string?)t.Attribute("skipped") != "YES")
+                .Select(t => (string?)t.Descendants("BuildableReference").FirstOrDefault()?.Attribute("BlueprintName")).OfType<string>().Distinct().ToList() ?? [];
+            return info with
+            {
+                ArchiveTargets = archive, ArchiveConfiguration = (string?)doc.Descendants("ArchiveAction").FirstOrDefault()?.Attribute("buildConfiguration"),
+                TestTargets = tests, TestConfiguration = (string?)test?.Attribute("buildConfiguration"),
+            };
         }
         catch (System.Xml.XmlException) { return info; }
     }

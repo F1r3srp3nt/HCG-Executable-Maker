@@ -207,6 +207,71 @@ public static class ReleasePassport
         };
     }
 
+    /// <summary>What a builder knows about one artifact of a build that is not a Debian package (macOS apps, installers, archives).</summary>
+    public sealed record ArtifactFacts(
+        string Platform, string Architecture, string Package, string Version, string? BuildNumber, string? ProductName,
+        string FileName, string Sha256, long Size, string ArtifactKind,
+        SourceProvenance Source, string Provider, string? Toolchain, DateTimeOffset BuiltAt,
+        string StaticInspectionState, string StaticInspectionNote, IReadOnlyList<(string Check, string Status, string Detail)> Checks,
+        JsonObject? Tests, JsonObject CodeSigning, string IssuedBy);
+
+    /// <summary>
+    /// The build half for any artifact: the same rules as <see cref="BuildHalf"/> (no repository signing, approvals,
+    /// publication, channel or device results). Maintainer scripts and the dpkg lifecycle do not apply to these artifacts.
+    /// </summary>
+    public static JsonObject ForArtifact(ArtifactFacts a)
+    {
+        JsonObject Level(string state, string note) => new() { ["state"] = state, ["by"] = "HCG Executable Maker", ["note"] = note };
+        var validation = new JsonObject
+        {
+            ["levels"] = new JsonObject
+            {
+                ["static_inspection"] = Level(a.StaticInspectionState, a.StaticInspectionNote),
+                ["maintainer_script_review"] = Level("not-applicable", $"a {a.ArtifactKind} has no Debian maintainer scripts"),
+                ["script_free_lifecycle"] = Level("not-applicable", "the dpkg lifecycle applies to Debian packages only"),
+                ["device_installation"] = Level("not-recorded", "no installation on another machine is recorded by the builder"),
+                ["application_launch"] = Level("not-recorded", "no launch is recorded by the builder"),
+                ["runtime_verification"] = Level("not-recorded", "no runtime checklist is recorded by the builder"),
+            },
+            ["tool"] = a.IssuedBy,
+            ["checks"] = new JsonArray(a.Checks.Select(c => (JsonNode?)new JsonObject { ["check"] = c.Check, ["status"] = c.Status, ["detail"] = c.Detail }).ToArray()),
+        };
+        if (a.Tests is not null) validation["tests"] = a.Tests;
+        return new JsonObject
+        {
+            ["format"] = Format,
+            ["formatVersion"] = FormatVersion,
+            ["issuer"] = new JsonObject
+            {
+                ["part"] = "build", ["system"] = "HCG Executable Maker", ["version"] = a.IssuedBy,
+                ["note"] = "the build half: measured by the builder. Channel, access, approvals, publication, device evidence and repository signing are the distribution authority's",
+            },
+            ["product"] = new JsonObject { ["key"] = null, ["name"] = a.ProductName, ["store_slug"] = null, ["central_id"] = null },
+            ["edition"] = null,
+            ["platform"] = a.Platform,
+            ["architecture"] = a.Architecture,
+            ["package"] = a.Package,
+            ["version"] = a.Version,
+            ["build_number"] = a.BuildNumber,
+            ["source"] = new JsonObject
+            {
+                ["repository"] = a.Source.Repository, ["commit"] = a.Source.Commit, ["branch"] = a.Source.Branch, ["dirty"] = a.Source.Dirty, ["basis"] = a.Source.Basis,
+            },
+            ["build"] = new JsonObject
+            {
+                ["provider"] = a.Provider, ["toolchain"] = a.Toolchain, ["built_at"] = a.BuiltAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"), ["run_id"] = null, ["artifact"] = null,
+            },
+            ["artifact"] = new JsonObject { ["filename"] = a.FileName, ["sha256"] = a.Sha256, ["size"] = a.Size, ["kind"] = a.ArtifactKind },
+            ["validation"] = validation,
+            ["device_evidence"] = new JsonArray(),
+            ["approvals"] = new JsonArray(),
+            ["distribution"] = new JsonObject { ["note"] = "channel and access are assigned by the distribution authority" },
+            ["publication"] = new JsonObject { ["note"] = "not published: Executable Maker never publishes" },
+            ["repository_signing"] = new JsonObject { ["scope"] = RepositorySigningScope, ["status"] = RepositorySigningNotFromBuilder },
+            ["code_signing"] = a.CodeSigning,
+        };
+    }
+
     /// <summary>The passport's platform for a Debian architecture, as HCG Repo names it (tools/hcgrepo/passport.py).</summary>
     public static string Platform(string architecture) => architecture switch
     {

@@ -35,6 +35,14 @@ public sealed partial class BuildWizardViewModel
     public ObservableCollection<Choice<MacXcodeArchitecture>> XcodeArchitectures { get; } = [];
     [ObservableProperty] private Choice<MacXcodeArchitecture>? _selectedXcodeArchitecture;
     [ObservableProperty] private bool _xcodeSignLocallyAdHoc;
+    /// <summary>Runs the scheme's Test action (xcodebuild test) after the build; a failing test fails the build.</summary>
+    [ObservableProperty] private bool _xcodeRunTests;
+    /// <summary>Also archives the scheme (xcodebuild archive) and keeps the .xcarchive (zipped) with the outputs.</summary>
+    [ObservableProperty] private bool _xcodeCreateArchive;
+    [ObservableProperty] private string _xcodeTestsNote = "";
+    [ObservableProperty] private bool _xcodeHasTests;
+    [ObservableProperty] private string _xcodeDependencies = "";
+    [ObservableProperty] private string _xcodeConfigurationFacts = "";
     [ObservableProperty] private StatusTag _xcodeTag = new("—", "neutral");
     [ObservableProperty] private string _xcodeFacts = "";
     [ObservableProperty] private string _xcodeOverridesText = "";
@@ -45,7 +53,15 @@ public sealed partial class BuildWizardViewModel
     [ObservableProperty] private bool _hasXcodeFixes;
     private bool _refreshingXcode;
 
-    partial void OnSelectedXcodeSchemeChanged(string? value) => XcodeOptionsChanged();
+    partial void OnSelectedXcodeSchemeChanged(string? value)
+    {
+        var scheme = SelectedXcodeProject?.Schemes.FirstOrDefault(x => x.Name == value);
+        XcodeHasTests = scheme is { TestTargets.Count: > 0 };
+        XcodeTestsNote = scheme is null ? "" : scheme.TestTargets.Count == 0 ? $"The scheme {value} has no tests in its Test action."
+            : $"Test action: {string.Join(", ", scheme.TestTargets)}{(scheme.TestConfiguration is { } tc ? $" ({tc})" : "")}, run on this Mac's architecture.";
+        if (!XcodeHasTests) XcodeRunTests = false;
+        XcodeOptionsChanged();
+    }
     partial void OnSelectedXcodeConfigurationChanged(string? value) => XcodeOptionsChanged();
     partial void OnSelectedXcodeArchitectureChanged(Choice<MacXcodeArchitecture>? value)
     {
@@ -55,6 +71,8 @@ public sealed partial class BuildWizardViewModel
         XcodeOptionsChanged();
     }
     partial void OnXcodeSignLocallyAdHocChanged(bool value) => XcodeOptionsChanged();
+    partial void OnXcodeRunTestsChanged(bool value) => XcodeOptionsChanged();
+    partial void OnXcodeCreateArchiveChanged(bool value) => XcodeOptionsChanged();
 
     private void XcodeOptionsChanged()
     {
@@ -103,6 +121,14 @@ public sealed partial class BuildWizardViewModel
                 XcodeArchitectures.Add(new Choice<MacXcodeArchitecture>(arch, arch.Label() + (arch == own ? " — this Mac" : arch == MacXcodeArchitecture.Universal ? " — runs on both, larger" : "")));
             SelectedXcodeArchitecture = XcodeArchitectures.FirstOrDefault(x => x.Value == keepArch) ?? XcodeArchitectures.FirstOrDefault(x => x.Value == own) ?? XcodeArchitectures.FirstOrDefault();
 
+            XcodeDependencies = p.PackageReferences.Count == 0 ? "No Swift packages."
+                : string.Join("\n", p.PackageReferences.Select(r => r.IsLocal
+                    ? $"Local package {r.Location} (in the source; no download){(r.ManifestPath is null ? " — its Package.swift is missing" : "")}"
+                    : $"Remote package {r.Location}{(r.Requirement is { } req ? $" ({req})" : "")}"
+                      + (p.ResolvedPackages.FirstOrDefault(pin => string.Equals(pin.Location?.TrimEnd('/').Replace(".git", ""), r.Location.TrimEnd('/').Replace(".git", ""), StringComparison.OrdinalIgnoreCase)) is { } pin
+                          ? $" — pinned {pin.Version ?? pin.Revision?[..Math.Min(12, pin.Revision.Length)]}" : " — not pinned in Package.resolved")))
+                  + (p.PackageReferences.Any(r => !r.IsLocal) ? "\nRemote packages are resolved by xcodebuild into HCG's build folder before the build (network needed)." : "");
+            XcodeConfigurationFacts = string.Join("\n", t.ConfigurationFacts.Select(MacXcodeProjectInspector.Describe));
             XcodeOffersLocalSigning = t.CodeSignIdentity is not "-" && !(t.CodeSignIdentity is null or "" && t.DevelopmentTeam is null && t.CodeSignStyle != "Automatic");
             if (!XcodeOffersLocalSigning) XcodeSignLocallyAdHoc = false;
 
@@ -149,6 +175,8 @@ public sealed partial class BuildWizardViewModel
             DisplayName = t.DisplayName,
             DeploymentTarget = t.DeploymentTarget,
             SignLocallyAdHoc = XcodeSignLocallyAdHoc,
+            RunTests = XcodeRunTests && XcodeHasTests,
+            CreateArchive = XcodeCreateArchive,
             LicenseFiles = p.LicenseFiles,
         };
     }
@@ -200,5 +228,7 @@ public sealed partial class BuildWizardViewModel
         SelectedXcodeConfiguration = XcodeConfigurations.Contains(o.Configuration) ? o.Configuration : SelectedXcodeConfiguration;
         SelectedXcodeArchitecture = XcodeArchitectures.FirstOrDefault(a => a.Value == o.Architecture) ?? SelectedXcodeArchitecture;
         XcodeSignLocallyAdHoc = o.SignLocallyAdHoc && XcodeOffersLocalSigning;
+        XcodeRunTests = o.RunTests && XcodeHasTests;
+        XcodeCreateArchive = o.CreateArchive;
     }
 }
