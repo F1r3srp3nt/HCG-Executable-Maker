@@ -189,3 +189,7 @@ The Xcode used is the one selected for HCG (Toolchains page), then `DEVELOPER_DI
 
 **Native build-provider contract.** `docs/contracts/NATIVE-BUILD-PROVIDER.md` describes it. Maker's local provider
 needs no GitHub Actions. An HCG Server build host would implement the same request and result.
+
+**Without a Mac.** `docs/templates/maker-native-xcode-build.yml` is a workflow template for the app's own (private)
+repository. It runs the same two commands on a macOS runner and uploads the diagnostics report, or the build, as
+artifacts that stay private to that repository. Nothing is signed, notarized or published.

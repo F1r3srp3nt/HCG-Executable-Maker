@@ -1,0 +1,109 @@
+# Template: build a private macOS Xcode app with HCG Executable Maker's native Xcode provider on a macOS runner.
+#
+# Copy to .github/workflows/ in the app's own repository (for example a new branch of HCG Offensive Frontier). It is
+# for an owner who has no Mac at hand; on a Mac, run the same two commands locally instead:
+#   HCGExecutableMaker --xcode-mac <checkout> --inspect-only
+#   HCGExecutableMaker --xcode-mac <checkout> --trust --test --formats app,zip,dmg,pkg,xcarchive
+#
+# What it does:
+#   - checks out the app at the pushed commit, and the public HCG Executable Maker at MAKER_REF;
+#   - runs Maker locally on the runner. Maker itself needs no GitHub Actions; this runner only stands in for a Mac.
+#   - inspects the project, then compiles it with the runner's Xcode (tests included).
+#
+# A failed build fails the job and uploads the diagnostics report: XCODE-DIAGNOSTICS.md has the Swift compiler's own
+# errors with file, line and target. A successful build uploads the .app (zipped), DMG, PKG, Xcode archive, checksums,
+# Signing Doctor, native build request/result and Release Passports.
+#
+# Nothing is signed with an identity, notarized, uploaded to a store or published. The artifacts stay in this private
+# repository's Actions storage, and the source never leaves the runner.
+name: Native macOS build (HCG Executable Maker)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths: ["**/*.swift", "**/*.xcodeproj/**", "**/*.xcworkspace/**", "**/Package.swift", "**/Package.resolved", "**/*.xcassets/**", "**/*.entitlements", ".github/workflows/maker-native-xcode-build.yml"]
+
+permissions:
+  contents: read
+
+env:
+  MAKER_REPO: F1r3srp3nt/HCG-Executable-Maker
+  MAKER_REF: feature/native-macos-xcode
+  OUT: ${{ github.workspace }}/../maker-out
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: app
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.MAKER_REPO }}
+          ref: ${{ env.MAKER_REF }}
+          path: maker
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Xcode on this runner (newest, through DEVELOPER_DIR)
+        run: |
+          x="$(ls -d /Applications/Xcode_26*.app /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)"
+          echo "DEVELOPER_DIR=${x:-/Applications/Xcode.app}/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="${x:-/Applications/Xcode.app}/Contents/Developer" xcodebuild -version
+
+      - name: Build HCG Executable Maker
+        run: dotnet build maker/src/HCG.ExecutableMaker.App -c Release
+
+      - name: Inspect (static; nothing is run)
+        run: |
+          mkdir -p "$OUT"
+          dotnet maker/src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac app --inspect-only | tee "$OUT/inspect.txt"
+
+      - name: Compile, test and package
+        run: |
+          set +e
+          dotnet maker/src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac app --trust --test \
+            --formats app,zip,dmg,pkg,xcarchive --out "$OUT/build" 2>&1 | tee "$OUT/build.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          json="$(sed -n 's/^Diagnostics: .* (JSON: \(.*\))$/\1/p' "$OUT/build.txt" | head -1)"
+          if [ -n "$json" ]; then
+            d="$(dirname "$json")"
+            for f in xcode-diagnostics.json XCODE-DIAGNOSTICS.md native-build-request.json native-build-result.json build.log; do
+              [ -f "$d/$f" ] && cp "$d/$f" "$OUT/"
+            done
+          fi
+          exit "$code"
+
+      - name: Upload diagnostics and reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maker-diagnostics
+          path: |
+            ${{ env.OUT }}/*.txt
+            ${{ env.OUT }}/*.json
+            ${{ env.OUT }}/*.md
+            ${{ env.OUT }}/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload the build (private to this repository)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maker-build
+          path: |
+            ${{ env.OUT }}/build/**/*.zip
+            ${{ env.OUT }}/build/**/*.dmg
+            ${{ env.OUT }}/build/**/*.pkg
+            ${{ env.OUT }}/build/**/*.json
+            ${{ env.OUT }}/build/**/*.txt
+            ${{ env.OUT }}/build/**/*.md
+          retention-days: 14
