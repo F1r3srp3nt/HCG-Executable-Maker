@@ -1471,22 +1471,17 @@ jobs:
           vtool -show-build "$bin" | grep -E "platform|minos" | tee -a "$OUT/archs.txt"
           plutil -extract CFBundleIdentifier raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx com.hcg.sentinel
           plutil -extract MinimumOSVersion raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx 15.0
-      - name: Local build (no CI run) — the same archive through --rootless-deb --local → submission.json, lifecycle, HCG Repo Release Manager preview
+      - name: Local build (no CI run) — the same archive through --rootless-deb --local → submission.json, lifecycle (HCG Repo's review runs on Linux, below)
         env:
-          # HCG Repo main: Release Manager with the Executable Maker submission contract (submit --result-json, status,
-          # six evidence levels). Nothing is written to HCG Repo.
-          HCG_REPO_LOCAL_COMMIT: 3bf53c7bb2b6e67a2f66f3a7e1490fc0c1f41481
-          # HCG Repo already holds 0.1.0~beta1; this dry run uses a version that exists only in its throwaway copy.
+          # HCG Repo already holds 0.1.0~beta1; the review uses a version that exists only in its throwaway copy.
           LOCAL_VERSION: 0.1.0~beta1.local1
         run: |
-          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo-local"
-          git -C "$OUT/hcg-repo-local" checkout --quiet "$HCG_REPO_LOCAL_COMMIT"
           archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceBuild"])' "$OUT/ui-run/unleashify-unleashify.json")"
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
             --package "$PKG" --package-version "$LOCAL_VERSION" --name "HCG Sentinel" --description "$DESCRIPTION" --production-access undecided \
             --device-ios 16.5 --repository F1r3srp3nt/HCG-Sentinel --commit "$SENTINEL_COMMIT" \
             --local --source-visibility public --host "GitHub-hosted macOS runner (CI test of the local path)" \
-            --hcg-repo "$OUT/hcg-repo-local" --out "$OUT/local" | tee "$OUT/local.log"
+            --out "$OUT/local" | tee "$OUT/local.log"
           H="$(ls -d "$OUT/local"/*-candidate-handoff)"
           cat "$H/submission.json"
           # A local build: no request of Maker's own (HCG Repo's Release Manager writes it), no CI run or artifact anywhere.
@@ -1504,17 +1499,12 @@ jobs:
           print("submission.json:", b["provider"], b["toolchain"], m["artifact"]["sha256"])
           EOF
           grep -q "^Lifecycle: lifecycle passed" "$OUT/local.log"
-          grep -q "^Import preview: HCG Repo Release Manager review: VALIDATED" "$OUT/local.log"   # HCG Repo's own review, throwaway store
           # Same packager: the local path and the CI path give the same bytes for the same input and version.
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
             --package "$PKG" --package-version "$LOCAL_VERSION" --name "HCG Sentinel" --description "$DESCRIPTION" --no-handoff --out "$OUT/local-ci" > /dev/null
           local="$(ls "$H"/*.deb)"
           cmp "$local" "$(ls "$OUT/local-ci"/*.deb)" || { echo "the local path packaged different bytes"; exit 1; }
-          git -C "$OUT/hcg-repo-local" status --porcelain | tee "$OUT/hcg-repo-local-status.txt"; [ ! -s "$OUT/hcg-repo-local-status.txt" ]
-      - name: Real Xcode icon → standard PNG; device-test text is the product's; Ship to Repo on HCG Repo main (submission contract, throwaway copy)
-        env:
-          # HCG Repo main with the Executable Maker submission contract (docs/EXECUTABLE_MAKER_SUBMISSION.md). Nothing is written to HCG Repo.
-          HCG_REPO_V2_COMMIT: 3bf53c7bb2b6e67a2f66f3a7e1490fc0c1f41481
+      - name: Real Xcode icon → standard PNG; device-test text is the product's
         run: |
           H="$(ls -d "$OUT/local"/*-candidate-handoff)"
           # 1. icon.png: a PNG any decoder reads (no Apple CgBI chunk, zlib image data), whatever Xcode stored in the app.
@@ -1538,40 +1528,6 @@ jobs:
           grep -q "uicache -l | grep -i -e com.hcg.sentinel -e sentinel" "$H/DEVICE-TEST.md"
           grep -q "/var/mobile/hcgsentinel-test-before-dpkg.txt" "$H/DEVICE-TEST.md"
           grep -q "Installs only \`/var/jb/Applications/HCGSentinelModern.app\`" "$H/DEVICE-TEST.md"
-          # 3. submission.json and the Ship to Repo flow with HCG Repo's own Release Manager, on a throwaway copy.
-          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo-v2" && git -C "$OUT/hcg-repo-v2" checkout --quiet "$HCG_REPO_V2_COMMIT"
-          python3 -I -c "import json,sys; sys.path.insert(0, sys.argv[1]); from hcgrepo.submission import validate_manifest; p = validate_manifest(json.load(open(sys.argv[2]))); print(p); assert not p" \
-            "$OUT/hcg-repo-v2/tools" "$H/submission.json"
-          cp -R "$OUT/hcg-repo-v2" "$OUT/hcg-repo-ship"; rm -rf "$OUT/hcg-repo-ship/.git"
-          M="dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll"
-          export HCG_REPO_INCOMING="$RUNNER_TEMP/hcg-incoming"
-          $M --ship-to-repo submit --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-submit.txt"
-          grep -q "^State        VALIDATED" "$OUT/ship-submit.txt"
-          # The six levels are shown separately; the script-free lifecycle is not presented as device evidence.
-          grep -q "^  Script-free dpkg lifecycle  *PASSED" "$OUT/ship-submit.txt"
-          grep -q "^  Application launch  *NOT-RECORDED" "$OUT/ship-submit.txt"
-          grep -q "It is not evidence that the maintainer scripts, an installation on a device or the app work" "$OUT/ship-submit.txt"
-          # Maker never approves or prepares (HCG Repo's contract): it refuses, and prints the owner's commands instead.
-          if $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" > "$OUT/ship-approve-refused.txt" 2>&1; then echo "Maker ran an approval"; exit 1; fi
-          grep -q "does not run \`release approve\`" "$OUT/ship-approve-refused.txt"
-          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-status.txt"
-          grep -q "Executable Maker does not run these" "$OUT/ship-status.txt"
-          sha="$(shasum -a 256 < "$(ls "$H"/*.deb)" | cut -d' ' -f1)"
-          # This CI step plays the owner, on a throwaway copy: it runs the printed commands in the checkout itself.
-          approve="$(grep -m1 '^  bin/hcgrepo release approve ' "$OUT/ship-status.txt" | sed 's/^  //')"
-          echo "$approve" | grep -q -- "--sha256 $sha"
-          approve="${approve//<owner>/CI (test, throwaway copy)}"; approve="${approve//<approval, verbatim>/CI test approval of these exact bytes; never published.}"
-          if (cd "$OUT/hcg-repo-ship" && eval "${approve//$sha/$(printf '0%.0s' {1..64})}") > "$OUT/ship-wrong.txt" 2>&1; then echo "HCG Repo approved a wrong SHA-256"; exit 1; fi
-          (cd "$OUT/hcg-repo-ship" && eval "$approve") | tee "$OUT/ship-approve.txt"
-          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-approved.txt"
-          grep -q "^State        APPROVED" "$OUT/ship-approved.txt"
-          prepare="$(grep -m1 '^  bin/hcgrepo release prepare ' "$OUT/ship-approved.txt" | sed 's/^  //')"; prepare="${prepare%%   (*}"
-          prepare="${prepare//"<owner's words>"/CI test only (throwaway copy); not an owner approval.}"
-          (cd "$OUT/hcg-repo-ship" && eval "$prepare") | tee "$OUT/ship-prepare.txt"
-          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-prepared.txt"
-          grep -q "^State        PREPARED" "$OUT/ship-prepared.txt"
-          ls "$OUT/hcg-repo-ship/imports/" | tee "$OUT/ship-imports.txt"; grep -q "^${PKG}_0.1.0-beta1.local1_iphoneos-arm64_${sha:0:12}\.toml$" "$OUT/ship-imports.txt"
-          git -C "$OUT/hcg-repo-v2" status --porcelain | tee "$OUT/hcg-repo-v2-status.txt"; [ ! -s "$OUT/hcg-repo-v2-status.txt" ]   # the real clone is untouched
       - name: HCG Repo (cecfcf0) — bin/hcgrepo inspect, then the importer dry run on the exact exported bytes
         run: |
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo"
@@ -1607,6 +1563,7 @@ jobs:
           name: hcg-sentinel-unleashify-handoff
           path: |
             ${{ github.workspace }}/unleashify-out/ui/*-candidate-handoff
+            ${{ github.workspace }}/unleashify-out/local/*-candidate-handoff
             ${{ github.workspace }}/unleashify-out/ui/VALIDATION.txt
             ${{ github.workspace }}/unleashify-out/*.txt
             ${{ github.workspace }}/unleashify-out/*.log
@@ -1618,15 +1575,24 @@ jobs:
           retention-days: 30
 
   unleashify-artifact-roundtrip:
-    name: Unleashify — the uploaded artifact is the manifest's exact bytes; HCG Repo importer dry run on the downloaded .deb
+    name: Unleashify — the uploaded artifact is the manifest's exact bytes; HCG Repo importer dry run and Release Manager (Ship to Repo) on Linux
     needs: unleashify-sentinel
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       DEB_ARTIFACT: hcg-sentinel-unleashify-deb
       HCG_REPO_COMMIT: cecfcf0192250242613fe3095613bed9118cb32a
+      # HCG Repo main with the Executable Maker submission contract (docs/EXECUTABLE_MAKER_SUBMISSION.md) and the
+      # Release Passport v1. Its script-free lifecycle upgrades from the version in pool/, and macOS refuses dpkg's backup
+      # hard links inside an installed .app (see the dpkg sandbox below), so HCG Repo's review runs here, on Linux dpkg.
+      HCG_REPO_V2_COMMIT: 3bf53c7bb2b6e67a2f66f3a7e1490fc0c1f41481
+      PKG: com.hakmicapitalgroup.hcgsentinel
+      OUT: ${{ github.workspace }}/ship-out
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -1641,13 +1607,54 @@ jobs:
       - name: One .deb, with the manifest's SHA-256; importer dry run on the downloaded bytes
         run: |
           ls -la downloaded; [ "$(ls downloaded/*.deb | wc -l)" = 1 ]
-          H="$(find handoff-artifact -maxdepth 3 -type d -name '*-candidate-handoff' | head -1)"; echo "Handoff: $H"
+          H="$(find handoff-artifact -maxdepth 3 -type d -path '*/ui/*-candidate-handoff' | head -1)"; echo "Handoff: $H"
           sha="$(sha256sum downloaded/*.deb | cut -d' ' -f1)"; echo "downloaded sha256 $sha"
           grep -q "^sha256 = \"$sha\"$" "$H/import-request.toml"
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git hcg-repo && git -C hcg-repo checkout --quiet "$HCG_REPO_COMMIT"
           PYTHONPATH=hcg-repo/tools python3 tools/unleashify/hcgrepo-dry-run.py --repo hcg-repo --handoff "$H" --deb "$(ls downloaded/*.deb)" --require-genuine-approval | tee dry-run.txt
           grep -q "^RESULT       VALIDATED:" dry-run.txt
           echo "Publication stays manual: after this run succeeds, HCG Repo's maintainer runs bin/hcgrepo import-request (with --dry-run first)."
+      - name: Ship to Repo on HCG Repo main (submission contract, throwaway copy) — the macOS job's local handoff
+        run: |
+          sudo apt-get install -y -qq dpkg > /dev/null
+          dotnet build src/HCG.ExecutableMaker.App -c Release -v q
+          mkdir -p "$OUT"
+          H="$(find "$PWD/handoff-artifact" -maxdepth 3 -type d -path '*local/*-candidate-handoff' | head -1)"; echo "Local handoff: $H"; test -f "$H/submission.json"
+          # 3. submission.json and the Ship to Repo flow with HCG Repo's own Release Manager, on a throwaway copy.
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo-v2" && git -C "$OUT/hcg-repo-v2" checkout --quiet "$HCG_REPO_V2_COMMIT"
+          python3 -I -c "import json,sys; sys.path.insert(0, sys.argv[1]); from hcgrepo.submission import validate_manifest; p = validate_manifest(json.load(open(sys.argv[2]))); print(p); assert not p" \
+            "$OUT/hcg-repo-v2/tools" "$H/submission.json"
+          cp -R "$OUT/hcg-repo-v2" "$OUT/hcg-repo-ship"; rm -rf "$OUT/hcg-repo-ship/.git"
+          M="dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll"
+          export HCG_REPO_INCOMING="$RUNNER_TEMP/hcg-incoming"
+          $M --ship-to-repo submit --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-submit.txt"
+          grep -q "^State        VALIDATED" "$OUT/ship-submit.txt"
+          # The six levels are shown separately; the script-free lifecycle is not presented as device evidence.
+          grep -q "^  Script-free dpkg lifecycle  *PASSED" "$OUT/ship-submit.txt"
+          grep -q "^  Application launch  *NOT-RECORDED" "$OUT/ship-submit.txt"
+          grep -q "It is not evidence that the maintainer scripts, an installation on a device or the app work" "$OUT/ship-submit.txt"
+          # Maker never approves or prepares (HCG Repo's contract): it refuses, and prints the owner's commands instead.
+          if $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" > "$OUT/ship-approve-refused.txt" 2>&1; then echo "Maker ran an approval"; exit 1; fi
+          grep -q "does not run \`release approve\`" "$OUT/ship-approve-refused.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-status.txt"
+          grep -q "Executable Maker does not run these" "$OUT/ship-status.txt"
+          sha="$(shasum -a 256 < "$(ls "$H"/*.deb)" | cut -d' ' -f1)"
+          # This CI step plays the owner, on a throwaway copy: it runs the printed commands in the checkout itself.
+          approve="$(grep -m1 '^  bin/hcgrepo release approve ' "$OUT/ship-status.txt" | sed 's/^  //')"
+          echo "$approve" | grep -q -- "--sha256 $sha"
+          approve="${approve//<owner>/CI (test, throwaway copy)}"; approve="${approve//<approval, verbatim>/CI test approval of these exact bytes; never published.}"
+          if (cd "$OUT/hcg-repo-ship" && eval "${approve//$sha/$(printf '0%.0s' {1..64})}") > "$OUT/ship-wrong.txt" 2>&1; then echo "HCG Repo approved a wrong SHA-256"; exit 1; fi
+          (cd "$OUT/hcg-repo-ship" && eval "$approve") | tee "$OUT/ship-approve.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-approved.txt"
+          grep -q "^State        APPROVED" "$OUT/ship-approved.txt"
+          prepare="$(grep -m1 '^  bin/hcgrepo release prepare ' "$OUT/ship-approved.txt" | sed 's/^  //')"; prepare="${prepare%%   (*}"
+          prepare="${prepare//"<owner's words>"/CI test only (throwaway copy); not an owner approval.}"
+          (cd "$OUT/hcg-repo-ship" && eval "$prepare") | tee "$OUT/ship-prepare.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-prepared.txt"
+          grep -q "^State        PREPARED" "$OUT/ship-prepared.txt"
+          ls "$OUT/hcg-repo-ship/imports/" | tee "$OUT/ship-imports.txt"; grep -q "^${PKG}_0.1.0-beta1.local1_iphoneos-arm64_${sha:0:12}\.toml$" "$OUT/ship-imports.txt"
+          git -C "$OUT/hcg-repo-v2" status --porcelain | tee "$OUT/hcg-repo-v2-status.txt"; [ ! -s "$OUT/hcg-repo-v2-status.txt" ]   # the real clone is untouched
+
       # On Linux: macOS (26) refuses dpkg's backup hard links inside an installed .app bundle, an artefact of the host, not of the package.
       - name: dpkg sandbox — install, reinstall, remove and purge the downloaded bytes with real dpkg (not a device test)
         run: |
