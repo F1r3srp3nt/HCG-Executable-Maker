@@ -6,27 +6,43 @@ using HCG.ExecutableMaker.Core;
 namespace HCG.ExecutableMaker.Packaging.Jailbreak;
 
 /// <summary>
-/// Ship to Repo: hands a validated Unleashify package to HCG Repo's Candidate Release Manager (HCG Repo Distribution v2,
-/// <c>bin/hcgrepo release …</c>) on the owner's own HCG Repo checkout. It runs HCG Repo's code and never re-implements
-/// its decisions:
+/// Ship to Repo: hands a validated Unleashify package to HCG Repo's Candidate Release Manager on the owner's own HCG Repo
+/// checkout, following HCG Repo's Executable Maker submission contract (docs/EXECUTABLE_MAKER_SUBMISSION.md in HCG Repo).
+/// It runs HCG Repo's code and never re-implements its decisions:
 /// <list type="number">
-/// <item><b>Submit</b>: copies the exact .deb into HCG Repo's private incoming store (outside Git) and lets HCG Repo validate it
-/// (manifest claims vs the package, static checks, secrets, scripts, simulated dpkg lifecycle, repository consistency).</item>
-/// <item><b>Review</b>: HCG Repo's review, with the exact SHA-256 and the three validation levels.</item>
-/// <item><b>Approve</b>: records the owner's approval of that exact SHA-256 — only when the owner typed that SHA-256, their name and
-/// their words; Maker never approves on its own.</item>
-/// <item><b>Prepare</b>: imports the approved bytes into the checkout's pool/ for Candidate. Nothing is committed, pushed or
-/// published: the owner commits on a branch, and publication stays HCG Repo's manual Publish workflow.</item>
+/// <item><b>Submit</b>: <c>bin/hcgrepo release submit --handoff &lt;folder&gt; --result-json &lt;file&gt;</c>. HCG Repo copies the exact .deb into
+/// its private incoming store (outside Git) and validates it; the result is <c>hcg.repo.submission-result</c> v1.</item>
+/// <item><b>Status</b>: <c>bin/hcgrepo release status &lt;id&gt;</c>, the same result as JSON.</item>
 /// </list>
+/// Approval of the exact SHA-256, Candidate preparation and publication belong to the owner. Maker shows the six evidence
+/// levels separately and the owner's next commands (<see cref="OwnerCommands"/>); it never runs <c>approve</c>,
+/// <c>prepare</c> or Publish.
 /// </summary>
 public static partial class ShipToRepo
 {
-    public enum Action { Submit, Show, Approve, Prepare }
+    public enum Action { Submit, Status, Show }
 
-    public sealed record Step(Action Action, bool Ran, int ExitCode, string Output, string? SubmissionId, string? State, JsonObject? Review)
+    /// <param name="Result">HCG Repo's <c>hcg.repo.submission-result</c> v1, when it produced one.</param>
+    public sealed record Step(Action Action, bool Ran, int ExitCode, string Output, string? SubmissionId, string? State, JsonObject? Result)
     {
         public bool Succeeded => Ran && ExitCode == 0;
     }
+
+    /// <summary>HCG Repo's evidence levels, in its order, with its labels (tools/hcgrepo/levels.py).</summary>
+    public static readonly IReadOnlyList<(string Key, string Label)> Levels =
+    [
+        ("static_inspection", "Static package inspection"),
+        ("maintainer_script_review", "Maintainer script review (read, not run)"),
+        ("script_free_lifecycle", "Script-free dpkg lifecycle"),
+        ("device_installation", "Device installation"),
+        ("application_launch", "Application launch"),
+        ("runtime_verification", "Full runtime verification"),
+    ];
+
+    public const string LifecycleCaveat =
+        "The script-free lifecycle ran dpkg on a copy with the maintainer scripts removed: it shows the payload installs, " +
+        "reinstalls, removes and purges cleanly. It is not evidence that the maintainer scripts, an installation on a device " +
+        "or the app work.";
 
     /// <summary>HCG Repo's submission id for a package: identifier_version_architecture_first-12-of-sha256 (tools/hcgrepo/submission.py).</summary>
     public static string SubmissionId(string package, string version, string architecture, string sha256) =>
@@ -34,50 +50,151 @@ public static partial class ShipToRepo
 
     [GeneratedRegex(@"[^A-Za-z0-9._-]")] private static partial Regex UnsafeId();
 
-    /// <summary>Whether the checkout has HCG Repo's Release Manager (Distribution v2).</summary>
+    /// <summary>Whether the checkout has HCG Repo's Release Manager with the submission-result contract.</summary>
     public static string? CheckoutProblem(string checkout) =>
         !File.Exists(Path.Combine(checkout, "bin", "hcgrepo")) ? $"{checkout} is not an HCG Repo checkout (no bin/hcgrepo)."
         : !File.Exists(Path.Combine(checkout, "tools", "hcgrepo", "release.py")) ? $"{checkout} has no Release Manager (tools/hcgrepo/release.py): update it to HCG Repo main with Distribution v2."
+        : !File.Exists(Path.Combine(checkout, "docs", "schemas", "submission-result-v1.schema.json")) ? $"{checkout} predates HCG Repo's Executable Maker submission contract (no docs/schemas/submission-result-v1.schema.json): update it to HCG Repo main."
         : null;
 
-    public static Task<Step> SubmitAsync(IProcessRunner runner, string python, string checkout, string handoff, string? incoming, Action<string>? log, CancellationToken ct) =>
-        RunAsync(Action.Submit, runner, python, checkout, incoming, ["submit", "--handoff", handoff], log, ct);
-
-    public static async Task<Step> ShowAsync(IProcessRunner runner, string python, string checkout, string id, string? incoming, CancellationToken ct)
+    public static async Task<Step> SubmitAsync(IProcessRunner runner, string python, string checkout, string handoff, string? incoming, Action<string>? log, CancellationToken ct)
     {
-        var step = await RunAsync(Action.Show, runner, python, checkout, incoming, ["show", id, "--json"], null, ct).ConfigureAwait(false);
-        JsonObject? review = null;
-        try { review = step.Succeeded ? JsonNode.Parse(step.Output) as JsonObject : null; } catch (System.Text.Json.JsonException) { }
-        return step with { SubmissionId = id, Review = review, State = review?["state"]?.GetValue<string>() };
+        var resultFile = Path.Combine(Path.GetTempPath(), "hcg-ship-result-" + Guid.NewGuid().ToString("N")[..10] + ".json");
+        try
+        {
+            var step = await RunAsync(Action.Submit, runner, python, checkout, incoming, ["submit", "--handoff", handoff, "--result-json", resultFile], log, ct).ConfigureAwait(false);
+            var result = File.Exists(resultFile) ? ParseResult(await File.ReadAllTextAsync(resultFile, ct).ConfigureAwait(false)) : null;
+            return result is null ? step : step with { Result = result, SubmissionId = Str(result, "submission") ?? step.SubmissionId, State = Str(result, "state") ?? step.State };
+        }
+        finally
+        {
+            try { File.Delete(resultFile); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
-    /// <summary>Records the owner's approval. Refused unless <paramref name="approvedSha256"/> is the reviewed SHA-256 and who and what are given.</summary>
-    public static async Task<Step> ApproveAsync(IProcessRunner runner, string python, string checkout, string id, string approvedSha256, string by, string record, string? incoming, CancellationToken ct)
+    /// <summary><c>release status &lt;id&gt;</c>: HCG Repo's current result for a submission (state, levels, requirements, next step).</summary>
+    public static async Task<Step> StatusAsync(IProcessRunner runner, string python, string checkout, string id, string? incoming, CancellationToken ct)
     {
-        var shown = await ShowAsync(runner, python, checkout, id, incoming, ct).ConfigureAwait(false);
-        string Refuse(string why) => why;
-        string? problem = shown.Review is null ? Refuse("HCG Repo has no review for this submission; submit it first.")
-            : shown.State != "validated" ? Refuse($"the submission is {shown.State}; only a validated submission can be approved.")
-            : !string.Equals(shown.Review["sha256"]?.GetValue<string>(), approvedSha256.Trim(), StringComparison.OrdinalIgnoreCase) ? Refuse($"the approved SHA-256 {approvedSha256.Trim()} is not the reviewed package's {shown.Review["sha256"]}.")
-            : string.IsNullOrWhiteSpace(by) || string.IsNullOrWhiteSpace(record) ? Refuse("an approval needs who approved and their approval, verbatim.")
-            : null;
-        if (problem is not null) return new(Action.Approve, false, 1, "REFUSED by HCG Executable Maker: " + problem, id, shown.State, shown.Review);
-        return await RunAsync(Action.Approve, runner, python, checkout, incoming,
-            ["approve", id, "--sha256", approvedSha256.Trim().ToLowerInvariant(), "--by", by.Trim(), "--record", record.Trim()], null, ct).ConfigureAwait(false) with { SubmissionId = id };
+        var step = await RunAsync(Action.Status, runner, python, checkout, incoming, ["status", id], null, ct).ConfigureAwait(false);
+        var result = step.Succeeded ? ParseResult(step.Output) : null;
+        return step with { SubmissionId = id, Result = result, State = result is null ? null : Str(result, "state") };
     }
 
-    /// <param name="viaLocalFile">
-    /// false: HCG Repo imports into the checkout's pool/ here. true: HCG Repo stages the approved bytes under imports/local/
-    /// with its own local-file request, so its Prepare packages workflow imports them in CI.
+    /// <summary><c>release show &lt;id&gt;</c>: HCG Repo's human review text.</summary>
+    public static async Task<Step> ShowAsync(IProcessRunner runner, string python, string checkout, string id, string? incoming, CancellationToken ct) =>
+        await RunAsync(Action.Show, runner, python, checkout, incoming, ["show", id], null, ct).ConfigureAwait(false) with { SubmissionId = id };
+
+    /// <summary>The [access] level of a handoff's package.toml draft (null when there is none).</summary>
+    public static string? DraftAccessLevel(string? handoff)
+    {
+        var toml = handoff is null ? null : Path.Combine(handoff, "package.toml");
+        if (toml is null || !File.Exists(toml)) return null;
+        var inAccess = false;
+        foreach (var line in File.ReadLines(toml))
+        {
+            var t = line.Trim();
+            if (t.StartsWith('[')) inAccess = t == "[access]";
+            else if (inAccess && AccessLevel().Match(t) is { Success: true } m) return m.Groups[1].Value;
+        }
+        return null;
+    }
+
+    [GeneratedRegex("^level\\s*=\\s*\"([a-z]+)\"")] private static partial Regex AccessLevel();
+
+    private static JsonObject? ParseResult(string text)
+    {
+        try
+        {
+            return JsonNode.Parse(text) is JsonObject o && Str(o, "format") == "hcg.repo.submission-result" ? o : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    private static string? Str(JsonNode? n, string key) => n?[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    /// <summary>
+    /// The six levels, one line each, in HCG Repo's order and with HCG Repo's states (never merged or inferred here),
+    /// followed by the lifecycle caveat.
+    /// </summary>
+    public static string RenderLevels(JsonObject result)
+    {
+        var sb = new StringBuilder();
+        var levels = result["levels"] as JsonObject;
+        foreach (var (key, label) in Levels)
+        {
+            var lv = levels?[key] as JsonObject;
+            var state = Str(lv, "state") ?? "not-recorded";
+            var extra = "";
+            if (key == "script_free_lifecycle" && lv?["steps"] is JsonArray steps && steps.Count > 0)
+                extra = " (" + string.Join(", ", steps.Select(s => $"{Str(s, "step")} {(s?["ok"]?.GetValue<bool>() == true ? "ok" : "FAILED")}")) + ")";
+            if (Str(lv, "note") is { } note && key is "device_installation" && state == "passed") extra += $" — {note}";
+            sb.AppendLine($"  {label,-42} {state.ToUpperInvariant()}{extra}");
+        }
+        sb.AppendLine("  " + LifecycleCaveat);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The owner's next commands, from HCG Repo's result: the checksum approval (HCG Repo's own command line, with the
+    /// owner's name and words left as placeholders), then the Candidate preparation with the options HCG Repo's
+    /// requirements call for. Maker prints them; only the owner runs them.
+    /// </summary>
+    /// <param name="draftAccessLevel">
+    /// The [access] level of the handoff's package.toml draft, when known. For a package HCG Repo does not have yet, its
+    /// result cannot list the free-demo requirement (it has no metadata to read the level from); a draft that is not
+    /// public needs it all the same.
     /// </param>
-    public static async Task<Step> PrepareAsync(IProcessRunner runner, string python, string checkout, string id, string? freeDemoApproval, bool createPackageMetadata, string? incoming, Action<string>? log, CancellationToken ct,
-        bool viaLocalFile = false)
+    public static IReadOnlyList<string> OwnerCommands(JsonObject result, string? draftAccessLevel = null)
     {
-        List<string> args = ["prepare", id];
-        if (viaLocalFile) args.AddRange(["--via", "local-file"]);
-        if (freeDemoApproval is { Length: > 0 }) args.AddRange(["--free-demo-approval", freeDemoApproval.Trim()]);
-        if (createPackageMetadata) args.Add("--create-package-metadata");
-        return await RunAsync(Action.Prepare, runner, python, checkout, incoming, args, log, ct).ConfigureAwait(false) with { SubmissionId = id };
+        var id = Str(result, "submission") ?? "<submission>";
+        var state = Str(result, "state");
+        var reqs = (result["requirements"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        bool Needs(string kind) => reqs.Any(r => Str(r, "kind") == kind && r["satisfied"]?.GetValue<bool>() == false);
+        var lines = new List<string>();
+        if (state == "validated")
+            lines.Add(reqs.Where(r => Str(r, "kind") == "checksum-approval").Select(r => Str(r, "command")).FirstOrDefault(c => c is not null)
+                ?? $"bin/hcgrepo release approve {id} --sha256 {Str(result["artifact"], "sha256")} --by \"<owner>\" --record \"<approval, verbatim>\"");
+        if (state is "validated" or "approved")
+        {
+            var prepare = $"bin/hcgrepo release prepare {id}";
+            if (Needs("package-metadata")) prepare += " --create-package-metadata";
+            if (Needs("free-demo-approval") || (Needs("package-metadata") && draftAccessLevel != "public")) prepare += " --free-demo-approval \"<owner's words>\"";
+            lines.Add(prepare + "   (add --via local-file to stage it for HCG Repo's Prepare packages workflow instead of pool/)");
+        }
+        return lines;
+    }
+
+    /// <summary>Everything Maker shows after a submit or status: state, SHA-256, the six levels, findings, the owner's next step and commands.</summary>
+    public static string Summary(JsonObject result, string? draftAccessLevel = null)
+    {
+        var sb = new StringBuilder();
+        var pkg = result["package"];
+        sb.AppendLine($"Submission   {Str(result, "submission")}");
+        sb.AppendLine($"State        {Str(result, "state")?.ToUpperInvariant()}");
+        sb.AppendLine($"Package      {Str(pkg, "identifier")} {Str(pkg, "version")} {Str(pkg, "architecture")}");
+        sb.AppendLine($"SHA-256      {Str(result["artifact"], "sha256")}");
+        sb.AppendLine();
+        sb.AppendLine("Evidence levels (HCG Repo):");
+        sb.Append(RenderLevels(result));
+        var findings = (result["findings"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        if (findings.Count > 0)
+        {
+            sb.AppendLine();
+            foreach (var f in findings.OrderBy(f => Str(f, "level") == "error" ? 0 : 1))
+                sb.AppendLine($"  {(Str(f, "level") == "error" ? "ERROR" : "warn ")} [{Str(f, "code")}] {Str(f, "message")}");
+        }
+        sb.AppendLine();
+        sb.AppendLine($"Next step    {Str(result, "next_step")}");
+        var open = (result["requirements"] as JsonArray ?? []).OfType<JsonObject>().Where(r => r["satisfied"]?.GetValue<bool>() == false).ToList();
+        foreach (var r in open) sb.AppendLine($"  needs {Str(r, "kind")}{(Str(r, "detail") is { } d ? ": " + d : "")}");
+        var cmds = OwnerCommands(result, draftAccessLevel);
+        if (cmds.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("For the owner to run in the HCG Repo checkout (Executable Maker does not run these):");
+            foreach (var c in cmds) sb.AppendLine("  " + c);
+        }
+        return sb.ToString();
     }
 
     /// <summary>
@@ -95,9 +212,6 @@ public static partial class ShipToRepo
         }
     }
 
-    /// <summary>Whether HCG Repo already has metadata for the package (otherwise Prepare must create it from the handoff's draft).</summary>
-    public static bool HasPackageMetadata(string checkout, string package) => File.Exists(Path.Combine(checkout, "packages", package, "package.toml"));
-
     private static async Task<Step> RunAsync(Action action, IProcessRunner runner, string python, string checkout, string? incoming, IReadOnlyList<string> args, Action<string>? log, CancellationToken ct)
     {
         if (CheckoutProblem(checkout) is { } bad) return new(action, false, 2, bad, null, null, null);
@@ -106,7 +220,8 @@ public static partial class ShipToRepo
         all.AddRange(args);
         var output = new StringBuilder();
         var env = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var k in new[] { "PATH", "HOME", "LANG", "TMPDIR" })
+        // HCG_REPO_INCOMING: the owner's private store, so Maker's submit and the owner's own approve/prepare see the same submissions.
+        foreach (var k in new[] { "PATH", "HOME", "LANG", "TMPDIR", "HCG_REPO_INCOMING" })
             if (Environment.GetEnvironmentVariable(k) is { } v) env[k] = v;
         // dpkg-deb from Homebrew on Macs where the app was not started from a shell.
         env["PATH"] = string.Join(':', new[] { env.GetValueOrDefault("PATH"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin" }.Where(x => !string.IsNullOrEmpty(x)));

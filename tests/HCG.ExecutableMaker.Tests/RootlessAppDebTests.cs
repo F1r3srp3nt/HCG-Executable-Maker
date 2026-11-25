@@ -171,7 +171,9 @@ public class RootlessAppDebTests
         Assert.Contains("does not", v.Checks.Single(c => c.Name == "Minimum iOS vs iOS 16.5").Detail.Replace("not a device test", "does not"));
         Assert.Equal(VerificationStatus.Passed, v.Checks.Single(c => c.Name == "Dynamic libraries").Status);
         Assert.Equal(VerificationStatus.Passed, v.Checks.Single(c => c.Name == "Rootless install paths").Status);
-        Assert.All(v.Checks.Where(c => c.Name != "Installation on a device"), c => Assert.Equal(VerificationStatus.Passed, c.Status));
+        Assert.All(v.Checks.Where(c => c.Name is not "Installation on a device" and not "Signature integrity"), c => Assert.Equal(VerificationStatus.Passed, c.Status));
+        // This fixture's signatures are stubs without page hashes: nothing to verify, which is reported as such (real ones: DotNetBundleSigningTests).
+        Assert.Equal(VerificationStatus.NotVerifiable, v.Checks.Single(c => c.Name == "Signature integrity").Status);
         Assert.Equal(VerificationStatus.NotVerifiable, v.Checks.Single(c => c.Name == "Installation on a device").Status);
         Assert.Equal(["postinst", "postrm"], v.Facts.Scripts.Keys.Order().ToArray());
         Assert.DoesNotContain("respring", v.Facts.Scripts["postinst"], StringComparison.OrdinalIgnoreCase);

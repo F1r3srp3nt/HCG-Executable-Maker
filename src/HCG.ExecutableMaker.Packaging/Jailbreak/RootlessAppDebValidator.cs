@@ -178,6 +178,9 @@ public static class RootlessAppDebValidator
             var linkProblems = new List<string>(); var linkWarnings = new List<string>();
             var compatProblems = new List<string>();
             var signProblems = new List<string>();
+            // Signature integrity: every slice's CodeDirectories verified against the bytes (see MachOSignatureAudit).
+            var integrityProblems = new List<string>(); var integrityWarnings = new List<string>();
+            var audits = new List<(string Rel, IReadOnlyList<MachOSignatureAudit.Slice> Slices)>();
             var entProblems = new List<string>();
             var systemLibs = new SortedSet<string>(StringComparer.Ordinal);
             // dyld searches @rpath in the loading image's LC_RPATHs and then in those of the images that loaded it — for
@@ -193,6 +196,23 @@ public static class RootlessAppDebValidator
                 var installed = installPath + "/" + rel;
                 var slices = MachOLinkage.Read(file);
                 report.AppendLine($"  {rel}: " + string.Join("; ", slices.Select(s => $"{s.Architecture} {s.Platform ?? "?"} {s.MinimumOS ?? "?"}{(s.HasCodeSignature ? " signed" : " UNSIGNED")}{(s.Encrypted ? " ENCRYPTED" : "")}")));
+                var audit = MachOSignatureAudit.Audit(file, BundleOf(file, appDir));
+                audits.Add((rel, audit));
+                foreach (var a in audit.Where(a => a.Signer != MachOSignatureAudit.SignerKind.None))
+                {
+                    report.AppendLine($"    signature ({a.Architecture}): {a.SignerText} · " + string.Join(" + ", a.CodeDirectories.Select(c =>
+                        $"{c.HashType} {(c.Verifiable ? $"{c.CodeSlots - c.BadPages}/{c.CodeSlots} pages verified" : "no page hashes")}")) +
+                        (a.CodeDirectories.FirstOrDefault() is { } cd0 ? $" · identifier {cd0.Identifier} · cdhash {cd0.CdHash}" : "") +
+                        (a.CodeDirectories.SelectMany(c => c.SpecialSlots).DistinctBy(kv => kv.Key).ToList() is { Count: > 0 } sp ? " · " + string.Join(", ", sp.Select(kv => $"{kv.Key} {kv.Value}")) : ""));
+                    if (a.Problem is { } p) integrityProblems.Add($"{rel} ({a.Architecture}): {p}");
+                    if (a.BadPages > 0)
+                        integrityProblems.Add($"{rel} ({a.Architecture}): {a.BadPages} of {a.CodeDirectories.Sum(c => c.CodeSlots)} page hashes do not match the file — it was changed after it was signed, and iOS kills the process when it loads those pages");
+                    foreach (var (slot, state) in a.CodeDirectories.SelectMany(c => c.SpecialSlots).Where(kv => kv.Value != "matches").DistinctBy(kv => kv.Key))
+                        if (slot is "Entitlements" or "DER entitlements" or "Requirements") integrityProblems.Add($"{rel} ({a.Architecture}): the signature's {slot} hash {state.ToLowerInvariant()} (the signature is internally inconsistent)");
+                        else integrityWarnings.Add($"{rel} ({a.Architecture}): the {slot} it was signed with {(state.StartsWith("bound", StringComparison.Ordinal) ? "is missing" : "has changed")} (a bundle seal; iOS does not check it for code a jailbreak trusts, but the files differ from what was signed)");
+                    if (a.Signer == MachOSignatureAudit.SignerKind.Certificate)
+                        integrityWarnings.Add($"{rel} ({a.Architecture}): {a.SignerText}; kept as built (a jailbreak trusts its cdhash like any ad hoc signature)");
+                }
                 if (slices.Count == 0) { binProblems.Add($"{rel}: unreadable Mach-O"); continue; }
                 if (!slices.Any(s => s.Architecture is "arm64" or "arm64e")) binProblems.Add($"{rel}: no arm64 slice ({string.Join(", ", slices.Select(s => s.Architecture))})");
                 foreach (var s in slices)
@@ -254,6 +274,20 @@ public static class RootlessAppDebValidator
             checks.Add(new("Code signatures", signProblems.Count == 0 ? VerificationStatus.Passed : VerificationStatus.Failed,
                 signProblems.Count == 0 ? "Every Mach-O carries a code signature (an ldid pseudo-signature is enough on a jailbroken device; it is not an Apple signature)"
                     : "Unsigned: " + string.Join(", ", signProblems) + ". A jailbroken device refuses unsigned code; sign with ldid."));
+            // Library validation / hardened runtime in the main executable refuses libraries signed by anyone else (dyld).
+            if (exe is not null && audits.FirstOrDefault(x => x.Rel == exe).Slices is { } mainSlices && mainSlices.FirstOrDefault(m => m.HardenedRuntime || m.LibraryValidation) is { } strict)
+                foreach (var (rel, sl) in audits.Where(x => x.Rel != exe))
+                    if (sl.Any(n => n.Signer is MachOSignatureAudit.SignerKind.AdHoc || n.TeamId != strict.TeamId))
+                        integrityProblems.Add($"{exe} enforces {(strict.LibraryValidation ? "library validation" : "the hardened runtime")}, and {rel} is {sl[0].SignerText}: dyld refuses to load it");
+            var verifiedCount = audits.SelectMany(a => a.Slices).Count(a => a.Verified);
+            var unverifiable = audits.SelectMany(a => a.Slices).Count(a => a.Signer != MachOSignatureAudit.SignerKind.None && !a.Verified && a.BadPages == 0 && a.Problem is null);
+            checks.Add(new("Signature integrity", integrityProblems.Count > 0 ? VerificationStatus.Failed
+                    : verifiedCount == 0 && unverifiable > 0 ? VerificationStatus.NotVerifiable
+                    : integrityWarnings.Count > 0 ? VerificationStatus.PassedWithWarnings : VerificationStatus.Passed,
+                integrityProblems.Count > 0 ? string.Join("; ", integrityProblems)
+                    : (verifiedCount > 0 ? $"{verifiedCount} signature(s) verified page by page against the files: " + string.Join(", ", audits.Select(a => $"{a.Rel} ({string.Join("/", a.Slices.Select(x => x.SignerText).Distinct())})")) : "No signature carries page hashes to verify")
+                      + (unverifiable > 0 && verifiedCount > 0 ? $"; {unverifiable} without page hashes" : "")
+                      + (integrityWarnings.Count > 0 ? "; " + string.Join("; ", integrityWarnings) : "")));
             checks.Add(new("Entitlements", entProblems.Count == 0 ? VerificationStatus.Passed : VerificationStatus.Failed,
                 entProblems.Count == 0
                     ? (entitlements.Count == 0 ? "No entitlements embedded" : $"Embedded in {entitlements.Count} file(s), none privileged (listed in the report for review)")
@@ -324,6 +358,14 @@ public static class RootlessAppDebValidator
         if (path.StartsWith("@rpath/", StringComparison.Ordinal))
             return rpaths.Select(r => Normalize(Expand(r) + path["@rpath".Length..])).ToList();
         return [Normalize(Expand(path))];
+    }
+
+    /// <summary>The bundle a Mach-O belongs to (its .framework, .appex or .app folder): the Info.plist and CodeResources its signature binds.</summary>
+    internal static string BundleOf(string file, string appDir)
+    {
+        for (var dir = Path.GetDirectoryName(file); dir is not null && dir.Length >= appDir.Length; dir = Path.GetDirectoryName(dir))
+            if (dir.EndsWith(".framework", StringComparison.Ordinal) || dir.EndsWith(".appex", StringComparison.Ordinal) || dir.EndsWith(".app", StringComparison.Ordinal)) return dir;
+        return appDir;
     }
 
     internal static int CompareOs(string a, string b)

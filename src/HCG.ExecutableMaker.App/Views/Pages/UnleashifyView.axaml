@@ -195,11 +195,10 @@
             <TextBox Grid.Row="2" Grid.Column="0" Text="{Binding CiRepository}" PlaceholderText="CI run's repository, if not the source repository" />
             <TextBox Grid.Row="2" Grid.Column="2" Text="{Binding CiCommit}" PlaceholderText="Commit that CI run built (40 characters)" />
           </Grid>
-          <TextBox Text="{Binding OwnerApproval}" TextWrapping="Wrap"
+          <TextBox Text="{Binding OwnerApproval}" TextWrapping="Wrap" IsVisible="{Binding !IsLocalBuild}"
                    PlaceholderText="Owner's approval of this version as a free public candidate demo: who, when and their words. Leave empty until it is given."
                    ToolTip.Tip="HCG Repo Candidate serves only free public builds, and the owner approves each version (HCG Repo docs/ACCESS.md). Without an approval the handoff's package.toml keeps the exception commented out and HCG Repo's importer refuses the package." />
-          <TextBox Text="{Binding ApprovedBy}" PlaceholderText="Approved by (the owner's name, as recorded in HCG Repo)" />
-          <TextBox Classes="mono" Text="{Binding ApprovedSha256}"
+          <TextBox Classes="mono" Text="{Binding ApprovedSha256}" IsVisible="{Binding !IsLocalBuild}"
                    PlaceholderText="SHA-256 of the exact .deb the owner approved (64 hex characters). A local build's approval counts only for these bytes."
                    ToolTip.Tip="If the package is rebuilt, its SHA-256 changes and the approval no longer applies: the handoff then leaves the exception out and says why." />
           <Grid ColumnDefinitions="*,12,*">
@@ -273,17 +272,11 @@
                 <c:StatusChip Status="{Binding ShipTag}" />
               </StackPanel>
               <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
-                         Text="HCG Repo's Candidate Release Manager (Distribution v2) on your HCG Repo checkout: Submit validates the exact .deb into HCG Repo's private incoming store; Approve records your approval of its exact SHA-256; Prepare imports it into the checkout's pool/ for Candidate. Nothing is committed, pushed or published — commit on a branch and use HCG Repo's manual Publish workflow." />
+                         Text="HCG Repo's Candidate Release Manager on your HCG Repo checkout. Submit: HCG Repo validates the exact .deb into its private incoming store and reports six evidence levels, kept apart. Approving the exact SHA-256, preparing the Candidate and publishing are yours: the commands to run in the checkout are shown below. Executable Maker never runs them." />
               <TextBox Text="{Binding IncomingStore}" PlaceholderText="Incoming store (optional; HCG Repo's default ~/.local/share/hcg-repo/incoming, outside any checkout)" />
-              <CheckBox IsChecked="{Binding CreatePackageMetadata}" IsVisible="{Binding NeedsPackageMetadata}"
-                        Content="New package: create packages/&lt;id&gt;/ in HCG Repo from the handoff's draft (package.toml, CHANGELOG.md, icon.png)" />
-              <CheckBox IsChecked="{Binding PrepareViaLocalFile}"
-                        Content="Prepare via local-file: stage the approved .deb under imports/local/ for HCG Repo's Prepare packages workflow, instead of importing into pool/ here" />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="Submit" Command="{Binding SubmitToRepoCommand}" />
-                <Button Classes="ghost" Content="Refresh review" Command="{Binding RefreshReviewCommand}" />
-                <Button Content="Approve exact SHA-256…" Command="{Binding ApproveInRepoCommand}" />
-                <Button Content="Prepare Candidate…" Command="{Binding PrepareInRepoCommand}" />
+                <Button Classes="ghost" Content="Refresh status" Command="{Binding RefreshReviewCommand}" />
               </StackPanel>
               <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding ShipText}" TextWrapping="Wrap" MaxHeight="360"
                                    IsVisible="{Binding ShipText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

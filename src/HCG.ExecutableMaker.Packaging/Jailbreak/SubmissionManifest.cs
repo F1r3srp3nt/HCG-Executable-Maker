@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging.Mobile;
 
 namespace HCG.ExecutableMaker.Packaging.Jailbreak;
 
@@ -25,7 +26,8 @@ public static partial class SubmissionManifest
     }
 
     public static Result Build(RootlessAppPackageSpec spec, IosAppBundle app, RootlessAppDebValidator.Result validation, PackageProvenance p,
-        HandoffContext? context, DateTimeOffset packagedAt, string debName, RootlessLifecycleSimulator.Result? lifecycle = null)
+        HandoffContext? context, DateTimeOffset packagedAt, string debName, RootlessLifecycleSimulator.Result? lifecycle = null,
+        IReadOnlyList<string>? signedFiles = null)
     {
         var f = validation.Facts;
         var github = p.CiRunId is > 0 && p.Local is null;
@@ -85,9 +87,84 @@ public static partial class SubmissionManifest
                 ["host"] = p.Local?.Host,
             },
         };
+        if (Signing(f, signedFiles) is { } signing) m["signing"] = signing;
         var problems = Validate(m);
         return new(m, problems);
     }
+
+    /// <summary>
+    /// The <c>signing</c> claim: <c>ldid</c> with the files Maker pseudo-signed (as package paths), and the exact
+    /// entitlements of every binary that carries any. Files that arrived signed (e.g. a NuGet framework's ad hoc
+    /// signature) are not listed as signed by Maker. Omitted when Maker signed nothing: then it has no method to claim.
+    /// </summary>
+    public static JsonObject? Signing(RootlessAppDebValidator.Facts f, IReadOnlyList<string>? signedFiles)
+    {
+        if (signedFiles is not { Count: > 0 } || f.AppPath is null) return null;
+        var prefix = f.AppPath.TrimStart('/') + "/";
+        var ents = new JsonObject();
+        foreach (var (path, dict) in EntitlementsByPath(f)) ents[path] = (JsonObject)ToJson(dict)!;
+        return new JsonObject
+        {
+            ["method"] = "ldid",
+            ["signedFiles"] = new JsonArray(signedFiles.Order(StringComparer.Ordinal).Select(r => (JsonNode?)(prefix + r)).ToArray()),
+            ["entitlements"] = ents,
+        };
+    }
+
+    /// <summary>
+    /// Package path (no leading slash, as HCG Repo names binaries) → entitlements, for every binary that carries any and
+    /// whose entitlements JSON and TOML can state exactly (plist data and dates cannot; such a binary is left out, and
+    /// HCG Repo's own review then asks for its entitlements).
+    /// </summary>
+    public static IReadOnlyDictionary<string, Dictionary<string, object>> EntitlementsByPath(RootlessAppDebValidator.Facts f)
+    {
+        var d = new SortedDictionary<string, Dictionary<string, object>>(StringComparer.Ordinal);
+        if (f.AppPath is null) return d;
+        foreach (var (rel, xml) in f.Entitlements)
+            try
+            {
+                var dict = PlistReader.ParseDictionary(System.Text.Encoding.UTF8.GetBytes(xml));
+                if (ToJson(dict) is not null) d[f.AppPath.TrimStart('/') + "/" + rel] = dict;
+            }
+            catch (Exception e) when (e is FormatException or InvalidDataException or InvalidCastException or System.Xml.XmlException) { }
+        return d;
+    }
+
+    /// <summary>A property-list value as JSON; null when it has no exact JSON form (data, date).</summary>
+    public static JsonNode? ToJson(object v)
+    {
+        switch (v)
+        {
+            case bool b: return JsonValue.Create(b);
+            case string s: return JsonValue.Create(s);
+            case long l: return JsonValue.Create(l);
+            case double x: return JsonValue.Create(x);
+            case List<object> a:
+                var arr = new JsonArray();
+                foreach (var item in a) { if (ToJson(item) is not { } j) return null; arr.Add(j); }
+                return arr;
+            case Dictionary<string, object> o:
+                var obj = new JsonObject();
+                foreach (var (k, item) in o.OrderBy(kv => kv.Key, StringComparer.Ordinal)) { if (ToJson(item) is not { } j) return null; obj[k] = j; }
+                return obj;
+            default: return null;
+        }
+    }
+
+    /// <summary>A property-list value as a TOML value (inline tables for dictionaries), for package.toml [review.entitlements].</summary>
+    public static string ToToml(object v) => v switch
+    {
+        bool b => b ? "true" : "false",
+        string s => TomlString(s),
+        long l => l.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        double x => x.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+        List<object> a => "[" + string.Join(", ", a.Select(ToToml)) + "]",
+        Dictionary<string, object> o => "{ " + string.Join(", ", o.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{TomlString(kv.Key)} = {ToToml(kv.Value)}")) + " }",
+        _ => throw new InvalidDataException("no TOML form for " + v.GetType().Name),
+    };
+
+    /// <summary>A TOML basic string (JSON's escapes are valid TOML escapes).</summary>
+    public static string TomlString(string s) => JsonSerializer.Serialize(s, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
     /// <summary>Package names in a Depends field (alternatives included), as HCG Repo compares them.</summary>
     public static IReadOnlyList<string> DependencyNames(string? depends) =>
@@ -133,6 +210,13 @@ public static partial class SubmissionManifest
         }
         else p.Add("build.provider must be executable-maker-local or github-actions");
         if (Node(m, "maintainerScripts.declared") is not JsonArray) p.Add("maintainerScripts.declared is required");
+        if (Node(m, "signing") is JsonObject sig)
+        {
+            if (S("signing.method") is not ("ldid" or "apple-development" or "apple-distribution" or "unsigned")) p.Add("signing.method must be ldid, apple-development, apple-distribution or unsigned");
+            if (sig["signedFiles"] is not null and not JsonArray) p.Add("signing.signedFiles must be a list of paths inside the package");
+            if (sig["entitlements"] is not null and not JsonObject || (sig["entitlements"] is JsonObject eo && eo.Any(kv => kv.Value is not JsonObject)))
+                p.Add("signing.entitlements must map a path inside the package to its entitlements dictionary");
+        }
         if (S("channel") != "candidate") p.Add("channel must be candidate");
         return p;
     }

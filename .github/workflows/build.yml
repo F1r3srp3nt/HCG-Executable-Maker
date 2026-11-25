@@ -1473,8 +1473,9 @@ jobs:
           plutil -extract MinimumOSVersion raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx 15.0
       - name: Local build (no CI run) — the same archive through --rootless-deb --local → submission.json, lifecycle, HCG Repo Release Manager preview
         env:
-          # HCG Repo main: Distribution v2 Release Manager with the local-file route (PR #20 merged). Nothing is written to HCG Repo.
-          HCG_REPO_LOCAL_COMMIT: a549dbde93a226390b3648c3895155e63415f27a
+          # HCG Repo main: Release Manager with the Executable Maker submission contract (submit --result-json, status,
+          # six evidence levels). Nothing is written to HCG Repo.
+          HCG_REPO_LOCAL_COMMIT: 3bf53c7bb2b6e67a2f66f3a7e1490fc0c1f41481
           # HCG Repo already holds 0.1.0~beta1; this dry run uses a version that exists only in its throwaway copy.
           LOCAL_VERSION: 0.1.0~beta1.local1
         run: |
@@ -1510,10 +1511,10 @@ jobs:
           local="$(ls "$H"/*.deb)"
           cmp "$local" "$(ls "$OUT/local-ci"/*.deb)" || { echo "the local path packaged different bytes"; exit 1; }
           git -C "$OUT/hcg-repo-local" status --porcelain | tee "$OUT/hcg-repo-local-status.txt"; [ ! -s "$OUT/hcg-repo-local-status.txt" ]
-      - name: Real Xcode icon → standard PNG; device-test text is the product's; Ship to Repo on HCG Repo main (Distribution v2, throwaway copy)
+      - name: Real Xcode icon → standard PNG; device-test text is the product's; Ship to Repo on HCG Repo main (submission contract, throwaway copy)
         env:
-          # HCG Repo main with Distribution v2 (Release Manager, submission manifest v1). Nothing is written to HCG Repo.
-          HCG_REPO_V2_COMMIT: a549dbde93a226390b3648c3895155e63415f27a
+          # HCG Repo main with the Executable Maker submission contract (docs/EXECUTABLE_MAKER_SUBMISSION.md). Nothing is written to HCG Repo.
+          HCG_REPO_V2_COMMIT: 3bf53c7bb2b6e67a2f66f3a7e1490fc0c1f41481
         run: |
           H="$(ls -d "$OUT/local"/*-candidate-handoff)"
           # 1. icon.png: a PNG any decoder reads (no Apple CgBI chunk, zlib image data), whatever Xcode stored in the app.
@@ -1546,13 +1547,29 @@ jobs:
           export HCG_REPO_INCOMING="$RUNNER_TEMP/hcg-incoming"
           $M --ship-to-repo submit --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-submit.txt"
           grep -q "^State        VALIDATED" "$OUT/ship-submit.txt"
+          # The six levels are shown separately; the script-free lifecycle is not presented as device evidence.
+          grep -q "^  Script-free dpkg lifecycle  *PASSED" "$OUT/ship-submit.txt"
+          grep -q "^  Application launch  *NOT-RECORDED" "$OUT/ship-submit.txt"
+          grep -q "It is not evidence that the maintainer scripts, an installation on a device or the app work" "$OUT/ship-submit.txt"
+          # Maker never approves or prepares (HCG Repo's contract): it refuses, and prints the owner's commands instead.
+          if $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" > "$OUT/ship-approve-refused.txt" 2>&1; then echo "Maker ran an approval"; exit 1; fi
+          grep -q "does not run \`release approve\`" "$OUT/ship-approve-refused.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-status.txt"
+          grep -q "Executable Maker does not run these" "$OUT/ship-status.txt"
           sha="$(shasum -a 256 < "$(ls "$H"/*.deb)" | cut -d' ' -f1)"
-          if $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" --approved-sha256 "$(printf '0%.0s' {1..64})" --by CI --record "test" > "$OUT/ship-wrong.txt"; then echo "a wrong SHA-256 was approved"; exit 1; fi
-          grep -q "is not the reviewed package's" "$OUT/ship-wrong.txt"
-          $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" --approved-sha256 "$sha" --by "CI (test, throwaway copy)" --record "CI test approval of these exact bytes; never published." | tee "$OUT/ship-approve.txt"
-          grep -q "Not published" "$OUT/ship-approve.txt"
-          $M --ship-to-repo prepare --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" --free-demo-approval "CI test only (throwaway copy); not an owner approval." | tee "$OUT/ship-prepare.txt"
-          grep -q "Prepared in the checkout only" "$OUT/ship-prepare.txt"
+          # This CI step plays the owner, on a throwaway copy: it runs the printed commands in the checkout itself.
+          approve="$(grep -m1 '^  bin/hcgrepo release approve ' "$OUT/ship-status.txt" | sed 's/^  //')"
+          echo "$approve" | grep -q -- "--sha256 $sha"
+          approve="${approve//<owner>/CI (test, throwaway copy)}"; approve="${approve//<approval, verbatim>/CI test approval of these exact bytes; never published.}"
+          if (cd "$OUT/hcg-repo-ship" && eval "${approve//$sha/$(printf '0%.0s' {1..64})}") > "$OUT/ship-wrong.txt" 2>&1; then echo "HCG Repo approved a wrong SHA-256"; exit 1; fi
+          (cd "$OUT/hcg-repo-ship" && eval "$approve") | tee "$OUT/ship-approve.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-approved.txt"
+          grep -q "^State        APPROVED" "$OUT/ship-approved.txt"
+          prepare="$(grep -m1 '^  bin/hcgrepo release prepare ' "$OUT/ship-approved.txt" | sed 's/^  //')"; prepare="${prepare%%   (*}"
+          prepare="${prepare//"<owner's words>"/CI test only (throwaway copy); not an owner approval.}"
+          (cd "$OUT/hcg-repo-ship" && eval "$prepare") | tee "$OUT/ship-prepare.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-prepared.txt"
+          grep -q "^State        PREPARED" "$OUT/ship-prepared.txt"
           ls "$OUT/hcg-repo-ship/imports/" | tee "$OUT/ship-imports.txt"; grep -q "^${PKG}_0.1.0-beta1.local1_iphoneos-arm64_${sha:0:12}\.toml$" "$OUT/ship-imports.txt"
           git -C "$OUT/hcg-repo-v2" status --porcelain | tee "$OUT/hcg-repo-v2-status.txt"; [ ! -s "$OUT/hcg-repo-v2-status.txt" ]   # the real clone is untouched
       - name: HCG Repo (cecfcf0) — bin/hcgrepo inspect, then the importer dry run on the exact exported bytes

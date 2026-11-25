@@ -5,14 +5,29 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ## [Unreleased] — HCG Impactor
 
 ### Added
-- **Ship to Repo** (Unleashify › Build output, `--ship-to-repo submit|show|approve|prepare`): drives HCG Repo's
-  Candidate Release Manager (Distribution v2) on your checkout.
-  - **Submit:** HCG Repo validates the exact .deb into its private incoming store.
-  - **Approve:** you approve the exact SHA-256, with your name and your words.
-  - **Prepare:** HCG Repo imports the approved bytes into `pool/` for Candidate.
-  - Maker never commits, pushes or publishes.
+- **Ship to Repo** (Unleashify › Build output, `--ship-to-repo submit|status|show`), under HCG Repo's Executable Maker
+  submission contract (`docs/EXECUTABLE_MAKER_SUBMISSION.md` in HCG Repo).
+  - **Submit:** `release submit --handoff … --result-json …`; HCG Repo validates the exact .deb into its private
+    incoming store. **Status:** `release status <id>`.
+  - Maker shows the state, the SHA-256, HCG Repo's **six evidence levels separately** (the script-free lifecycle is
+    never presented as device evidence), the findings and the owner's next commands.
+  - **Approval of the exact SHA-256, Candidate preparation and publication are the owner's**, run in HCG Repo. Maker
+    has no approve or prepare operation (`--ship-to-repo approve|prepare` is refused with an explanation).
+  - `HCG_REPO_INCOMING` is passed to HCG Repo, so Maker's submissions are in the same store as the owner's commands.
+- **Signature integrity** check in rootless package validation: every Mach-O signature's page hashes and special
+  slots are recomputed against the files (`MachOSignatureAudit`). It fails a binary changed after signing, an
+  inconsistent signature, or a main executable with library validation or hardened runtime loading an ad hoc or
+  differently signed framework. VALIDATION.txt lists each binary's signer, verified pages, identifier and cdhash.
+- **DEVICE-TEST.md:** "If the app closes at launch": how to collect the crash report and read its termination
+  namespace (CODESIGNING, DYLD, EXC_CRASH, FRONTBOARD) before changing anything.
+- Regression tests for a .NET/Avalonia iOS bundle shaped like HCG Mail Unleashed (unsigned main executable,
+  SkiaSharp/HarfBuzzSharp frameworks with their own ad hoc signatures, AOT data, managed assemblies) and an opt-in
+  check of the published HCG Mail Unleashed 0.1.0~beta1 package (`HCG_MAIL_UNLEASHED_DEB`, read only).
 - **HCG Repo Distribution v2 submission manifest** (`submission.json`, `hcg.repo.artifact-submission` v1) in every
-  handoff with a pinned, clean source; validated by Maker and by HCG Repo's own `validate_manifest` in CI.
+  handoff with a pinned, clean source; validated by Maker and by HCG Repo's own `validate_manifest` in CI. It carries
+  the `signing` claim (method `ldid`, the files Maker signed, each binary's exact entitlements), and the `package.toml`
+  draft records the same entitlements under `[review.entitlements]`. A local handoff's draft has no `[access]
+  exception`: the owner approves a free demo in HCG Repo.
 
 ### Fixed
 - **icon.png** was Apple's CgBI PNG, copied from the Xcode build, which browsers and Sileo cannot decode. It is now
@@ -36,7 +51,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
     names, source visibility, validation. No CI run or artifact is recorded.
   - **HCG Repo handoff** through Ship to Repo (HCG Repo's Release Manager; `--via local-file` stages the .deb for
     Prepare packages). Maker writes no import request of its own for a local build.
-  - **Owner approval bound to the exact SHA-256.**
+  - **Owner approval bound to the exact SHA-256**, given in HCG Repo (`release approve`), not in Maker.
   - **HCG Repo import preview:** HCG Repo's own importer, dry run, on a throwaway copy of your checkout.
   - The same in the CLI: `--rootless-deb … --local --source-visibility … [--approved-sha256 …] [--hcg-repo …]`.
 - `IBuildHost` / `LocalBuildHost`: the seam for a future owner-authorized HCG Server build host (proposal in

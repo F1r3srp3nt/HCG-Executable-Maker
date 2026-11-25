@@ -78,28 +78,28 @@ public sealed class LocalUnleashifyTests : IDisposable
         Assert.Contains(dirty.Handoff.Missing, m => m.StartsWith("submission.json") && m.Contains("dirty"));
     }
 
+    /// <summary>
+    /// HCG Repo's submission contract: a local handoff's package.toml carries no [access] exception, whatever approval text
+    /// was typed into Maker. The owner approves the exact SHA-256 and the free demo in HCG Repo (approve, prepare
+    /// --free-demo-approval); Maker neither writes nor needs that approval, so the handoff does not list it as missing.
+    /// </summary>
     [Fact]
-    public async Task The_owners_approval_counts_only_for_the_exact_sha256_it_names()
+    public async Task A_local_handoff_never_writes_the_owners_approval_the_owner_gives_it_in_HCG_Repo()
     {
         const string words = "approved by the owner on 25 Nov 2026: 'publish to Candidate'";
         var probe = await Run(Local(), name: "probe");
         var sha = probe.Validation!.Facts.Sha256;
-
-        var none = await Run(Local(), approval: words, name: "nosha");   // local build, approval without a checksum
-        Assert.Contains(none.Handoff!.Missing, m => m.StartsWith("owner approval NOT recorded") && m.Contains("exact SHA-256"));
-        Assert.DoesNotContain("\nexception = ", File.ReadAllText(Path.Combine(none.Handoff.Folder, "package.toml")));
-
-        var wrong = await Run(Local(), approval: words, approvedSha: new string('0', 64), name: "wrong");
-        Assert.Contains(wrong.Handoff!.Missing, m => m.Contains("rebuilt bytes need a new approval"));
-        Assert.DoesNotContain("\nexception = ", File.ReadAllText(Path.Combine(wrong.Handoff.Folder, "package.toml")));
-
-        var right = await Run(Local(), approval: words, approvedSha: sha.ToUpperInvariant(), name: "right");
-        Assert.Equal(sha, right.Validation!.Facts.Sha256);   // deterministic: the same inputs give the same bytes
-        var toml = File.ReadAllText(Path.Combine(right.Handoff!.Folder, "package.toml"));
-        Assert.Contains("\nexception = \"", toml);
-        Assert.Contains($"Approved package SHA-256: {sha}.", toml);
-        Assert.Contains("exception_versions = [\"0.1.0~beta1\"]", toml);
-        Assert.DoesNotContain(right.Handoff.Missing, m => m.StartsWith("owner approval"));
+        foreach (var (approval, approvedSha, name) in new (string?, string?, string)[] { (null, null, "none"), (words, null, "nosha"), (words, new string('0', 64), "wrong"), (words, sha.ToUpperInvariant(), "right") })
+        {
+            var o = await Run(Local(), approval: approval, approvedSha: approvedSha, name: name);
+            Assert.Equal(sha, o.Validation!.Facts.Sha256);   // deterministic: the same inputs give the same bytes
+            var toml = File.ReadAllText(Path.Combine(o.Handoff!.Folder, "package.toml"));
+            Assert.DoesNotContain("\nexception = ", toml);
+            Assert.DoesNotContain("\nexception_versions = ", toml);
+            Assert.Contains("--free-demo-approval", toml);
+            Assert.DoesNotContain(o.Handoff.Missing, m => m.StartsWith("owner approval", StringComparison.Ordinal));
+            Assert.True(o.Handoff.ImportRequestComplete);
+        }
     }
 
     [Fact]
@@ -194,7 +194,9 @@ public sealed class LocalUnleashifyTests : IDisposable
         var p = await ShipToRepo.PreviewAsync(new ProcessRunner(), python, checkout, o.Handoff!.Folder, null, CancellationToken.None);
         Assert.Equal("validated", p.State);
         Assert.Contains($"SHA-256      {o.Validation!.Facts.Sha256}", p.Output);
-        Assert.Contains("Simulated lifecycle       PASSED", p.Output);
+        Assert.Contains("Script-free dpkg lifecycle", p.Output);
+        Assert.Equal("passed", p.Result!["levels"]!["script_free_lifecycle"]!["state"]!.GetValue<string>());
+        Assert.Equal("not-recorded", p.Result!["levels"]!["device_installation"]!["state"]!.GetValue<string>());
         Assert.Equal(before, Directory.EnumerateFileSystemEntries(Path.GetTempPath(), "hcg-ship-preview-*").Count());   // the throwaway store is gone
     }
 }

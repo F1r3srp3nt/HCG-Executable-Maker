@@ -54,8 +54,7 @@ public sealed partial class UnleashifyViewModel(
     IProjectRepository projects,
     MobileBuildService mobileBuilder,
     IAppPaths paths,
-    ProjectService projectService,
-    IDialogService dialogs) : PageViewModel
+    ProjectService projectService) : PageViewModel
 {
     public override string Title => "Unleashify";
     public override string Subtitle => "Mobile Build Studio · an iOS app as a rootless jailbreak package for HCG Repo Candidate — built, validated and handed off, never published.";
@@ -123,13 +122,9 @@ public sealed partial class UnleashifyViewModel(
     [ObservableProperty] private string? _suggestedArtwork;
     [ObservableProperty] private string _iconStatus = "The handoff's icon.png is the app's own icon, converted to a standard PNG when Xcode stored it as Apple CgBI.";
 
-    // Ship to Repo: HCG Repo's Candidate Release Manager (Distribution v2) on the owner's checkout. Never publishes.
+    // Ship to Repo: HCG Repo's Candidate Release Manager on the owner's checkout (submit and status only; approval,
+    // preparation and publication are the owner's, per HCG Repo's Executable Maker submission contract).
     [ObservableProperty] private string _incomingStore = "";
-    [ObservableProperty] private string _approvedBy = "";
-    [ObservableProperty] private bool _createPackageMetadata;
-    /// <summary>Prepare through HCG Repo's local-file route (staged for its Prepare packages workflow in CI) instead of importing here.</summary>
-    [ObservableProperty] private bool _prepareViaLocalFile;
-    [ObservableProperty] private bool _needsPackageMetadata;
     [ObservableProperty] private string? _submissionId;
     [ObservableProperty] private StatusTag _shipTag = new("Not submitted", "neutral");
     [ObservableProperty] private string _shipText = "";
@@ -151,14 +146,14 @@ public sealed partial class UnleashifyViewModel(
 
     // Run state.
     [ObservableProperty] private string? _ldid;
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(BuildCommand), nameof(ExportHandoffCommand), nameof(PreviewImportCommand), nameof(ImportPinnedCommitCommand), nameof(SubmitToRepoCommand), nameof(RefreshReviewCommand), nameof(ApproveInRepoCommand), nameof(PrepareInRepoCommand))] private bool _isBusy;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(BuildCommand), nameof(ExportHandoffCommand), nameof(PreviewImportCommand), nameof(ImportPinnedCommitCommand), nameof(SubmitToRepoCommand), nameof(RefreshReviewCommand))] private bool _isBusy;
     [ObservableProperty] private string _log = "";
     [ObservableProperty] private string _appSummary = "No app inspected yet.";
     [ObservableProperty] private string? _result;
     [ObservableProperty] private StatusTag _validationTag = new("Not built", "neutral");
     [ObservableProperty] private StatusTag _readinessTag = new("Not built", "neutral");
     [ObservableProperty] private string _readinessText = "";
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(PreviewImportCommand), nameof(SubmitToRepoCommand), nameof(RefreshReviewCommand), nameof(ApproveInRepoCommand), nameof(PrepareInRepoCommand))] private string? _handoffFolder;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(PreviewImportCommand), nameof(SubmitToRepoCommand), nameof(RefreshReviewCommand))] private string? _handoffFolder;
     [ObservableProperty] private StatusTag _handoffTag = new("Not exported", "neutral");
     public ObservableCollection<StageItem> Stages { get; } = [new("Archive"), new("Inspect"), new("Package"), new("Validate"), new("Handoff")];
     public ObservableCollection<CheckItem> Checks { get; } = [];
@@ -434,11 +429,15 @@ public sealed partial class UnleashifyViewModel(
 
     private bool CanShip() => !IsBusy && HandoffFolder is not null;
 
-    /// <summary>Ship to Repo › Submit: HCG Repo validates the exact .deb into its private incoming store (outside Git). Nothing is published.</summary>
+    /// <summary>
+    /// Ship to Repo › Submit: <c>bin/hcgrepo release submit --handoff … --result-json …</c>. HCG Repo validates the exact .deb
+    /// into its private incoming store (outside Git). Maker shows HCG Repo's six levels and the owner's next commands; it
+    /// does not approve, prepare or publish.
+    /// </summary>
     [RelayCommand(CanExecute = nameof(CanShip))]
     private async Task SubmitToRepoAsync()
     {
-        if (HandoffFolder is not { } folder || _outcome?.Validation is not { } val) return;
+        if (HandoffFolder is not { } folder || _outcome?.Validation is null) return;
         if (Python() is not { } python) { ShipTag = new("python3 missing", "error"); ShipText = "HCG Repo's Release Manager needs Python 3.11+ and dpkg-deb (brew install dpkg)."; return; }
         if (ShipToRepo.CheckoutProblem(HcgRepoCheckout.Trim()) is { } bad) { ShipTag = new("Choose a checkout", "warning"); ShipText = bad; return; }
         IsBusy = true;
@@ -446,74 +445,34 @@ public sealed partial class UnleashifyViewModel(
         {
             ShipTag = new("Submitting", "info");
             var r = await Task.Run(() => ShipToRepo.SubmitAsync(runner, python, HcgRepoCheckout.Trim(), folder, Incoming(), null, CancellationToken.None));
-            SubmissionId = r.SubmissionId;
-            NeedsPackageMetadata = !ShipToRepo.HasPackageMetadata(HcgRepoCheckout.Trim(), PackageId.Trim());
-            ShipText = r.Output.Trim();
-            ShipTag = r.State switch
-            {
-                "validated" => new($"Validated by HCG Repo · SHA-256 {val.Facts.Sha256[..12]}… · awaiting the owner's approval", "success"),
-                "refused" => new("Refused by HCG Repo", "error"),
-                _ => new(r.Succeeded ? "Submitted" : "Not submitted", r.Succeeded ? "info" : "error"),
-            };
+            ShowShipResult(r);
             Log += "\n[Ship to Repo] " + ShipTag.Text;
         }
         finally { IsBusy = false; }
     }
 
+    /// <summary>Ship to Repo › Status: <c>bin/hcgrepo release status &lt;id&gt;</c> (after the owner approves or prepares in the checkout).</summary>
     [RelayCommand(CanExecute = nameof(CanShip))]
     private async Task RefreshReviewAsync()
     {
-        if (SubmissionId is not { } id || Python() is not { } python) return;
-        var r = await Task.Run(() => ShipToRepo.ShowAsync(runner, python, HcgRepoCheckout.Trim(), id, Incoming(), CancellationToken.None));
-        ShipTag = new($"HCG Repo: {r.State ?? "unknown"}", r.State switch { "validated" or "approved" or "prepared" => "success", "refused" => "error", _ => "neutral" });
-    }
-
-    /// <summary>Ship to Repo › Approve: records the owner's approval of the exact reviewed SHA-256 (typed by the owner) in HCG Repo's review.</summary>
-    [RelayCommand(CanExecute = nameof(CanShip))]
-    private async Task ApproveInRepoAsync()
-    {
         if (SubmissionId is not { } id || Python() is not { } python) { ShipText = "Submit first."; return; }
-        if (ApprovedSha256.Trim().Length != 64 || OwnerApproval.Trim().Length == 0 || ApprovedBy.Trim().Length == 0)
-        {
-            ShipTag = new("Approval incomplete", "warning");
-            ShipText = "An approval needs the owner's name (Approved by), their words (Owner's approval) and the exact SHA-256 they approve.";
-            return;
-        }
-        var ok = await dialogs.ConfirmAsync("Record the owner's approval in HCG Repo?",
-            $"Submission {id}\n\nSHA-256 {ApprovedSha256.Trim().ToLowerInvariant()}\nApproved by {ApprovedBy.Trim()}: “{OwnerApproval.Trim()}”\n\n" +
-            "HCG Repo records this approval for a Candidate import of exactly these bytes. Nothing is imported, committed or published by this step.", "Record approval");
-        if (!ok) return;
-        IsBusy = true;
-        try
-        {
-            var r = await Task.Run(() => ShipToRepo.ApproveAsync(runner, python, HcgRepoCheckout.Trim(), id, ApprovedSha256, ApprovedBy, OwnerApproval, Incoming(), CancellationToken.None));
-            ShipText = r.Output.Trim();
-            ShipTag = r.Succeeded ? new("Approved for Candidate import · not published", "success") : new("Approval refused", "error");
-        }
-        finally { IsBusy = false; }
+        var r = await Task.Run(() => ShipToRepo.StatusAsync(runner, python, HcgRepoCheckout.Trim(), id, Incoming(), CancellationToken.None));
+        ShowShipResult(r);
     }
 
-    /// <summary>Ship to Repo › Prepare: HCG Repo imports the approved bytes into the checkout's pool/ for Candidate. No commit, push or publication.</summary>
-    [RelayCommand(CanExecute = nameof(CanShip))]
-    private async Task PrepareInRepoAsync()
+    private void ShowShipResult(ShipToRepo.Step r)
     {
-        if (SubmissionId is not { } id || Python() is not { } python) { ShipText = "Submit and approve first."; return; }
-        var ok = await dialogs.ConfirmAsync("Prepare the Candidate import in your HCG Repo checkout?",
-            $"HCG Repo imports the approved bytes of {id} into {HcgRepoCheckout.Trim()}: pool/, repo-lock.json, imports/{id}.toml and submissions/{id}/" +
-            (CreatePackageMetadata ? $", and packages/{PackageId.Trim()}/ from the handoff's draft" : "") +
-            (PrepareViaLocalFile ? " — staged under imports/local/ with HCG Repo's local-file request, for its Prepare packages workflow (instead of pool/)" : "") +
-            ".\n\nNothing is committed, pushed or published. Review the changes, commit them on a branch and open a pull request; publication is HCG Repo's separate, manual Publish workflow.", "Prepare");
-        if (!ok) return;
-        IsBusy = true;
-        try
+        SubmissionId = r.SubmissionId ?? SubmissionId;
+        ShipText = r.Result is { } result ? ShipToRepo.Summary(result, ShipToRepo.DraftAccessLevel(HandoffFolder)) : r.Output.Trim();
+        ShipTag = r.State switch
         {
-            var r = await Task.Run(() => ShipToRepo.PrepareAsync(runner, python, HcgRepoCheckout.Trim(), id, OwnerApproval.Trim() is { Length: > 0 } words ? words : null,
-                CreatePackageMetadata, Incoming(), null, CancellationToken.None, PrepareViaLocalFile));
-            ShipText = r.Output.Trim();
-            ShipTag = r.Succeeded ? new("Prepared in the checkout · commit on a branch · not published", "success") : new("Prepare refused", "error");
-            if (r.Succeeded) NeedsPackageMetadata = false;
-        }
-        finally { IsBusy = false; }
+            "validated" => new("Validated by HCG Repo · awaiting the owner's checksum approval", "success"),
+            "approved" => new("Approved by the owner · Candidate not prepared yet", "success"),
+            "prepared" => new("Prepared in the checkout · not published", "success"),
+            "refused" => new("Refused by HCG Repo", "error"),
+            "withdrawn" => new("Withdrawn", "neutral"),
+            _ => new(r.Succeeded ? "Submitted" : "Not submitted", r.Succeeded ? "info" : "error"),
+        };
     }
 
     private bool CanBuild() => !IsBusy && SelectedMode?.Available == true && (!BuildFromXcode || (TrustAcknowledged && Project is not null));

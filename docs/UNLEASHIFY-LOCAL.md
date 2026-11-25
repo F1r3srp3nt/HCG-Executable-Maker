@@ -14,15 +14,24 @@ There is no second packager. Nothing is installed, uploaded, committed or publis
 | Validation | Debian format 2.0, gzip members, full extraction, metadata, architecture, scripts, install paths, linkage, entitlements, minimum iOS vs the test device, SHA-256. | Build › Validate |
 | Lifecycle | install → configure → upgrade → remove in a throwaway folder: payload stays under `/var/jb`; Maker's own `postinst`/`postrm` run with a recording stand-in for `uicache` (also once with a failing one, which must not fail the install); removal leaves nothing. Scripts that are not exactly Maker's are never run. No privileges are used. | Build › Validate (checks named "Lifecycle · …") |
 | Provenance | Built by (Maker version and commit), toolchain read from the app itself (`DTXcode`, `DTXcodeBuild`, `DTSDKName`, e.g. "Xcode 27.2 (…)"), build time, host label (operating system and architecture only: no computer or user name), source visibility, validation summary. **No CI run or artifact is recorded for a local build.** | Candidate and provenance |
-| HCG Repo handoff | `submission.json`, HCG Repo's Distribution v2 manifest. Submit the handoff with **Ship to Repo**; HCG Repo's Release Manager writes the import request itself (`--via local-file` stages it under `imports/local/` for Prepare packages). | **Export Candidate Handoff** |
-| Owner approval | Counts only for the exact SHA-256 you approve. If the bytes change, the approval no longer applies; the handoff says so and leaves the exception out. | Candidate and provenance › approval + approved SHA-256 |
+| HCG Repo handoff | `submission.json` (HCG Repo's `hcg.repo.artifact-submission` v1), with the `signing` claim: method `ldid`, the files Maker signed, each binary's exact entitlements. `package.toml` draft with the same entitlements under `[review.entitlements."<path>"]` and **no `[access] exception`**. Submit with **Ship to Repo**; HCG Repo's Release Manager writes the import request itself. | **Export Candidate Handoff** |
+| Owner approval | Given in HCG Repo, not in Maker: `release approve` (exact SHA-256), then `release prepare --free-demo-approval` for a free Candidate demo. Maker shows these commands; it never runs them. | HCG Repo checkout (commands shown under **Ship to Repo**) |
 | Import preview | HCG Repo's own importer (dry run) on the exact bytes, in a throwaway copy of your HCG Repo checkout. | Build output › **HCG Repo import preview** |
 
-The HCG Repo side is its Candidate Release Manager (Distribution v2, on HCG Repo `main`).
-- `release submit` reviews the exact bytes in a private incoming store.
-- `release approve` records your approval of the exact SHA-256.
+The HCG Repo side is its Candidate Release Manager, under HCG Repo's Executable Maker submission contract
+(`docs/EXECUTABLE_MAKER_SUBMISSION.md` in HCG Repo).
+- `release submit --handoff <folder> --result-json <file>` reviews the exact bytes in a private incoming store (Maker
+  runs this).
+- `release status <id>` gives the result as JSON: state, the six evidence levels, findings, requirements, next step
+  (Maker runs this).
+- `release approve` records your approval of the exact SHA-256 (**you** run this; Maker never does).
 - `release prepare` imports into `pool/`. With `--via local-file`, it instead stages the .deb under `imports/local/`
-  with its own `local-file` request, so the Prepare packages workflow imports it in CI.
+  with its own `local-file` request, so the Prepare packages workflow imports it in CI (**you** run this).
+
+The six levels are shown separately: static inspection, maintainer script review (read, not run), script-free dpkg
+lifecycle, device installation, application launch, runtime verification. A passed script-free lifecycle means dpkg
+handled the payload with the maintainer scripts removed. It is not evidence that the scripts, an installation on a
+device or the app work.
 
 Only the binary package, the repository name and the commit reach HCG Repo. Your source stays private and no token is
 needed.
@@ -75,23 +84,21 @@ dotnet run --project src/HCG.ExecutableMaker.App -c Release
       `VALIDATION.txt`, `DEVICE-TEST.md`, `package.toml`, `icon.png` and the .deb.
    2. HCG Repo import preview: choose your HCG Repo `main` checkout and click **Preview import**. HCG Repo's Release
       Manager reviews the handoff in a throwaway incoming store, which is then deleted. The expected verdict is
-      "Validated by HCG Repo · awaiting your approval".
-   3. When you approve, type your name, your approval and the **exact SHA-256** you approve.
-   4. **Ship to Repo**: HCG Repo's Candidate Release Manager (Distribution v2), on your HCG Repo `main` checkout.
+      "Validated by HCG Repo · awaiting the owner's checksum approval", with the six levels listed separately.
+   3. **Ship to Repo**: HCG Repo's Candidate Release Manager, on your HCG Repo `main` checkout.
       1. **Submit**: HCG Repo validates the exact .deb into its private incoming store, outside Git. It checks the
-         handoff's `submission.json` against the package, then runs static checks, secrets, scripts, a simulated dpkg
-         lifecycle and the repository's own rules.
-      2. **Approve exact SHA-256…**: give your name ("Approved by"), your words ("Owner's approval") and the SHA-256 you
-         approve. Maker refuses a SHA-256 that is not the reviewed package's. HCG Repo records the approval.
-      3. **Prepare Candidate…**: HCG Repo imports the approved bytes into the checkout's `pool/`, plus
-         `repo-lock.json`, `imports/<id>.toml` and `submissions/<id>/`. For a new package, tick "create
-         packages/<id>/" to use the handoff's draft.
-      4. Review the changes, commit them on a branch and open a pull request. Publishing is HCG Repo's manual
-         **Publish repository** workflow; Maker never commits, pushes or publishes.
-
-      Tick **Prepare via local-file** to have HCG Repo stage the approved .deb under `imports/local/` with its own
-      `local-file` request, so the **Prepare packages** workflow imports it in CI, instead of importing into `pool/`
-      here.
+         handoff's `submission.json` (including the signing and entitlement claims) against the package, then runs
+         static checks, secrets, scripts, a script-free dpkg lifecycle and the repository's own rules. Maker shows
+         the state, the SHA-256, the six levels, the findings and the owner's next commands.
+      2. **You approve, in your HCG Repo checkout**: run the `bin/hcgrepo release approve <id> --sha256 <sha> --by …
+         --record …` line Maker shows, with your name and your words. HCG Repo refuses any other SHA-256.
+      3. **You prepare, in your HCG Repo checkout**: run the `bin/hcgrepo release prepare <id> …` line Maker shows. It
+         already carries `--create-package-metadata` for a new package and `--free-demo-approval "<your words>"` when
+         the package is not public. Add `--via local-file` to stage the .deb under `imports/local/` for HCG Repo's
+         **Prepare packages** workflow instead of importing into `pool/` here.
+      4. **Refresh status** in Maker shows HCG Repo's state (approved, prepared).
+      5. Review the changes, commit them on a branch and open a pull request. Publishing is HCG Repo's manual
+         **Publish repository** workflow; Maker never approves, prepares, commits, pushes or publishes.
 
 ### The same from the command line
 
@@ -101,12 +108,12 @@ $M --rootless-deb <SignalContractor.xcarchive> --package com.hakmicapitalgroup.s
    --name "HCG Signal Contractor" --description "…" --device-ios 17.4 --production-access undecided \
    --repository F1r3srp3nt/HCG-Signal-Contractor --commit a5b3c2322f0de4fbbe8d10df179872c590aa1d75 \
    --local --source-visibility private --host "MacBook Pro M4 Max" --hcg-repo ~/src/HCG-repo --out ~/Desktop/signal-contractor
-# after your approval of the printed SHA-256:
-#  … --owner-approval "<who> on <date>: '<words>'" --approved-sha256 <sha>
 H=~/Desktop/signal-contractor/com.hakmicapitalgroup.signalcontractor_0.1.0~beta1-candidate-handoff
-$M --ship-to-repo submit  --hcg-repo ~/src/HCG-repo --handoff "$H"
-$M --ship-to-repo approve --hcg-repo ~/src/HCG-repo --handoff "$H" --approved-sha256 <sha> --by "<name>" --record "<approval, verbatim>"
-$M --ship-to-repo prepare --hcg-repo ~/src/HCG-repo --handoff "$H" --create-package-metadata --free-demo-approval "<owner's words>"
+$M --ship-to-repo submit --hcg-repo ~/src/HCG-repo --handoff "$H"   # state, SHA-256, six levels, your next commands
+$M --ship-to-repo status --hcg-repo ~/src/HCG-repo --handoff "$H"   # after you approve or prepare in HCG Repo
+# Then, yourself, in ~/src/HCG-repo (the exact lines are printed by submit/status):
+#   bin/hcgrepo release approve <id> --sha256 <sha> --by "<you>" --record "<your approval, verbatim>"
+#   bin/hcgrepo release prepare <id> --create-package-metadata --free-demo-approval "<your words>"
 ```
 
 ## Icon and device-test instructions
@@ -137,13 +144,17 @@ Exit codes: 0 done, 4 inspection or prerequisite, 5 packaging, 6 validation or l
 - **Unit tests (all platforms):**
   - `submission.json` with no CI fields, and no request of Maker's own;
   - an unpinned or dirty source is refused;
-  - an approval applies to its exact SHA-256 only;
+  - a local handoff never writes the owner's approval (no `[access] exception`); Maker has no approve or prepare
+    operation;
+  - `signing` claims only the files Maker signed, with each binary's exact entitlements, matching the
+    `[review.entitlements]` tables of the draft;
   - the lifecycle: script calls, failing `uicache`, upgrade, removal;
   - pinned checkout: a clean copy at the commit, the source repository unchanged, option-like commits refused;
   - no computer or user name in the host label, no credentials taken from remote URLs.
 - **With an HCG Repo `main` checkout (`HCG_REPO_MAIN_CHECKOUT`):** HCG Repo's Release Manager validates each
-  handoff. Submit → approve (wrong SHA-256 refused) → prepare runs end to end into `pool/`, and also via local-file
-  (HCG Repo's loader accepts the request it wrote). The preview leaves nothing behind.
+  handoff. Maker submits and reads status; the test then plays the owner and runs the printed approve (a wrong
+  SHA-256 is refused by HCG Repo) and prepare commands, into `pool/` and via local-file (HCG Repo's loader accepts the
+  request it wrote). The preview leaves nothing behind.
 - **macOS CI (Unleashify job):**
   - a real Xcode archive goes through `--rootless-deb --local`: toolchain from `DTXcode`, lifecycle passed, no
     run/artifact fields;

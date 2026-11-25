@@ -261,8 +261,59 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Runs one of the owner's commands exactly as Maker printed it (placeholders filled in), in the HCG Repo checkout,
+    /// as the owner would. The test plays the owner; Maker itself has no approve or prepare operation.
+    /// </summary>
+    private static async Task<(bool Ok, string Output)> RunAsOwner(string python, string repo, string incoming, string command, params (string Placeholder, string Value)[] fill)
+    {
+        command = command.Split("   (", 2)[0];
+        foreach (var (k, v) in fill) command = command.Replace(k, v);
+        var words = System.Text.RegularExpressions.Regex.Matches(command, "\"([^\"]*)\"|(\\S+)").Select(m => m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).ToList();
+        Assert.Equal(["bin/hcgrepo", "release"], words.Take(2));
+        List<string> args = ["-I", Path.Combine(repo, "bin", "hcgrepo"), "release", "--incoming", incoming, .. words.Skip(2)];
+        var (r, stdout, stderr) = await new ProcessRunner().CaptureAsync(new ProcessSpec { Executable = python, Arguments = args, WorkingDirectory = repo }, CancellationToken.None);
+        return (r.Succeeded, stdout + stderr);
+    }
+
     [Fact]
-    public async Task Ship_to_Repo_submits_reviews_approves_the_exact_sha_and_prepares_Candidate_in_a_checkout_copy()
+    public void Executable_Maker_has_no_operation_that_approves_prepares_or_publishes_in_HCG_Repo()
+    {
+        var names = typeof(ShipToRepo).GetMethods().Select(m => m.Name).ToList();
+        Assert.DoesNotContain(names, n => n.StartsWith("Approve", StringComparison.Ordinal) || n.StartsWith("Prepare", StringComparison.Ordinal) || n.StartsWith("Publish", StringComparison.Ordinal));
+        Assert.Equal(["Submit", "Status", "Show"], Enum.GetNames<ShipToRepo.Action>());
+    }
+
+    [Fact]
+    public void The_six_levels_are_shown_separately_and_the_lifecycle_is_not_presented_as_device_evidence()
+    {
+        var result = JsonNode.Parse("""
+            {"format":"hcg.repo.submission-result","formatVersion":1,"submission":"x_1_iphoneos-arm64_abc","state":"validated",
+             "package":{"identifier":"x","version":"1","architecture":"iphoneos-arm64"},"artifact":{"sha256":"ab","size":1},
+             "levels":{"static_inspection":{"state":"passed"},"maintainer_script_review":{"state":"passed","executed":false},
+                       "script_free_lifecycle":{"state":"passed","scripts_executed":false,"steps":[{"step":"install","ok":true},{"step":"purge","ok":true}]},
+                       "device_installation":{"state":"not-recorded"},"application_launch":{"state":"not-recorded"},"runtime_verification":{"state":"not-recorded"}},
+             "findings":[],"requirements":[{"kind":"checksum-approval","satisfied":false,"command":"bin/hcgrepo release approve x_1_iphoneos-arm64_abc --sha256 ab --by \"<owner>\" --record \"<approval, verbatim>\""},
+                                           {"kind":"package-metadata","satisfied":false},{"kind":"free-demo-approval","satisfied":false},{"kind":"publication-approval","satisfied":false}],
+             "next_step":"wait for the owner's checksum approval","channel":"candidate"}
+            """)!.AsObject();
+        var text = ShipToRepo.Summary(result);
+        foreach (var (_, label) in ShipToRepo.Levels) Assert.Single(text.Split('\n'), l => l.TrimStart().StartsWith(label, StringComparison.Ordinal));
+        Assert.Contains("Script-free dpkg lifecycle                 PASSED (install ok, purge ok)", text);
+        Assert.Contains("Device installation                        NOT-RECORDED", text);
+        Assert.Contains("Application launch                         NOT-RECORDED", text);
+        Assert.Contains("It is not evidence that the maintainer scripts, an installation on a device or the app work", text);
+        Assert.Contains("Executable Maker does not run these", text);
+        var cmds = ShipToRepo.OwnerCommands(result);
+        Assert.Equal("bin/hcgrepo release approve x_1_iphoneos-arm64_abc --sha256 ab --by \"<owner>\" --record \"<approval, verbatim>\"", cmds[0]);
+        Assert.StartsWith("bin/hcgrepo release prepare x_1_iphoneos-arm64_abc --create-package-metadata --free-demo-approval \"<owner's words>\"", cmds[1]);
+        // Once prepared there is nothing left for Maker to suggest in HCG Repo.
+        result["state"] = "prepared";
+        Assert.Empty(ShipToRepo.OwnerCommands(result));
+    }
+
+    [Fact]
+    public async Task Ship_to_Repo_submits_and_reads_status_and_the_owner_approves_and_prepares_in_HCG_Repo()
     {
         if (RepoMain() is not { } main || new HCG.ExecutableMaker.Core.ExecutableLocator().Find("python3") is not { } python) return;
         var repo = _t.Combine("hcg-repo");
@@ -277,29 +328,39 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
         var submit = await ShipToRepo.SubmitAsync(runner, python, repo, o.Handoff!.Folder, incoming, null, CancellationToken.None);
         Assert.True(submit.Succeeded, submit.Output);
         Assert.Equal((id, "validated"), (submit.SubmissionId, submit.State));
-        Assert.Contains($"SHA-256      {sha}", submit.Output);
+        var result = submit.Result!;
+        Assert.Equal(sha, result["artifact"]!["sha256"]!.GetValue<string>());
+        Assert.Equal("executable-maker-local", result["provider"]!.GetValue<string>());
+        Assert.Equal(ShipToRepo.Levels.Select(l => l.Key), result["levels"]!.AsObject().Select(kv => kv.Key).Order().Intersect(ShipToRepo.Levels.Select(l => l.Key)).OrderBy(k => ShipToRepo.Levels.Select(l => l.Key).ToList().IndexOf(k)));
+        Assert.Equal("passed", result["levels"]!["static_inspection"]!["state"]!.GetValue<string>());
+        Assert.Equal("not-recorded", result["levels"]!["application_launch"]!["state"]!.GetValue<string>());
+        Assert.DoesNotContain(result["findings"]!.AsArray(), f => f!["code"]!.GetValue<string>() is "submission-signing" or "submission-entitlements");
+        Assert.DoesNotContain(incoming, ShipToRepo.Summary(result));   // the result never names the private store
 
-        var show = await ShipToRepo.ShowAsync(runner, python, repo, id, incoming, CancellationToken.None);
-        Assert.Equal(("validated", sha), (show.State, show.Review!["sha256"]!.GetValue<string>()));
+        var status = await ShipToRepo.StatusAsync(runner, python, repo, id, incoming, CancellationToken.None);
+        Assert.Equal(("validated", sha), (status.State, status.Result!["artifact"]!["sha256"]!.GetValue<string>()));
+        Assert.Equal("connect", ShipToRepo.DraftAccessLevel(o.Handoff.Folder));
+        var cmds = ShipToRepo.OwnerCommands(status.Result!, ShipToRepo.DraftAccessLevel(o.Handoff.Folder));
+        Assert.Equal(2, cmds.Count);
+        Assert.Contains($"--sha256 {sha}", cmds[0]);
+        Assert.Contains("--create-package-metadata", cmds[1]);   // a new package: HCG Repo asks for its metadata
+        Assert.Contains("--free-demo-approval", cmds[1]);        // and its draft is not public
+        Assert.DoesNotContain("--free-demo-approval", ShipToRepo.OwnerCommands(status.Result!, "public")[1]);
 
-        var wrong = await ShipToRepo.ApproveAsync(runner, python, repo, id, new string('0', 64), "Owner", "approved", incoming, CancellationToken.None);
-        Assert.False(wrong.Succeeded);
-        Assert.Contains("is not the reviewed package's", wrong.Output);
-        var nobody = await ShipToRepo.ApproveAsync(runner, python, repo, id, sha, " ", "approved", incoming, CancellationToken.None);
-        Assert.False(nobody.Succeeded);
+        // The owner, not Maker: a wrong SHA-256 is refused by HCG Repo; the exact one is recorded.
+        Assert.False((await RunAsOwner(python, repo, incoming, cmds[0].Replace(sha, new string('0', 64)), ("<owner>", "Owner (test)"), ("<approval, verbatim>", "approved (test)"))).Ok);
+        var approve = await RunAsOwner(python, repo, incoming, cmds[0], ("<owner>", "Owner (test)"), ("<approval, verbatim>", "I approve these exact bytes for Candidate (test)."));
+        Assert.True(approve.Ok, approve.Output);
+        var approved = await ShipToRepo.StatusAsync(runner, python, repo, id, incoming, CancellationToken.None);
+        Assert.Equal("approved", approved.State);
+        var prepareCmd = Assert.Single(ShipToRepo.OwnerCommands(approved.Result!, ShipToRepo.DraftAccessLevel(o.Handoff.Folder)));
+        var prepare = await RunAsOwner(python, repo, incoming, prepareCmd, ("<owner's words>", "free Candidate demo approved by the owner (test)"));
+        Assert.True(prepare.Ok, prepare.Output);
+        Assert.Equal("prepared", (await ShipToRepo.StatusAsync(runner, python, repo, id, incoming, CancellationToken.None)).State);
 
-        Assert.False(ShipToRepo.HasPackageMetadata(repo, p.PackageId));
-        var early = await ShipToRepo.PrepareAsync(runner, python, repo, id, null, true, incoming, null, CancellationToken.None);
-        Assert.False(early.Succeeded);                          // HCG Repo refuses: not approved
-        var approve = await ShipToRepo.ApproveAsync(runner, python, repo, id, sha.ToUpperInvariant(), "Owner (test)", "I approve these exact bytes for Candidate (test).", incoming, CancellationToken.None);
-        Assert.True(approve.Succeeded, approve.Output);
-        Assert.Contains("Not published", approve.Output);
-
-        var prepare = await ShipToRepo.PrepareAsync(runner, python, repo, id, "free Candidate demo approved by the owner (test)", true, incoming, null, CancellationToken.None);
-        Assert.True(prepare.Succeeded, prepare.Output);
         Assert.True(File.Exists(Path.Combine(repo, "imports", id + ".toml")));
         Assert.True(File.Exists(Path.Combine(repo, "submissions", id, "submission.json")));
-        Assert.True(ShipToRepo.HasPackageMetadata(repo, p.PackageId));
+        Assert.True(File.Exists(Path.Combine(repo, "packages", p.PackageId, "package.toml")));
         Assert.Contains(Directory.EnumerateFiles(Path.Combine(repo, "pool"), "*.deb", SearchOption.AllDirectories),
             f => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f))) == sha);
         Assert.Null(PngIcon.ValidateStandard(File.ReadAllBytes(Path.Combine(repo, "packages", p.PackageId, "icon.png"))));
@@ -307,30 +368,29 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
     }
 
     [Fact]
-    public async Task Ship_to_Repo_can_stage_the_approved_bytes_for_HCG_Repos_Prepare_packages_via_local_file()
+    public async Task The_owners_prepare_command_can_stage_the_approved_bytes_for_HCG_Repos_Prepare_packages_via_local_file()
     {
         if (RepoMain() is not { } main || new HCG.ExecutableMaker.Core.ExecutableLocator().Find("python3") is not { } python) return;
         var repo = _t.Combine("hcg-repo-lf");
         CopyDir(main, repo);
         var incoming = _t.Combine("incoming-lf");
         var runner = new ProcessRunner();
-        // A test-only version of a product (HCG Mail Unleashed's real 0.1.0~beta1 may already be in HCG Repo; released bytes are never replaced).
+        // A test-only version of a product (HCG Mail Unleashed's real 0.1.0~beta1 is in HCG Repo; released bytes are never replaced).
         var o = await Build(MailUnleashed, version: "0.1.0~beta1.test1");
         var sha = o.Validation!.Facts.Sha256;
         var submit = await ShipToRepo.SubmitAsync(runner, python, repo, o.Handoff!.Folder, incoming, null, CancellationToken.None);
         Assert.Equal("validated", submit.State);
         var id = submit.SubmissionId!;
-        Assert.True((await ShipToRepo.ApproveAsync(runner, python, repo, id, sha, "Owner (test)", "Approved (test).", incoming, CancellationToken.None)).Succeeded);
-        var prepare = await ShipToRepo.PrepareAsync(runner, python, repo, id, "free Candidate demo approved by the owner (test)", !ShipToRepo.HasPackageMetadata(repo, MailUnleashed.PackageId),
-            incoming, null, CancellationToken.None, viaLocalFile: true);
-        Assert.True(prepare.Succeeded, prepare.Output);
+        var cmds = ShipToRepo.OwnerCommands(submit.Result!, ShipToRepo.DraftAccessLevel(o.Handoff.Folder));
+        Assert.True((await RunAsOwner(python, repo, incoming, cmds[0], ("<owner>", "Owner (test)"), ("<approval, verbatim>", "Approved (test)."))).Ok);
+        var prepare = await RunAsOwner(python, repo, incoming, cmds[1].Split("   (", 2)[0] + " --via local-file", ("<owner's words>", "free Candidate demo approved by the owner (test)"));
+        Assert.True(prepare.Ok, prepare.Output);
         var staged = Path.Combine(repo, "imports", "local", $"{MailUnleashed.PackageId}_0.1.0~beta1.test1_iphoneos-arm64.deb");
         Assert.Equal(sha, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(staged))));
         var request = Path.Combine(repo, "imports", id + ".toml");
         Assert.Contains("kind = \"local-file\"", File.ReadAllText(request));
         Assert.DoesNotContain(Directory.EnumerateFiles(Path.Combine(repo, "pool"), "*.deb", SearchOption.AllDirectories),
             f => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f))) == sha);   // staged, not imported here
-        // HCG Repo's own loader accepts the request it wrote.
         var script = $"import sys; sys.path.insert(0, {System.Text.Json.JsonSerializer.Serialize(Path.Combine(repo, "tools"))}); from pathlib import Path; " +
                      $"from hcgrepo.importer import load_request; r = load_request(Path({System.Text.Json.JsonSerializer.Serialize(request)})); print(r['source']['kind'])";
         var (r, stdout, stderr) = await runner.CaptureAsync(new ProcessSpec { Executable = python, Arguments = ["-I", "-c", script] }, CancellationToken.None);
