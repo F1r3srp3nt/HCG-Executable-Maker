@@ -73,8 +73,20 @@ dotnet run --project src/HCG.ExecutableMaker.App -c Release
       approval, the expected verdict is "Blocked only by the owner's approval".
    3. When you approve, type your approval and the **exact SHA-256** you approve, then export again and preview again.
       The verdict becomes "Importable as exported".
-   4. Copy `hcg-repo/` onto an HCG Repo branch and open a pull request. **Prepare packages** imports it. Publishing
-      remains your separate step.
+   4. **Ship to Repo**: HCG Repo's Candidate Release Manager (Distribution v2), on your HCG Repo `main` checkout.
+      1. **Submit**: HCG Repo validates the exact .deb into its private incoming store, outside Git. It checks the
+         handoff's `submission.json` against the package, then runs static checks, secrets, scripts, a simulated dpkg
+         lifecycle and the repository's own rules.
+      2. **Approve exact SHA-256…**: give your name ("Approved by"), your words ("Owner's approval") and the SHA-256 you
+         approve. Maker refuses a SHA-256 that is not the reviewed package's. HCG Repo records the approval.
+      3. **Prepare Candidate…**: HCG Repo imports the approved bytes into the checkout's `pool/`, plus
+         `repo-lock.json`, `imports/<id>.toml` and `submissions/<id>/`. For a new package, tick "create
+         packages/<id>/" to use the handoff's draft.
+      4. Review the changes, commit them on a branch and open a pull request. Publishing is HCG Repo's manual
+         **Publish repository** workflow; Maker never commits, pushes or publishes.
+
+      The older `hcg-repo/` route (`kind = "local-file"`, HCG Repo PR #20) still works: copy `hcg-repo/` onto a
+      branch, and **Prepare packages** imports it.
 
 ### The same from the command line
 
@@ -86,7 +98,32 @@ $M --rootless-deb <SignalContractor.xcarchive> --package com.hakmicapitalgroup.s
    --local --source-visibility private --host "MacBook Pro M4 Max" --hcg-repo ~/src/HCG-repo --out ~/Desktop/signal-contractor
 # after your approval of the printed SHA-256:
 #  … --owner-approval "<who> on <date>: '<words>'" --approved-sha256 <sha>
+H=~/Desktop/signal-contractor/com.hakmicapitalgroup.signalcontractor_0.1.0~beta1-candidate-handoff
+$M --ship-to-repo submit  --hcg-repo ~/src/HCG-repo --handoff "$H"
+$M --ship-to-repo approve --hcg-repo ~/src/HCG-repo --handoff "$H" --approved-sha256 <sha> --by "<name>" --record "<approval, verbatim>"
+$M --ship-to-repo prepare --hcg-repo ~/src/HCG-repo --handoff "$H" --create-package-metadata --free-demo-approval "<owner's words>"
 ```
+
+## Icon and device-test instructions
+
+- **icon.png** is always a standard PNG, so browsers, Sileo, Zebra and HCG Repo's pages can show it.
+  - Xcode stores app icons as Apple's CgBI PNG variant (BGRA, premultiplied alpha, raw deflate), which only Apple's
+    frameworks decode. Unleashify converts such an icon to a standard RGBA PNG.
+  - Every icon must be decoded by a standard decoder, be square and be at least 60 pixels.
+  - When the app has no loose icon (icons only in `Assets.car`), or its icon cannot be made valid, the **approved
+    artwork** is used. Set it under Package › Icon artwork, or with `--icon-artwork`. "Use the project's AppIcon"
+    offers the largest image of the project's own AppIcon set, but only when you click it.
+  - `provenance.json` records the icon's source, size and SHA-256. The package's own files are never changed.
+- **DEVICE-TEST.md** names the actual product: its name, bundle ID, package ID, version and install path.
+  - Detection searches for the product's own family terms, e.g. `sentinel`, `hcgmail` or `signalcontractor`.
+  - Snapshot files are named after the package, e.g. `/var/mobile/hcgmail-unleashed-test-before-dpkg.txt`.
+  - A variant such as HCG Mail Unleashed notes that the standard app (`com.hakmicapitalgroup.hcgmail`) is a
+    different app ID and can stay installed.
+- **submission.json** is HCG Repo's Distribution v2 manifest (`hcg.repo.artifact-submission` v1).
+  - It records only measured facts: package, the exact file, SHA-256 and size, minimum iOS, the declared maintainer
+    scripts, dependencies, source commit, and provider (`executable-maker-local`, or `github-actions` with its run).
+  - It names no jailbreaks until a device test records one.
+
 
 Exit codes: 0 done, 4 inspection or prerequisite, 5 packaging, 6 validation or lifecycle, 7 import preview rejected.
 

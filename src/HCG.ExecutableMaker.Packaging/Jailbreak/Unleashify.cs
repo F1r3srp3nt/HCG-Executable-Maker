@@ -116,7 +116,8 @@ public static partial class Unleashify
             }
             else findings.Add(cmp == 0 ? $"{packageId} {version} is already installed: this is a reinstall of the same version." : $"{packageId} {e.Version} is installed: installing {version} upgrades it.");
         }
-        foreach (var e in seen.Where(e => e.Id != bundleId && e.Id != packageId && e.Id.Contains("sentinel", StringComparison.OrdinalIgnoreCase)))
+        var terms = ProductTerms(bundleId, packageId);
+        foreach (var e in seen.Where(e => e.Id != bundleId && e.Id != packageId && terms.Any(t => e.Id.Contains(t, StringComparison.OrdinalIgnoreCase) || e.Path?.Contains(t, StringComparison.OrdinalIgnoreCase) == true)))
             findings.Add($"Also installed: {e.Id}{(e.Version is null ? "" : " " + e.Version)}{(e.Path is null ? "" : " at " + e.Path)} — a different identifier; check it is not another build of the same app.");
 
         if (conflict)
@@ -127,6 +128,48 @@ public static partial class Unleashify
             return new ConflictReport(ConflictState.Clear, "The tester confirmed that no other build of the app is installed on the test phone (not read by Maker).", findings, seen);
         return new ConflictReport(ConflictState.NotChecked,
             $"Not checked: paste the phone's `uicache -l` or `dpkg -l` output, or confirm that no other build with bundle ID {bundleId} is installed.", findings, seen);
+    }
+
+    /// <summary>Words that mark a variant of an app rather than the app itself (com.example.mail.unleashed is a variant of com.example.mail).</summary>
+    private static readonly HashSet<string> VariantWords = new(StringComparer.OrdinalIgnoreCase)
+        { "unleashed", "beta", "dev", "debug", "rootless", "rootful", "jb", "jailbreak", "modern", "legacy", "candidate", "preview", "app", "ios" };
+
+    /// <summary>Too general to search for on a phone (they match Apple's own apps and unrelated packages).</summary>
+    private static readonly HashSet<string> GenericWords = new(StringComparer.OrdinalIgnoreCase)
+        { "mail", "apple", "app", "com", "net", "org", "mobile", "phone", "camera", "photos", "music", "notes", "settings", "terminal" };
+
+    /// <summary>
+    /// The app's family: the bundle ID without a trailing variant word (com.hakmicapitalgroup.hcgmail for
+    /// com.hakmicapitalgroup.hcgmail.unleashed). Other builds of the same app share it.
+    /// </summary>
+    public static string FamilyBundleId(string bundleId)
+    {
+        var parts = bundleId.Split('.').ToList();
+        while (parts.Count > 2 && VariantWords.Contains(parts[^1])) parts.RemoveAt(parts.Count - 1);
+        return string.Join('.', parts);
+    }
+
+    /// <summary>
+    /// Search terms that find other builds of this app on a phone (uicache, dpkg, app folders), derived from the app's own
+    /// identifiers: the family's last bundle-ID word and package-ID word (e.g. "sentinel", "hcgmail", "signalcontractor"),
+    /// never generic words. A term that contains another one is dropped (the shorter one already matches it).
+    /// </summary>
+    public static IReadOnlyList<string> ProductTerms(string bundleId, string packageId, string? executable = null)
+    {
+        var candidates = new List<string> { FamilyBundleId(bundleId).Split('.')[^1], FamilyBundleId(packageId).Split('.')[^1] };
+        if (executable is { Length: > 0 }) candidates.Add(executable);
+        var terms = candidates.Select(t => t.ToLowerInvariant()).Where(t => t.Length >= 5 && !GenericWords.Contains(t) && t.All(c => char.IsAsciiLetterOrDigit(c) || c == '-'))
+            .Distinct().ToList();
+        if (terms.Count == 0) terms.Add(FamilyBundleId(bundleId).ToLowerInvariant());
+        return terms.Where(t => !terms.Any(o => o != t && t.Contains(o, StringComparison.Ordinal))).ToList();
+    }
+
+    /// <summary>A file-name stem for this package (com.hakmicapitalgroup.hcgmail.unleashed → hcgmail-unleashed).</summary>
+    public static string Slug(string packageId)
+    {
+        var parts = packageId.Split('.');
+        var tail = parts.Length > 2 ? parts[2..] : parts;
+        return string.Join('-', tail.Select(p => new string(p.ToLowerInvariant().Where(c => char.IsAsciiLetterOrDigit(c) || c == '-').ToArray())).Where(p => p.Length > 0));
     }
 
     /// <summary>Reads bundle IDs / package IDs (with a path or version when given) from uicache, dpkg and dpkg-query output.</summary>

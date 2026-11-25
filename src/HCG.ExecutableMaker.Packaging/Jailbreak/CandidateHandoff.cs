@@ -36,7 +36,8 @@ public sealed record CandidateTexts(
     string ProductionAccess = "public",
     string? DeviceTarget = null,
     string? OwnerApproval = null,
-    string? ApprovedSha256 = null);
+    string? ApprovedSha256 = null,
+    string? IconArtwork = null);
 
 /// <summary>
 /// What Unleashify knew when it exported: the mode, the scheme, the source revision and whether the imported copy was
@@ -74,7 +75,8 @@ public static class CandidateHandoff
     public sealed record Output(string Folder, IReadOnlyList<string> Files, bool ImportRequestComplete, IReadOnlyList<string> Missing);
 
     public static async Task<Output> ExportAsync(string folder, string debPath, IosAppBundle app, RootlessAppPackageSpec spec, RootlessAppDebValidator.Result validation,
-        PackageProvenance provenance, CandidateTexts texts, IReadOnlyList<string> signedFiles, DateTimeOffset now, CancellationToken ct, HandoffContext? context = null)
+        PackageProvenance provenance, CandidateTexts texts, IReadOnlyList<string> signedFiles, DateTimeOffset now, CancellationToken ct, HandoffContext? context = null,
+        RootlessLifecycleSimulator.Result? lifecycle = null)
     {
         Directory.CreateDirectory(folder);
         var files = new List<string>();
@@ -107,7 +109,10 @@ public static class CandidateHandoff
             },
             ["packaging"] = new JsonObject
             {
-                ["tool"] = provenance.PackagedBy, ["built_with"] = provenance.BuiltWith, ["packaged_at"] = now.ToString("O"),
+                // The toolchain that compiled the app: as given for CI, otherwise read from the app itself (DTXcode…). HCG Repo's
+                // handoff adapter records built_with + tool as the submission's build.toolchain, which it requires.
+                ["tool"] = provenance.PackagedBy ?? provenance.Local?.BuiltBy,
+                ["built_with"] = provenance.BuiltWith ?? provenance.Local?.Toolchain ?? LocalBuild.ToolchainFrom(app), ["packaged_at"] = now.ToString("O"),
                 ["install_path"] = f.AppPath, ["compression"] = "gzip",
                 ["ldid_signed"] = new JsonArray(signedFiles.Select(s => (JsonNode?)s).ToArray()),
                 ["entitlements_files"] = new JsonArray(f.Entitlements.Keys.Select(s => (JsonNode?)s).ToArray()),
@@ -143,7 +148,7 @@ public static class CandidateHandoff
                 ["readiness"] = context.ReadinessText,
             };
         await Write("provenance.json", prov.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n").ConfigureAwait(false);
-        await Write("control.txt", string.Join("\n", f.Control.Select(kv => $"{kv.Key}: {kv.Value}")) + "\n").ConfigureAwait(false);
+        await Write("control.txt", ControlText(f.Control)).ConfigureAwait(false);
         await Write("VALIDATION.txt", validation.Report).ConfigureAwait(false);
 
         // Changelog and known issues.
@@ -162,9 +167,22 @@ public static class CandidateHandoff
         foreach (var check in validation.Checks.Where(ch => ch.Status == VerificationStatus.PassedWithWarnings)) issues.Add($"{check.Name}: {check.Detail}");
         await Write("KNOWN-ISSUES.md", $"# {spec.Name} {spec.Version}: known issues\n\n" + string.Join("\n", issues.Select(i => "- " + i)) + "\n").ConfigureAwait(false);
 
-        // Icon.
-        if (app.LargestIcon() is { } icon) { File.Copy(icon, Path.Combine(folder, "icon.png"), overwrite: true); files.Add("icon.png"); }
-        else missing.Add("icon.png: the app bundle has no loose AppIcon*.png (icons only in Assets.car); export a 180×180 PNG from the project's AppIcon set");
+        // Icon: standard PNG only (Xcode's CgBI icons are converted), validated with a standard decoder; approved artwork as fallback.
+        var icon = PngIcon.Choose(app.LargestIcon(), texts.IconArtwork);
+        if (icon.Icon is { } chosen)
+        {
+            await File.WriteAllBytesAsync(Path.Combine(folder, "icon.png"), chosen.Png, ct).ConfigureAwait(false);
+            files.Add("icon.png");
+            prov["icon"] = new JsonObject
+            {
+                ["file"] = "icon.png", ["source"] = chosen.Source, ["detail"] = chosen.Detail, ["width"] = chosen.Width, ["height"] = chosen.Height,
+                ["sha256"] = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(chosen.Png)), ["format"] = "PNG (standard)",
+                ["notes"] = new JsonArray(icon.Notes.Select(n => (JsonNode?)n).ToArray()),
+            };
+            await File.WriteAllTextAsync(Path.Combine(folder, "provenance.json"), prov.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n", new UTF8Encoding(false), ct).ConfigureAwait(false);
+        }
+        else missing.Add("icon.png: no usable standard PNG — " + string.Join("; ", icon.Notes) +
+                         ". Choose the project's AppIcon artwork (e.g. the 1024×1024 image in Assets.xcassets/AppIcon.appiconset) as approved artwork and export again");
 
         if (texts.ProductionAccess == "undecided") missing.Add("production access: not recorded for this product in HCG Repo; package.toml uses HCG's default (connect) and the owner decides the production level before any stable release");
         if (LocalBuild.ApprovalProblem(texts, provenance, f.Sha256) is { } approvalProblem)
@@ -203,10 +221,19 @@ public static class CandidateHandoff
             files.AddRange(new[] { "package.toml", "CHANGELOG.md", "icon.png" }.Where(n => File.Exists(Path.Combine(pkgDir, n))).Select(n => $"hcg-repo/packages/{spec.PackageId}/{n}"));
         }
 
+        // HCG Repo Distribution v2 submission manifest (hcg.repo.artifact-submission v1): only for a pinned, clean source.
+        var manifest = SubmissionManifest.Build(spec, app, validation, provenance, context, now, debName, lifecycle);
+        if (manifest.Complete) await Write(SubmissionManifest.FileName, SubmissionManifest.Serialize(manifest.Manifest!)).ConfigureAwait(false);
+        else missing.Add("submission.json (HCG Repo Distribution v2): " + string.Join("; ", manifest.Problems));
+
         await Write("DEVICE-TEST.md", DeviceTest(spec, app, f, context, debName)).ConfigureAwait(false);
         await Write("README.md", Readme(spec, f, files, complete, missing, context, provenance.Local is not null)).ConfigureAwait(false);
         return new Output(folder, files, complete, missing);
     }
+
+    /// <summary>The package's control fields in Debian control syntax: continuation lines start with a space (blank ones are " .").</summary>
+    public static string ControlText(IReadOnlyDictionary<string, string> control) =>
+        string.Concat(control.Select(kv => $"{kv.Key}: " + string.Join("\n ", kv.Value.Replace("\r", "").Split('\n').Select((l, i) => i > 0 && l.Trim().Length == 0 ? "." : l)) + "\n"));
 
     private static string TomlEscape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
@@ -311,6 +338,16 @@ public static class CandidateHandoff
     {
         var deb = debName ?? $"{spec.PackageId}_{spec.Version}_iphoneos-arm64.deb";
         var exe = app.Executable;
+        var bundle = f.BundleId ?? app.BundleId;
+        var terms = Unleashify.ProductTerms(bundle, spec.PackageId, exe);
+        var grep = string.Join(' ', terms.Select(t => $"-e {t}"));
+        var slug = Unleashify.Slug(spec.PackageId);
+        var family = Unleashify.FamilyBundleId(bundle);
+        var quoted = string.Join(", ", terms.Select(t => $"\"{t}\""));
+        var variantNote = family != bundle
+            ? $"\n- `{family}` (or another bundle ID of the same family): a **different app ID**, e.g. the standard app next to this variant. It can stay installed; record it."
+            : "";
+        var target = context?.Devices.FirstOrDefault() is { } d ? $"\n- Test target: {d.Device.Name}, iOS {d.Device.IosVersion} — {(d.Compatible ? "compatible" : "NOT compatible")}: {d.Detail}" : "";
         return $"""
         # {spec.Name} {spec.Version}: device test and rollback
 
@@ -326,14 +363,14 @@ public static class CandidateHandoff
         - Rootless jailbreak (Dopamine, palera1n rootless) on iOS {f.MinimumOS} or later; `/var/jb` exists (`ls -d /var/jb`).
         - Record: iPhone model, iOS version, jailbreak and version, package manager and version.
         - `uikittools` installed (`dpkg -s uikittools | grep Status`); it provides `uicache`.
-        - **Stop** if iOS is below {f.MinimumOS} or there is no `/var/jb`: the package does not apply to this device.
+        - **Stop** if iOS is below {f.MinimumOS} or there is no `/var/jb`: the package does not apply to this device.{target}
 
         ## 1 · Detect existing {spec.Name} installations (before anything is installed)
         ```
-        uicache -l | grep -i -e {f.BundleId} -e sentinel
-        dpkg -l | grep -i sentinel
-        ls -d /var/jb/Applications/*.app | grep -i sentinel
-        ls -d /var/containers/Bundle/Application/*/*.app 2>/dev/null | grep -i sentinel
+        uicache -l | grep -i -e {bundle} {grep}
+        dpkg -l | grep -i -e {spec.PackageId} {grep}
+        ls -d /var/jb/Applications/*.app | grep -i -e {app.AppDirectoryName} {grep}
+        ls -d /var/containers/Bundle/Application/*/*.app 2>/dev/null | grep -i -e {app.AppDirectoryName} {grep}
         ```
         - Nothing printed: no other build is installed; continue.
         - `{f.BundleId}` at a path under `/var/containers/Bundle/Application/`: a **sideloaded / Xcode / TestFlight build**. Two
@@ -341,13 +378,13 @@ public static class CandidateHandoff
           deletes that build *and its data*; rollback then means reinstalling it from its original source (Xcode, IPA, TestFlight).
         - `{spec.PackageId}` already in `dpkg -l`: an earlier copy of this package. Same version: reinstall; older: upgrade;
           **newer: stop** (that would be a downgrade).
-        - Another package or path containing "sentinel": record it; **stop** if it is another build of the same app.
+        - Another package or path matching {quoted}: record it; **stop** only if it is another build with bundle ID `{bundle}`.{variantNote}
         - Paste the output into Maker's Unleashify page (*Test devices and installed builds*) to have it checked.{InstalledLine(context)}
 
         ## 2 · Snapshot for rollback
         ```
-        dpkg -l > /var/mobile/sentinel-test-before-dpkg.txt
-        uicache -l > /var/mobile/sentinel-test-before-uicache.txt
+        dpkg -l > /var/mobile/{slug}-test-before-dpkg.txt
+        uicache -l > /var/mobile/{slug}-test-before-uicache.txt
         ```
 
         ## 3 · Install this exact file (before publication)
@@ -375,7 +412,7 @@ public static class CandidateHandoff
         1. `sudo dpkg -r {spec.PackageId}` (or Zebra › Installed › **{spec.Name}** › Remove).
         2. Expected: `ls {f.AppPath}` → "No such file or directory"; `uicache -l | grep {f.BundleId}` prints nothing; the icon is gone.
         3. `sudo dpkg -P {spec.PackageId}` purges dpkg's record.
-        4. `dpkg -l > /var/mobile/sentinel-test-after-dpkg.txt; diff /var/mobile/sentinel-test-before-dpkg.txt /var/mobile/sentinel-test-after-dpkg.txt`
+        4. `dpkg -l > /var/mobile/{slug}-test-after-dpkg.txt; diff /var/mobile/{slug}-test-before-dpkg.txt /var/mobile/{slug}-test-after-dpkg.txt`
            Expected: no difference.
 
         ## 7 · Rollback and recovery

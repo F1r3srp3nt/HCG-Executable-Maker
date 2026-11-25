@@ -1,0 +1,148 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using HCG.ExecutableMaker.Domain;
+
+namespace HCG.ExecutableMaker.Packaging.Jailbreak;
+
+/// <summary>
+/// HCG Repo Distribution v2 submission manifest, format <c>hcg.repo.artifact-submission</c> version 1
+/// (HCG Repo docs/DISTRIBUTION_V2.md, docs/schemas/artifact-submission-v1.schema.json; tools/hcgrepo/submission.py is
+/// authoritative). Every field is a claim HCG Repo re-checks against the package itself. Maker writes only what it
+/// measured: the provider is <c>executable-maker-local</c> for a local build (no CI run fields at all) and
+/// <c>github-actions</c> for a CI build with its run, artifact and run repository.
+/// </summary>
+public static partial class SubmissionManifest
+{
+    public const string Format = "hcg.repo.artifact-submission";
+    public const int FormatVersion = 1;
+    public const string FileName = "submission.json";
+    private static readonly string[] ScriptNames = ["preinst", "postinst", "prerm", "postrm", "config"];
+
+    public sealed record Result(JsonObject? Manifest, IReadOnlyList<string> Problems)
+    {
+        public bool Complete => Manifest is not null && Problems.Count == 0;
+    }
+
+    public static Result Build(RootlessAppPackageSpec spec, IosAppBundle app, RootlessAppDebValidator.Result validation, PackageProvenance p,
+        HandoffContext? context, DateTimeOffset packagedAt, string debName, RootlessLifecycleSimulator.Result? lifecycle = null)
+    {
+        var f = validation.Facts;
+        var github = p.CiRunId is > 0 && p.Local is null;
+        var toolchain = string.Join(", ", new[] { p.Local?.Toolchain ?? LocalBuild.ToolchainFrom(app) ?? p.BuiltWith, p.Local?.BuiltBy ?? p.PackagedBy }
+            .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct());
+        var checks = new JsonArray(validation.Checks.Select(c => (JsonNode?)new JsonObject { ["check"] = c.Name, ["status"] = c.Status.ToString(), ["detail"] = c.Detail })
+            .Concat((lifecycle?.Checks ?? []).Select(c => (JsonNode?)new JsonObject { ["check"] = "Lifecycle · " + c.Name, ["status"] = c.Status.ToString(), ["detail"] = c.Detail })).ToArray());
+        var build = new JsonObject
+        {
+            ["provider"] = github ? "github-actions" : "executable-maker-local",
+            ["toolchain"] = toolchain,
+            ["builtAt"] = (p.Local?.BuiltAt ?? packagedAt).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        };
+        if (github)
+        {
+            build["runId"] = p.CiRunId;
+            build["runUrl"] = p.CiRunUrl;
+            build["artifactName"] = p.CiArtifact;
+            build["runRepository"] = p.ImportRepository;
+            build["runCommit"] = p.ImportCommit;
+        }
+        var m = new JsonObject
+        {
+            ["format"] = Format, ["formatVersion"] = FormatVersion,
+            ["package"] = new JsonObject { ["identifier"] = spec.PackageId, ["version"] = spec.Version, ["architecture"] = RootlessAppPackager.Architecture, ["name"] = spec.Name },
+            ["artifact"] = new JsonObject { ["filename"] = debName, ["sha256"] = f.Sha256, ["size"] = f.Size },
+            ["compatibility"] = new JsonObject
+            {
+                ["minimumOS"] = f.MinimumOS, ["environment"] = "rootless",
+                // Named jailbreaks are claims of tested compatibility; no device test is recorded, so none are claimed.
+                ["jailbreaks"] = new JsonArray(),
+                ["deviceFamilies"] = new JsonArray(app.DeviceFamilies.Select(d => (JsonNode?)d).ToArray()),
+            },
+            ["source"] = new JsonObject
+            {
+                ["repository"] = p.Repository, ["commit"] = p.Commit?.ToLowerInvariant(), ["dirty"] = p.SourceDirty,
+                ["branch"] = context?.Revision?.Branch,
+            },
+            ["build"] = build,
+            ["dependencies"] = new JsonArray(DependencyNames(f.Control.GetValueOrDefault("Depends")).Select(d => (JsonNode?)d).ToArray()),
+            ["maintainerScripts"] = new JsonObject { ["declared"] = new JsonArray(f.Scripts.Keys.Where(ScriptNames.Contains).OrderBy(s => s, StringComparer.Ordinal).Select(s => (JsonNode?)s).ToArray()) },
+            ["validation"] = new JsonObject
+            {
+                ["tool"] = p.PackagedBy ?? "HCG Executable Maker", ["checks"] = checks, ["passed"] = validation.Passed && lifecycle?.Passed != false,
+                ["lifecycle"] = lifecycle is null ? "not simulated" : lifecycle.Summary, ["deviceTested"] = false,
+            },
+            ["channel"] = "candidate",
+            ["origin"] = new JsonObject
+            {
+                ["kind"] = "executable-maker-unleashify",
+                ["bundleIdentifier"] = f.BundleId, ["installPath"] = f.AppPath,
+                ["targetDevices"] = new JsonArray((context?.Devices ?? []).Select(d => (JsonNode?)new JsonObject
+                {
+                    ["name"] = d.Device.Name, ["ios"] = d.Device.IosVersion, ["compatible"] = d.Compatible, ["tested"] = false,
+                }).ToArray()),
+                ["sourceVisibility"] = p.Local?.SourceVisibility,
+                ["host"] = p.Local?.Host,
+            },
+        };
+        var problems = Validate(m);
+        return new(m, problems);
+    }
+
+    /// <summary>Package names in a Depends field (alternatives included), as HCG Repo compares them.</summary>
+    public static IReadOnlyList<string> DependencyNames(string? depends) =>
+        (depends ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .SelectMany(g => g.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(a => a.Split([' ', '(', ':'], 2)[0].Trim()).Where(n => n.Length > 0).Distinct().ToList();
+
+    [GeneratedRegex(@"^[0-9a-f]{64}$")] private static partial Regex Sha256Re();
+    [GeneratedRegex(@"^[0-9a-f]{40}$")] private static partial Regex Sha40Re();
+    [GeneratedRegex(@"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")] private static partial Regex RepoRe();
+    [GeneratedRegex(@"^\d+(\.\d+){0,2}$")] private static partial Regex OsRe();
+
+    /// <summary>The rules of HCG Repo's <c>validate_manifest</c> (format, provenance, channel); empty when the manifest is well formed.</summary>
+    public static IReadOnlyList<string> Validate(JsonObject m)
+    {
+        var p = new List<string>();
+        string? S(string path) => Node(m, path) is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+        if (S("format") != Format) p.Add($"format must be {Format}");
+        if (Node(m, "formatVersion")?.GetValue<int>() != FormatVersion) p.Add($"formatVersion must be {FormatVersion}");
+        if (!RootlessAppPackager.PackageIdRegex().IsMatch(S("package.identifier") ?? "")) p.Add("package.identifier must be a Debian package name");
+        if (!RootlessAppPackager.VersionRegex().IsMatch(S("package.version") ?? "")) p.Add("package.version must be a valid Debian version");
+        if (!Sha256Re().IsMatch(S("artifact.sha256") ?? "")) p.Add("artifact.sha256 must be 64 lowercase hex characters");
+        if (Node(m, "artifact.size") is not JsonValue size || !size.TryGetValue<long>(out var n) || n <= 0) p.Add("artifact.size must be a positive integer");
+        if (S("artifact.filename") is not { } fn || !fn.EndsWith(".deb", StringComparison.Ordinal) || fn.Contains('/') || fn.Contains('\\') || fn.StartsWith('.')) p.Add("artifact.filename must be a plain *.deb file name");
+        if (!OsRe().IsMatch(S("compatibility.minimumOS") ?? "")) p.Add("compatibility.minimumOS is required (e.g. 17.0)");
+        if (S("compatibility.environment") != "rootless" || S("package.architecture") != RootlessAppPackager.Architecture) p.Add("a rootless package is iphoneos-arm64");
+        if (!RepoRe().IsMatch(S("source.repository") ?? "")) p.Add("source.repository must be OWNER/NAME");
+        if (!Sha40Re().IsMatch(S("source.commit") ?? "")) p.Add("source.commit must be the full 40-character commit the package was built from");
+        if (Node(m, "source.dirty") is not JsonValue dirty || !dirty.TryGetValue<bool>(out var d) || d) p.Add("source.dirty must be false (built from a clean commit)");
+        var provider = S("build.provider");
+        if (string.IsNullOrWhiteSpace(S("build.toolchain"))) p.Add("build.toolchain is required");
+        if (!DateTimeOffset.TryParse(S("build.builtAt"), out _)) p.Add("build.builtAt must be an ISO 8601 time");
+        if (provider is "github-actions" or "github-actions-private")
+        {
+            if (Node(m, "build.runId") is not JsonValue r || !r.TryGetValue<long>(out var id) || id <= 0) p.Add("build.runId is required for a GitHub build");
+            if (string.IsNullOrEmpty(S("build.artifactName"))) p.Add("build.artifactName is required for a GitHub build");
+            if (!RepoRe().IsMatch(S("build.runRepository") ?? "")) p.Add("build.runRepository is required for a GitHub build");
+        }
+        else if (provider is "executable-maker-local")
+        {
+            foreach (var k in new[] { "runId", "runUrl", "artifactName", "runRepository" })
+                if (Node(m, "build." + k) is not null) p.Add($"build.{k} is only for GitHub Actions builds; a local build has no CI run");
+        }
+        else p.Add("build.provider must be executable-maker-local or github-actions");
+        if (Node(m, "maintainerScripts.declared") is not JsonArray) p.Add("maintainerScripts.declared is required");
+        if (S("channel") != "candidate") p.Add("channel must be candidate");
+        return p;
+    }
+
+    private static JsonNode? Node(JsonNode root, string dotted)
+    {
+        JsonNode? cur = root;
+        foreach (var part in dotted.Split('.')) cur = cur is JsonObject o && o.TryGetPropertyValue(part, out var next) ? next : null;
+        return cur;
+    }
+
+    public static string Serialize(JsonObject m) => m.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
+}

@@ -5,6 +5,27 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ## [Unreleased] — HCG Impactor
 
 ### Added
+- **Ship to Repo** (Unleashify › Build output, `--ship-to-repo submit|show|approve|prepare`): drives HCG Repo's
+  Candidate Release Manager (Distribution v2) on your checkout.
+  - **Submit:** HCG Repo validates the exact .deb into its private incoming store.
+  - **Approve:** you approve the exact SHA-256, with your name and your words.
+  - **Prepare:** HCG Repo imports the approved bytes into `pool/` for Candidate.
+  - Maker never commits, pushes or publishes.
+- **HCG Repo Distribution v2 submission manifest** (`submission.json`, `hcg.repo.artifact-submission` v1) in every
+  handoff with a pinned, clean source; validated by Maker and by HCG Repo's own `validate_manifest` in CI.
+
+### Fixed
+- **icon.png** was Apple's CgBI PNG, copied from the Xcode build, which browsers and Sileo cannot decode. It is now
+  converted to a standard RGBA PNG and verified with a standard decoder (square, at least 60 pixels). Approved
+  source artwork is the fallback (`--icon-artwork`, or Package › Icon artwork with a suggestion from the project's
+  AppIcon set).
+- **DEVICE-TEST.md** searched for "sentinel" and wrote `sentinel-test-*` snapshots for every product. All
+  instructions now use the actual product name, bundle ID, package ID, version and install path. The installed-build
+  check matches the product's own family.
+- **control.txt** wrote multi-line descriptions without Debian continuation lines, so HCG Repo's handoff reader saw
+  no dependencies.
+- **provenance.json** now records the app's toolchain (from `DTXcode`) for local builds, which HCG Repo requires.
+
 - **Unleashify on your Mac, without GitHub Actions** (`docs/UNLEASHIFY-LOCAL.md`). This uses the same packager,
   validator and handoff as CI.
   - **Pinned commit:** a clean checkout of one exact commit of your local repository (read only), imported and

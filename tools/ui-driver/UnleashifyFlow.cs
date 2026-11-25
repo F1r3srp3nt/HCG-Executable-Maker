@@ -156,6 +156,13 @@ internal static partial class Program
         ShotAt("BUILD OUTPUT", "unleashify-handoff");
         ShotScrolledToEnd("unleashify-log");
         Check(page.HandoffFolder is not null && Directory.Exists(page.HandoffFolder), "Candidate handoff exported");
+        Log("Icon: " + page.IconStatus);
+        var iconFile = Path.Combine(page.HandoffFolder!, "icon.png");
+        Check(File.Exists(iconFile) && HCG.ExecutableMaker.Packaging.Jailbreak.PngIcon.ValidateStandard(File.ReadAllBytes(iconFile)) is null,
+            "icon.png is a standard PNG a browser or Sileo can decode (not Apple CgBI)");
+        Check(File.Exists(Path.Combine(page.HandoffFolder!, "submission.json")) || page.Missing.Any(m => m.StartsWith("submission.json", StringComparison.Ordinal)),
+            "The HCG Repo Distribution v2 manifest is written, or the reason it is not is listed");
+        Log($"Ship to Repo: [{page.ShipTag.Text}]");
         if (_args.ContainsKey("unleashify-owner-approval-file"))
         {
             Check(!page.Missing.Any(m => m.StartsWith("owner approval", StringComparison.Ordinal)), "The handoff no longer lists the owner approval as missing");

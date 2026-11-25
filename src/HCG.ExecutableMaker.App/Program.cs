@@ -23,6 +23,9 @@ internal static class Program
         // `HCGExecutableMaker --ship-to-store …`: upload a release to HCG Store as a private draft (see ShipToStoreCommand).
         if (args.Contains("--ship-to-store"))
             return ShipToStoreCommand.Run(args);
+        // `HCGExecutableMaker --ship-to-repo submit|show|approve|prepare …`: HCG Repo's Candidate Release Manager for a handoff (see RootlessDebCommand).
+        if (args.Contains("--ship-to-repo"))
+            return RootlessDebCommand.ShipToRepoCli(args);
         // `HCGExecutableMaker --rootless-deb …`: package an iOS app a build produced as a rootless jailbreak .deb (see RootlessDebCommand).
         if (args.Contains("--rootless-deb") || args.Contains("--rootless-deb-validate"))
             return RootlessDebCommand.Run(args);

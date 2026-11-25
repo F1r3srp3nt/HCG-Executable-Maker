@@ -27,9 +27,50 @@ internal static class RootlessDebCommand
               [--approved-sha256 <sha>] (the exact .deb the owner approved; required for a local build's approval to count)
               [--local --source-visibility private|public [--host <label>]] (built on this computer: no CI run or artifact; exports HCG Repo's local-file request and hcg-repo/)
               [--hcg-repo <HCG Repo checkout>] (preview the import with HCG Repo's own importer, dry run on a throwaway copy)
+              [--icon-artwork <png>] (approved fallback when the app's own icon is missing or unusable; CgBI icons are converted)
               [--timestamp <ISO 8601>] [--no-handoff] [--no-lifecycle]
+          HCGExecutableMaker --ship-to-repo submit  --hcg-repo <checkout> --handoff <folder> [--incoming <store>]
+          HCGExecutableMaker --ship-to-repo show    --hcg-repo <checkout> --handoff <folder> | --id <submission> [--incoming <store>]
+          HCGExecutableMaker --ship-to-repo approve --hcg-repo <checkout> --handoff <folder> --approved-sha256 <sha> --by "<name>" --record "<approval, verbatim>"
+          HCGExecutableMaker --ship-to-repo prepare --hcg-repo <checkout> --handoff <folder> [--free-demo-approval "<owner's words>"] [--create-package-metadata]
+              (HCG Repo's Release Manager; nothing is committed, pushed or published)
           HCGExecutableMaker --rootless-deb-validate <file.deb> [--package <id>] [--package-version <v>] [--bundle-id <id>] [--device-ios <x.y>] [--published <version>=<sha256>]...
         """;
+
+    /// <summary>
+    /// <c>--ship-to-repo</c>: HCG Repo's Candidate Release Manager for an exported handoff (submit → show → approve → prepare).
+    /// Exit codes: 0 done, 2 usage, 1 refused by HCG Repo or by Maker (the output says why).
+    /// </summary>
+    public static int ShipToRepoCli(string[] args)
+    {
+        string? Arg(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
+        Console.WriteLine(HostInfo.BuildIdentity);
+        var action = Arg("--ship-to-repo");
+        if (Arg("--hcg-repo") is not { } checkout || action is not ("submit" or "show" or "approve" or "prepare")) { Console.Error.WriteLine(Usage); return 2; }
+        checkout = Path.GetFullPath(checkout);
+        if (new ExecutableLocator().Find("python3") is not { } python) { Console.WriteLine("python3 not found (HCG Repo needs Python 3.11+ and dpkg-deb)."); return 1; }
+        var incoming = Arg("--incoming");
+        var handoff = Arg("--handoff") is { } h ? Path.GetFullPath(h) : null;
+        var id = Arg("--id");
+        if (id is null && handoff is not null && File.Exists(Path.Combine(handoff, "provenance.json")))
+        {
+            var prov = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(handoff, "provenance.json")))!;
+            id = ShipToRepo.SubmissionId(prov["package"]!.GetValue<string>(), prov["version"]!.GetValue<string>(), prov["architecture"]!.GetValue<string>(), prov["sha256"]!.GetValue<string>());
+        }
+        var runner = new HCG.ExecutableMaker.Infrastructure.Processes.ProcessRunner();
+        ShipToRepo.Step step = action switch
+        {
+            "submit" when handoff is not null => ShipToRepo.SubmitAsync(runner, python, checkout, handoff, incoming, Console.WriteLine, CancellationToken.None).GetAwaiter().GetResult(),
+            "show" when id is not null => ShipToRepo.ShowAsync(runner, python, checkout, id, incoming, CancellationToken.None).GetAwaiter().GetResult(),
+            "approve" when id is not null => ShipToRepo.ApproveAsync(runner, python, checkout, id, Arg("--approved-sha256") ?? "", Arg("--by") ?? "", Arg("--record") ?? "", incoming, CancellationToken.None).GetAwaiter().GetResult(),
+            "prepare" when id is not null => ShipToRepo.PrepareAsync(runner, python, checkout, id, Arg("--free-demo-approval"), args.Contains("--create-package-metadata"), incoming, Console.WriteLine, CancellationToken.None).GetAwaiter().GetResult(),
+            _ => new ShipToRepo.Step(ShipToRepo.Action.Show, false, 2, "Name the handoff (--handoff) or the submission (--id).", null, null, null),
+        };
+        if (action is "show" or "approve") Console.WriteLine(step.Output.Trim());
+        if (step.SubmissionId is { } sid) Console.WriteLine($"Submission: {sid}{(step.State is { } st ? $" ({st})" : "")}");
+        if (action == "prepare" && step.Succeeded) Console.WriteLine("Prepared in the checkout only. Review, commit on a branch and open a pull request; publication is HCG Repo's manual Publish workflow.");
+        return step.ExitCode == 2 ? 2 : step.Succeeded ? 0 : 1;
+    }
 
     public static int Run(string[] args)
     {
@@ -78,7 +119,7 @@ internal static class RootlessDebCommand
             long.TryParse(Arg("--ci-run"), out var run) ? run : null, Arg("--ci-artifact"), Arg("--ci-run-url"), Arg("--built-with"), HostInfo.BuildIdentity,
             Arg("--ci-repository"), Arg("--ci-commit"),
             local ? new LocalBuildInfo($"{HostInfo.BuildIdentity} · Unleashify, local", null, stamp ?? DateTimeOffset.UtcNow, Arg("--host") ?? LocalBuild.DefaultHostLabel(), Arg("--source-visibility")!, null) : null);
-        var texts = new CandidateTexts(Arg("--summary") ?? description.Split('\n')[0], All("--change"), All("--known-issue"), Arg("--production-access") ?? "undecided", Arg("--device-target"), Arg("--owner-approval"), Arg("--approved-sha256")?.ToLowerInvariant());
+        var texts = new CandidateTexts(Arg("--summary") ?? description.Split('\n')[0], All("--change"), All("--known-issue"), Arg("--production-access") ?? "undecided", Arg("--device-target"), Arg("--owner-approval"), Arg("--approved-sha256")?.ToLowerInvariant(), Arg("--icon-artwork"));
         var outDir = Path.GetFullPath(Arg("--out") ?? Path.Combine(Environment.CurrentDirectory, "rootless-deb"));
 
         var workflow = new RootlessAppWorkflow(services.GetRequiredService<IProcessRunner>(), TimeProvider.System);

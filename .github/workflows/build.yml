@@ -1503,6 +1503,51 @@ jobs:
           cmp "$local" "$staged"
           test -f "$H/hcg-repo/imports/$PKG-0.1.0-beta1.local1.toml" && test -f "$H/hcg-repo/packages/$PKG/package.toml"
           git -C "$OUT/hcg-repo-local" status --porcelain | tee "$OUT/hcg-repo-local-status.txt"; [ ! -s "$OUT/hcg-repo-local-status.txt" ]
+      - name: Real Xcode icon → standard PNG; device-test text is the product's; Ship to Repo on HCG Repo main (Distribution v2, throwaway copy)
+        env:
+          # HCG Repo main with Distribution v2 (Release Manager, submission manifest v1). Nothing is written to HCG Repo.
+          HCG_REPO_V2_COMMIT: a15aa4773f38757e18c5ee00329e5eded358a733
+        run: |
+          H="$(ls -d "$OUT/local"/*-candidate-handoff)"
+          # 1. icon.png: a PNG any decoder reads (no Apple CgBI chunk, zlib image data), whatever Xcode stored in the app.
+          app_icon="$(find "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceBuild"])' "$OUT/ui-run/unleashify-unleashify.json")" -name 'AppIcon*.png' | head -1)"
+          python3 - "$H/icon.png" "$app_icon" "$H/provenance.json" <<'EOF'
+          import json, struct, sys, zlib
+          def chunks(path):
+              b = open(path, "rb").read(); assert b[:8] == b"\x89PNG\r\n\x1a\n", path; i, out = 8, []
+              while i < len(b):
+                  n, t = struct.unpack(">I4s", b[i:i + 8]); out.append((t.decode(), b[i + 8:i + 8 + n])); i += 12 + n
+              return out
+          icon, app = chunks(sys.argv[1]), chunks(sys.argv[2]) if sys.argv[2] else []
+          print("app bundle icon chunks:", [t for t, _ in app][:4], "(Apple CgBI)" if any(t == "CgBI" for t, _ in app) else "(standard)")
+          print("handoff icon.png chunks:", [t for t, _ in icon][:4])
+          assert icon[0][0] == "IHDR" and not any(t == "CgBI" for t, _ in icon), "icon.png is not a standard PNG"
+          w, h = struct.unpack(">II", icon[0][1][:8]); assert w == h and w >= 60, (w, h)
+          zlib.decompress(b"".join(d for t, d in icon if t == "IDAT"))     # standard zlib stream (CgBI would fail here)
+          print("icon:", json.load(open(sys.argv[3]))["icon"]["detail"])
+          EOF
+          # 2. DEVICE-TEST.md uses this product's identifiers and install path.
+          grep -q "uicache -l | grep -i -e com.hcg.sentinel -e sentinel" "$H/DEVICE-TEST.md"
+          grep -q "/var/mobile/hcgsentinel-test-before-dpkg.txt" "$H/DEVICE-TEST.md"
+          grep -q "Installs only \`/var/jb/Applications/HCGSentinelModern.app\`" "$H/DEVICE-TEST.md"
+          # 3. submission.json and the Ship to Repo flow with HCG Repo's own Release Manager, on a throwaway copy.
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo-v2" && git -C "$OUT/hcg-repo-v2" checkout --quiet "$HCG_REPO_V2_COMMIT"
+          python3 -I -c "import json,sys; sys.path.insert(0, sys.argv[1]); from hcgrepo.submission import validate_manifest; p = validate_manifest(json.load(open(sys.argv[2]))); print(p); assert not p" \
+            "$OUT/hcg-repo-v2/tools" "$H/submission.json"
+          cp -R "$OUT/hcg-repo-v2" "$OUT/hcg-repo-ship"; rm -rf "$OUT/hcg-repo-ship/.git"
+          M="dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll"
+          export HCG_REPO_INCOMING="$RUNNER_TEMP/hcg-incoming"
+          $M --ship-to-repo submit --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-submit.txt"
+          grep -q "^State        VALIDATED" "$OUT/ship-submit.txt"
+          sha="$(shasum -a 256 < "$(ls "$H"/*.deb)" | cut -d' ' -f1)"
+          if $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" --approved-sha256 "$(printf '0%.0s' {1..64})" --by CI --record "test" > "$OUT/ship-wrong.txt"; then echo "a wrong SHA-256 was approved"; exit 1; fi
+          grep -q "is not the reviewed package's" "$OUT/ship-wrong.txt"
+          $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" --approved-sha256 "$sha" --by "CI (test, throwaway copy)" --record "CI test approval of these exact bytes; never published." | tee "$OUT/ship-approve.txt"
+          grep -q "Not published" "$OUT/ship-approve.txt"
+          $M --ship-to-repo prepare --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" --free-demo-approval "CI test only (throwaway copy); not an owner approval." | tee "$OUT/ship-prepare.txt"
+          grep -q "Prepared in the checkout only" "$OUT/ship-prepare.txt"
+          ls "$OUT/hcg-repo-ship/imports/" | tee "$OUT/ship-imports.txt"; grep -q "^${PKG}_0.1.0-beta1.local1_iphoneos-arm64_${sha:0:12}\.toml$" "$OUT/ship-imports.txt"
+          git -C "$OUT/hcg-repo-v2" status --porcelain | tee "$OUT/hcg-repo-v2-status.txt"; [ ! -s "$OUT/hcg-repo-v2-status.txt" ]   # the real clone is untouched
       - name: HCG Repo (cecfcf0) — bin/hcgrepo inspect, then the importer dry run on the exact exported bytes
         run: |
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo"

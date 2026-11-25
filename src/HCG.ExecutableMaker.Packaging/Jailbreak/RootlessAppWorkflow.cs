@@ -110,7 +110,7 @@ public sealed class RootlessAppWorkflow(IProcessRunner runner, TimeProvider time
 
         // Handoff.
         var folder = Path.Combine(r.OutputDir, $"{r.Spec.PackageId}_{r.Spec.Version.Replace(':', '_')}-candidate-handoff");
-        var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, prov, r.Texts, pkg.SignedFiles, time.GetUtcNow(), ct, r.Context).ConfigureAwait(false);
+        var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, prov, r.Texts, pkg.SignedFiles, time.GetUtcNow(), ct, r.Context, life).ConfigureAwait(false);
         Log(Stage.Handoff, $"Exported {handoff.Files.Count} files to {folder}");
         foreach (var m in handoff.Missing) Log(Stage.Handoff, "MISSING " + m);
         return new(Stage.Done, true, null, app, pkg, val, handoff, log, life, prov);

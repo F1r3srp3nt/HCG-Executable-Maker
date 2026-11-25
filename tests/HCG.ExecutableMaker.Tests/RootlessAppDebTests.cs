@@ -87,13 +87,13 @@ internal static class MachOFixture
         return file;
     }
 
-    public static string InfoPlist(string bundleId = "com.hcg.sentinel", string exe = "HCGSentinel", string minos = "14.7", string version = "1.4.0", string? platform = "iPhoneOS") => $"""
+    public static string InfoPlist(string bundleId = "com.hcg.sentinel", string exe = "HCGSentinel", string minos = "14.7", string version = "1.4.0", string? platform = "iPhoneOS", string name = "HCG Sentinel") => $"""
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0"><dict>
         <key>CFBundleIdentifier</key><string>{bundleId}</string>
         <key>CFBundleExecutable</key><string>{exe}</string>
-        <key>CFBundleName</key><string>HCG Sentinel</string>
+        <key>CFBundleName</key><string>{name}</string>
         <key>CFBundleShortVersionString</key><string>{version}</string>
         <key>CFBundleVersion</key><string>42</string>
         <key>MinimumOSVersion</key><string>{minos}</string>
@@ -105,16 +105,17 @@ internal static class MachOFixture
         """;
 
     /// <summary>An app like Xcode's device build: main executable, an embedded framework loaded through @rpath, an icon.</summary>
-    public static string App(string dir, bool signed = true, string minos = "14.7", string[]? extraDylibs = null, bool framework = true, uint platform = 2, string? entitlementsXml = null, string? plistPlatform = "iPhoneOS")
+    public static string App(string dir, bool signed = true, string minos = "14.7", string[]? extraDylibs = null, bool framework = true, uint platform = 2, string? entitlementsXml = null, string? plistPlatform = "iPhoneOS",
+        string exe = "HCGSentinel", string bundleId = "com.hcg.sentinel", string name = "HCG Sentinel", byte[]? icon = null)
     {
-        var app = Path.Combine(dir, "HCGSentinel.app");
+        var app = Path.Combine(dir, exe + ".app");
         Directory.CreateDirectory(app);
-        File.WriteAllText(Path.Combine(app, "Info.plist"), InfoPlist(minos: minos, platform: plistPlatform));
+        File.WriteAllText(Path.Combine(app, "Info.plist"), InfoPlist(bundleId, exe, minos, platform: plistPlatform, name: name));
         var dylibs = new List<string> { "/usr/lib/libSystem.B.dylib", "/System/Library/Frameworks/UIKit.framework/UIKit" };
         if (framework) dylibs.Add("@rpath/SentinelCore.framework/SentinelCore");
         dylibs.AddRange(extraDylibs ?? []);
-        File.WriteAllBytes(Path.Combine(app, "HCGSentinel"), Build(minos: minos, platform: platform, dylibs: [.. dylibs], rpaths: ["@executable_path/Frameworks"], signed: signed, entitlementsXml: entitlementsXml));
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(Path.Combine(app, "HCGSentinel"), (UnixFileMode)0b111_101_101);
+        File.WriteAllBytes(Path.Combine(app, exe), Build(minos: minos, platform: platform, dylibs: [.. dylibs], rpaths: ["@executable_path/Frameworks"], signed: signed, entitlementsXml: entitlementsXml));
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(Path.Combine(app, exe), (UnixFileMode)0b111_101_101);
         if (framework)
         {
             var fw = Path.Combine(app, "Frameworks", "SentinelCore.framework");
@@ -122,7 +123,7 @@ internal static class MachOFixture
             File.WriteAllBytes(Path.Combine(fw, "SentinelCore"), Build(Dylib, minos: minos, platform: platform, signed: signed));
             File.WriteAllText(Path.Combine(fw, "Info.plist"), InfoPlist("com.hcg.sentinel.core", "SentinelCore", minos));
         }
-        File.WriteAllBytes(Path.Combine(app, "AppIcon60x60@3x.png"), [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3]);
+        File.WriteAllBytes(Path.Combine(app, "AppIcon60x60@3x.png"), icon ?? PngFixtures.Standard(180));
         File.WriteAllBytes(Path.Combine(app, "Assets.car"), new byte[300]);
         return app;
     }
@@ -498,7 +499,7 @@ public class RootlessAppDebTests
         Assert.Contains("uicache -p /var/jb/Applications/HCGSentinel.app", deviceTest);
         Assert.Contains("## 1 · Detect existing HCG Sentinel installations", deviceTest);       // sideloaded / packaged / other builds
         Assert.Contains("uicache -l | grep -i -e com.hcg.sentinel -e sentinel", deviceTest);
-        Assert.Contains("dpkg -l > /var/mobile/sentinel-test-before-dpkg.txt", deviceTest);     // snapshot for rollback
+        Assert.Contains("dpkg -l > /var/mobile/hcgsentinel-test-before-dpkg.txt", deviceTest);     // snapshot for rollback
         Assert.Contains($"must print `{pinned.Validation!.Facts.Sha256}`", deviceTest);         // the exact file is checked before install
         Assert.Contains("## 7 · Rollback and recovery", deviceTest);
 

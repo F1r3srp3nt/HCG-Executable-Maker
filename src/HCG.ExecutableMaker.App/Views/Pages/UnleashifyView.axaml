@@ -115,6 +115,15 @@
           </Grid>
           <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
                      Text="Use the package ID HCG Repo records for the product. A published version is immutable: changed bytes need a new version." />
+          <Grid ColumnDefinitions="150,*,Auto,Auto" RowDefinitions="Auto,4,Auto">
+            <TextBlock Classes="muted" Text="Icon artwork" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding IconArtwork}" PlaceholderText="Approved fallback: square PNG, e.g. the 1024×1024 image of the project's AppIcon set"
+                     ToolTip.Tip="Used only when the app's own icon is missing or cannot be made a valid standard PNG. Xcode's Apple CgBI icons are converted automatically." />
+            <Button Grid.Column="2" Margin="8,0,0,0" Content="PNG…" Command="{Binding BrowseArtworkCommand}" />
+            <Button Grid.Column="3" Margin="8,0,0,0" Classes="ghost" Content="Use the project's AppIcon" Command="{Binding UseSuggestedArtworkCommand}"
+                    IsVisible="{Binding SuggestedArtwork, Converter={x:Static ObjectConverters.IsNotNull}}" ToolTip.Tip="{Binding SuggestedArtwork}" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Classes="muted" FontSize="12" Text="{Binding IconStatus}" TextWrapping="Wrap" />
+          </Grid>
         </StackPanel>
       </Border>
 
@@ -189,6 +198,7 @@
           <TextBox Text="{Binding OwnerApproval}" TextWrapping="Wrap"
                    PlaceholderText="Owner's approval of this version as a free public candidate demo: who, when and their words. Leave empty until it is given."
                    ToolTip.Tip="HCG Repo Candidate serves only free public builds, and the owner approves each version (HCG Repo docs/ACCESS.md). Without an approval the handoff's package.toml keeps the exception commented out and HCG Repo's importer refuses the package." />
+          <TextBox Text="{Binding ApprovedBy}" PlaceholderText="Approved by (the owner's name, as recorded in HCG Repo)" />
           <TextBox Classes="mono" Text="{Binding ApprovedSha256}"
                    PlaceholderText="SHA-256 of the exact .deb the owner approved (64 hex characters). A local build's approval counts only for these bytes."
                    ToolTip.Tip="If the package is rebuilt, its SHA-256 changes and the approval no longer applies: the handoff then leaves the exception out and says why." />
@@ -254,6 +264,27 @@
               </Grid>
               <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding PreviewText}" TextWrapping="Wrap" MaxHeight="320"
                                    IsVisible="{Binding PreviewText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+          </Border>
+          <Border Classes="inset" Padding="12" IsVisible="{Binding HandoffFolder, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <StackPanel Spacing="8">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Classes="label" Text="SHIP TO REPO" VerticalAlignment="Center" />
+                <c:StatusChip Status="{Binding ShipTag}" />
+              </StackPanel>
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="HCG Repo's Candidate Release Manager (Distribution v2) on your HCG Repo checkout: Submit validates the exact .deb into HCG Repo's private incoming store; Approve records your approval of its exact SHA-256; Prepare imports it into the checkout's pool/ for Candidate. Nothing is committed, pushed or published — commit on a branch and use HCG Repo's manual Publish workflow." />
+              <TextBox Text="{Binding IncomingStore}" PlaceholderText="Incoming store (optional; HCG Repo's default ~/.local/share/hcg-repo/incoming, outside any checkout)" />
+              <CheckBox IsChecked="{Binding CreatePackageMetadata}" IsVisible="{Binding NeedsPackageMetadata}"
+                        Content="New package: create packages/&lt;id&gt;/ in HCG Repo from the handoff's draft (package.toml, CHANGELOG.md, icon.png)" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Submit" Command="{Binding SubmitToRepoCommand}" />
+                <Button Classes="ghost" Content="Refresh review" Command="{Binding RefreshReviewCommand}" />
+                <Button Content="Approve exact SHA-256…" Command="{Binding ApproveInRepoCommand}" />
+                <Button Content="Prepare Candidate…" Command="{Binding PrepareInRepoCommand}" />
+              </StackPanel>
+              <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding ShipText}" TextWrapping="Wrap" MaxHeight="360"
+                                   IsVisible="{Binding ShipText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
           </Border>
           <ItemsControl ItemsSource="{Binding Checks}">

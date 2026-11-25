@@ -54,7 +54,8 @@ public sealed partial class UnleashifyViewModel(
     IProjectRepository projects,
     MobileBuildService mobileBuilder,
     IAppPaths paths,
-    ProjectService projectService) : PageViewModel
+    ProjectService projectService,
+    IDialogService dialogs) : PageViewModel
 {
     public override string Title => "Unleashify";
     public override string Subtitle => "Mobile Build Studio · an iOS app as a rootless jailbreak package for HCG Repo Candidate — built, validated and handed off, never published.";
@@ -117,6 +118,20 @@ public sealed partial class UnleashifyViewModel(
     [ObservableProperty] private string _pinCommit = "";
     [ObservableProperty] private string _pinStatus = "";
 
+    // Icon: the app's own icon (Apple CgBI converted to standard PNG); approved artwork is the fallback, chosen by the owner.
+    [ObservableProperty] private string _iconArtwork = "";
+    [ObservableProperty] private string? _suggestedArtwork;
+    [ObservableProperty] private string _iconStatus = "The handoff's icon.png is the app's own icon, converted to a standard PNG when Xcode stored it as Apple CgBI.";
+
+    // Ship to Repo: HCG Repo's Candidate Release Manager (Distribution v2) on the owner's checkout. Never publishes.
+    [ObservableProperty] private string _incomingStore = "";
+    [ObservableProperty] private string _approvedBy = "";
+    [ObservableProperty] private bool _createPackageMetadata;
+    [ObservableProperty] private bool _needsPackageMetadata;
+    [ObservableProperty] private string? _submissionId;
+    [ObservableProperty] private StatusTag _shipTag = new("Not submitted", "neutral");
+    [ObservableProperty] private string _shipText = "";
+
     // HCG Repo import preview (HCG Repo's own importer, dry run, on a throwaway copy of a checkout).
     [ObservableProperty] private string _hcgRepoCheckout = "";
     [ObservableProperty] private StatusTag _previewTag = new("Not previewed", "neutral");
@@ -134,14 +149,14 @@ public sealed partial class UnleashifyViewModel(
 
     // Run state.
     [ObservableProperty] private string? _ldid;
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(BuildCommand), nameof(ExportHandoffCommand), nameof(PreviewImportCommand), nameof(ImportPinnedCommitCommand))] private bool _isBusy;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(BuildCommand), nameof(ExportHandoffCommand), nameof(PreviewImportCommand), nameof(ImportPinnedCommitCommand), nameof(SubmitToRepoCommand), nameof(RefreshReviewCommand), nameof(ApproveInRepoCommand), nameof(PrepareInRepoCommand))] private bool _isBusy;
     [ObservableProperty] private string _log = "";
     [ObservableProperty] private string _appSummary = "No app inspected yet.";
     [ObservableProperty] private string? _result;
     [ObservableProperty] private StatusTag _validationTag = new("Not built", "neutral");
     [ObservableProperty] private StatusTag _readinessTag = new("Not built", "neutral");
     [ObservableProperty] private string _readinessText = "";
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(PreviewImportCommand))] private string? _handoffFolder;
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(PreviewImportCommand), nameof(SubmitToRepoCommand), nameof(RefreshReviewCommand), nameof(ApproveInRepoCommand), nameof(PrepareInRepoCommand))] private string? _handoffFolder;
     [ObservableProperty] private StatusTag _handoffTag = new("Not exported", "neutral");
     public ObservableCollection<StageItem> Stages { get; } = [new("Archive"), new("Inspect"), new("Package"), new("Validate"), new("Handoff")];
     public ObservableCollection<CheckItem> Checks { get; } = [];
@@ -204,6 +219,7 @@ public sealed partial class UnleashifyViewModel(
         if (PackageId.Length == 0) PackageId = "com.hakmicapitalgroup." + new string(p.Name.ToLowerInvariant().Where(char.IsAsciiLetterOrDigit).ToArray());
         if (AppName.Length == 0) AppName = p.Name.StartsWith("HCG", StringComparison.Ordinal) && p.Name.Length > 3 && char.IsUpper(p.Name[3]) ? "HCG " + p.Name[3..] : p.Name;
         if (OutputDir.Length == 0) OutputDir = Path.Combine(paths.DefaultOutputDirectory, "Unleashify", p.Name);
+        SuggestedArtwork = PngIcon.SuggestArtwork(p.SourceDirectory);
         LoadModes(p.Analysis);
     }
 
@@ -389,6 +405,105 @@ public sealed partial class UnleashifyViewModel(
         finally { IsBusy = false; }
     }
 
+    [RelayCommand]
+    private async Task BrowseArtworkAsync()
+    {
+        if (await shell.PickFileAsync("Choose the approved icon artwork (PNG, square, e.g. the 1024×1024 AppIcon image)", "PNG image", "*.png") is { } file) IconArtwork = file;
+    }
+
+    /// <summary>The owner chooses the project's own AppIcon image as the approved fallback artwork; never applied without this click.</summary>
+    [RelayCommand]
+    private void UseSuggestedArtwork()
+    {
+        if (SuggestedArtwork is { } a) IconArtwork = a;
+    }
+
+    private string? Python() => new ExecutableLocator().Find("python3");
+    private string? Incoming() => IncomingStore.Trim() is { Length: > 0 } i ? i : null;
+
+    private bool CanShip() => !IsBusy && HandoffFolder is not null;
+
+    /// <summary>Ship to Repo › Submit: HCG Repo validates the exact .deb into its private incoming store (outside Git). Nothing is published.</summary>
+    [RelayCommand(CanExecute = nameof(CanShip))]
+    private async Task SubmitToRepoAsync()
+    {
+        if (HandoffFolder is not { } folder || _outcome?.Validation is not { } val) return;
+        if (Python() is not { } python) { ShipTag = new("python3 missing", "error"); ShipText = "HCG Repo's Release Manager needs Python 3.11+ and dpkg-deb (brew install dpkg)."; return; }
+        if (ShipToRepo.CheckoutProblem(HcgRepoCheckout.Trim()) is { } bad) { ShipTag = new("Choose a checkout", "warning"); ShipText = bad; return; }
+        IsBusy = true;
+        try
+        {
+            ShipTag = new("Submitting", "info");
+            var r = await Task.Run(() => ShipToRepo.SubmitAsync(runner, python, HcgRepoCheckout.Trim(), folder, Incoming(), null, CancellationToken.None));
+            SubmissionId = r.SubmissionId;
+            NeedsPackageMetadata = !ShipToRepo.HasPackageMetadata(HcgRepoCheckout.Trim(), PackageId.Trim());
+            ShipText = r.Output.Trim();
+            ShipTag = r.State switch
+            {
+                "validated" => new($"Validated by HCG Repo · SHA-256 {val.Facts.Sha256[..12]}… · awaiting the owner's approval", "success"),
+                "refused" => new("Refused by HCG Repo", "error"),
+                _ => new(r.Succeeded ? "Submitted" : "Not submitted", r.Succeeded ? "info" : "error"),
+            };
+            Log += "\n[Ship to Repo] " + ShipTag.Text;
+        }
+        finally { IsBusy = false; }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanShip))]
+    private async Task RefreshReviewAsync()
+    {
+        if (SubmissionId is not { } id || Python() is not { } python) return;
+        var r = await Task.Run(() => ShipToRepo.ShowAsync(runner, python, HcgRepoCheckout.Trim(), id, Incoming(), CancellationToken.None));
+        ShipTag = new($"HCG Repo: {r.State ?? "unknown"}", r.State switch { "validated" or "approved" or "prepared" => "success", "refused" => "error", _ => "neutral" });
+    }
+
+    /// <summary>Ship to Repo › Approve: records the owner's approval of the exact reviewed SHA-256 (typed by the owner) in HCG Repo's review.</summary>
+    [RelayCommand(CanExecute = nameof(CanShip))]
+    private async Task ApproveInRepoAsync()
+    {
+        if (SubmissionId is not { } id || Python() is not { } python) { ShipText = "Submit first."; return; }
+        if (ApprovedSha256.Trim().Length != 64 || OwnerApproval.Trim().Length == 0 || ApprovedBy.Trim().Length == 0)
+        {
+            ShipTag = new("Approval incomplete", "warning");
+            ShipText = "An approval needs the owner's name (Approved by), their words (Owner's approval) and the exact SHA-256 they approve.";
+            return;
+        }
+        var ok = await dialogs.ConfirmAsync("Record the owner's approval in HCG Repo?",
+            $"Submission {id}\n\nSHA-256 {ApprovedSha256.Trim().ToLowerInvariant()}\nApproved by {ApprovedBy.Trim()}: “{OwnerApproval.Trim()}”\n\n" +
+            "HCG Repo records this approval for a Candidate import of exactly these bytes. Nothing is imported, committed or published by this step.", "Record approval");
+        if (!ok) return;
+        IsBusy = true;
+        try
+        {
+            var r = await Task.Run(() => ShipToRepo.ApproveAsync(runner, python, HcgRepoCheckout.Trim(), id, ApprovedSha256, ApprovedBy, OwnerApproval, Incoming(), CancellationToken.None));
+            ShipText = r.Output.Trim();
+            ShipTag = r.Succeeded ? new("Approved for Candidate import · not published", "success") : new("Approval refused", "error");
+        }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Ship to Repo › Prepare: HCG Repo imports the approved bytes into the checkout's pool/ for Candidate. No commit, push or publication.</summary>
+    [RelayCommand(CanExecute = nameof(CanShip))]
+    private async Task PrepareInRepoAsync()
+    {
+        if (SubmissionId is not { } id || Python() is not { } python) { ShipText = "Submit and approve first."; return; }
+        var ok = await dialogs.ConfirmAsync("Prepare the Candidate import in your HCG Repo checkout?",
+            $"HCG Repo imports the approved bytes of {id} into {HcgRepoCheckout.Trim()}: pool/, repo-lock.json, imports/{id}.toml and submissions/{id}/" +
+            (CreatePackageMetadata ? $", and packages/{PackageId.Trim()}/ from the handoff's draft" : "") +
+            ".\n\nNothing is committed, pushed or published. Review the changes, commit them on a branch and open a pull request; publication is HCG Repo's separate, manual Publish workflow.", "Prepare");
+        if (!ok) return;
+        IsBusy = true;
+        try
+        {
+            var r = await Task.Run(() => ShipToRepo.PrepareAsync(runner, python, HcgRepoCheckout.Trim(), id, OwnerApproval.Trim() is { Length: > 0 } words ? words : null,
+                CreatePackageMetadata, Incoming(), null, CancellationToken.None));
+            ShipText = r.Output.Trim();
+            ShipTag = r.Succeeded ? new("Prepared in the checkout · commit on a branch · not published", "success") : new("Prepare refused", "error");
+            if (r.Succeeded) NeedsPackageMetadata = false;
+        }
+        finally { IsBusy = false; }
+    }
+
     private bool CanBuild() => !IsBusy && SelectedMode?.Available == true && (!BuildFromXcode || (TrustAcknowledged && Project is not null));
 
     /// <summary>Build: an unsigned device archive from the Xcode project (or the chosen device build) → package → validate.</summary>
@@ -510,7 +625,7 @@ public sealed partial class UnleashifyViewModel(
         var primary = ParsedDevices().FirstOrDefault();
         var texts = new CandidateTexts(Description.Split('\n')[0].Trim(), Split(Changes), Split(KnownIssues), ProductionAccess,
             primary is null ? null : $"{primary.Name}, iOS {primary.IosVersion}", OwnerApproval.Trim() is { Length: > 0 } ok ? ok : null,
-            ApprovedSha256.Trim() is { Length: > 0 } approvedSha ? approvedSha.ToLowerInvariant() : null);
+            ApprovedSha256.Trim() is { Length: > 0 } approvedSha ? approvedSha.ToLowerInvariant() : null, IconArtwork.Trim() is { Length: > 0 } art ? art : null);
         return new RootlessAppWorkflow.Request(source, OutputDir.Length > 0 ? OutputDir : Path.Combine(Path.GetTempPath(), "unleashify"), spec, prov, texts, Ldid,
             primary?.IosVersion, ExportHandoff: exportHandoff, Context: Context());
     }
@@ -528,7 +643,7 @@ public sealed partial class UnleashifyViewModel(
             var r = WorkflowRequest(_builtFrom ?? DeviceBuild, exportHandoff: true);
             var folder = Path.Combine(r.OutputDir, $"{r.Spec.PackageId}_{r.Spec.Version.Replace(':', '_')}-candidate-handoff");
             var prov = RootlessAppWorkflow.Complete(r.Provenance, app, val, _outcome.Lifecycle, r.DeviceIosVersion);
-            var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, prov, r.Texts, pkg.SignedFiles, DateTimeOffset.UtcNow, CancellationToken.None, r.Context);
+            var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, prov, r.Texts, pkg.SignedFiles, DateTimeOffset.UtcNow, CancellationToken.None, r.Context, _outcome.Lifecycle);
             HandoffFolder = handoff.Folder;
             Missing.Clear();
             foreach (var m in handoff.Missing) Missing.Add(m);
@@ -536,6 +651,12 @@ public sealed partial class UnleashifyViewModel(
             HandoffTag = handoff.ImportRequestComplete ? new(prov.Local is null ? "Handoff exported · import request pinned" : "Handoff exported · local-file request (hcg-repo/)", "success") : new("Handoff exported · import request incomplete", "warning");
             PreviewTag = new("Not previewed", "neutral");
             PreviewText = "";
+            IconStatus = File.Exists(Path.Combine(handoff.Folder, "icon.png"))
+                ? "icon.png: " + (System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(handoff.Folder, "provenance.json")))?["icon"]?["detail"]?.GetValue<string>() ?? "standard PNG")
+                : "icon.png is missing: " + (handoff.Missing.FirstOrDefault(m => m.StartsWith("icon.png", StringComparison.Ordinal)) ?? "");
+            SubmissionId = null;
+            ShipTag = new(File.Exists(Path.Combine(handoff.Folder, SubmissionManifest.FileName)) ? "Ready to submit" : "Not submittable", File.Exists(Path.Combine(handoff.Folder, SubmissionManifest.FileName)) ? "info" : "warning");
+            ShipText = "";
             Log += $"\n[Handoff] {handoff.Files.Count} files in {handoff.Folder}";
         }
         finally { IsBusy = false; }
