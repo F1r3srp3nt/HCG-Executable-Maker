@@ -72,6 +72,8 @@ internal static class RootlessDebCommand
         {
             Console.WriteLine();
             Console.Write(ShipToRepo.Summary(result, ShipToRepo.DraftAccessLevel(handoff)));
+            Console.WriteLine();
+            Console.Write(ShipToRepo.PassportSectionAsync(runner, python, checkout, result, handoff, CancellationToken.None).GetAwaiter().GetResult());
         }
         else if (step.SubmissionId is { } sid) Console.WriteLine($"Submission: {sid}{(step.State is { } st ? $" ({st})" : "")}");
         return step.ExitCode == 2 ? 2 : step.Succeeded ? 0 : 1;

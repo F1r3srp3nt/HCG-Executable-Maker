@@ -332,7 +332,18 @@ public sealed record StoreArtifactRequest
     /// <summary>installer · portable-app · device-build · simulator-build · jailbreak-package. HCG Store decides the kind
     /// from the file's content and refuses a declaration that contradicts it.</summary>
     public string? Kind { get; init; }
+    /// <summary>Build provenance, as REPORTED by Maker (HCG Store v2 needs it on every file before a release is submitted).
+    /// Sent only when known, from a release passport that matches the file's exact bytes; never guessed. Null fields are
+    /// omitted, so HCG Store servers without these fields keep accepting the request.</summary>
+    public string? SourceCommit { get; init; }
+    /// <summary>local · github-actions · hcg-server-build-host (HCG Store's taxonomy).</summary>
+    public string? BuildProvider { get; init; }
+    public string? Toolchain { get; init; }
+    public StoreValidationReport? ValidationReport { get; init; }
 }
+
+/// <summary>The uploading tool's own validation, recorded by HCG Store as reported (HCG Store adds its own checks).</summary>
+public sealed record StoreValidationReport(string Tool, bool Passed, string Summary);
 
 /// <summary>How a file installs, as HCG Store (or this computer, before upload) judges it. <see cref="OrdinaryInstall"/> is
 /// true only when it installs on an ordinary device of its platform as it is.</summary>

@@ -23,6 +23,8 @@ public sealed partial class ShipFileItem(StoreArtifactCandidate candidate) : Obs
     public string Size => Format.Bytes(Candidate.SizeBytes);
     public string Sha256 => Candidate.Sha256;
     public string Problems => string.Join(" ", Candidate.Problems.Concat(Candidate.Notes));
+    /// <summary>The build provenance reported to HCG Store, from a release passport of these exact bytes.</summary>
+    public string Provenance => "Build provenance: " + ShipToStoreCommand.ProvenanceText(Candidate.Provenance);
     public bool HasProblems => Problems.Length > 0;
     public string Signing => Candidate.Signing.Status switch
     {

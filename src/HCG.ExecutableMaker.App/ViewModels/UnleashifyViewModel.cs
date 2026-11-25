@@ -445,7 +445,7 @@ public sealed partial class UnleashifyViewModel(
         {
             ShipTag = new("Submitting", "info");
             var r = await Task.Run(() => ShipToRepo.SubmitAsync(runner, python, HcgRepoCheckout.Trim(), folder, Incoming(), null, CancellationToken.None));
-            ShowShipResult(r);
+            await ShowShipResultAsync(r, python);
             Log += "\n[Ship to Repo] " + ShipTag.Text;
         }
         finally { IsBusy = false; }
@@ -457,13 +457,16 @@ public sealed partial class UnleashifyViewModel(
     {
         if (SubmissionId is not { } id || Python() is not { } python) { ShipText = "Submit first."; return; }
         var r = await Task.Run(() => ShipToRepo.StatusAsync(runner, python, HcgRepoCheckout.Trim(), id, Incoming(), CancellationToken.None));
-        ShowShipResult(r);
+        await ShowShipResultAsync(r, python);
     }
 
-    private void ShowShipResult(ShipToRepo.Step r)
+    private async Task ShowShipResultAsync(ShipToRepo.Step r, string python)
     {
         SubmissionId = r.SubmissionId ?? SubmissionId;
-        ShipText = r.Result is { } result ? ShipToRepo.Summary(result, ShipToRepo.DraftAccessLevel(HandoffFolder)) : r.Output.Trim();
+        ShipText = r.Result is { } result
+            ? ShipToRepo.Summary(result, ShipToRepo.DraftAccessLevel(HandoffFolder)) + "\n" +
+              await Task.Run(() => ShipToRepo.PassportSectionAsync(runner, python, HcgRepoCheckout.Trim(), result, HandoffFolder, CancellationToken.None))
+            : r.Output.Trim();
         ShipTag = r.State switch
         {
             "validated" => new("Validated by HCG Repo · awaiting the owner's checksum approval", "success"),

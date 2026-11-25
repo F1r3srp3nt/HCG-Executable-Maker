@@ -209,6 +209,16 @@ public static class CandidateHandoff
         if (manifest.Complete) await Write(SubmissionManifest.FileName, SubmissionManifest.Serialize(manifest.Manifest!)).ConfigureAwait(false);
         else missing.Add("submission.json (HCG Repo Distribution v2): " + string.Join("; ", manifest.Problems));
 
+        // HCG Release Passport v1, build half: what Maker measured. The distribution authority adds channel, access,
+        // approvals, publication, device evidence and repository signing in its own passport.
+        if (manifest.Complete)
+        {
+            var passport = Distribution.ReleasePassport.BuildHalf(manifest.Manifest!, validation, lifecycle, provenance.PackagedBy ?? "HCG Executable Maker");
+            if (Distribution.ReleasePassport.ValidateBuildHalf(passport) is { Count: > 0 } passportProblems)
+                missing.Add(Distribution.ReleasePassport.FileName + ": " + string.Join("; ", passportProblems));
+            else await Write(Distribution.ReleasePassport.FileName, SubmissionManifest.Serialize(passport)).ConfigureAwait(false);
+        }
+
         // Import request. A CI build is pinned by its run and artifact (github-artifact). A local build has none: it goes
         // through HCG Repo's Release Manager (Ship to Repo submits; the owner approves and prepares in HCG Repo), so Maker
         // writes no request of its own for it.

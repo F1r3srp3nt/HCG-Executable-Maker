@@ -1652,6 +1652,23 @@ jobs:
           (cd "$OUT/hcg-repo-ship" && eval "$prepare") | tee "$OUT/ship-prepare.txt"
           $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-prepared.txt"
           grep -q "^State        PREPARED" "$OUT/ship-prepared.txt"
+          # Release Passport v1: the handoff's build half is valid against HCG Repo's own schema and states no repository
+          # signing; once prepared, HCG Repo's passport supplies it, and Maker shows it apart from the code signing.
+          python3 -m pip install -q "jsonschema==4.26.0"
+          python3 -I - "$OUT/hcg-repo-v2/docs/schemas/release-passport-v1.schema.json" "$H/release-passport.json" <<'EOF'
+          import json, sys, jsonschema
+          schema, p = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+          jsonschema.Draft202012Validator(schema).validate(p)
+          assert set(p["repository_signing"]) == {"scope", "status"}, p["repository_signing"]   # no key, no "configured" from the builder
+          assert p["code_signing"]["all_signed"] is True and p["code_signing"]["method_claimed"] == "ldid", p["code_signing"]
+          assert p["approvals"] == [] and p["device_evidence"] == []
+          print("release-passport.json (build half): valid against HCG Repo's schema;", p["code_signing"]["binaries"], "Mach-O, all signed")
+          EOF
+          grep -q "^  Distribution authority:  *HCG Repo (bin/hcgrepo passport), hcg.release-passport v1" "$OUT/ship-prepared.txt"
+          grep -q "^  Repository signing (channel metadata, not the app): " "$OUT/ship-prepared.txt"
+          grep -q "^  Code signing (Mach-O code inside the package): " "$OUT/ship-prepared.txt"
+          grep -q "^  Reconciliation: the build half and HCG Repo's passport agree" "$OUT/ship-prepared.txt"
+          grep -q "^  Repository signing (channel metadata, not the app): not stated: only the distribution authority states it" "$OUT/ship-submit.txt"
           ls "$OUT/hcg-repo-ship/imports/" | tee "$OUT/ship-imports.txt"; grep -q "^${PKG}_0.1.0-beta1.local1_iphoneos-arm64_${sha:0:12}\.toml$" "$OUT/ship-imports.txt"
           git -C "$OUT/hcg-repo-v2" status --porcelain | tee "$OUT/hcg-repo-v2-status.txt"; [ ! -s "$OUT/hcg-repo-v2-status.txt" ]   # the real clone is untouched
 

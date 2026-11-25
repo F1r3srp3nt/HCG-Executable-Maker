@@ -27,7 +27,15 @@ public static class RootlessAppDebValidator
 {
     public sealed record Facts(
         string Sha256, long Size, IReadOnlyDictionary<string, string> Control, string? AppPath, string? BundleId, string? MinimumOS,
-        int FileCount, long PayloadBytes, IReadOnlyDictionary<string, string> Scripts, IReadOnlyDictionary<string, string> Entitlements);
+        int FileCount, long PayloadBytes, IReadOnlyDictionary<string, string> Scripts, IReadOnlyDictionary<string, string> Entitlements,
+        IReadOnlyList<BinarySignature>? Binaries = null);
+
+    /// <summary>
+    /// One Mach-O's code signature as measured in the package (all slices): application code signing, never repository
+    /// signing. <paramref name="Path"/> is relative to the app bundle.
+    /// </summary>
+    public sealed record BinarySignature(string Path, string Signer, bool Signed, bool Verified, int PageHashes, int PageHashesVerified,
+        string? Identifier, string? CdHash, string? TeamId, bool HardenedRuntime, bool LibraryValidation, IReadOnlyList<string> Architectures);
 
     public sealed record Result(Facts Facts, IReadOnlyList<VerificationCheck> Checks, string Report)
     {
@@ -50,6 +58,7 @@ public static class RootlessAppDebValidator
         var control = new Dictionary<string, string>();
         var scripts = new Dictionary<string, string>();
         var entitlements = new Dictionary<string, string>();
+        var audits = new List<(string Rel, IReadOnlyList<MachOSignatureAudit.Slice> Slices)>();
         string? appRel = null, bundleId = null, minOS = null;
         var fileCount = 0;
         long payloadBytes = 0;
@@ -180,7 +189,6 @@ public static class RootlessAppDebValidator
             var signProblems = new List<string>();
             // Signature integrity: every slice's CodeDirectories verified against the bytes (see MachOSignatureAudit).
             var integrityProblems = new List<string>(); var integrityWarnings = new List<string>();
-            var audits = new List<(string Rel, IReadOnlyList<MachOSignatureAudit.Slice> Slices)>();
             var entProblems = new List<string>();
             var systemLibs = new SortedSet<string>(StringComparer.Ordinal);
             // dyld searches @rpath in the loading image's LC_RPATHs and then in those of the images that loaded it — for
@@ -334,7 +342,17 @@ public static class RootlessAppDebValidator
         {
             report.AppendLine().AppendLine("Checks:");
             foreach (var c in checks) report.AppendLine($"  [{c.Status}] {c.Name}: {c.Detail}");
-            return new Result(new Facts(sha, bytes.Length, control, appRel is null ? null : "/" + appRel, bundleId, minOS, fileCount, payloadBytes, scripts, entitlements), checks, report.ToString());
+            var binaries = audits.Select(a => new BinarySignature(a.Rel,
+                string.Join(" / ", a.Slices.Select(x => x.SignerText).Distinct()),
+                a.Slices.Count > 0 && a.Slices.All(x => x.Signer is MachOSignatureAudit.SignerKind.AdHoc or MachOSignatureAudit.SignerKind.Certificate),
+                a.Slices.Count > 0 && a.Slices.All(x => x.Verified),
+                a.Slices.Sum(x => x.CodeDirectories.Sum(c => c.CodeSlots)), a.Slices.Sum(x => x.CodeDirectories.Sum(c => c.Verifiable ? c.CodeSlots - c.BadPages : 0)),
+                a.Slices.SelectMany(x => x.CodeDirectories).Select(c => c.Identifier).FirstOrDefault(i => i.Length > 0),
+                a.Slices.SelectMany(x => x.CodeDirectories).Select(c => c.CdHash).FirstOrDefault(),
+                a.Slices.Select(x => x.TeamId).FirstOrDefault(t => t is not null),
+                a.Slices.Any(x => x.HardenedRuntime), a.Slices.Any(x => x.LibraryValidation),
+                a.Slices.Select(x => x.Architecture).ToList())).ToList();
+            return new Result(new Facts(sha, bytes.Length, control, appRel is null ? null : "/" + appRel, bundleId, minOS, fileCount, payloadBytes, scripts, entitlements, binaries), checks, report.ToString());
         }
     }
 

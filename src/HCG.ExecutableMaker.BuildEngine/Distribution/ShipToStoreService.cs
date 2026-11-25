@@ -82,6 +82,8 @@ public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessServi
                     {
                         FileName = f.FileName, Platform = f.Platform!, Format = f.Format!, SizeBytes = f.SizeBytes, Sha256 = f.Sha256,
                         Architectures = f.Architectures, MinimumOs = f.MinimumOs, Signing = DeclaredSigning(f), Package = f.Package, Kind = f.Kind,
+                        SourceCommit = f.Provenance?.SourceCommit, BuildProvider = f.Provenance?.BuildProvider, Toolchain = f.Provenance?.Toolchain,
+                        ValidationReport = f.Provenance?.ValidationReport,
                     }, ct).ConfigureAwait(false);
                     artifactId = declared.Artifact.Id;
                     url = declared.Upload;

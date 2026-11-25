@@ -101,3 +101,22 @@ No entitlement was added, and no protection was disabled.
   - the dotted executable name is handled in the handoff;
   - the submission claims only what Maker signed, with the exact entitlements.
   An opt-in test (`HCG_MAIL_UNLEASHED_DEB`) re-verifies the published package itself.
+
+## Recorded in the Release Passport
+
+Every Unleashify handoff now carries the build half of its HCG Release Passport (`release-passport.json`,
+[RELEASE-PASSPORT.md](../RELEASE-PASSPORT.md)). Its `code_signing.details` records, for each Mach-O:
+- the signer;
+- whether Executable Maker signed it (`signed_by_builder`);
+- the verified page hashes, identifier, cdhash, team, hardened runtime and library validation.
+
+For a bundle shaped like this one, the main executable is "ad hoc, ldid-style" and signed by the builder. The SkiaSharp
+and HarfBuzzSharp frameworks are "ad hoc", keep their own signatures, and are all verified
+(`DotNetBundleSigningTests.The_release_passport_build_half_records_each_binarys_signature_and_no_repository_signing`).
+
+HCG Repo's passport for the published 0.1.0~beta1 reports:
+- `code_signing`: 3 Mach-O, all signed, `keychain-access-groups` only;
+- `repository_signing`: not configured ("unsigned: no production repository signing key configured yet").
+
+Repository signing concerns the channel's `Release` metadata and has no bearing on whether the app launches.
+

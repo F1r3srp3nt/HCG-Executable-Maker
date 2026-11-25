@@ -356,7 +356,25 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
         var prepareCmd = Assert.Single(ShipToRepo.OwnerCommands(approved.Result!, ShipToRepo.DraftAccessLevel(o.Handoff.Folder)));
         var prepare = await RunAsOwner(python, repo, incoming, prepareCmd, ("<owner's words>", "free Candidate demo approved by the owner (test)"));
         Assert.True(prepare.Ok, prepare.Output);
-        Assert.Equal("prepared", (await ShipToRepo.StatusAsync(runner, python, repo, id, incoming, CancellationToken.None)).State);
+        var prepared = await ShipToRepo.StatusAsync(runner, python, repo, id, incoming, CancellationToken.None);
+        Assert.Equal("prepared", prepared.State);
+
+        // HCG Repo now issues its own Release Passport. It reconciles with Maker's build half, and its repository
+        // signing (HCG Repo's configuration) is what Maker shows: never anything from the build half.
+        var (authority, detail) = await ShipToRepo.AuthorityPassportAsync(runner, python, repo, p.PackageId, p.Version, "iphoneos-arm64", CancellationToken.None);
+        Assert.True(authority is not null, detail);
+        var buildHalf = ShipToRepo.BuildHalfOf(o.Handoff.Folder)!;
+        var (findings, combined) = HCG.ExecutableMaker.Packaging.Distribution.ReleasePassport.Reconcile(buildHalf, authority!);
+        Assert.True(findings.Count == 0, string.Join("\n", findings.Select(f => $"{f.Level} {f.Field}: {f.Message}")));
+        Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(authority!["repository_signing"], combined!["repository_signing"]));
+        Assert.Equal(["scope", "status"], buildHalf["repository_signing"]!.AsObject().Select(kv => kv.Key));
+        var section = await ShipToRepo.PassportSectionAsync(runner, python, repo, prepared.Result!, o.Handoff.Folder, CancellationToken.None);
+        Assert.Contains("Repository signing (channel metadata, not the app): " + HCG.ExecutableMaker.Packaging.Distribution.ReleasePassport.RepositorySigningText(authority!), section);
+        Assert.Contains("Code signing (Mach-O code inside the package)", section);
+        Assert.Contains("Reconciliation", section);
+        // Before preparation there is no authority passport, and Maker says so instead of filling one in.
+        var early = await ShipToRepo.PassportSectionAsync(runner, python, repo, status.Result!, o.Handoff.Folder, CancellationToken.None);
+        Assert.Contains("not stated: only the distribution authority states it", early);
 
         Assert.True(File.Exists(Path.Combine(repo, "imports", id + ".toml")));
         Assert.True(File.Exists(Path.Combine(repo, "submissions", id, "submission.json")));

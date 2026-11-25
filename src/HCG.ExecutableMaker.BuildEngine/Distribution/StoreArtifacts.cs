@@ -33,6 +33,8 @@ public sealed record StoreArtifactCandidate
     /// format was not examined. Presence is not validity: <see cref="Signing"/> holds the platform tool's verdict.</summary>
     public string? SignatureStructure { get; init; }
     public IosBundleFacts? Ios { get; init; }
+    /// <summary>Build provenance from a release passport of these exact bytes (or none, with the reason).</summary>
+    public StoreProvenance.Result? Provenance { get; init; }
     public bool IsSupported => Platform is not null && Format is not null && Problems.Count == 0;
     public string Label => Platform is null ? (Kind == "simulator-build" ? "iOS Simulator build — not accepted" : "Not supported") : $"{StoreArtifacts.PlatformName(Platform)} · {Format}";
     public string KindName => StoreArtifacts.KindName(Kind);
@@ -267,7 +269,8 @@ public static class StoreArtifacts
         }
         else problems.Add(UnsupportedExplanation(lower));
         if (kind == "simulator-build") (platform, format) = (null, null);
-        return c with { Platform = platform, Format = format, Architectures = arch, MinimumOs = minOs, Package = package, Problems = problems, Notes = notes, Kind = kind, SignatureStructure = structure, Ios = ios };
+        return c with { Platform = platform, Format = format, Architectures = arch, MinimumOs = minOs, Package = package, Problems = problems, Notes = notes, Kind = kind, SignatureStructure = structure, Ios = ios,
+            Provenance = c.Sha256.Length == 64 ? StoreProvenance.ForFile(path, c.Sha256, c.SizeBytes) : null };
     }
 
     /// <summary>What HCG Store accepts, and what to do instead, for a file type it does not.</summary>

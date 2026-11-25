@@ -14,6 +14,7 @@ namespace HCG.ExecutableMaker.App;
 /// --store &lt;url&gt; --product &lt;id&gt; [--edition &lt;id&gt;] [--draft-product "Title"] --release-version 1.2.0 --build-number 42
 /// --file &lt;path&gt; [--file …] [--note "…"]… [--distribution free|paid|subscription|entitlement]
 /// [--eligibility private|internal-testing|public] [--channel beta|stable] [--hcg-repo]
+/// [--passport &lt;release-passport.json&gt;] build provenance for the files (otherwise a passport next to each file is used)
 /// [--release &lt;id&gt;]   continue an existing draft (retry/resume)
 /// [--verify-download] download each verified file back and compare its SHA-256
 /// [--submit]          submit the draft for MANUAL review in HCG Store (never approves)
@@ -24,6 +25,11 @@ namespace HCG.ExecutableMaker.App;
 /// </summary>
 internal static class ShipToStoreCommand
 {
+    /// <summary>What Maker reports to HCG Store about how the file was built (from a release passport of these exact bytes).</summary>
+    internal static string ProvenanceText(StoreProvenance.Result? p) => p is null ? "not examined"
+        : (p.SourceCommit is null && p.BuildProvider is null && p.Toolchain is null ? "none reported" : $"commit {p.SourceCommit ?? "—"}, provider {p.BuildProvider ?? "—"}, toolchain {p.Toolchain ?? "—"}")
+          + (p.PassportPath is { } pp ? $" (from {Path.GetFileName(pp)})" : "") + string.Concat(p.Notes.Select(n => "; " + n));
+
     public static int Run(string[] args)
     {
         string? Arg(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
@@ -71,9 +77,11 @@ internal static class ShipToStoreCommand
             {
                 var c = StoreArtifacts.DetectAsync(Path.GetFullPath(f)).GetAwaiter().GetResult();
                 c = c with { Signing = StoreArtifacts.CheckSigningAsync(c, runner).GetAwaiter().GetResult() };
+                if (Arg("--passport") is { } passport && c.Sha256.Length == 64) c = c with { Provenance = StoreProvenance.ForFile(c.Path, c.Sha256, c.SizeBytes, Path.GetFullPath(passport)) };
                 Console.WriteLine($"File {c.FileName}: {c.Label} · {c.KindName}, {c.SizeBytes:N0} bytes, SHA-256 {c.Sha256}, signature {ShipToStoreService.DeclaredSigning(c).Status}" +
                                   (c.MinimumOs is null ? "" : $", minimum OS {c.MinimumOs}") + (c.Package is { } pk ? $", package {pk.Id} {pk.Version} {pk.Architecture}" : "") +
                                   $"\n  install: {c.Readiness.Label}" +
+                                  $"\n  provenance: {ProvenanceText(c.Provenance)}" +
                                   string.Concat(c.Problems.Select(x => "\n  PROBLEM " + x)) + string.Concat(c.Notes.Select(x => "\n  note " + x)));
                 files.Add(c);
             }

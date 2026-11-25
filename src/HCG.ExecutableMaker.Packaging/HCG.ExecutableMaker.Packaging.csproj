@@ -11,6 +11,8 @@
   <ItemGroup>
     <!-- HCG Repo import preview: the same dry-run script CI runs, carried in the app (it imports HCG Repo's own importer from the checkout). -->
     <EmbeddedResource Include="..\..\tools\unleashify\hcgrepo-dry-run.py" LogicalName="hcgrepo-dry-run.py" />
+    <!-- HCG Release Passport v1 schema, verbatim from HCG Repo main 3bf53c7 (docs/schemas/release-passport-v1.schema.json). -->
+    <EmbeddedResource Include="Distribution\release-passport-v1.schema.json" LogicalName="release-passport-v1.schema.json" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />

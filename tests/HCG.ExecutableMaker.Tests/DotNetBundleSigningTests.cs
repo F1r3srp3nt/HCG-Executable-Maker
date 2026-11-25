@@ -246,6 +246,74 @@ public sealed class DotNetBundleSigningTests : IDisposable
     }
 
     /// <summary>
+    /// The handoff's Release Passport build half for a Mail-like bundle: the code signatures as measured (the ldid-signed
+    /// main executable and the frameworks' own ad hoc signatures, all verified page by page, only the main executable
+    /// signed by Maker), the exact entitlements, Maker's validation, and no repository signing, approvals, publication or
+    /// device results.
+    /// </summary>
+    [Fact]
+    public async Task The_release_passport_build_half_records_each_binarys_signature_and_no_repository_signing()
+    {
+        var app = MailLikeApp();
+        var ents = _t.Write("Entitlements.passport.plist", $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>keychain-access-groups</key><array><string>{BundleId}</string></array></dict></plist>");
+        var spec = new RootlessAppPackageSpec(BundleId, "0.1.0~beta1", "HCG Mail Unleashed", RootlessAppPackager.HcgMaintainer, "Private email.\nCandidate beta.", EntitlementsFile: ents);
+        var o = await new RootlessAppWorkflow(Ldid(), TimeProvider.System).RunAsync(new RootlessAppWorkflow.Request(app, _t.Combine("wf-passport"), spec,
+            new PackageProvenance("F1r3srp3nt/HCG-Mail", new string('b', 40), false),
+            new CandidateTexts("Private email.", [], [], "undecided"), "/usr/local/bin/ldid", "17.4"), null, CancellationToken.None);
+        Assert.True(o.Succeeded, o.Failure);
+        var path = Path.Combine(o.Handoff!.Folder, HCG.ExecutableMaker.Packaging.Distribution.ReleasePassport.FileName);
+        Assert.True(File.Exists(path), string.Join("; ", o.Handoff.Missing));
+        var p = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        Assert.Empty(HCG.ExecutableMaker.Packaging.Distribution.ReleasePassport.ValidateBuildHalf(p));
+
+        Assert.Equal((o.Validation!.Facts.Sha256, o.Validation.Facts.Size), (p["artifact"]!["sha256"]!.GetValue<string>(), p["artifact"]!["size"]!.GetValue<long>()));
+        Assert.Equal(("F1r3srp3nt/HCG-Mail", new string('b', 40)), (p["source"]!["repository"]!.GetValue<string>(), p["source"]!["commit"]!.GetValue<string>()));
+        Assert.Equal("ios-jailbreak-rootless", p["platform"]!.GetValue<string>());
+
+        // Repository signing: not stated by the builder at all.
+        var rs = p["repository_signing"]!.AsObject();
+        Assert.Equal(["scope", "status"], rs.Select(kv => kv.Key));
+        Assert.Contains("distribution authority", rs["status"]!.GetValue<string>());
+
+        // Code signing: what is in the package, binary by binary.
+        const string main = $"var/jb/Applications/{Exe}.app/{Exe}";
+        var cs = p["code_signing"]!;
+        Assert.Equal(("ldid", 3, true), (cs["method_claimed"]!.GetValue<string>(), cs["binaries"]!.GetValue<int>(), cs["all_signed"]!.GetValue<bool>()));
+        Assert.Equal([main], cs["signed_by_builder"]!.AsArray().Select(x => x!.GetValue<string>()));
+        Assert.Equal(["keychain-access-groups"], cs["entitlements"]![main]!.AsArray().Select(x => x!.GetValue<string>()));
+        Assert.Equal(BundleId, cs["entitlements_exact"]![main]!["keychain-access-groups"]![0]!.GetValue<string>());
+        var details = cs["details"]!.AsArray().Select(d => d!.AsObject()).ToDictionary(d => d["path"]!.GetValue<string>());
+        Assert.Equal(3, details.Count);
+        Assert.Equal(("ad hoc, ldid-style", true, true), (details[main]["signer"]!.GetValue<string>(), details[main]["signed_by_builder"]!.GetValue<bool>(), details[main]["verified"]!.GetValue<bool>()));
+        foreach (var fw in Frameworks)
+        {
+            var d = details[$"var/jb/Applications/{Exe}.app/Frameworks/{fw}.framework/{fw}"];
+            Assert.Equal(("ad hoc", false, true), (d["signer"]!.GetValue<string>(), d["signed_by_builder"]!.GetValue<bool>(), d["verified"]!.GetValue<bool>()));
+            Assert.Equal("com.microsoft." + fw, d["identifier"]!.GetValue<string>());
+            Assert.Equal(d["page_hashes"]!.GetValue<int>(), d["page_hashes_verified"]!.GetValue<int>());
+            Assert.False(d["library_validation"]!.GetValue<bool>());
+        }
+        Assert.False(details[main]["library_validation"]!.GetValue<bool>());
+        Assert.False(details[main]["hardened_runtime"]!.GetValue<bool>());
+
+        // Validation: Maker's own levels; device levels are never the builder's.
+        var levels = p["validation"]!["levels"]!;
+        Assert.Equal("passed", levels["static_inspection"]!["state"]!.GetValue<string>());
+        Assert.Equal("not-run", levels["script_free_lifecycle"]!["state"]!.GetValue<string>());
+        foreach (var k in new[] { "device_installation", "application_launch", "runtime_verification" })
+            Assert.Equal("not-recorded", levels[k]!["state"]!.GetValue<string>());
+        Assert.Contains(p["validation"]!["checks"]!.AsArray(), c => c!["check"]!.GetValue<string>() == "Signature integrity" && c["status"]!.GetValue<string>() == "Passed");
+        Assert.Empty(p["approvals"]!.AsArray());
+        Assert.Empty(p["device_evidence"]!.AsArray());
+
+        // Ship to Store reads the same passport for the .deb in this folder.
+        var deb = Directory.GetFiles(o.Handoff.Folder, "*.deb").Single();
+        var store = HCG.ExecutableMaker.BuildEngine.Distribution.StoreProvenance.ForFile(deb, o.Validation.Facts.Sha256, o.Validation.Facts.Size);
+        Assert.True(store.Complete, string.Join("; ", store.Notes));
+        Assert.Equal("local", store.BuildProvider);
+    }
+
+    /// <summary>
     /// The published HCG Mail Unleashed 0.1.0~beta1 (HCG_MAIL_UNLEASHED_DEB, read only): every signature verifies, the
     /// frameworks are SkiaSharp's own ad hoc signatures and the main executable is ldid-signed.
     /// </summary>

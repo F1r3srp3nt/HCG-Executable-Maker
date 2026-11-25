@@ -212,11 +212,77 @@ public static partial class ShipToRepo
         }
     }
 
-    private static async Task<Step> RunAsync(Action action, IProcessRunner runner, string python, string checkout, string? incoming, IReadOnlyList<string> args, Action<string>? log, CancellationToken ct)
+    /// <summary>
+    /// HCG Repo's own Release Passport for a release in its lock (<c>bin/hcgrepo passport &lt;package&gt; &lt;version&gt;</c>):
+    /// the distribution authority's record, including its repository signing. Null with the reason when HCG Repo has none
+    /// yet (not prepared, or staged via local-file and not imported), or when it is not a passport this Maker can read.
+    /// </summary>
+    public static async Task<(JsonObject? Passport, string Detail)> AuthorityPassportAsync(IProcessRunner runner, string python, string checkout, string package, string version, string architecture, CancellationToken ct)
+    {
+        var step = await RunAsync(Action.Status, runner, python, checkout, null, ["passport", package, version], null, ct, releaseCommand: false).ConfigureAwait(false);
+        if (!step.Succeeded) return (null, step.Output.Contains("no matching release", StringComparison.Ordinal)
+            ? $"HCG Repo has no passport for {package} {version} yet: it exists once the release is in HCG Repo's lock (after prepare into pool/, or after Prepare packages for a local-file request)"
+            : "bin/hcgrepo passport failed: " + step.Output.Trim());
+        JsonNode? node;
+        try { node = JsonNode.Parse(step.Output); } catch (System.Text.Json.JsonException ex) { return (null, "HCG Repo's passport output is not JSON: " + ex.Message); }
+        var passport = node is JsonArray many ? many.OfType<JsonObject>().FirstOrDefault(x => Str(x, "architecture") == architecture) : node as JsonObject;
+        if (passport is null) return (null, $"HCG Repo has no {architecture} passport for {package} {version}");
+        if (Distribution.ReleasePassport.Validate(passport) is { Count: > 0 } problems)
+            return (null, "HCG Repo's passport is not used: " + string.Join("; ", problems.Take(3)));
+        return (passport, "HCG Repo (bin/hcgrepo passport)");
+    }
+
+    /// <summary>The handoff's build half (release-passport.json), when it has one.</summary>
+    public static JsonObject? BuildHalfOf(string? handoff)
+    {
+        var path = handoff is null ? null : Path.Combine(handoff, Distribution.ReleasePassport.FileName);
+        if (path is null || !File.Exists(path)) return null;
+        try { return JsonNode.Parse(File.ReadAllText(path)) as JsonObject; } catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>The passport section for a submission result: HCG Repo's passport is looked up once the release is prepared.</summary>
+    public static async Task<string> PassportSectionAsync(IProcessRunner runner, string python, string checkout, JsonObject result, string? handoff, CancellationToken ct)
+    {
+        var pkg = result["package"];
+        JsonObject? authority = null;
+        var detail = $"none yet: HCG Repo issues its passport once the release is in its lock (state now {Str(result, "state")})";
+        if (Str(result, "state") == "prepared" && Str(pkg, "identifier") is { } id && Str(pkg, "version") is { } ver && Str(pkg, "architecture") is { } arch)
+            (authority, detail) = await AuthorityPassportAsync(runner, python, checkout, id, ver, arch, ct).ConfigureAwait(false);
+        return PassportSummary(BuildHalfOf(handoff), authority, detail);
+    }
+
+    /// <summary>
+    /// The Release Passport section of the status: the build half from the handoff, the distribution authority's
+    /// passport when HCG Repo has one, and their reconciliation. Repository signing comes only from HCG Repo's passport;
+    /// code signing is the Mach-O code inside the package. The two are shown separately.
+    /// </summary>
+    public static string PassportSummary(JsonObject? buildHalf, JsonObject? authority, string authorityDetail)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Release Passport (hcg.release-passport v1):");
+        sb.AppendLine($"  Build half (Executable Maker):  {(buildHalf is null ? "none in the handoff" : $"{Distribution.ReleasePassport.FileName}, SHA-256 {Str(buildHalf["artifact"], "sha256")}")}");
+        sb.AppendLine($"  Distribution authority:         {(authority is null ? authorityDetail : authorityDetail + ", " + Distribution.ReleasePassport.CheckVersion(authority).Detail)}");
+        sb.AppendLine($"  Repository signing (channel metadata, not the app): {(authority is null ? "not stated: only the distribution authority states it" : Distribution.ReleasePassport.RepositorySigningText(authority))}");
+        sb.AppendLine($"  Code signing (Mach-O code inside the package):      {Distribution.ReleasePassport.CodeSigningText(authority ?? buildHalf)}{(authority is null ? " (measured by Executable Maker)" : " (as HCG Repo inspected it)")}");
+        if (buildHalf is not null && authority is not null)
+        {
+            var (findings, _) = Distribution.ReleasePassport.Reconcile(buildHalf, authority);
+            sb.AppendLine(findings.Count == 0 ? "  Reconciliation: the build half and HCG Repo's passport agree (artifact, release, source, provider, code signing)" : "  Reconciliation:");
+            foreach (var f in findings) sb.AppendLine($"    {(f.Level == "error" ? "ERROR" : "warn ")} {f.Field}: {f.Message}");
+        }
+        return sb.ToString();
+    }
+
+    private static async Task<Step> RunAsync(Action action, IProcessRunner runner, string python, string checkout, string? incoming, IReadOnlyList<string> args, Action<string>? log, CancellationToken ct,
+        bool releaseCommand = true)
     {
         if (CheckoutProblem(checkout) is { } bad) return new(action, false, 2, bad, null, null, null);
-        List<string> all = ["-I", Path.Combine(checkout, "bin", "hcgrepo"), "release"];
-        if (incoming is { Length: > 0 }) all.AddRange(["--incoming", incoming]);
+        List<string> all = ["-I", Path.Combine(checkout, "bin", "hcgrepo")];
+        if (releaseCommand)
+        {
+            all.Add("release");
+            if (incoming is { Length: > 0 }) all.AddRange(["--incoming", incoming]);
+        }
         all.AddRange(args);
         var output = new StringBuilder();
         var env = new Dictionary<string, string>(StringComparer.Ordinal);

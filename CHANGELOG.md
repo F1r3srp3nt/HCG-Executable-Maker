@@ -14,6 +14,18 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - **Approval of the exact SHA-256, Candidate preparation and publication are the owner's**, run in HCG Repo. Maker
     has no approve or prepare operation (`--ship-to-repo approve|prepare` is refused with an explanation).
   - `HCG_REPO_INCOMING` is passed to HCG Repo, so Maker's submissions are in the same store as the owner's commands.
+- **HCG Release Passport v1** (`docs/RELEASE-PASSPORT.md`): schema pinned byte for byte from HCG Repo 3bf53c7.
+  - **Build half:** every Unleashify handoff carries `release-passport.json`. It holds the artifact, SHA-256, source,
+    provider, toolchain, Maker's validation evidence and `code_signing` (each Mach-O's signer, verified pages,
+    identifier, cdhash and entitlements). It states no repository signing, approvals, publication or device results.
+  - **Ship to Repo:** once the owner has prepared a release, Maker reads HCG Repo's own passport and reconciles it with
+    the build half. It shows `repository_signing` exactly as HCG Repo states it, apart from `code_signing`.
+  - **Ship to Store:** HCG Store v2's source commit, build provider, toolchain and validation report are filled from a
+    passport of the file's exact bytes (or `--passport`), and left empty otherwise.
+  - **Checks:** version compatibility (newer versions refused with a reason; extra fields accepted), and a schema
+    evaluator cross-checked against Python `jsonschema`.
+- **CI:** HCG Repo's Release Manager review runs on Linux. HCG Repo 3bf53c7's script-free lifecycle upgrades from the
+  version in `pool/`, and macOS refuses dpkg's backup hard links inside an installed `.app`.
 - **Signature integrity** check in rootless package validation: every Mach-O signature's page hashes and special
   slots are recomputed against the files (`MachOSignatureAudit`). It fails a binary changed after signing, an
   inconsistent signature, or a main executable with library validation or hardened runtime loading an ad hoc or
