@@ -51,6 +51,8 @@ xcodebuild -project tests/Fixtures/HelloIOS/HelloIOS.xcodeproj -scheme HelloIOS 
 APP="$OUT/dd/Build/Products/Release-iphoneos/HelloIOS.app"
 rm -rf "$OUT/pkg" && mkdir -p "$OUT/pkg/Payload"
 ditto "$APP" "$OUT/pkg/Payload/HelloIOS.app"
+# A loose resource, as real apps have: it is sealed by the signature (CodeResources files2), so step 5 can change it.
+printf 'HCG CI sealed resource\n' > "$OUT/pkg/Payload/HelloIOS.app/hcg-ci-resource.txt"
 (cd "$OUT/pkg" && zip -qry "$OUT/HelloIOS-unsigned.ipa" Payload)
 UNSIGNED="$OUT/HelloIOS-unsigned.ipa"
 SHA_BEFORE="$(shasum -a 256 "$UNSIGNED" | cut -d' ' -f1)"
@@ -170,7 +172,8 @@ endgroup
 
 # ---------------------------------------------------------------- 5. integrity
 group "5. A file changed after signing is detected (HCG and codesign agree)"
-RES="$(cd "$VAPP" && find . -type f ! -path './_CodeSignature/*' ! -name HelloIOS ! -name Info.plist ! -name PkgInfo ! -name embedded.mobileprovision | head -1)"
+RES="hcg-ci-resource.txt"
+grep -q "$RES" "$VAPP/_CodeSignature/CodeResources" || { echo "::error::$RES is not sealed in CodeResources"; exit 1; }
 echo "Tampering with $RES"
 printf 'changed after signing' >> "$VAPP/$RES"
 (cd "$OUT/verify" && rm -f "$OUT/HelloIOS-tampered.ipa" && zip -qry "$OUT/HelloIOS-tampered.ipa" Payload)

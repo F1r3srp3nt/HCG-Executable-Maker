@@ -127,6 +127,8 @@ public sealed partial class UnleashifyViewModel(
     [ObservableProperty] private string _incomingStore = "";
     [ObservableProperty] private string _approvedBy = "";
     [ObservableProperty] private bool _createPackageMetadata;
+    /// <summary>Prepare through HCG Repo's local-file route (staged for its Prepare packages workflow in CI) instead of importing here.</summary>
+    [ObservableProperty] private bool _prepareViaLocalFile;
     [ObservableProperty] private bool _needsPackageMetadata;
     [ObservableProperty] private string? _submissionId;
     [ObservableProperty] private StatusTag _shipTag = new("Not submitted", "neutral");
@@ -393,6 +395,15 @@ public sealed partial class UnleashifyViewModel(
         try
         {
             PreviewTag = new("Running", "info");
+            if (!File.Exists(Path.Combine(folder, "import-request.toml")) && File.Exists(Path.Combine(folder, SubmissionManifest.FileName)))
+            {
+                // A local build: HCG Repo's Release Manager reviews it in a throwaway incoming store (nothing is kept).
+                var p = await Task.Run(() => ShipToRepo.PreviewAsync(runner, python, HcgRepoCheckout.Trim(), folder, null, CancellationToken.None));
+                PreviewText = p.Output.Trim();
+                PreviewTag = p.State == "validated" ? new("Validated by HCG Repo · awaiting your approval", "success") : p.State == "refused" ? new("Refused by HCG Repo", "error") : new("Not run", "error");
+                Log += "\n[Preview] HCG Repo Release Manager: " + (p.State ?? "not run");
+                return;
+            }
             var genuine = OwnerApproval.Trim().Length > 0 && !Missing.Any(m => m.StartsWith("owner approval", StringComparison.Ordinal));
             var r = await Task.Run(() => HcgRepoImportPreview.RunAsync(runner, python, HcgRepoCheckout.Trim(), folder, hypotheticalApproval: !genuine, requireGenuineApproval: genuine, null, CancellationToken.None));
             PreviewText = r.Verdict + "\n\n" + r.Output.Trim();
@@ -490,13 +501,14 @@ public sealed partial class UnleashifyViewModel(
         var ok = await dialogs.ConfirmAsync("Prepare the Candidate import in your HCG Repo checkout?",
             $"HCG Repo imports the approved bytes of {id} into {HcgRepoCheckout.Trim()}: pool/, repo-lock.json, imports/{id}.toml and submissions/{id}/" +
             (CreatePackageMetadata ? $", and packages/{PackageId.Trim()}/ from the handoff's draft" : "") +
+            (PrepareViaLocalFile ? " — staged under imports/local/ with HCG Repo's local-file request, for its Prepare packages workflow (instead of pool/)" : "") +
             ".\n\nNothing is committed, pushed or published. Review the changes, commit them on a branch and open a pull request; publication is HCG Repo's separate, manual Publish workflow.", "Prepare");
         if (!ok) return;
         IsBusy = true;
         try
         {
             var r = await Task.Run(() => ShipToRepo.PrepareAsync(runner, python, HcgRepoCheckout.Trim(), id, OwnerApproval.Trim() is { Length: > 0 } words ? words : null,
-                CreatePackageMetadata, Incoming(), null, CancellationToken.None));
+                CreatePackageMetadata, Incoming(), null, CancellationToken.None, PrepareViaLocalFile));
             ShipText = r.Output.Trim();
             ShipTag = r.Succeeded ? new("Prepared in the checkout · commit on a branch · not published", "success") : new("Prepare refused", "error");
             if (r.Succeeded) NeedsPackageMetadata = false;
@@ -648,7 +660,7 @@ public sealed partial class UnleashifyViewModel(
             Missing.Clear();
             foreach (var m in handoff.Missing) Missing.Add(m);
             Stages[4].Tag = new("Done", "success");
-            HandoffTag = handoff.ImportRequestComplete ? new(prov.Local is null ? "Handoff exported · import request pinned" : "Handoff exported · local-file request (hcg-repo/)", "success") : new("Handoff exported · import request incomplete", "warning");
+            HandoffTag = handoff.ImportRequestComplete ? new(prov.Local is null ? "Handoff exported · import request pinned" : "Handoff exported · ready for Ship to Repo", "success") : new("Handoff exported · import request incomplete", "warning");
             PreviewTag = new("Not previewed", "neutral");
             PreviewText = "";
             IconStatus = File.Exists(Path.Combine(handoff.Folder, "icon.png"))

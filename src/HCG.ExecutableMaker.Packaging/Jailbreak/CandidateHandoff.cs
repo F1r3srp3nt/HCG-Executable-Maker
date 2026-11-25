@@ -195,36 +195,27 @@ public static class CandidateHandoff
         await Write("package.toml", PackageToml(spec, app, f, texts, issues)).ConfigureAwait(false);
 
         // Import request: only a pinned, immutable source can be imported.
-        var local = provenance.Local is not null;
-        var complete = local ? LocalBuild.IsPinned(provenance)
-            : provenance is { ImportRepository: { Length: > 0 }, CiRunId: not null, CiArtifact: { Length: > 0 }, ImportCommit.Length: 40 };
-        var request = ImportRequest(spec, provenance, f.Sha256, complete, debName);
-        await Write(complete ? "import-request.toml" : "import-request.INCOMPLETE.toml", request).ConfigureAwait(false);
-        if (!complete)
-            missing.Add(local
-                ? "import-request.toml: the local build is not pinned to its source; build from a pinned commit (repository OWNER/NAME, the full 40-character commit, no local changes)"
-                : "import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact");
-        if (local && complete)
-        {
-            // The files to add to an HCG Repo checkout, at their paths there (the .deb is the exact bytes validated above).
-            var repoDir = Path.Combine(folder, "hcg-repo");
-            var localDir = Path.Combine(repoDir, "imports", "local");
-            var pkgDir = Path.Combine(repoDir, "packages", spec.PackageId);
-            Directory.CreateDirectory(localDir);
-            Directory.CreateDirectory(pkgDir);
-            File.Copy(dest, Path.Combine(localDir, debName), overwrite: true);
-            File.Copy(Path.Combine(folder, "import-request.toml"), Path.Combine(repoDir, "imports", LocalBuild.RequestFileName(spec)), overwrite: true);
-            foreach (var n in new[] { "package.toml", "CHANGELOG.md", "icon.png" })
-                if (File.Exists(Path.Combine(folder, n))) File.Copy(Path.Combine(folder, n), Path.Combine(pkgDir, n), overwrite: true);
-            files.Add($"hcg-repo/imports/{LocalBuild.RequestFileName(spec)}");
-            files.Add($"hcg-repo/{LocalBuild.LocalImportsDir}/{debName}");
-            files.AddRange(new[] { "package.toml", "CHANGELOG.md", "icon.png" }.Where(n => File.Exists(Path.Combine(pkgDir, n))).Select(n => $"hcg-repo/packages/{spec.PackageId}/{n}"));
-        }
-
         // HCG Repo Distribution v2 submission manifest (hcg.repo.artifact-submission v1): only for a pinned, clean source.
         var manifest = SubmissionManifest.Build(spec, app, validation, provenance, context, now, debName, lifecycle);
         if (manifest.Complete) await Write(SubmissionManifest.FileName, SubmissionManifest.Serialize(manifest.Manifest!)).ConfigureAwait(false);
         else missing.Add("submission.json (HCG Repo Distribution v2): " + string.Join("; ", manifest.Problems));
+
+        // Import request. A CI build is pinned by its run and artifact (github-artifact). A local build has none: it goes
+        // through HCG Repo's Release Manager (Ship to Repo: submit → approve → prepare, optionally --via local-file, which
+        // writes HCG Repo's own local-file request), so Maker writes no request of its own for it.
+        var local = provenance.Local is not null;
+        bool complete;
+        if (local)
+        {
+            complete = manifest.Complete;
+            if (!complete) missing.Add("Ship to Repo: the local build is not pinned to its source; build from a pinned commit (repository OWNER/NAME, the full 40-character commit, no local changes)");
+        }
+        else
+        {
+            complete = provenance is { ImportRepository: { Length: > 0 }, CiRunId: not null, CiArtifact: { Length: > 0 }, ImportCommit.Length: 40 };
+            await Write(complete ? "import-request.toml" : "import-request.INCOMPLETE.toml", ImportRequest(spec, provenance, f.Sha256, complete, debName)).ConfigureAwait(false);
+            if (!complete) missing.Add("import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact, or use Ship to Repo");
+        }
 
         await Write("DEVICE-TEST.md", DeviceTest(spec, app, f, context, debName)).ConfigureAwait(false);
         await Write("README.md", Readme(spec, f, files, complete, missing, context, provenance.Local is not null)).ConfigureAwait(false);
@@ -296,28 +287,6 @@ public static class CandidateHandoff
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {spec.Name} {spec.Version}, rootless. Exported by HCG Executable Maker.");
-        if (p.Local is { } lb)
-        {
-            string Q(string? v) => $"\"{TomlEscape(v ?? "")}\"";
-            if (!complete)
-                sb.AppendLine("# INCOMPLETE: not importable yet. The local build is not pinned to a source repository and a full, clean commit.");
-            sb.AppendLine("# Built on the owner's computer (no CI run). HCG Repo receives only this .deb, the source's name and commit;");
-            sb.AppendLine("# the source stays private. Commit the .deb at `path` together with this file (see hcg-repo/ in the handoff).");
-            sb.AppendLine().AppendLine("[request]");
-            sb.AppendLine($"package = \"{spec.PackageId}\"").AppendLine($"version = \"{spec.Version}\"").AppendLine($"architecture = \"{RootlessAppPackager.Architecture}\"").AppendLine("channel = \"candidate\"");
-            sb.AppendLine().AppendLine("[source]").AppendLine("kind = \"local-file\"");
-            sb.AppendLine($"path = {Q($"{LocalBuild.LocalImportsDir}/{debName ?? $"{spec.PackageId}_{spec.Version}_{RootlessAppPackager.Architecture}.deb"}")}");
-            sb.AppendLine($"sha256 = \"{sha256}\"");
-            sb.AppendLine(p.Repository is { Length: > 0 } repo ? $"repository = {Q(repo)}" : "# repository = (OWNER/NAME of the app's source)");
-            sb.AppendLine(p.Commit is { Length: 40 } commit ? $"commit = \"{commit}\"" : "# commit = (the full 40-character commit the package was built from)");
-            sb.AppendLine($"built_by = {Q(lb.BuiltBy)}");
-            if (lb.Toolchain is { Length: > 0 } tc) sb.AppendLine($"toolchain = {Q(tc)}");
-            sb.AppendLine($"built_at = \"{lb.BuiltAt.ToUniversalTime():yyyy-MM-ddTHH:mm:ssZ}\"");
-            if (lb.Host is { Length: > 0 } host) sb.AppendLine($"host = {Q(host)}");
-            sb.AppendLine($"source_visibility = {Q(lb.SourceVisibility)}");
-            if (lb.Validation is { Length: > 0 } v) sb.AppendLine($"validation = {Q(v)}");
-            return sb.ToString();
-        }
         if (!complete)
             sb.AppendLine("# INCOMPLETE: not importable yet. The .deb was not produced by a CI run with an uploaded artifact, so there is no immutable")
               .AppendLine("# source to pin. Build it in CI (or attach it to a tagged release), then fill in the source and rename this file.");
@@ -462,9 +431,8 @@ public static class CandidateHandoff
         sb.Append("Files:\n");
         foreach (var file in files.Append("README.md").Distinct()) sb.Append("- `").Append(file).Append("`\n");
         sb.Append(complete && local
-            ? "\nTo submit (local build): copy the contents of `hcg-repo/` onto an HCG Repo checkout (it holds `imports/" + LocalBuild.RequestFileName(spec) + "`, the .deb under `imports/local/` and `packages/" + spec.PackageId + "/`), " +
-              "merge `package.toml` with an existing one if HCG Repo already has the package, push a branch; **Prepare packages** checks the committed .deb's SHA-256 against the request. " +
-              "Nothing from the app's source is included. Publishing stays a separate, manual step after the owner approves this exact SHA-256.\n"
+            ? "\nTo submit (local build): use **Ship to Repo** (Unleashify, or `--ship-to-repo submit|approve|prepare`) with your HCG Repo checkout. HCG Repo's Release Manager validates `" + SubmissionManifest.FileName + "` and the .deb, records your approval of the exact SHA-256, then prepares the Candidate import (`--via local-file` stages it for **Prepare packages** in CI). " +
+              "Nothing from the app's source is included. Publishing stays a separate, manual step.\n"
             : complete
             ? "\nTo submit: copy `import-request.toml` to HCG Repo `imports/`, `package.toml`, `CHANGELOG.md` and `icon.png` to `packages/" + spec.PackageId + "/`, push a branch; **Prepare packages** fetches and checks the pinned artifact.\n"
             : "\n**Not importable yet:** see `import-request.INCOMPLETE.toml`.\n");

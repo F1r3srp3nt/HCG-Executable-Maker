@@ -277,6 +277,8 @@
               <TextBox Text="{Binding IncomingStore}" PlaceholderText="Incoming store (optional; HCG Repo's default ~/.local/share/hcg-repo/incoming, outside any checkout)" />
               <CheckBox IsChecked="{Binding CreatePackageMetadata}" IsVisible="{Binding NeedsPackageMetadata}"
                         Content="New package: create packages/&lt;id&gt;/ in HCG Repo from the handoff's draft (package.toml, CHANGELOG.md, icon.png)" />
+              <CheckBox IsChecked="{Binding PrepareViaLocalFile}"
+                        Content="Prepare via local-file: stage the approved .deb under imports/local/ for HCG Repo's Prepare packages workflow, instead of importing into pool/ here" />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Content="Submit" Command="{Binding SubmitToRepoCommand}" />
                 <Button Classes="ghost" Content="Refresh review" Command="{Binding RefreshReviewCommand}" />

@@ -66,12 +66,33 @@ public static partial class ShipToRepo
             ["approve", id, "--sha256", approvedSha256.Trim().ToLowerInvariant(), "--by", by.Trim(), "--record", record.Trim()], null, ct).ConfigureAwait(false) with { SubmissionId = id };
     }
 
-    public static async Task<Step> PrepareAsync(IProcessRunner runner, string python, string checkout, string id, string? freeDemoApproval, bool createPackageMetadata, string? incoming, Action<string>? log, CancellationToken ct)
+    /// <param name="viaLocalFile">
+    /// false: HCG Repo imports into the checkout's pool/ here. true: HCG Repo stages the approved bytes under imports/local/
+    /// with its own local-file request, so its Prepare packages workflow imports them in CI.
+    /// </param>
+    public static async Task<Step> PrepareAsync(IProcessRunner runner, string python, string checkout, string id, string? freeDemoApproval, bool createPackageMetadata, string? incoming, Action<string>? log, CancellationToken ct,
+        bool viaLocalFile = false)
     {
         List<string> args = ["prepare", id];
+        if (viaLocalFile) args.AddRange(["--via", "local-file"]);
         if (freeDemoApproval is { Length: > 0 }) args.AddRange(["--free-demo-approval", freeDemoApproval.Trim()]);
         if (createPackageMetadata) args.Add("--create-package-metadata");
         return await RunAsync(Action.Prepare, runner, python, checkout, incoming, args, log, ct).ConfigureAwait(false) with { SubmissionId = id };
+    }
+
+    /// <summary>
+    /// Import preview: HCG Repo's full review of the handoff (manifest vs package, static checks, secrets, scripts, simulated
+    /// dpkg lifecycle, repository rules) in a throwaway incoming store that is deleted afterwards. Nothing is kept, approved,
+    /// imported or published; the owner's real incoming store is not touched.
+    /// </summary>
+    public static async Task<Step> PreviewAsync(IProcessRunner runner, string python, string checkout, string handoff, Action<string>? log, CancellationToken ct)
+    {
+        var store = Path.Combine(Path.GetTempPath(), "hcg-ship-preview-" + Guid.NewGuid().ToString("N")[..10]);
+        try { return await SubmitAsync(runner, python, checkout, handoff, store, log, ct).ConfigureAwait(false); }
+        finally
+        {
+            try { if (Directory.Exists(store)) Directory.Delete(store, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     /// <summary>Whether HCG Repo already has metadata for the package (otherwise Prepare must create it from the handoff's draft).</summary>

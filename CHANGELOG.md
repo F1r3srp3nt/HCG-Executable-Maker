@@ -34,7 +34,8 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
     recording `uicache`.
   - **Local provenance:** built by, toolchain read from the app's `DTXcode`, time, host label without computer or user
     names, source visibility, validation. No CI run or artifact is recorded.
-  - **HCG Repo `local-file` import request** with an `hcg-repo/` folder laid out for an HCG Repo branch.
+  - **HCG Repo handoff** through Ship to Repo (HCG Repo's Release Manager; `--via local-file` stages the .deb for
+    Prepare packages). Maker writes no import request of its own for a local build.
   - **Owner approval bound to the exact SHA-256.**
   - **HCG Repo import preview:** HCG Repo's own importer, dry run, on a throwaway copy of your checkout.
   - The same in the CLI: `--rootless-deb … --local --source-visibility … [--approved-sha256 …] [--hcg-repo …]`.

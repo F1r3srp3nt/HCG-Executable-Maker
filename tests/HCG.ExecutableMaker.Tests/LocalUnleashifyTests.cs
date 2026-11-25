@@ -39,50 +39,43 @@ public sealed class LocalUnleashifyTests : IDisposable
             "/usr/local/bin/ldid", "17.4"), null, CancellationToken.None);
 
     [Fact]
-    public async Task A_local_build_exports_a_local_file_request_and_the_hcg_repo_layout_without_any_ci_claim()
+    public async Task A_local_build_is_handed_to_HCG_Repos_Release_Manager_without_any_ci_claim()
     {
         var o = await Run(Local());
         Assert.True(o.Succeeded, o.Failure + "\n" + string.Join("\n", o.Log));
         var h = o.Handoff!;
         Assert.True(h.ImportRequestComplete, string.Join("\n", h.Missing));
-        var sha = o.Validation!.Facts.Sha256;
-        var req = File.ReadAllText(Path.Combine(h.Folder, "import-request.toml"));
-        Assert.Contains("kind = \"local-file\"", req);
-        Assert.Contains("path = \"imports/local/com.hakmicapitalgroup.signalcontractor_0.1.0~beta1_iphoneos-arm64.deb\"", req);
-        Assert.Contains($"sha256 = \"{sha}\"", req);
-        Assert.Contains($"commit = \"{Commit}\"", req);
-        Assert.Contains("repository = \"F1r3srp3nt/HCG-Signal-Contractor\"", req);
-        Assert.Contains("toolchain = \"Xcode 27.2 (27C5040a) · iphoneos27.2\"", req);   // measured from the app, not typed
-        Assert.Contains("source_visibility = \"private\"", req);
-        Assert.Contains("validation = \"HCG Executable Maker rootless validator: passed", req);
-        Assert.Contains("lifecycle passed", req);
-        Assert.DoesNotContain("run_id", req);
-        Assert.DoesNotContain("artifact", req);
-
-        // The files to copy onto an HCG Repo checkout, at their paths there; the .deb is the validated bytes.
-        var repo = Path.Combine(h.Folder, "hcg-repo");
-        Assert.Equal(File.ReadAllBytes(o.Package!.DebPath), File.ReadAllBytes(Path.Combine(repo, "imports", "local", "com.hakmicapitalgroup.signalcontractor_0.1.0~beta1_iphoneos-arm64.deb")));
-        Assert.Equal(req, File.ReadAllText(Path.Combine(repo, "imports", "com.hakmicapitalgroup.signalcontractor-0.1.0-beta1.toml")));
-        Assert.True(File.Exists(Path.Combine(repo, "packages", "com.hakmicapitalgroup.signalcontractor", "package.toml")));
+        // HCG Repo's Release Manager writes the local-file request itself (release prepare --via local-file); Maker writes none.
+        Assert.False(File.Exists(Path.Combine(h.Folder, "import-request.toml")));
+        Assert.False(Directory.Exists(Path.Combine(h.Folder, "hcg-repo")));
+        var m = File.ReadAllText(Path.Combine(h.Folder, SubmissionManifest.FileName));
+        Assert.Contains("\"provider\": \"executable-maker-local\"", m);
+        Assert.Contains($"\"commit\": \"{Commit}\"", m);
+        Assert.Contains("Xcode 27.2 (27C5040a) · iphoneos27.2", m);       // measured from the app, not typed
+        Assert.Contains("lifecycle passed", m);
+        Assert.DoesNotContain("runId", m);
+        Assert.Contains("Ship to Repo", File.ReadAllText(Path.Combine(h.Folder, "README.md")));
         var prov = File.ReadAllText(Path.Combine(h.Folder, "provenance.json"));
         Assert.Contains("\"local_build\"", prov);
         Assert.Contains("there is no run ID or artifact", prov);
         Assert.Contains("\"ci_run_id\": null", prov);
+        Assert.Contains("\"source_visibility\": \"private\"", prov);
         Assert.Contains("built locally with Xcode 27.2", File.ReadAllText(Path.Combine(h.Folder, "CHANGELOG.md")));
         // Nothing from the source tree is in the handoff.
         Assert.DoesNotContain(Directory.EnumerateFiles(h.Folder, "*", SearchOption.AllDirectories), f => f.EndsWith(".swift", StringComparison.Ordinal) || f.Contains(".xcodeproj"));
     }
 
     [Fact]
-    public async Task A_local_build_without_a_pinned_clean_commit_is_not_importable()
+    public async Task A_local_build_without_a_pinned_clean_commit_is_not_submittable()
     {
         var unpinned = await Run(Local(commit: "a5b3c23"), name: "short");
         Assert.False(unpinned.Handoff!.ImportRequestComplete);
-        Assert.True(File.Exists(Path.Combine(unpinned.Handoff.Folder, "import-request.INCOMPLETE.toml")));
-        Assert.False(Directory.Exists(Path.Combine(unpinned.Handoff.Folder, "hcg-repo")));
+        Assert.False(File.Exists(Path.Combine(unpinned.Handoff.Folder, SubmissionManifest.FileName)));
         Assert.Contains(unpinned.Handoff.Missing, m => m.Contains("not pinned to its source"));
+        Assert.Contains(unpinned.Handoff.Missing, m => m.StartsWith("submission.json") && m.Contains("40-character"));
         var dirty = await Run(Local(dirty: true), name: "dirty");
         Assert.False(dirty.Handoff!.ImportRequestComplete);
+        Assert.Contains(dirty.Handoff.Missing, m => m.StartsWith("submission.json") && m.Contains("dirty"));
     }
 
     [Fact]
@@ -189,21 +182,19 @@ public sealed class LocalUnleashifyTests : IDisposable
         Assert.False(option.Succeeded);
     }
 
-    /// <summary>With an HCG Repo checkout (HCG_REPO_CHECKOUT, local-file support), HCG Repo's own importer judges the exported bytes.</summary>
+    /// <summary>With an HCG Repo checkout (HCG_REPO_MAIN_CHECKOUT), HCG Repo's Release Manager reviews the handoff in a throwaway store.</summary>
     [Fact]
-    public async Task HCG_Repos_importer_accepts_the_local_file_request_and_waits_only_for_the_approval()
+    public async Task The_import_preview_is_HCG_Repos_own_review_and_keeps_nothing()
     {
-        var checkout = Environment.GetEnvironmentVariable("HCG_REPO_CHECKOUT");
+        var checkout = Environment.GetEnvironmentVariable("HCG_REPO_MAIN_CHECKOUT");
         var python = new HCG.ExecutableMaker.Core.ExecutableLocator().Find("python3");
-        if (checkout is null || python is null) return; // runs in CI's Unleashify job and wherever a checkout is given
+        if (checkout is null || ShipToRepo.CheckoutProblem(checkout) is not null || python is null) return;
+        var before = Directory.EnumerateFileSystemEntries(Path.GetTempPath(), "hcg-ship-preview-*").Count();
         var o = await Run(Local(), name: "preview");
-        var p = await HcgRepoImportPreview.RunAsync(new ProcessRunner(), python, checkout, o.Handoff!.Folder, hypotheticalApproval: true, requireGenuineApproval: false, null, CancellationToken.None);
-        Assert.True(p.Verdict.StartsWith("BYTES VALIDATED, NOT YET IMPORTABLE", StringComparison.Ordinal), p.Output);
-        Assert.Contains("local-file imports/local/", p.Output);
-
-        var sha = o.Validation!.Facts.Sha256;
-        var approved = await Run(Local(), approval: "approved by the owner on 25 Nov 2026: 'test'", approvedSha: sha, name: "preview-approved");
-        var q = await HcgRepoImportPreview.RunAsync(new ProcessRunner(), python, checkout, approved.Handoff!.Folder, hypotheticalApproval: false, requireGenuineApproval: true, null, CancellationToken.None);
-        Assert.True(q.Verdict.StartsWith("VALIDATED", StringComparison.Ordinal), q.Output);
+        var p = await ShipToRepo.PreviewAsync(new ProcessRunner(), python, checkout, o.Handoff!.Folder, null, CancellationToken.None);
+        Assert.Equal("validated", p.State);
+        Assert.Contains($"SHA-256      {o.Validation!.Facts.Sha256}", p.Output);
+        Assert.Contains("Simulated lifecycle       PASSED", p.Output);
+        Assert.Equal(before, Directory.EnumerateFileSystemEntries(Path.GetTempPath(), "hcg-ship-preview-*").Count());   // the throwaway store is gone
     }
 }

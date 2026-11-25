@@ -28,8 +28,9 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
     public static TheoryData<string> Products => new() { "sentinel", "mail", "signal" };
     private static Product Get(string key) => key switch { "sentinel" => Sentinel, "mail" => MailUnleashed, _ => SignalContractor };
 
-    private async Task<RootlessAppWorkflow.Outcome> Build(Product p, string? artwork = null, bool local = true, bool appIcon = true)
+    private async Task<RootlessAppWorkflow.Outcome> Build(Product p, string? artwork = null, bool local = true, bool appIcon = true, string? version = null)
     {
+        if (version is not null) p = p with { Version = version };
         var dir = _t.Combine(p.Key + "-" + Guid.NewGuid().ToString("N")[..6]);
         var app = MachOFixture.App(Path.Combine(dir, "src"), minos: p.MinOs, framework: p.Key == "sentinel", exe: p.Exe, bundleId: p.BundleId, name: p.Name,
             icon: p.CgbiIcon ? PngFixtures.CgBI(180, 180) : PngFixtures.Standard(180));
@@ -107,7 +108,6 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
         var prov = JsonNode.Parse(File.ReadAllText(Path.Combine(o.Handoff.Folder, "provenance.json")))!["icon"]!;
         Assert.Equal(p.CgbiIcon ? "converted from Apple CgBI to a standard RGBA PNG (180×180) and verified with a standard decoder" : "standard PNG (180×180), used unchanged",
             prov["detail"]!.GetValue<string>());
-        Assert.Equal(icon, File.ReadAllBytes(Path.Combine(o.Handoff.Folder, "hcg-repo", "packages", p.PackageId, "icon.png")));   // the same file goes to HCG Repo
         // The package itself is unchanged: its app still carries the original icon bytes as built.
         Assert.True(o.Validation!.Passed);
     }
@@ -269,9 +269,10 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
         CopyDir(main, repo);                                    // never the real checkout
         var incoming = _t.Combine("incoming");
         var runner = new ProcessRunner();
-        var o = await Build(MailUnleashed);
+        var p = SignalContractor;                               // not in HCG Repo yet: a new package
+        var o = await Build(p);
         var sha = o.Validation!.Facts.Sha256;
-        var id = ShipToRepo.SubmissionId(MailUnleashed.PackageId, MailUnleashed.Version, "iphoneos-arm64", sha);
+        var id = ShipToRepo.SubmissionId(p.PackageId, p.Version, "iphoneos-arm64", sha);
 
         var submit = await ShipToRepo.SubmitAsync(runner, python, repo, o.Handoff!.Folder, incoming, null, CancellationToken.None);
         Assert.True(submit.Succeeded, submit.Output);
@@ -287,7 +288,7 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
         var nobody = await ShipToRepo.ApproveAsync(runner, python, repo, id, sha, " ", "approved", incoming, CancellationToken.None);
         Assert.False(nobody.Succeeded);
 
-        Assert.False(ShipToRepo.HasPackageMetadata(repo, MailUnleashed.PackageId));
+        Assert.False(ShipToRepo.HasPackageMetadata(repo, p.PackageId));
         var early = await ShipToRepo.PrepareAsync(runner, python, repo, id, null, true, incoming, null, CancellationToken.None);
         Assert.False(early.Succeeded);                          // HCG Repo refuses: not approved
         var approve = await ShipToRepo.ApproveAsync(runner, python, repo, id, sha.ToUpperInvariant(), "Owner (test)", "I approve these exact bytes for Candidate (test).", incoming, CancellationToken.None);
@@ -298,10 +299,42 @@ public sealed class UnleashifyHandoffRegressionTests : IDisposable
         Assert.True(prepare.Succeeded, prepare.Output);
         Assert.True(File.Exists(Path.Combine(repo, "imports", id + ".toml")));
         Assert.True(File.Exists(Path.Combine(repo, "submissions", id, "submission.json")));
-        Assert.True(ShipToRepo.HasPackageMetadata(repo, MailUnleashed.PackageId));
+        Assert.True(ShipToRepo.HasPackageMetadata(repo, p.PackageId));
         Assert.Contains(Directory.EnumerateFiles(Path.Combine(repo, "pool"), "*.deb", SearchOption.AllDirectories),
             f => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f))) == sha);
-        Assert.Null(PngIcon.ValidateStandard(File.ReadAllBytes(Path.Combine(repo, "packages", MailUnleashed.PackageId, "icon.png"))));
+        Assert.Null(PngIcon.ValidateStandard(File.ReadAllBytes(Path.Combine(repo, "packages", p.PackageId, "icon.png"))));
         Assert.Contains("kind = \"local-submission\"", File.ReadAllText(Path.Combine(repo, "imports", id + ".toml")));
+    }
+
+    [Fact]
+    public async Task Ship_to_Repo_can_stage_the_approved_bytes_for_HCG_Repos_Prepare_packages_via_local_file()
+    {
+        if (RepoMain() is not { } main || new HCG.ExecutableMaker.Core.ExecutableLocator().Find("python3") is not { } python) return;
+        var repo = _t.Combine("hcg-repo-lf");
+        CopyDir(main, repo);
+        var incoming = _t.Combine("incoming-lf");
+        var runner = new ProcessRunner();
+        // A test-only version of a product (HCG Mail Unleashed's real 0.1.0~beta1 may already be in HCG Repo; released bytes are never replaced).
+        var o = await Build(MailUnleashed, version: "0.1.0~beta1.test1");
+        var sha = o.Validation!.Facts.Sha256;
+        var submit = await ShipToRepo.SubmitAsync(runner, python, repo, o.Handoff!.Folder, incoming, null, CancellationToken.None);
+        Assert.Equal("validated", submit.State);
+        var id = submit.SubmissionId!;
+        Assert.True((await ShipToRepo.ApproveAsync(runner, python, repo, id, sha, "Owner (test)", "Approved (test).", incoming, CancellationToken.None)).Succeeded);
+        var prepare = await ShipToRepo.PrepareAsync(runner, python, repo, id, "free Candidate demo approved by the owner (test)", !ShipToRepo.HasPackageMetadata(repo, MailUnleashed.PackageId),
+            incoming, null, CancellationToken.None, viaLocalFile: true);
+        Assert.True(prepare.Succeeded, prepare.Output);
+        var staged = Path.Combine(repo, "imports", "local", $"{MailUnleashed.PackageId}_0.1.0~beta1.test1_iphoneos-arm64.deb");
+        Assert.Equal(sha, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(staged))));
+        var request = Path.Combine(repo, "imports", id + ".toml");
+        Assert.Contains("kind = \"local-file\"", File.ReadAllText(request));
+        Assert.DoesNotContain(Directory.EnumerateFiles(Path.Combine(repo, "pool"), "*.deb", SearchOption.AllDirectories),
+            f => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(f))) == sha);   // staged, not imported here
+        // HCG Repo's own loader accepts the request it wrote.
+        var script = $"import sys; sys.path.insert(0, {System.Text.Json.JsonSerializer.Serialize(Path.Combine(repo, "tools"))}); from pathlib import Path; " +
+                     $"from hcgrepo.importer import load_request; r = load_request(Path({System.Text.Json.JsonSerializer.Serialize(request)})); print(r['source']['kind'])";
+        var (r, stdout, stderr) = await runner.CaptureAsync(new ProcessSpec { Executable = python, Arguments = ["-I", "-c", script] }, CancellationToken.None);
+        Assert.True(r.Succeeded, stderr);
+        Assert.Equal("local-file", stdout.Trim());
     }
 }

@@ -22,7 +22,6 @@ public sealed record LocalBuildInfo(string BuiltBy, string? Toolchain, DateTimeO
 
 public static partial class LocalBuild
 {
-    public const string LocalImportsDir = "imports/local";
 
     /// <summary>"Xcode 27.2 (27C5040a) · iphoneos27.2" from the build's DTXcode/DTXcodeBuild/DTSDKName, or null when absent.</summary>
     public static string? ToolchainFrom(IosAppBundle app)
@@ -41,7 +40,6 @@ public static partial class LocalBuild
     /// <summary>The operating system and architecture of this computer — deliberately no computer, user or network name.</summary>
     public static string DefaultHostLabel() => $"{RuntimeInformation.OSDescription.Trim()} · {RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant()}";
 
-    public static string RequestFileName(RootlessAppPackageSpec spec) => $"{spec.PackageId}-{spec.Version.Replace('~', '-').Replace(':', '-')}.toml";
 
     /// <summary>Whether the local build is pinned well enough for HCG Repo: a named repository, a full commit and a clean source.</summary>
     public static bool IsPinned(PackageProvenance p) => p.Local is not null && p.Repository is { Length: > 0 } && p.Commit is { Length: 40 } c && c.All(Uri.IsHexDigit) && p.SourceDirty != true;

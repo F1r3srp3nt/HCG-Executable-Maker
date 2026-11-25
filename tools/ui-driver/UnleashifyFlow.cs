@@ -173,11 +173,14 @@ internal static partial class Program
         }
         if (page.IsLocalBuild)
         {
-            var req = File.ReadAllText(Path.Combine(page.HandoffFolder!, File.Exists(Path.Combine(page.HandoffFolder!, "import-request.toml")) ? "import-request.toml" : "import-request.INCOMPLETE.toml"));
-            Log("Import request:\n" + req);
-            Check(req.Contains("kind = \"local-file\"", StringComparison.Ordinal), "A local build exports a local-file import request");
-            Check(!req.Contains("run_id", StringComparison.Ordinal) && !req.Contains("artifact", StringComparison.Ordinal), "No CI run or artifact is claimed for a local build");
-            Check(page.HandoffTag.Tone == "success", $"The local-file request is pinned ({page.HandoffTag.Text})");
+            var manifest = Path.Combine(page.HandoffFolder!, "submission.json");
+            Check(File.Exists(manifest), "A local build exports HCG Repo's Distribution v2 submission.json");
+            var m = File.Exists(manifest) ? File.ReadAllText(manifest) : "";
+            Log("submission.json:\n" + m);
+            Check(m.Contains("\"provider\": \"executable-maker-local\"", StringComparison.Ordinal), "The provider is executable-maker-local");
+            Check(!m.Contains("\"runId\"", StringComparison.Ordinal) && !m.Contains("\"artifactName\"", StringComparison.Ordinal), "No CI run or artifact is claimed for a local build");
+            Check(!File.Exists(Path.Combine(page.HandoffFolder!, "import-request.toml")), "No hand-written import request: HCG Repo's Release Manager writes it (Ship to Repo)");
+            Check(page.HandoffTag.Tone == "success", $"The local build is ready for Ship to Repo ({page.HandoffTag.Text})");
             Log("Toolchain: " + page.ToolchainText);
         }
         if (Arg("unleashify-hcg-repo") is { } hcgRepo)

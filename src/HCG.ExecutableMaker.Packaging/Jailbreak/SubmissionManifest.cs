@@ -144,5 +144,7 @@ public static partial class SubmissionManifest
         return cur;
     }
 
-    public static string Serialize(JsonObject m) => m.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n";
+    /// <summary>Readable UTF-8 JSON (non-ASCII text such as "·" or "×" is written as is; it is a file, never embedded in HTML).</summary>
+    public static string Serialize(JsonObject m) =>
+        m.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + "\n";
 }

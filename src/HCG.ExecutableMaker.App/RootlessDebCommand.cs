@@ -32,7 +32,7 @@ internal static class RootlessDebCommand
           HCGExecutableMaker --ship-to-repo submit  --hcg-repo <checkout> --handoff <folder> [--incoming <store>]
           HCGExecutableMaker --ship-to-repo show    --hcg-repo <checkout> --handoff <folder> | --id <submission> [--incoming <store>]
           HCGExecutableMaker --ship-to-repo approve --hcg-repo <checkout> --handoff <folder> --approved-sha256 <sha> --by "<name>" --record "<approval, verbatim>"
-          HCGExecutableMaker --ship-to-repo prepare --hcg-repo <checkout> --handoff <folder> [--free-demo-approval "<owner's words>"] [--create-package-metadata]
+          HCGExecutableMaker --ship-to-repo prepare --hcg-repo <checkout> --handoff <folder> [--free-demo-approval "<owner's words>"] [--create-package-metadata] [--via local-file]
               (HCG Repo's Release Manager; nothing is committed, pushed or published)
           HCGExecutableMaker --rootless-deb-validate <file.deb> [--package <id>] [--package-version <v>] [--bundle-id <id>] [--device-ios <x.y>] [--published <version>=<sha256>]...
         """;
@@ -63,7 +63,7 @@ internal static class RootlessDebCommand
             "submit" when handoff is not null => ShipToRepo.SubmitAsync(runner, python, checkout, handoff, incoming, Console.WriteLine, CancellationToken.None).GetAwaiter().GetResult(),
             "show" when id is not null => ShipToRepo.ShowAsync(runner, python, checkout, id, incoming, CancellationToken.None).GetAwaiter().GetResult(),
             "approve" when id is not null => ShipToRepo.ApproveAsync(runner, python, checkout, id, Arg("--approved-sha256") ?? "", Arg("--by") ?? "", Arg("--record") ?? "", incoming, CancellationToken.None).GetAwaiter().GetResult(),
-            "prepare" when id is not null => ShipToRepo.PrepareAsync(runner, python, checkout, id, Arg("--free-demo-approval"), args.Contains("--create-package-metadata"), incoming, Console.WriteLine, CancellationToken.None).GetAwaiter().GetResult(),
+            "prepare" when id is not null => ShipToRepo.PrepareAsync(runner, python, checkout, id, Arg("--free-demo-approval"), args.Contains("--create-package-metadata"), incoming, Console.WriteLine, CancellationToken.None, viaLocalFile: Arg("--via") == "local-file").GetAwaiter().GetResult(),
             _ => new ShipToRepo.Step(ShipToRepo.Action.Show, false, 2, "Name the handoff (--handoff) or the submission (--id).", null, null, null),
         };
         if (action is "show" or "approve") Console.WriteLine(step.Output.Trim());
@@ -134,12 +134,19 @@ internal static class RootlessDebCommand
             if (outcome.Provenance?.Local is { } lb) Console.WriteLine($"Local build: {lb.Toolchain ?? "toolchain not recorded in the app"} · {lb.Host} · {lb.SourceVisibility} source · no CI run or artifact");
             if (outcome.Handoff is { } h)
             {
-                Console.WriteLine($"Candidate handoff: {h.Folder} ({(h.ImportRequestComplete ? local ? "local-file request pinned; HCG Repo files in hcg-repo/" : "import request pinned" : "import request INCOMPLETE: source not pinned")})");
+                Console.WriteLine($"Candidate handoff: {h.Folder} ({(h.ImportRequestComplete ? local ? "submission.json ready for Ship to Repo" : "import request pinned" : "import request INCOMPLETE: source not pinned")})");
                 foreach (var m in h.Missing) Console.WriteLine("  Missing: " + m);
                 if (Arg("--hcg-repo") is { } checkout)
                 {
                     var python = new ExecutableLocator().Find("python3");
                     if (python is null) { Console.WriteLine("Import preview: python3 not found"); return 7; }
+                    if (local)
+                    {
+                        // A local build: HCG Repo's Release Manager reviews it in a throwaway incoming store (nothing is kept).
+                        var review = ShipToRepo.PreviewAsync(services.GetRequiredService<IProcessRunner>(), python, Path.GetFullPath(checkout), h.Folder, Console.WriteLine, CancellationToken.None).GetAwaiter().GetResult();
+                        Console.WriteLine("Import preview: HCG Repo Release Manager review: " + (review.State ?? "not run").ToUpperInvariant());
+                        return review.State == "validated" ? 0 : 7;
+                    }
                     var genuine = texts.OwnerApproval is not null && !h.Missing.Any(m => m.StartsWith("owner approval", StringComparison.Ordinal));
                     var preview = HcgRepoImportPreview.RunAsync(services.GetRequiredService<IProcessRunner>(), python, Path.GetFullPath(checkout), h.Folder,
                         hypotheticalApproval: !genuine, requireGenuineApproval: genuine, Console.WriteLine, CancellationToken.None).GetAwaiter().GetResult();
