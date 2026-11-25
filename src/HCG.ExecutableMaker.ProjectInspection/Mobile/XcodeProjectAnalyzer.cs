@@ -153,7 +153,7 @@ public static partial class XcodeProjectAnalyzer
         return null;
     }
 
-    private static IEnumerable<string> WorkspaceReferences(SourceIndex index, string workspace)
+    internal static IEnumerable<string> WorkspaceReferences(SourceIndex index, string workspace)
     {
         var text = AndroidGradleAnalyzer.Read(index, workspace + "/contents.xcworkspacedata");
         if (text.Length == 0) return [];

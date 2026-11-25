@@ -846,6 +846,128 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  xcode-macos:
+    name: Native macOS app — Xcode (MotionWallpaper ZIP → .app/ZIP/DMG through the wizard; build and runtime checks)
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/xcode-out
+      MW_COMMIT: ab038f7598f3542e6ba6b5a39afc46034997f007
+      MW_UPLOAD_SHA256: 58d00ecea44b69745a3f66200d4fae1ae612078a1562ceda44986a1f68eafcbc
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Mac, Xcode and macOS SDK on this runner; choose the newest Xcode 26 for HCG (MotionWallpaper needs the macOS 26 SDK)
+        run: |
+          sw_vers; uname -m
+          ls -d /Applications/Xcode*.app
+          x="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          echo "HCG_XCODE=${x:-/Applications/Xcode.app}" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="${x:-/Applications/Xcode.app}/Contents/Developer" xcodebuild -version
+          DEVELOPER_DIR="${x:-/Applications/Xcode.app}/Contents/Developer" xcrun --sdk macosx --show-sdk-version
+
+      - name: MotionWallpaper source at the pinned commit, checked file by file against the uploaded ZIP's contents
+        run: |
+          mkdir -p "$OUT/screens" "$OUT/src-check"
+          curl -fsSL -o "$OUT/MotionWallpaper-master.zip" "https://github.com/krol44/MotionWallpaper/archive/$MW_COMMIT.zip"
+          echo "Downloaded archive SHA-256: $(shasum -a 256 "$OUT/MotionWallpaper-master.zip" | cut -d' ' -f1) (uploaded ZIP: $MW_UPLOAD_SHA256)"
+          unzip -q "$OUT/MotionWallpaper-master.zip" -d "$OUT/src-check"
+          top="$(ls "$OUT/src-check")"
+          # GitHub names the folder <repo>-<commit>; the uploaded ZIP used MotionWallpaper-master. Same files either way.
+          (cd "$OUT/src-check/$top" && find . -type f | LC_ALL=C sort | sed 's|^\./||' | while read -r f; do shasum -a 256 "$f" | sed "s|  |  MotionWallpaper-master/|"; done) > "$OUT/downloaded.sha256"
+          diff <(awk '{print $1"  "$2}' tests/Fixtures/MacXcode/MotionWallpaper-ab038f7.sha256 | sort -k2) <(sort -k2 "$OUT/downloaded.sha256")
+          echo "All $(wc -l < "$OUT/downloaded.sha256" | xargs) files match the uploaded MotionWallpaper-master.zip"
+          # Re-pack with the uploaded ZIP's enclosing folder name, as a user would import it.
+          mv "$OUT/src-check/$top" "$OUT/src-check/MotionWallpaper-master"
+          (cd "$OUT/src-check" && zip -qry "$OUT/MotionWallpaper-master-import.zip" MotionWallpaper-master)
+
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Cancellation — DeskLoop fixture, cancelled while xcodebuild runs (nothing offered, processes stopped)
+        run: |
+          mkdir -p "$OUT/deskloop" && cp -R tests/Fixtures/MacXcode/DeskLoop "$OUT/deskloop/DeskLoop-main"
+          (cd "$OUT/deskloop" && zip -qry ../DeskLoop-main.zip DeskLoop-main)
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/DeskLoop-main.zip" --xcode-mac --select-xcode "$HCG_XCODE" \
+            --cancel-after-seconds 2 --output "$OUT/cancel" --screenshots "$OUT/screens" --prefix deskloop-cancel
+          ! pgrep -fl xcodebuild || { echo "xcodebuild still running after cancellation"; exit 1; }
+          ! find "$OUT/cancel" -name INSTALL-COMMAND-WAS-RUN | grep . || { echo "INSTALL.command was run"; exit 1; }
+
+      - name: MotionWallpaper — ZIP import → detection → preflight → Release build (Apple silicon, default) → .app + ZIP + DMG
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/MotionWallpaper-master-import.zip" --xcode-mac --select-xcode "$HCG_XCODE" \
+            --formats app,zip,dmg --expect-bundle-id com.example.MotionWallpaper --expect-version 1.0.5 \
+            --output "$OUT/arm64" --screenshots "$OUT/screens" --prefix motionwallpaper-arm64
+          echo "OUT_ARM64=$(sed -n 4p "$OUT/arm64/motionwallpaper-arm64-artifacts.txt")" >> "$GITHUB_ENV"
+
+      - name: Build verification (Apple's tools, independent of HCG) — Apple silicon build
+        run: bash tools/mac/verify-xcode-app-build.sh "$OUT_ARM64" com.example.MotionWallpaper 1.0.5 26.0 arm64
+
+      - name: Runtime verification on this disposable runner session — launch, import an MP4 through the app, desktop playback
+        run: |
+          zip="$(sed -n 2p "$OUT/arm64/motionwallpaper-arm64-artifacts.txt")"
+          bash tools/mac/verify-motionwallpaper-runtime.sh "$zip" "$OUT/runtime"
+
+      - name: MotionWallpaper — Universal build (arm64 + x86_64), verified with lipo
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/MotionWallpaper-master-import.zip" --xcode-mac --select-xcode "$HCG_XCODE" \
+            --arch universal --formats app,zip --expect-bundle-id com.example.MotionWallpaper --expect-version 1.0.5 \
+            --output "$OUT/universal" --screenshots "$OUT/screens" --prefix motionwallpaper-universal
+          bash tools/mac/verify-xcode-app-build.sh "$(sed -n 4p "$OUT/universal/motionwallpaper-universal-artifacts.txt")" com.example.MotionWallpaper 1.0.5 26.0 universal
+
+      - name: Collect the downloadable build (ZIP, DMG, checksums, licence, build report — the .app itself travels in the ZIP)
+        if: always()
+        run: |
+          mkdir -p "$OUT/deliver"
+          for d in "${OUT_ARM64:-}" "$(sed -n 4p "$OUT/universal/motionwallpaper-universal-artifacts.txt" 2>/dev/null)"; do
+            [ -n "$d" ] && [ -d "$d" ] || continue
+            sub="$OUT/deliver/$(basename "$d")"; mkdir -p "$sub"
+            find "$d" -maxdepth 1 -type f \( -name "*.zip" -o -name "*.dmg" -o -name "SHA256SUMS.txt" -o -name "LICENSE*" -o -name "BUILD-REPORT.md" -o -name "build-report.json" \) -exec cp {} "$sub/" \;
+          done
+          [ -f "$OUT/runtime/runtime-report.md" ] && cp "$OUT/runtime/runtime-report.md" "$OUT/deliver/RUNTIME-REPORT.md"
+          ls -laR "$OUT/deliver"
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png "$OUT"/runtime/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload the MotionWallpaper build (ZIP, DMG, checksums, licence, reports)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MotionWallpaper-1.0.5-built-by-HCG-Executable-Maker
+          path: ${{ env.OUT }}/deliver
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcode-macos-logs
+          path: |
+            ${{ env.OUT }}/**/*.txt
+            ${{ env.OUT }}/**/*.json
+            ${{ env.OUT }}/**/*.md
+            ${{ env.OUT }}/**/*.log
+            ${{ env.OUT }}/screens/*.jpg
+            ${{ env.OUT }}/runtime/screens/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
   hcg-connect-macos:
     name: HCG Connect — packaged macOS app sign-in, restart persistence, sign-out (MOCK identity server) and Account page states
     needs: test

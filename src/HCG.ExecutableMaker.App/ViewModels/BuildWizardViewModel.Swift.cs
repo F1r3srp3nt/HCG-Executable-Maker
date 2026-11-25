@@ -26,13 +26,12 @@ public sealed partial class BuildWizardViewModel
 
     /// <summary>The workspace contains Swift packages (this wizard builds them on a Mac).</summary>
     public bool IsSwiftProject => Analysis?.Swift is { Packages.Count: > 0 };
-    /// <summary>Only macOS Xcode projects/workspaces were found: recognized, but not built in this version.</summary>
+    /// <summary>Only macOS Xcode projects without an application target were found (nothing to package).</summary>
     public bool IsMacXcodeOnly => Analysis?.Swift is { Packages.Count: 0, MacXcodeProjects.Count: > 0 };
     public bool HasMacXcodeProjects => Analysis?.Swift is { MacXcodeProjects.Count: > 0 };
     public string MacXcodeProjectsText => Analysis?.Swift is { MacXcodeProjects.Count: > 0 } s
-        ? "macOS Xcode project(s): " + string.Join(", ", s.MacXcodeProjects) + ". Building .xcodeproj/.xcworkspace macOS apps (xcodebuild schemes, " +
-          "signing settings, asset catalogs) is a separate capability that is NOT implemented in this version. HCG builds Swift Package Manager packages " +
-          "(Package.swift) on a Mac. iOS Xcode projects are built in Mobile Build Studio, which does not produce macOS apps."
+        ? "macOS Xcode project(s) without an application target: " + string.Join(", ", s.MacXcodeProjects) + ". There is no .app to build here. " +
+          "macOS Xcode projects with an app target are built as “Native macOS app — Xcode”; iOS Xcode projects in Mobile Build Studio."
         : "";
     public string MissingHint => Analysis?.Support switch
     {
@@ -81,7 +80,7 @@ public sealed partial class BuildWizardViewModel
 
     /// <summary>Configure/Package/Build steps work on a Swift package product rather than a .NET project.</summary>
     public bool IsSwiftBuild => HasSelectedSwiftPackage && SelectedSwiftProduct is not null;
-    public bool IsDotNetBuild => !IsSwiftBuild && !IsElectronBuild && !IsNativeBuild;
+    public bool IsDotNetBuild => !IsSwiftBuild && !IsElectronBuild && !IsNativeBuild && !IsMacXcodeBuild;
 
     private bool SwiftReadyToConfigure =>
         SelectedSwiftPackage is { Evaluated: not null } pkg && SelectedSwiftProduct is not null && !IsEvaluatingSwift
@@ -472,7 +471,8 @@ public sealed partial class BuildWizardViewModel
     }
 
     private static string TargetLabel(BuildSettings s) =>
-        s.Swift is null ? $"{s.Platform.DisplayName()} {s.Architecture.DisplayName()} ({s.RuntimeIdentifier})"
+        s.MacXcode is { } mx ? $"macOS · {mx.Architecture.Label()}"
+        : s.Swift is null ? $"{s.Platform.DisplayName()} {s.Architecture.DisplayName()} ({s.RuntimeIdentifier})"
         : $"{s.Platform.DisplayName()} · {string.Join(" + ", HCG.ExecutableMaker.Packaging.Verification.MachO.ExpectedSlices(s.Architecture))}";
 }
 

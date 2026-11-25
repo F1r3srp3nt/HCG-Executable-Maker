@@ -55,7 +55,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("mobile") && !_args.ContainsKey("unleashify") && !_args.ContainsKey("doctor") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing") && !_args.ContainsKey("ship-page") && !_args.ContainsKey("ship-build") && !_args.ContainsKey("impactor")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("xcode-mac") && !_args.ContainsKey("mobile") && !_args.ContainsKey("unleashify") && !_args.ContainsKey("doctor") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing") && !_args.ContainsKey("ship-page") && !_args.ContainsKey("ship-build") && !_args.ContainsKey("impactor")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -263,6 +263,7 @@ internal static partial class Program
         if (_args.ContainsKey("native")) return await RunNativeAsync(wizard, host, output);
         if (_args.ContainsKey("doctor")) return await RunDoctorAsync(main, wizard, output);
         if (_args.ContainsKey("unleashify")) return await RunUnleashifyAsync(main, wizard, output);
+        if (_args.ContainsKey("xcode-mac")) return await RunXcodeMacAsync(wizard, host, output);
         if (_args.ContainsKey("mobile")) return await RunMobileAsync(main, wizard, output);
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
         if (_args.ContainsKey("signing")) return await RunSigningAsync(main);

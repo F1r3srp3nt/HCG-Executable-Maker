@@ -25,7 +25,7 @@ public sealed partial class BuildWizardViewModel
     public bool IsElectronBuild => SelectedNodeProject is { Kind: NodeProjectKind.ElectronDesktop } p
                                    && p.DesktopEligibility?.Category != DesktopConversionCategory.ElectronWithoutPackaging;
     /// <summary>Identity and icon are edited in HCG (.NET, Swift); for Electron they come from electron-builder's configuration.</summary>
-    public bool IdentityEditable => !IsElectronBuild;
+    public bool IdentityEditable => !IsElectronBuild && !IsMacXcodeBuild;
 
     [ObservableProperty] private StatusTag _electronTag = new("—", "neutral");
     [ObservableProperty] private string _electronStatus = "";
