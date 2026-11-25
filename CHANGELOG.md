@@ -2,6 +2,40 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG Impactor
+
+### Added
+- **HCG Impactor** (sidebar › HCG Impactor; `--impactor` on the command line): inspect, sign, install and diagnose iOS
+  and iPadOS apps on your own devices. Flow: Drop IPA → Inspect → Sign → Select device → Install. See `docs/IMPACTOR.md`.
+  - **IPA Inspector** (all platforms): identity, version and build, minimum iOS, device families, architectures,
+    Simulator/Mac/32-bit/App Store-encrypted binaries, every extension, framework and dylib, embedded signatures
+    (identifier, team, signer, chain, signing time, entitlements), embedded profiles (verified), sealed-resource
+    integrity and safe extraction. The original IPA is never changed; `.deb` files go to the jailbreak workflow.
+  - **Signing Studio** (macOS):
+    - Automatic or chosen identity and profiles per bundle; Development, Ad Hoc, Enterprise and App Store export.
+    - Every entitlement must be granted by the profile, and every removal is reported.
+    - Bundles are signed innermost first with `codesign` and your Keychain identity.
+    - `codesign --verify --deep --strict`, then a new IPA, inspected again.
+    - Warnings for bundle ID and team changes.
+  - **Device Manager / Deployment Queue** (macOS, Xcode `devicectl`):
+    - Device details: model, iOS, connection, pairing, Developer Mode, capabilities, registration in installed
+      profiles; guidance for Trust, pairing and Developer Mode.
+    - Pre-installation validation; installation with progress, cancellation, optional launch and batch mode; never
+      removes apps.
+  - **Certificates, Provisioning, Signing Monitor** (expiry reminders, manual re-sign and reinstall), **Installation
+    History** and **Diagnostics**: 15 failure types explained, original output redacted, and an export in
+    `hcg.diagnostic-report/1` plus Markdown.
+  - Shared device record **`hcg.apple-device/1`** (`docs/contracts/`) proposed to HCG System Tester. "Open in System
+    Tester" uses its existing `hcgsystemtester://open/connected-systems` route.
+  - `src/HCG.Impactor` is a self-contained module (no UI), ready to become a standalone app.
+- CI job **`impactor`** (macOS), using real Apple tools with a synthetic identity and profile; no physical device on CI:
+  - a real Xcode-built device app is inspected and signed;
+  - Apple's `codesign` verifies the result, and a tampered copy is caught;
+  - real `devicectl` output is translated;
+  - the workspace signs through Signing Studio.
+
+  Physical-device installation is to be validated on the owner's Mac (`docs/IMPACTOR.md`).
+
 ## [Unreleased] — Xcode projects that only wrap another build (HCG Mail)
 
 ### Fixed

@@ -10,6 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.Infrastructure\HCG.ExecutableMaker.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\HCG.Impactor\HCG.Impactor.csproj" />
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.ProjectInspection\HCG.ExecutableMaker.ProjectInspection.csproj" />
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.BuildEngine\HCG.ExecutableMaker.BuildEngine.csproj" />
     <ProjectReference Include="..\..\src\HCG.ExecutableMaker.Account\HCG.ExecutableMaker.Account.csproj" />

@@ -27,6 +27,9 @@
 #                 wizard and Mobile Build Studio: Nexus' Theos .deb (rootless, rootful, preview app) checked by HCG and by
 #                 Nexus' own script; Mail's .NET for iOS head (Simulator build, unsigned device archive); Sentinel archived
 #                 with every installed Xcode, with the deployment-range preflight, full logs and .xcresult bundles kept.
+#   impactor    — HCG Impactor on macOS: a real unsigned iOS device app (HelloIOS) is inspected, signed with a SYNTHETIC
+#                 identity/profile through codesign, verified by Apple's codesign, tampered and re-checked; devicectl's
+#                 real output is translated; the workspace UI signs through Signing Studio. No physical device on CI.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -1133,6 +1136,52 @@ jobs:
             ${{ runner.temp }}/xcode-out/*.txt
             ${{ runner.temp }}/xcode-out/screens
             ${{ runner.temp }}/xcode-out/dd/Build/Products/*/HCGExecutableMaker-build-logs
+          if-no-files-found: warn
+          retention-days: 7
+
+  impactor:
+    name: HCG Impactor — real IPA → inspect → sign (codesign, synthetic identity) → verify → devicectl → diagnostics → UI
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Output folder
+        run: echo "OUT=$RUNNER_TEMP/impactor-out" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build HCG Executable Maker and the UI driver
+        run: |
+          dotnet build src/HCG.ExecutableMaker.App -c Release
+          dotnet build tools/ui-driver -c Release
+      # Real Apple tools, synthetic signing assets, no physical device: see the script's header and docs/IMPACTOR.md.
+      - name: HCG Impactor end to end
+        run: tools/ci/impactor-e2e.sh
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*impactor-*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+      - name: Upload HCG Impactor outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: impactor-e2e
+          path: |
+            ${{ runner.temp }}/impactor-out/*.ipa
+            ${{ runner.temp }}/impactor-out/*.txt
+            ${{ runner.temp }}/impactor-out/*.json
+            ${{ runner.temp }}/impactor-out/*.xml
+            ${{ runner.temp }}/impactor-out/reports/**
+            ${{ runner.temp }}/impactor-out/screens/**
+            ${{ runner.temp }}/impactor-out/ui/*.txt
           if-no-files-found: warn
           retention-days: 7
 

@@ -114,6 +114,14 @@ Optional. Local builds never need it.
 
 Support requests use a website/ERP drop-in package (`integration/hcg-website`) that is not deployed, and HCG has not enabled the support or AI features yet. Details: [`docs/HCG-ACCOUNT.md`](docs/HCG-ACCOUNT.md).
 
+## HCG Impactor (unreleased)
+
+Inspect, sign and install iOS/iPadOS apps on your own iPhone or iPad: **Drop IPA → Inspect → Sign → Select device →
+Install**. On macOS it uses Apple's `codesign` with your Keychain identity and Xcode's `devicectl`. On Windows and Linux
+it inspects IPAs and checks signing plans only. It never bypasses Apple's signing rules, never removes apps, and never
+uploads anything. Physical-device installation still has to be validated on a real device. See
+[docs/IMPACTOR.md](docs/IMPACTOR.md).
+
 ## Mobile Build Studio (M0.5)
 
 | Area | Implemented |
@@ -177,6 +185,7 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 
 ## Documentation
 
+- [`docs/IMPACTOR.md`](docs/IMPACTOR.md) — HCG Impactor: IPA inspection, signing, devices, installation, diagnostics
 - [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md) — Mobile Build Studio overview, output matrix, signing modes, CLI
 - [`docs/ANDROID-BUILDING.md`](docs/ANDROID-BUILDING.md) · [`docs/IOS-BUILDING.md`](docs/IOS-BUILDING.md) ·
   [`docs/MOBILE-ARTIFACT-VERIFICATION.md`](docs/MOBILE-ARTIFACT-VERIFICATION.md)
