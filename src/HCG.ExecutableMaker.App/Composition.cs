@@ -84,6 +84,8 @@ public static class Composition
         services.AddSingleton<HCG.Impactor.IAppSigner>(sp => new HCG.Impactor.MacOS.MacAppSigner(sp.GetRequiredService<IProcessRunner>()));
         services.AddSingleton<HCG.Impactor.IDeviceService>(sp => new HCG.Impactor.MacOS.MacDeviceService(sp.GetRequiredService<IProcessRunner>()));
         services.AddSingleton<HCG.Impactor.ImpactorService>();
+        services.AddSingleton(sp => new HCG.Impactor.MacOS.XcodeProvisioningAssistant(sp.GetRequiredService<IProcessRunner>(),
+            Path.Combine(sp.GetRequiredService<IAppPaths>().Root, "impactor"), sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.ProvisioningProfileStore>()));
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService>();

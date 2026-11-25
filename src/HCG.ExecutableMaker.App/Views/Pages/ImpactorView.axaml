@@ -282,6 +282,69 @@
           </Border>
         </StackPanel>
 
+        <!-- ============================== SIGNING DOCTOR -->
+        <StackPanel Spacing="14" IsVisible="{Binding ShowDoctor}">
+          <Border Classes="card">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="label" Text="SIGNING DOCTOR" />
+              <TextBlock Classes="muted" FontSize="12.5" TextWrapping="Wrap" Text="Exactly why each provisioning profile on this Mac can or cannot sign an app: bundle identifier, team, certificate, expirations, registered device, development vs distribution and entitlements. Read-only." />
+              <Grid ColumnDefinitions="150,*,Auto" RowDefinitions="Auto,8,Auto,8,Auto,8,Auto">
+                <TextBlock Classes="formlabel" Text="Bundle ID" VerticalAlignment="Center" />
+                <TextBox Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding DoctorBundleId}" PlaceholderText="e.g. com.hakmicapitalgroup.hcgmail (default: the loaded IPA)" />
+                <TextBlock Grid.Row="2" Classes="formlabel" Text="Entitlements" VerticalAlignment="Center" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding DoctorEntitlementsPath}" PlaceholderText="The app's .entitlements file (optional; default: the loaded IPA's)" />
+                <Button Grid.Row="2" Grid.Column="2" Margin="8,0,0,0" Content="Choose…" Command="{Binding BrowseEntitlementsCommand}" />
+                <TextBlock Grid.Row="4" Classes="formlabel" Text="Team" VerticalAlignment="Center" />
+                <ComboBox Grid.Row="4" Grid.Column="1" MinWidth="200" ItemsSource="{Binding DoctorTeams}" SelectedItem="{Binding DoctorTeam}" PlaceholderText="Any team" />
+                <CheckBox Grid.Row="6" Grid.Column="1" IsChecked="{Binding DoctorUseDevice}" Content="Check registration of the connected device (Device Manager)" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="primary" Content="Diagnose" Command="{Binding RunDoctorCommand}" />
+                <Button Content="Create profile with Xcode…" Command="{Binding CreateProfileCommand}" IsEnabled="{Binding CanCreateProfile}"
+                        ToolTip.Tip="Uses the Apple Account signed in to Xcode: a throwaway stub app is built once with xcodebuild -allowProvisioningUpdates to register the App ID (and the connected device) and download a Development profile. Asks for your approval first." />
+              </StackPanel>
+              <TextBlock FontSize="13" FontWeight="SemiBold" Text="{Binding DoctorSummary}" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding DoctorFindings}" ItemTemplate="{StaticResource FindingTemplate}" />
+            </StackPanel>
+          </Border>
+          <Border Classes="card" IsVisible="{Binding DoctorSteps.Count}">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="label" Text="WHAT TO DO" />
+              <ItemsControl ItemsSource="{Binding DoctorSteps}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="x:String"><TextBlock FontSize="12.5" Margin="0,3" Text="{Binding}" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+              <ItemsControl ItemsSource="{Binding ProvisionLog}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="x:String"><TextBlock Classes="mono" FontSize="11" Text="{Binding}" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+              <SelectableTextBlock FontSize="12.5" Text="{Binding ProvisionResult}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+          <ItemsControl ItemsSource="{Binding DoctorProfiles}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ImpDoctorProfile">
+                <Border Classes="card compact" Margin="0,0,0,8">
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                        <SelectableTextBlock Classes="muted" FontSize="11.5" Text="{Binding Detail}" />
+                      </StackPanel>
+                      <c:StatusChip Grid.Column="1" Status="{Binding Tag}" VerticalAlignment="Top" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Checks}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ImpDoctorCheck">
+                          <Grid ColumnDefinitions="Auto,200,*" Margin="0,2">
+                            <c:StatusChip Status="{Binding Tag}" VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="1" Margin="8,0" FontSize="12" Classes="muted" Text="{Binding Title}" />
+                            <TextBlock Grid.Column="2" FontSize="12" Text="{Binding Detail}" TextWrapping="Wrap" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
         <!-- ============================== DEVICE MANAGER -->
         <StackPanel Spacing="14" IsVisible="{Binding ShowDevices}">
           <Border Classes="card">

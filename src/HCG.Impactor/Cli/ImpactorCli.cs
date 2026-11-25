@@ -33,6 +33,13 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
           check <signed.ipa> --device <id|name|usb>  Pre-installation validation for a device (no changes).
           install <ipa> --device <id|name|usb>... [--launch] [--yes] [--sign [signing options]]
                                                      Validate and install (optionally sign first); several --device = batch.
+          doctor --bundle-id <id> [--device <id|name|usb>] [--entitlements <file.entitlements>|--ipa <ipa>] [--method …] [--team <TEAMID>]
+                                                     Signing Doctor: exactly why each installed profile can or cannot sign the app.
+          provision --bundle-id <id> --team <TEAMID> [--entitlements <file>] [--min-ios 17.0] [--no-device-registration]
+                    [--api-key <AuthKey.p8> --api-key-id <ID> --api-issuer <UUID>] --yes
+                                                     Create the App ID and a Development profile with Xcode's automatic signing
+                                                     (your Xcode account), via a throwaway stub project. Changes your Apple
+                                                     Developer account (adds App ID/device/profile); never revokes anything.
           diagnose <file|->                          Explain an installation error output (redacted).
           history | monitor                          Installation history · signing expiry reminders.
           open-in-system-tester --device <id|name|usb>
@@ -76,6 +83,8 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
                 "check" when target is not null => await CheckAsync(target, ct),
                 "install" when target is not null => await InstallAsync(target, ct),
                 "diagnose" when target is not null => Diagnose(target),
+                "doctor" => await DoctorAsync(ct),
+                "provision" => await ProvisionAsync(ct),
                 "history" => History(),
                 "monitor" => Monitor(),
                 "open-in-system-tester" => await OpenInSystemTesterAsync(ct),
@@ -369,6 +378,79 @@ public sealed class ImpactorCli(ImpactorService service, TextWriter output, stri
         Report(session);
         if (signed is not null) service.Signer.Cleanup(signed);
         return ok ? 0 : 1;
+    }
+
+    // ---------------------------------------------------------------- signing doctor / provisioning
+
+    /// <summary>Set by the host (macOS): creates profiles with Xcode's automatic signing. Null where unavailable.</summary>
+    public HCG.Impactor.MacOS.XcodeProvisioningAssistant? Provisioning { get; init; }
+
+    private IReadOnlyDictionary<string, object> RequestedEntitlements()
+    {
+        if (Arg("--entitlements") is { } file) return ImpactorService.ReadEntitlements(file);
+        if (Arg("--ipa") is { } ipa && service.Inspect(ipa).App is { } app) return app.Signature.RawEntitlements;
+        return new Dictionary<string, object>();
+    }
+
+    private async Task<int> DoctorAsync(CancellationToken ct)
+    {
+        var bundleId = Arg("--bundle-id") ?? (Arg("--ipa") is { } ipa ? service.Inspect(ipa).App?.BundleIdentifier : null);
+        if (bundleId is null) { W("Name the app with --bundle-id <id> (or --ipa <ipa>)."); return 2; }
+        var devices = await ResolveDevicesAsync(ct);
+        if (devices is null) return 1;
+        var report = await service.DoctorAsync(new SigningDoctorRequest
+        {
+            BundleIdentifier = bundleId, Device = devices.FirstOrDefault(), Entitlements = RequestedEntitlements(), TeamId = Arg("--team"),
+            Method = Request(null).Method,
+        }, All("--profile-file"), ct);
+        PrintDoctor(report);
+        return report.HasUsableProfile ? 0 : 1;
+    }
+
+    private void PrintDoctor(SigningDoctorReport r)
+    {
+        var now = service.Time.GetUtcNow();
+        W($"\nSigning Doctor — {r.Request.BundleIdentifier}" + (r.Request.Device is { } d ? $" on {d.Name}" : "") + (r.Request.Entitlements.Count > 0 ? $" · {r.Request.Entitlements.Count} entitlement(s)" : ""));
+        W($"\n  {r.Summary}");
+        W("\n  Signing identities:");
+        if (r.Identities.Count == 0) W("    none");
+        foreach (var c in r.Identities)
+            W($"    {c.CommonName} · team {c.TeamId} · {c.ShortSha1} · expires {c.NotAfter:yyyy-MM-dd} · {c.Readiness(now)}");
+        foreach (var v in r.Profiles)
+        {
+            W($"\n  {(v.Usable ? "✓ USABLE" : "✗")} \"{v.Name}\" · {v.Profile.Info.Kind} · {v.Profile.Info.ApplicationIdentifier} · {v.Profile.Info.Uuid}");
+            foreach (var c in v.Checks) W($"      {(c.Passed ? "✓" : "✗")} {c.Title}: {c.Detail}");
+        }
+        PrintFindings(r.Findings);
+        if (r.NextSteps.Count > 0)
+        {
+            W("\n  Next steps:");
+            for (var i = 0; i < r.NextSteps.Count; i++) W($"    {i + 1}. {r.NextSteps[i]}");
+        }
+    }
+
+    private async Task<int> ProvisionAsync(CancellationToken ct)
+    {
+        if (Arg("--bundle-id") is not { } bundleId || Arg("--team") is not { } team) { W("Usage: provision --bundle-id <id> --team <TEAMID> [--entitlements <file>] --yes"); return 2; }
+        if (Provisioning is not { IsAvailable: true } assistant) { W("Profile creation needs macOS with Xcode."); return 1; }
+        var req = new HCG.Impactor.MacOS.ProvisioningRequest
+        {
+            BundleIdentifier = bundleId, TeamId = team, Entitlements = RequestedEntitlements(), MinimumIos = Arg("--min-ios") ?? "16.0",
+            RegisterConnectedDevices = !Flag("--no-device-registration"),
+            ApiKey = Arg("--api-key") is { } k && Arg("--api-key-id") is { } kid && Arg("--api-issuer") is { } iss ? (k, kid, iss) : null,
+        };
+        W($"\nCreate the App ID and a Development profile for {bundleId} in team {team} with Xcode's automatic signing:");
+        W("  " + string.Join(' ', HCG.Impactor.MacOS.XcodeProvisioningAssistant.Arguments("<stub folder>", req)));
+        W("  This uses the Apple Account signed in to Xcode (or the API key), registers the App ID" + (req.RegisterConnectedDevices ? " and the connected device(s)" : "") +
+          ", and downloads a profile. It changes your Apple Developer account; it never revokes certificates or removes anything.");
+        if (!Flag("--yes")) { W("\n  Not run: add --yes to approve."); return 1; }
+        var result = await assistant.CreateAsync(req, new Progress<string>(l => W("  " + l)), ct);
+        if (!result.Succeeded) { if (result.Failure is { } f) PrintDiagnosis(f); W($"  Log: {result.LogPath}"); return 1; }
+        W($"\n  Created/updated: {result.ProfileName ?? string.Join(", ", result.NewProfiles.Select(Path.GetFileName))}" + (result.SigningIdentity is null ? "" : $" · identity {result.SigningIdentity}"));
+        W($"  Stub project (not installed): {result.StubProject}");
+        var after = await service.DoctorAsync(new SigningDoctorRequest { BundleIdentifier = bundleId, Entitlements = req.Entitlements, TeamId = team }, null, ct);
+        PrintDoctor(after);
+        return after.HasUsableProfile ? 0 : 1;
     }
 
     // ---------------------------------------------------------------- misc

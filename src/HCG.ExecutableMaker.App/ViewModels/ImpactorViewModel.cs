@@ -15,7 +15,12 @@ using HCG.Impactor.Storage;
 
 namespace HCG.ExecutableMaker.App.ViewModels;
 
-public enum ImpactorSection { Dashboard, Inspector, Signing, Devices, Queue, Certificates, Profiles, Monitor, History, Diagnostics }
+public enum ImpactorSection { Dashboard, Inspector, Signing, Doctor, Devices, Queue, Certificates, Profiles, Monitor, History, Diagnostics }
+
+/// <summary>Navigation parameter: open the Signing Doctor for an app (from Mobile Build Studio).</summary>
+public sealed record ImpactorDoctorRequest(string BundleId, string? EntitlementsPath);
+public sealed record ImpDoctorCheck(string Title, string Detail, StatusTag Tag);
+public sealed record ImpDoctorProfile(string Name, string Detail, StatusTag Tag, IReadOnlyList<ImpDoctorCheck> Checks);
 
 public sealed record ImpactorSectionItem(ImpactorSection Section, string Title, string Icon);
 public sealed record ImpFindingItem(string Title, string Detail, string? Remedy, string? Subject, StatusTag Tag)
@@ -86,8 +91,10 @@ public sealed partial class ImpactorViewModel : PageViewModel
     private SignResult? _signed;
     private CancellationTokenSource? _cts;
     private ImpactorSession _session = new();
+    private readonly HCG.Impactor.MacOS.XcodeProvisioningAssistant? _provisioning;
 
-    public ImpactorViewModel(ImpactorService service, IPlatformShell shell, IDialogService dialogs, AppleSigningAssetService assets, ProvisioningProfileStore profileStore, IAppPaths paths)
+    public ImpactorViewModel(ImpactorService service, IPlatformShell shell, IDialogService dialogs, AppleSigningAssetService assets, ProvisioningProfileStore profileStore, IAppPaths paths,
+        HCG.Impactor.MacOS.XcodeProvisioningAssistant? provisioning = null)
     {
         _service = service;
         _shell = shell;
@@ -95,6 +102,7 @@ public sealed partial class ImpactorViewModel : PageViewModel
         _assets = assets;
         _profileStore = profileStore;
         _paths = paths;
+        _provisioning = provisioning;
         _selectedSectionItem = Sections[0];
         foreach (var (product, integration, status) in HcgLinks.Integrations) Integrations.Add(new ImpKeyValueItem($"{product} — {status}", integration));
     }
@@ -107,6 +115,7 @@ public sealed partial class ImpactorViewModel : PageViewModel
         new(ImpactorSection.Dashboard, "Dashboard", "Icon.Dashboard"),
         new(ImpactorSection.Inspector, "IPA Inspector", "Icon.Zip"),
         new(ImpactorSection.Signing, "Signing Studio", "Icon.Security"),
+        new(ImpactorSection.Doctor, "Signing Doctor", "Icon.Support"),
         new(ImpactorSection.Devices, "Device Manager", "Icon.Mobile"),
         new(ImpactorSection.Queue, "Deployment Queue", "Icon.Play"),
         new(ImpactorSection.Certificates, "Certificates", "Icon.Check"),
@@ -120,13 +129,14 @@ public sealed partial class ImpactorViewModel : PageViewModel
     partial void OnSelectedSectionItemChanged(ImpactorSectionItem value)
     {
         OnPropertyChanged(nameof(Section));
-        foreach (var n in new[] { nameof(ShowDashboard), nameof(ShowInspector), nameof(ShowSigning), nameof(ShowDevices), nameof(ShowQueue), nameof(ShowCertificates), nameof(ShowProfiles), nameof(ShowMonitor), nameof(ShowHistory), nameof(ShowDiagnostics) })
+        foreach (var n in new[] { nameof(ShowDashboard), nameof(ShowInspector), nameof(ShowSigning), nameof(ShowDoctor), nameof(ShowDevices), nameof(ShowQueue), nameof(ShowCertificates), nameof(ShowProfiles), nameof(ShowMonitor), nameof(ShowHistory), nameof(ShowDiagnostics) })
             OnPropertyChanged(n);
     }
     public ImpactorSection Section => SelectedSectionItem.Section;
     public bool ShowDashboard => Section == ImpactorSection.Dashboard;
     public bool ShowInspector => Section == ImpactorSection.Inspector;
     public bool ShowSigning => Section == ImpactorSection.Signing;
+    public bool ShowDoctor => Section == ImpactorSection.Doctor;
     public bool ShowDevices => Section == ImpactorSection.Devices;
     public bool ShowQueue => Section == ImpactorSection.Queue;
     public bool ShowCertificates => Section == ImpactorSection.Certificates;
@@ -165,9 +175,16 @@ public sealed partial class ImpactorViewModel : PageViewModel
     public override async Task OnNavigatedToAsync(object? parameter)
     {
         if (parameter is string path && File.Exists(path)) await LoadIpaAsync(path);
+        if (parameter is ImpactorDoctorRequest doctor)
+        {
+            DoctorBundleId = doctor.BundleId;
+            DoctorEntitlementsPath = doctor.EntitlementsPath;
+            SelectedSectionItem = Sections.First(s => s.Section == ImpactorSection.Doctor);
+        }
         RefreshRecords();
         await RefreshInventoryAsync();
         if (Capabilities.CanListDevices) await RefreshDevicesAsync();
+        if (parameter is ImpactorDoctorRequest) await RunDoctorAsync();
     }
 
     // ------------------------------------------------------------------ inspector
@@ -425,6 +442,96 @@ public sealed partial class ImpactorViewModel : PageViewModel
                 RefreshRecords();
             }
             else ShowDiagnosis(result.Failure, "Signing");
+        }
+        finally { IsBusy = false; }
+    }
+
+    // ------------------------------------------------------------------ signing doctor
+
+    [ObservableProperty] private string? _doctorBundleId;
+    [ObservableProperty] private string? _doctorEntitlementsPath;
+    [ObservableProperty] private string? _doctorTeam;
+    [ObservableProperty] private bool _doctorUseDevice = true;
+    [ObservableProperty] private string _doctorSummary = "Enter the app's bundle identifier and run the Signing Doctor.";
+    [ObservableProperty] private bool _doctorHasResult;
+    [ObservableProperty] private bool _canCreateProfile;
+    [ObservableProperty] private string? _provisionResult;
+    public ObservableCollection<ImpDoctorProfile> DoctorProfiles { get; } = [];
+    public ObservableCollection<string> DoctorSteps { get; } = [];
+    public ObservableCollection<ImpFindingItem> DoctorFindings { get; } = [];
+    public ObservableCollection<string> ProvisionLog { get; } = [];
+    public ObservableCollection<string> DoctorTeams { get; } = [];
+    private SigningDoctorReport? _doctor;
+
+    [RelayCommand]
+    private async Task BrowseEntitlementsAsync()
+    {
+        var file = await _shell.PickFileAsync("Choose the app's .entitlements file", "Entitlements", "*.entitlements", "*.plist");
+        if (file is not null) DoctorEntitlementsPath = file;
+    }
+
+    [RelayCommand]
+    private async Task RunDoctorAsync()
+    {
+        var id = string.IsNullOrWhiteSpace(DoctorBundleId) ? Inspection?.App?.BundleIdentifier : DoctorBundleId!.Trim();
+        if (id is null) { DoctorSummary = "Enter a bundle identifier (or load an IPA)."; return; }
+        DoctorBundleId = id;
+        IsBusy = true;
+        try
+        {
+            IReadOnlyDictionary<string, object> ent = new Dictionary<string, object>();
+            if (!string.IsNullOrWhiteSpace(DoctorEntitlementsPath) && File.Exists(DoctorEntitlementsPath)) ent = ImpactorService.ReadEntitlements(DoctorEntitlementsPath);
+            else if (Inspection?.App is { } app && app.BundleIdentifier == id) ent = app.Signature.RawEntitlements;
+            var device = DoctorUseDevice ? (TargetDevice ?? Devices.FirstOrDefault(d => d.Device.Connection == DeviceConnection.Usb))?.Device : null;
+            _doctor = await _service.DoctorAsync(new SigningDoctorRequest
+            {
+                BundleIdentifier = id, Device = device, Entitlements = ent, TeamId = string.IsNullOrWhiteSpace(DoctorTeam) ? null : DoctorTeam.Trim(),
+            }, ExtraProfiles, CancellationToken.None);
+            DoctorSummary = _doctor.Summary;
+            DoctorProfiles.Clear();
+            foreach (var v in _doctor.Profiles)
+                DoctorProfiles.Add(new ImpDoctorProfile(v.Name, $"{v.Profile.Info.Kind} · {v.Profile.Info.ApplicationIdentifier} · expires {v.Profile.Info.Expiration:yyyy-MM-dd} · {v.Profile.Info.Uuid}",
+                    v.Usable ? new("Usable", "success") : new($"{v.Failures.Count()} problem(s)", "error"),
+                    v.Checks.Select(c => new ImpDoctorCheck(c.Title, c.Detail, c.Passed ? new("✓", "success") : new("✗", "error"))).ToList()));
+            DoctorSteps.Clear();
+            foreach (var step in _doctor.NextSteps) DoctorSteps.Add(step);
+            DoctorFindings.Clear();
+            foreach (var f in _doctor.Findings) DoctorFindings.Add(ImpFindingItem.From(f));
+            DoctorTeams.Clear();
+            foreach (var t in _doctor.Identities.Select(c => c.TeamId).OfType<string>().Distinct()) DoctorTeams.Add(t);
+            DoctorTeam ??= _doctor.SuggestedTeam;
+            DoctorHasResult = true;
+            CanCreateProfile = !_doctor.HasUsableProfile && _provisioning is { IsAvailable: true } && DoctorTeams.Count > 0;
+        }
+        catch (Exception ex) { DoctorSummary = "The Signing Doctor could not run: " + ex.Message; }
+        finally { IsBusy = false; }
+    }
+
+    /// <summary>Creates the App ID and a Development profile with Xcode's automatic signing (the Xcode account), after explicit approval.</summary>
+    [RelayCommand]
+    private async Task CreateProfileAsync()
+    {
+        if (_provisioning is null || DoctorBundleId is null || string.IsNullOrWhiteSpace(DoctorTeam)) { ProvisionResult = "Choose the team first."; return; }
+        IReadOnlyDictionary<string, object> ent = !string.IsNullOrWhiteSpace(DoctorEntitlementsPath) && File.Exists(DoctorEntitlementsPath)
+            ? ImpactorService.ReadEntitlements(DoctorEntitlementsPath) : new Dictionary<string, object>();
+        var req = new HCG.Impactor.MacOS.ProvisioningRequest { BundleIdentifier = DoctorBundleId, TeamId = DoctorTeam.Trim(), Entitlements = ent, MinimumIos = Inspection?.App?.MinimumOSVersion ?? "16.0" };
+        var ok = await _dialogs.ConfirmAsync("Create a profile with your Xcode account?",
+            $"HCG will build a throwaway stub app with bundle ID {req.BundleIdentifier} for team {req.TeamId} using Xcode's automatic signing:\n\n" +
+            string.Join(' ', HCG.Impactor.MacOS.XcodeProvisioningAssistant.Arguments("<stub folder>", req)) +
+            "\n\nXcode uses the Apple Account signed in to Xcode › Settings › Accounts. It may register the App ID, enable capabilities for the entitlements, register the connected iPhone/iPad and download a Development profile. " +
+            "This changes your Apple Developer account. Nothing is revoked, no installed app is touched, and the stub is never installed.", "Create profile");
+        if (!ok) return;
+        IsBusy = true;
+        ProvisionLog.Clear();
+        try
+        {
+            var r = await _provisioning.CreateAsync(req, new Progress<string>(l => ProvisionLog.Add(l)), CancellationToken.None);
+            ProvisionResult = r.Succeeded
+                ? $"Done: {r.ProfileName ?? string.Join(", ", r.NewProfiles.Select(Path.GetFileName))}. Log: {r.LogPath}"
+                : $"{r.Failure?.Title}: {r.Failure?.Explanation} → {r.Failure?.Remedy}  (log: {r.LogPath})";
+            if (r.Failure is { } f) ShowDiagnosis(f, "Profile creation");
+            await RefreshInventoryAsync();
+            await RunDoctorAsync();
         }
         finally { IsBusy = false; }
     }

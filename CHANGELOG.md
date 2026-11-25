@@ -25,6 +25,13 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - **Certificates, Provisioning, Signing Monitor** (expiry reminders, manual re-sign and reinstall), **Installation
     History** and **Diagnostics**: 15 failure types explained, original output redacted, and an export in
     `hcg.diagnostic-report/1` plus Markdown.
+  - **Signing Doctor** (Impactor, Mobile Build Studio › Signing Doctor…, `--impactor doctor`): for one bundle ID,
+    every installed profile is checked for bundle ID, team, certificate, certificate and profile expiry, registered
+    device, development vs distribution, entitlements, platform and signature, with the exact reason and next steps.
+  - **Create profile with Xcode** (`--impactor provision`): with approval, a throwaway stub project is built once with
+    `xcodebuild -allowProvisioningUpdates` using the Apple Account signed in to Xcode. Xcode registers the App ID
+    (and the connected device) and downloads a Development profile. No manual temporary project; nothing is revoked
+    or installed.
   - Shared device record **`hcg.apple-device/1`** (`docs/contracts/`) proposed to HCG System Tester. "Open in System
     Tester" uses its existing `hcgsystemtester://open/connected-systems` route.
   - `src/HCG.Impactor` is a self-contained module (no UI), ready to become a standalone app.

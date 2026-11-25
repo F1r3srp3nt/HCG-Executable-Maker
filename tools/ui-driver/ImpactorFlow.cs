@@ -60,6 +60,14 @@ internal static partial class Program
             }
         }
 
+        page.DoctorBundleId = Arg("doctor-bundle-id") ?? page.Inspection?.App?.BundleIdentifier;
+        await page.RunDoctorCommand.ExecuteAsync(null);
+        Log("Signing Doctor: " + page.DoctorSummary);
+        foreach (var p in page.DoctorProfiles) Log($"  Doctor [{p.Tag.Text}] {p.Name}: " + string.Join(" | ", p.Checks.Where(c => c.Tag.Tone == "error").Select(c => $"{c.Title}: {c.Detail}")));
+        foreach (var step in page.DoctorSteps) Log("  Next: " + step);
+        Check(page.DoctorHasResult, "The Signing Doctor ran");
+        await Visit(ImpactorSection.Doctor, "impactor-signing-doctor");
+
         await page.RefreshDevicesCommand.ExecuteAsync(null);
         Log("Devices: " + page.DevicesNote);
         foreach (var d in page.Devices) Log($"  Device {d.Name} · {d.Model} · {d.Connection} · {d.PairingTag.Text} · {d.DeveloperModeTag.Text} · {d.InstallTag.Text}");

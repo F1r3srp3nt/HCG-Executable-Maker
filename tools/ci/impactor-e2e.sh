@@ -191,6 +191,26 @@ cat "$OUT/install-missing.txt"
 check "installing to a missing device stops before anything is sent" "grep -Eq 'No device matches|Device not found|Apple tools not available' '$OUT/install-missing.txt'"
 endgroup
 
+# ---------------------------------------------------------------- 6b. Signing Doctor and Xcode-account provisioning
+group "6b. Signing Doctor (HCG Mail's bundle ID) and automatic provisioning through a stub project"
+imp doctor --bundle-id com.hakmicapitalgroup.hcgmail | tee "$OUT/doctor-mail.txt" || true
+check "the Signing Doctor explains why no profile fits com.hakmicapitalgroup.hcgmail" "grep -Eq 'None of the [0-9]+ profile\(s\) can sign com.hakmicapitalgroup.hcgmail' '$OUT/doctor-mail.txt' && grep -q 'App ID $TEAM.$BUNDLE does not cover com.hakmicapitalgroup.hcgmail' '$OUT/doctor-mail.txt'"
+check "the Signing Doctor proposes Xcode's automatic provisioning for the team" "grep -q 'allowProvisioningUpdates' '$OUT/doctor-mail.txt'"
+imp doctor --bundle-id "$BUNDLE" | tee "$OUT/doctor-hello.txt"
+check "the Signing Doctor finds the matching profile for the CI app" "grep -q 'USABLE \"HCG CI Development\"' '$OUT/doctor-hello.txt'"
+imp provision --bundle-id com.hakmicapitalgroup.hcgmail --team "$TEAM" --no-device-registration > "$OUT/provision-noyes.txt" 2>&1 || true
+check "profile creation does nothing without approval (--yes)" "grep -q 'Not run: add --yes to approve' '$OUT/provision-noyes.txt'"
+# The runner has no Apple Account in Xcode: the real xcodebuild -allowProvisioningUpdates must fail with an explanation.
+imp provision --bundle-id com.hakmicapitalgroup.hcgmail --team "$TEAM" --no-device-registration --yes > "$OUT/provision.txt" 2>&1 || true
+cat "$OUT/provision.txt"
+check "without an Xcode account, automatic provisioning is explained (not unknown)" "grep -Eq 'Xcode is not signed in to this team|No usable signing certificate|No registered device|No team selected' '$OUT/provision.txt'"
+STUB="$(ls -d "$HCG_EXECUTABLE_MAKER_HOME"/impactor/provisioning/com.hakmicapitalgroup.hcgmail-* | tail -1)"
+echo "Stub project: $STUB"
+xcodebuild -project "$STUB/HCGProvisioningStub.xcodeproj" -scheme HCGProvisioningStub -configuration Debug -destination generic/platform=iOS \
+  -derivedDataPath "$OUT/stub-dd" CODE_SIGNING_ALLOWED=NO build -quiet
+check "the generated stub project builds with Xcode (unsigned)" "test -d '$OUT/stub-dd/Build/Products/Debug-iphoneos/HCGProvisioningStub.app'"
+endgroup
+
 # ---------------------------------------------------------------- reports
 group "Diagnostic reports"
 ls -R "$OUT/reports"
@@ -202,7 +222,7 @@ endgroup
 
 # ---------------------------------------------------------------- 7. workspace UI
 group "7. HCG Impactor workspace (headless UI): sign through Signing Studio"
-dotnet "$ROOT/tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll" --impactor --impactor-sign --source "$UNSIGNED" --identity "$SHA1" \
+dotnet "$ROOT/tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll" --impactor --impactor-sign --source "$UNSIGNED" --identity "$SHA1" --doctor-bundle-id com.hakmicapitalgroup.hcgmail \
   --expect-bundle-id "$BUNDLE" --output "$OUT/ui" --screenshots "$OUT/screens" --prefix impactor --window-height 1200
 UI_SIGNED="$OUT/HelloIOS-unsigned-signed.ipa"
 check "the UI wrote a signed IPA" "test -s '$UI_SIGNED'"

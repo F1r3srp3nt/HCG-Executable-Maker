@@ -8,6 +8,8 @@
   -->
   <ItemGroup>
     <ProjectReference Include="..\HCG.ExecutableMaker.Packaging\HCG.ExecutableMaker.Packaging.csproj" />
+    <!-- The Xcode project writer (internal) for the provisioning stub project. -->
+    <ProjectReference Include="..\HCG.ExecutableMaker.Porting\HCG.ExecutableMaker.Porting.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.Pkcs" />

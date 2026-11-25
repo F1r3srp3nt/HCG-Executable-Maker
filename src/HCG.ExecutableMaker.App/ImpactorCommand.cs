@@ -21,7 +21,10 @@ internal static class ImpactorCommand
         catch (Exception ex) { Console.WriteLine("Note: could not load HCG's Xcode selection: " + ex.Message); }
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
-        var cli = new ImpactorCli(services.GetRequiredService<ImpactorService>(), Console.Out, HostInfo.ProductVersion, InstallationId(paths));
+        var cli = new ImpactorCli(services.GetRequiredService<ImpactorService>(), Console.Out, HostInfo.ProductVersion, InstallationId(paths))
+        {
+            Provisioning = services.GetRequiredService<HCG.Impactor.MacOS.XcodeProvisioningAssistant>(),
+        };
         return cli.RunAsync(rest, cts.Token).GetAwaiter().GetResult();
     }
 

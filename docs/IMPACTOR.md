@@ -90,6 +90,53 @@ A `.deb` is refused with a pointer to the separate jailbreak workflow (Mobile Bu
    - App Store profiles are not installable on devices.
    - Expiry within 14 days.
 
+## Signing Doctor and creating a profile with your Xcode account
+
+**Signing Doctor** (Impactor › Signing Doctor; Mobile Build Studio › **Signing Doctor…** for an iOS project; command
+line `--impactor doctor --bundle-id <id> [--device usb] [--entitlements app.entitlements]`). It examines **every**
+provisioning profile on the Mac for one app and reports, per profile, each check with ✓ or ✗ and the exact reason:
+
+| Check | Fails when |
+|---|---|
+| Bundle identifier | The profile's App ID (`TEAM.id` or a wildcard) does not cover the app's bundle ID |
+| Apple Developer team | The profile's team is not the requested one, or none of your certificates belongs to it |
+| Certificate | None of the profile's certificates is yours with its private key (names the ones it does include) |
+| Certificate expiration / profile expiration | Expired (date shown) |
+| Registered device | The connected device's UDID is not in the profile's device list (App Store profiles have none) |
+| Development / distribution | App Store profile (never installable), wrong type for the request, or a certificate of the other kind |
+| Entitlements | A capability the app needs (from its `.entitlements` or current signature) is not enabled for the App ID |
+| Platform, profile signature | Not an iOS profile; damaged or not Apple-issued |
+
+It names the closest profile, counts which reasons block the most profiles, and lists the next steps.
+
+**Can the existing Xcode account do this without a manual temporary project? Yes.** Xcode's supported command-line
+automatic signing, `xcodebuild -allowProvisioningUpdates [-allowProvisioningDeviceRegistration]`, uses the Apple
+Account already signed in to Xcode › Settings › Accounts. It needs an Xcode project with the app's bundle ID, so
+**Create profile with Xcode…** (command line `--impactor provision --bundle-id <id> --team <TEAMID> [--entitlements …] --yes`)
+writes a throwaway stub iOS project into HCG's data folder (`impactor/provisioning/…`), with the bundle ID,
+the team and the app's entitlements, and builds it once:
+
+- Xcode registers the App ID if needed and enables the capabilities for the entitlements.
+- Xcode registers the connected device (unless you turn that off) and downloads an "iOS Team Provisioning Profile"
+  for the bundle ID.
+- The Signing Doctor then runs again and shows the new profile as usable.
+- The stub is never installed or distributed. HCG never revokes certificates or deletes profiles.
+- Each run asks for approval, because it changes your Apple Developer account.
+- An App Store Connect API key can be used instead of the Xcode account (`--api-key/--api-key-id/--api-issuer`; the
+  key file is read by `xcodebuild` only).
+
+Failures are explained: no Xcode account, bundle ID owned by another team, no registered device, no team, capability
+not available to the team (for example a Personal Team), no usable certificate, Apple unreachable.
+
+For **HCG Mail** (`com.hakmicapitalgroup.hcgmail`) on your iPhone 16 Pro Max:
+
+1. Mobile Build Studio › HCG Mail › **Signing Doctor…**. It opens with the bundle ID and HCG Mail's `.entitlements`.
+2. Read why each of the eight profiles fails.
+3. **Create profile with Xcode…** for your team (the iPhone connected and unlocked).
+4. Build HCG Mail for the device.
+
+The manual route (developer.apple.com › Identifiers, Devices, Profiles) is listed in the next steps too.
+
 ## How installation works (macOS)
 
 Installation uses Xcode's `devicectl` with JSON output. HCG Impactor uses the Xcode selected in Toolchains.

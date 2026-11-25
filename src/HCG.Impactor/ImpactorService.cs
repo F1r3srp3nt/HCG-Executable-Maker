@@ -80,6 +80,14 @@ public sealed class ImpactorService(IAppSigner signer, IDeviceService devices, I
 
     public Task<DeviceListing> ListDevicesAsync(CancellationToken ct) => devices.ListAsync(ct);
 
+    /// <summary>Signing Doctor: why each installed profile can or cannot sign <paramref name="request"/>'s app (read-only).</summary>
+    public async Task<SigningDoctorReport> DoctorAsync(SigningDoctorRequest request, IReadOnlyList<string>? extraProfiles, CancellationToken ct) =>
+        SigningDoctor.Diagnose(await inventory.ReadAsync(extraProfiles, ct).ConfigureAwait(false), request, time.GetUtcNow());
+
+    /// <summary>Reads an .entitlements (or any plist) file into the values the Signing Doctor and provisioning use.</summary>
+    public static IReadOnlyDictionary<string, object> ReadEntitlements(string path) =>
+        HCG.ExecutableMaker.Packaging.Mobile.PlistReader.ParseDictionary(File.ReadAllBytes(path));
+
     /// <summary>Pre-installation validation (no changes to the device): compatibility, signing facts, and whether the app is already installed.</summary>
     public async Task<(IReadOnlyList<Finding> Checks, InstalledApp? Existing)> CheckAsync(IpaReport signedIpa, AppleDevice device, CancellationToken ct)
     {

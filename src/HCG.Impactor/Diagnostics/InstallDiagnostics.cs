@@ -23,6 +23,8 @@ public enum DiagnosisKind
     DeviceNotFound,
     EncryptedBinary,
     ToolMissing,
+    /// <summary>Xcode automatic provisioning (App ID / device / profile creation) failed.</summary>
+    ProvisioningFailed,
     Cancelled,
     TimedOut,
     Unknown,
