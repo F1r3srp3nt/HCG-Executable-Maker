@@ -378,6 +378,17 @@ public sealed class NativeMacXcodeProviderTests : IDisposable
         Assert.Equal(["** TEST FAILED **"], r.ResultLines);
     }
 
+    /// <summary>Xcode 26.6's own output when a scheme's Test action has no test bundle it can build (seen in CI on FieldKit).</summary>
+    [Fact]
+    public void A_scheme_without_buildable_test_bundles_is_a_project_error_not_a_test_failure()
+    {
+        var r = XcodeDiagnostics.Analyze(["   ** BUILD SUCCEEDED **",
+            "xcodebuild: error: Failed to build project FieldKit with scheme FieldKit.: There are no test bundles available to test."], "Failed", null, null);
+        var e = Assert.Single(r.Issues);
+        Assert.Equal(("error", "project"), (e.Severity, e.Category));
+        Assert.Empty(r.TestFailures);
+    }
+
     [Fact]
     public void HCGs_own_build_log_lines_are_read_like_xcodebuilds_raw_output()
     {

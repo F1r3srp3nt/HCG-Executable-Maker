@@ -879,6 +879,22 @@ jobs:
           grep -q "Swift packages: Packages/FieldKitCore (local)" "$OUT/inspect.txt"
           grep -q "Release: org.example.fieldkit, App Sandbox on" "$OUT/inspect.txt"
 
+      - name: Evidence outside HCG — plain xcodebuild and swift test on the fixture (how Xcode itself sees the scheme's tests)
+        continue-on-error: true
+        run: |
+          mkdir -p "$OUT/plain" && cp -R tests/Fixtures/MacXcode/FieldKit "$OUT/plain/FieldKit" && cd "$OUT/plain/FieldKit"
+          xcodebuild -project FieldKit.xcodeproj -scheme FieldKit -showTestPlans 2>&1 | tail -20 || true
+          echo "== xcodebuild test -project (no HCG)"
+          xcodebuild -project FieldKit.xcodeproj -scheme FieldKit -destination "platform=macOS" -derivedDataPath "$OUT/plain/dd" test > "$OUT/plain-xcodebuild-test.txt" 2>&1; echo "exit $?"
+          grep -E "error:|Test Suite|Executed|TEST (SUCCEEDED|FAILED)|no test bundles" "$OUT/plain-xcodebuild-test.txt" | head -20
+          echo "== xcodebuild test -project, Debug, testables built for testing (no HCG)"
+          xcodebuild -project FieldKit.xcodeproj -scheme FieldKit -configuration Debug -destination "platform=macOS" -derivedDataPath "$OUT/plain/dd2" build-for-testing > "$OUT/plain-build-for-testing.txt" 2>&1; echo "exit $?"
+          grep -E "error:|warning: .*test|BUILD (SUCCEEDED|FAILED)|\.xctest" "$OUT/plain-build-for-testing.txt" | head -20
+          find "$OUT/plain/dd2" -name "*.xctest" -maxdepth 6 | head
+          echo "== swift test --package-path Packages/FieldKitCore (no HCG)"
+          swift test --package-path Packages/FieldKitCore > "$OUT/plain-swift-test.txt" 2>&1; echo "exit $?"
+          tail -8 "$OUT/plain-swift-test.txt"
+
       - name: Genuine compile error — the failure is reported as failed, with the Swift compiler's own error, file and line
         run: |
           mkdir -p "$OUT/broken" && cp -R tests/Fixtures/MacXcode/FieldKit "$OUT/broken/FieldKit"
