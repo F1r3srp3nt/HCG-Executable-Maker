@@ -47,6 +47,15 @@ Reusable parts from HCG Mail for Windows 0.1.0-beta.1 (docs/WINDOWS-PACKAGING.md
   manifest, and a fake of the deployed Store's strict schema.
 
 ### Fixed
+
+- **`--version` no longer swallows a command.** `--package-windows … --version 0.1.0-beta.1` printed Executable Maker's own
+  version, exited 0 and packaged nothing; HCG Mail's prerelease run showed this. Commands are now matched first, and
+  `--version` means Maker's version only when no command is named. The same applied to `--ship-to-store` and
+  `--xcode-mac`. Regression tests check this, and the Windows CI job passes `--version` explicitly.
+- **A cancelled or timed-out process is never left stopped.** The root of a process tree is paused while its tree is
+  collected. It is then killed with SIGKILL sent directly to its process ID, and sent SIGCONT as a backstop. On macOS,
+  `Process.Kill` had left a stopped `sleep` behind, and the test steps waited on it until they timed out.
+- **The Store summary for a Windows file says "Windows PE".** It used to call the binaries "Mach-O".
 - The Inno Setup "Code signature" check verifies the signature instead of only noting that a signature block is
   present.
 

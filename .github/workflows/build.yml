@@ -345,8 +345,10 @@ jobs:
           dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-x64" --arch x64 --formats installer,zip --out "$env:OUT\out" --dist "$env:OUT\dist-x64" `
             --authenticode-thumbprint $env:THUMB --timestamp-url http://timestamp.digicert.com --approve-signing --built-with ".NET SDK $(dotnet --version)"
           if ($LASTEXITCODE -ne 0) { throw "x64 packaging failed ($LASTEXITCODE)" }
-          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-arm64" --arch arm64 --formats installer,zip --out "$env:OUT\out" --dist "$env:OUT\dist-arm64"
+          # The product's --version given explicitly (HCG Mail does this): it must package, not print Maker's own version.
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --version 1.2.0-beta.1 --app-dir "$env:OUT\publish-win-arm64" --arch arm64 --formats installer,zip --out "$env:OUT\out" --dist "$env:OUT\dist-arm64"
           if ($LASTEXITCODE -ne 0) { throw "arm64 packaging failed ($LASTEXITCODE)" }
+          if (-not (Test-Path "$env:OUT\dist-arm64\SHA256SUMS.txt")) { throw "--package-windows --version … wrote nothing" }
           Get-ChildItem "$env:OUT\dist-x64", "$env:OUT\dist-arm64" | Format-Table Name, Length
 
       - name: Authenticode — Maker's verdict against Windows' own (Get-AuthenticodeSignature / WinVerifyTrust)

@@ -7,8 +7,11 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Commands are matched before `--version`: a command's own `--version` (e.g. `--package-windows … --version 1.2.0`) is
+        // the product's version, never a request for Maker's (see Core.CommandLine).
+        var command = Core.CommandLine.CommandOf(args);
         // `HCGExecutableMaker --version`: identify exactly which build this is, without starting the UI.
-        if (args.Contains("--version"))
+        if (command == Core.CommandLine.MakerVersion)
         {
             Console.WriteLine(Core.HostInfo.BuildIdentity);
             Console.WriteLine(Account.HcgConnectConfiguration.BuiltInDescription(Account.HcgConnectConfiguration.SelectedEnvironment()));
