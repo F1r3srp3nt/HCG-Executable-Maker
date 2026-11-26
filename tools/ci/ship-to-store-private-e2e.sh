@@ -124,5 +124,15 @@ STATUS=$(curl -s "$STORE/api/v1/publishing/status")
 check "8 Public publication disabled: approval works ($(jq -r '.result.approvedEligibility // .result.error' "$OUT/approve.json")), publication refused ($(jq -c '.result.error // .result' "$OUT/publish.json" | head -c 120)), status says off, no public release" \
   '[ "$(jq -r .result.approvedEligibility "$OUT/approve.json")" = private ] && grep -q publication_disabled "$OUT/publish.json" && [ "$(echo "$STATUS" | jq -r .stages.publicPublication.available)" = false ] && ! curl -s "$STORE/api/public/v1/release-resolution/fixture-quasar-shell" | grep -q "$VERSION"'
 
+# 9 · The Ship to Store page in the real app (headless): signed out it contacts no Store; signed in, Check connection
+#     shows the eleven checks and the products; screenshot ship-diagnostics.png.
+UI=tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll
+if [ -f "$UI" ]; then
+  sign_in_as e2e-alice
+  dotnet "$UI" --source "$ZIP" --ship-page --ship-store "$INFO" --output "$OUT/ui" --screenshots "$OUT/shots" --prefix ship > "$OUT/ui.log" 2>&1; rc=$?
+  check "9 Ship to Store page (real app, headless): eleven diagnostics on the page, ready to upload private drafts, products listed (exit $rc)" \
+    '[ $rc = 0 ] && grep -q "PASS  Eleven separate connection checks are shown" "$OUT/ui.log" && ls "$OUT"/shots/*ship-diagnostics.png >/dev/null 2>&1'
+fi
+
 echo; [ $fail = 0 ] && echo "ALL PASSED" | tee -a "$RESULTS" || echo "SOME FAILED" | tee -a "$RESULTS"
 exit $fail

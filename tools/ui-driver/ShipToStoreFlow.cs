@@ -24,6 +24,28 @@ internal static partial class Program
         Check(page.Files.All(f => f.Candidate.IsSupported), "Every sample file is detected as a supported platform artifact");
         Check(page.Connection == "Sign in required", "Without an HCG Connect session the page asks for sign-in and contacts no Store");
         Shot("ship-to-store");
+        if (_args.ContainsKey("ship-store"))
+        {
+            // With a TEST HCG Store: sign in, then Check connection shows the eleven diagnostics on the page.
+            using var info = JsonDocument.Parse(File.ReadAllText(_args["ship-store"]));
+            await main.NavigateAsync("account", null);
+            var account = (AccountViewModel)main.CurrentPage!;
+            await Task.Delay(300);
+            account.SignInCommand.Execute(null);
+            await WaitUntil(() => account.IsSignedIn, TimeSpan.FromSeconds(60), "HCG Connect sign-in");
+            await main.NavigateAsync("ship", files);
+            page = (ShipToStoreViewModel)main.CurrentPage!;
+            page.StoreUrl = info.RootElement.GetProperty("storeOrigin").GetString()!;
+            await page.ConnectCommand.ExecuteAsync(null);
+            Log($"Connection: [{page.Connection}] {page.ConnectionDetail}");
+            foreach (var c in page.Diagnostics) Log($"  [{c.Check.StateLabel}] {c.Check.Title}: {c.Check.Summary}");
+            Check(page.Diagnostics.Count == 11, "Eleven separate connection checks are shown");
+            var expectReady = !_args.TryGetValue("ship-expect", out var expect) || expect != "off";
+            Check(expectReady ? page.Report?.CanUpload == true && page.Products.Count > 0 : page.Report?.CanUpload == false,
+                expectReady ? "Ready to upload private drafts; the products HCG allows are listed" : "Not ready: the checks name what is switched off");
+            await page.CopyDiagnosticsCommand.ExecuteAsync(null);
+            Shot("ship-diagnostics");
+        }
         return Failures.Count == 0 ? 0 : 1;
     }
 

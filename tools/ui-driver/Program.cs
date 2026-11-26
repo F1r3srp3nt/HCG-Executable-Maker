@@ -68,7 +68,7 @@ internal static partial class Program
         // Isolated data folder: imports, history and SwiftPM scratch space do not touch a real installation.
         Environment.SetEnvironmentVariable(AppPaths.RootOverrideVariable, Path.Combine(output, "hcg-data"));
         if (_args.ContainsKey("account-signed-in")) PrepareMockHcg(Path.Combine(output, "hcg-data"));
-        if (_args.ContainsKey("ship-build")) PrepareShipStore(Path.Combine(output, "hcg-data"));
+        if (_args.ContainsKey("ship-build") || (_args.ContainsKey("ship-page") && _args.ContainsKey("ship-store"))) PrepareShipStore(Path.Combine(output, "hcg-data"));
 
         var source = Path.GetFullPath(_args["source"]);
         AppClass.ServiceOverrides = services =>

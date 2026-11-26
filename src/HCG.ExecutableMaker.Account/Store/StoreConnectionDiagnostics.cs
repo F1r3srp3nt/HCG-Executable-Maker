@@ -294,22 +294,26 @@ public static class StoreConnectionDiagnostics
         }
 
         // 8–11 · Stages, as HCG Store states them. Nothing is created to test them.
-        checks.Add(StageCheck("draft", "Private draft creation", stages?.DraftCreation, status, statusProbe, olderServer, perm?.Submit, "create private drafts"));
-        checks.Add(StageCheck("upload", "Artifact upload availability", stages?.ArtifactUpload, status, statusProbe, olderServer, perm?.Submit,
+        checks.Add(StageCheck("draft", "Private draft creation", "draftCreation", stages?.DraftCreation, status, statusProbe, olderServer, perm?.Submit, "create private drafts"));
+        checks.Add(StageCheck("upload", "Artifact upload availability", "artifactUpload", stages?.ArtifactUpload, status, statusProbe, olderServer, perm?.Submit,
             "upload files" + (status?.Limits is { } l ? $" (resumable, {l.ChunkBytes / 1048576} MB chunks, files up to {l.MaxUploadBytes / 1048576:N0} MB, SHA-256 checked by the server)" : "")));
-        checks.Add(StageCheck("submission", "Release submission", stages?.ReleaseSubmission, status, statusProbe, olderServer, perm?.Submit, "submit releases for review (a person approves them in HCG Store)"));
+        checks.Add(StageCheck("submission", "Release submission", "releaseSubmission", stages?.ReleaseSubmission, status, statusProbe, olderServer, perm?.Submit, "submit releases for review (a person approves them in HCG Store)"));
         var pub = stages?.PublicPublication;
         checks.Add(status is null
             ? new("publication", "Public publication", olderServer ? StoreCheckState.Off : StoreCheckState.NotChecked,
                 olderServer ? "Switched off on this server (publishing is disabled). Maker never publishes; a person publishes approved releases in HCG Store." : "Not checked.", null, statusProbe.Line)
             : pub?.Available == true
-                ? new("publication", "Public publication", StoreCheckState.Passed, "Available in HCG Store's browser review, by a person with HCG's publication permission. Maker never publishes.", null, statusProbe.Line)
-                : new("publication", "Public publication", StoreCheckState.Off, (pub?.Reason ?? "Switched off on this server.") + " Uploading and leaving releases waiting privately for approval does not need it.", null, statusProbe.Line));
+                ? new("publication", "Public publication", StoreCheckState.Passed, "Available in HCG Store's browser review, by a person with HCG's publication permission. Maker never publishes.", null, StageLine("publicPublication", pub))
+                : new("publication", "Public publication", StoreCheckState.Off, (pub?.Reason ?? "Switched off on this server.") + " Uploading and leaving releases waiting privately for approval does not need it.", null, StageLine("publicPublication", pub)));
 
         return new StoreDiagnosticsReport(client.Origin, now, checks, products, status);
     }
 
-    private static StoreCheck StageCheck(string id, string title, StoreStage? stage, StorePublishingStatus? status, StoreProbe statusProbe, bool olderServer, string? submit, string what)
+    /// <summary>The one field of HCG Store's status answer a stage check relies on (the full answer is under API version).</summary>
+    private static string StageLine(string key, StoreStage? stage) =>
+        $"status → stages.{key}: available {(stage?.Available == true ? "true" : "false")}, where {stage?.Where ?? "?"}{(stage?.Reason is { } r ? $", reason \"{r}\"" : "")}";
+
+    private static StoreCheck StageCheck(string id, string title, string key, StoreStage? stage, StorePublishingStatus? status, StoreProbe statusProbe, bool olderServer, string? submit, string what)
     {
         if (status is null)
             return olderServer
@@ -318,12 +322,12 @@ public static class StoreConnectionDiagnostics
                 : new(id, title, StoreCheckState.NotChecked, "Not checked: the server's status is unknown.", null, statusProbe.Line);
         if (stage is not { Available: true })
             return new(id, title, StoreCheckState.Failed, $"Switched off on this server. {stage?.Reason}".Trim(),
-                $"An HCG Store administrator sets HCG_STORE_PUBLISHING=submissions (private drafts and uploads only; nothing becomes public).", statusProbe.Line, "HCG Store administrator");
+                $"An HCG Store administrator sets HCG_STORE_PUBLISHING=submissions (private drafts and uploads only; nothing becomes public).", StageLine(key, stage), "HCG Store administrator");
         return submit switch
         {
-            "granted" => new(id, title, StoreCheckState.Passed, $"Available: you may {what}.", null, statusProbe.Line),
-            "not-granted" => new(id, title, StoreCheckState.Failed, "Available on the server, but HCG has not granted you the publishing permission (see above).", null, statusProbe.Line, "HCG"),
-            _ => new(id, title, StoreCheckState.Warning, $"Available on the server; whether you may {what} depends on your sign-in and permission (see above).", null, statusProbe.Line),
+            "granted" => new(id, title, StoreCheckState.Passed, $"Available: you may {what}.", null, StageLine(key, stage)),
+            "not-granted" => new(id, title, StoreCheckState.Failed, "Available on the server, but HCG has not granted you the publishing permission (see above).", null, StageLine(key, stage), "HCG"),
+            _ => new(id, title, StoreCheckState.Warning, $"Available on the server; whether you may {what} depends on your sign-in and permission (see above).", null, StageLine(key, stage)),
         };
     }
 
