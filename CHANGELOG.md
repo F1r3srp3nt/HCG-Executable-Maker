@@ -2,6 +2,118 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG Impactor
+
+### Added
+- **Ship to Repo** (Unleashify › Build output, `--ship-to-repo submit|status|show`), under HCG Repo's Executable Maker
+  submission contract (`docs/EXECUTABLE_MAKER_SUBMISSION.md` in HCG Repo).
+  - **Submit:** `release submit --handoff … --result-json …`; HCG Repo validates the exact .deb into its private
+    incoming store. **Status:** `release status <id>`.
+  - Maker shows the state, the SHA-256, HCG Repo's **six evidence levels separately** (the script-free lifecycle is
+    never presented as device evidence), the findings and the owner's next commands.
+  - **Approval of the exact SHA-256, Candidate preparation and publication are the owner's**, run in HCG Repo. Maker
+    has no approve or prepare operation (`--ship-to-repo approve|prepare` is refused with an explanation).
+  - `HCG_REPO_INCOMING` is passed to HCG Repo, so Maker's submissions are in the same store as the owner's commands.
+- **HCG Release Passport v1** (`docs/RELEASE-PASSPORT.md`): schema pinned byte for byte from HCG Repo 3bf53c7.
+  - **Build half:** every Unleashify handoff carries `release-passport.json`. It holds the artifact, SHA-256, source,
+    provider, toolchain, Maker's validation evidence and `code_signing` (each Mach-O's signer, verified pages,
+    identifier, cdhash and entitlements). It states no repository signing, approvals, publication or device results.
+  - **Ship to Repo:** once the owner has prepared a release, Maker reads HCG Repo's own passport and reconciles it with
+    the build half. It shows `repository_signing` exactly as HCG Repo states it, apart from `code_signing`.
+  - **Ship to Store:** HCG Store v2's source commit, build provider, toolchain and validation report are filled from a
+    passport of the file's exact bytes (or `--passport`), and left empty otherwise.
+  - **Checks:** version compatibility (newer versions refused with a reason; extra fields accepted), and a schema
+    evaluator cross-checked against Python `jsonschema`.
+- **CI:** HCG Repo's Release Manager review runs on Linux. HCG Repo 3bf53c7's script-free lifecycle upgrades from the
+  version in `pool/`, and macOS refuses dpkg's backup hard links inside an installed `.app`.
+- **Signature integrity** check in rootless package validation: every Mach-O signature's page hashes and special
+  slots are recomputed against the files (`MachOSignatureAudit`). It fails a binary changed after signing, an
+  inconsistent signature, or a main executable with library validation or hardened runtime loading an ad hoc or
+  differently signed framework. VALIDATION.txt lists each binary's signer, verified pages, identifier and cdhash.
+- **DEVICE-TEST.md:** "If the app closes at launch": how to collect the crash report and read its termination
+  namespace (CODESIGNING, DYLD, EXC_CRASH, FRONTBOARD) before changing anything.
+- Regression tests for a .NET/Avalonia iOS bundle shaped like HCG Mail Unleashed (unsigned main executable,
+  SkiaSharp/HarfBuzzSharp frameworks with their own ad hoc signatures, AOT data, managed assemblies) and an opt-in
+  check of the published HCG Mail Unleashed 0.1.0~beta1 package (`HCG_MAIL_UNLEASHED_DEB`, read only).
+- **HCG Repo Distribution v2 submission manifest** (`submission.json`, `hcg.repo.artifact-submission` v1) in every
+  handoff with a pinned, clean source; validated by Maker and by HCG Repo's own `validate_manifest` in CI. It carries
+  the `signing` claim (method `ldid`, the files Maker signed, each binary's exact entitlements), and the `package.toml`
+  draft records the same entitlements under `[review.entitlements]`. A local handoff's draft has no `[access]
+  exception`: the owner approves a free demo in HCG Repo.
+
+### Fixed
+- **icon.png** was Apple's CgBI PNG, copied from the Xcode build, which browsers and Sileo cannot decode. It is now
+  converted to a standard RGBA PNG and verified with a standard decoder (square, at least 60 pixels). Approved
+  source artwork is the fallback (`--icon-artwork`, or Package › Icon artwork with a suggestion from the project's
+  AppIcon set).
+- **DEVICE-TEST.md** searched for "sentinel" and wrote `sentinel-test-*` snapshots for every product. All
+  instructions now use the actual product name, bundle ID, package ID, version and install path. The installed-build
+  check matches the product's own family.
+- **control.txt** wrote multi-line descriptions without Debian continuation lines, so HCG Repo's handoff reader saw
+  no dependencies.
+- **provenance.json** now records the app's toolchain (from `DTXcode`) for local builds, which HCG Repo requires.
+
+- **Unleashify on your Mac, without GitHub Actions** (`docs/UNLEASHIFY-LOCAL.md`). This uses the same packager,
+  validator and handoff as CI.
+  - **Pinned commit:** a clean checkout of one exact commit of your local repository (read only), imported and
+    recorded.
+  - **Lifecycle simulation:** install → configure → upgrade → remove in a throwaway folder; Maker's scripts run with a
+    recording `uicache`.
+  - **Local provenance:** built by, toolchain read from the app's `DTXcode`, time, host label without computer or user
+    names, source visibility, validation. No CI run or artifact is recorded.
+  - **HCG Repo handoff** through Ship to Repo (HCG Repo's Release Manager; `--via local-file` stages the .deb for
+    Prepare packages). Maker writes no import request of its own for a local build.
+  - **Owner approval bound to the exact SHA-256**, given in HCG Repo (`release approve`), not in Maker.
+  - **HCG Repo import preview:** HCG Repo's own importer, dry run, on a throwaway copy of your checkout.
+  - The same in the CLI: `--rootless-deb … --local --source-visibility … [--approved-sha256 …] [--hcg-repo …]`.
+- `IBuildHost` / `LocalBuildHost`: the seam for a future owner-authorized HCG Server build host (proposal in
+  `docs/BUILD-HOSTS.md`).
+
+### Changed
+- Creating a profile with the Xcode account registers a device only when you tick **Register the connected device**
+  (command line `--register-device`). The approval dialog names the App ID and device registration.
+- Impactor labels the team when a signature records none (codesign records a team only for Apple-issued
+  certificates).
+- Windows installer test: a `taskkill` child that had already exited no longer fails the test.
+
+- **HCG Impactor** (sidebar › HCG Impactor; `--impactor` on the command line): inspect, sign, install and diagnose iOS
+  and iPadOS apps on your own devices. Flow: Drop IPA → Inspect → Sign → Select device → Install. See `docs/IMPACTOR.md`.
+  - **IPA Inspector** (all platforms): identity, version and build, minimum iOS, device families, architectures,
+    Simulator/Mac/32-bit/App Store-encrypted binaries, every extension, framework and dylib, embedded signatures
+    (identifier, team, signer, chain, signing time, entitlements), embedded profiles (verified), sealed-resource
+    integrity and safe extraction. The original IPA is never changed; `.deb` files go to the jailbreak workflow.
+  - **Signing Studio** (macOS):
+    - Automatic or chosen identity and profiles per bundle; Development, Ad Hoc, Enterprise and App Store export.
+    - Every entitlement must be granted by the profile, and every removal is reported.
+    - Bundles are signed innermost first with `codesign` and your Keychain identity.
+    - `codesign --verify --deep --strict`, then a new IPA, inspected again.
+    - Warnings for bundle ID and team changes.
+  - **Device Manager / Deployment Queue** (macOS, Xcode `devicectl`):
+    - Device details: model, iOS, connection, pairing, Developer Mode, capabilities, registration in installed
+      profiles; guidance for Trust, pairing and Developer Mode.
+    - Pre-installation validation; installation with progress, cancellation, optional launch and batch mode; never
+      removes apps.
+  - **Certificates, Provisioning, Signing Monitor** (expiry reminders, manual re-sign and reinstall), **Installation
+    History** and **Diagnostics**: 15 failure types explained, original output redacted, and an export in
+    `hcg.diagnostic-report/1` plus Markdown.
+  - **Signing Doctor** (Impactor, Mobile Build Studio › Signing Doctor…, `--impactor doctor`): for one bundle ID,
+    every installed profile is checked for bundle ID, team, certificate, certificate and profile expiry, registered
+    device, development vs distribution, entitlements, platform and signature, with the exact reason and next steps.
+  - **Create profile with Xcode** (`--impactor provision`): with approval, a throwaway stub project is built once with
+    `xcodebuild -allowProvisioningUpdates` using the Apple Account signed in to Xcode. Xcode registers the App ID
+    (and the connected device) and downloads a Development profile. No manual temporary project; nothing is revoked
+    or installed.
+  - Shared device record **`hcg.apple-device/1`** (`docs/contracts/`) proposed to HCG System Tester. "Open in System
+    Tester" uses its existing `hcgsystemtester://open/connected-systems` route.
+  - `src/HCG.Impactor` is a self-contained module (no UI), ready to become a standalone app.
+- CI job **`impactor`** (macOS), using real Apple tools with a synthetic identity and profile; no physical device on CI:
+  - a real Xcode-built device app is inspected and signed;
+  - Apple's `codesign` verifies the result, and a tampered copy is caught;
+  - real `devicectl` output is translated;
+  - the workspace signs through Signing Studio.
+
+  Physical-device installation is to be validated on the owner's Mac (`docs/IMPACTOR.md`).
+
 ## [Unreleased] — Xcode projects that only wrap another build (HCG Mail)
 
 ### Fixed

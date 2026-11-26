@@ -22,7 +22,8 @@ public sealed class RootlessAppWorkflow(IProcessRunner runner, TimeProvider time
         string? DeviceIosVersion = null,
         IReadOnlyList<(string Version, string Sha256)>? PublishedVersions = null,
         bool ExportHandoff = true,
-        HandoffContext? Context = null);
+        HandoffContext? Context = null,
+        bool SimulateLifecycle = true);
 
     public sealed record Outcome(
         Stage ReachedStage,
@@ -32,7 +33,9 @@ public sealed class RootlessAppWorkflow(IProcessRunner runner, TimeProvider time
         RootlessAppPackager.Result? Package,
         RootlessAppDebValidator.Result? Validation,
         CandidateHandoff.Output? Handoff,
-        IReadOnlyList<string> Log);
+        IReadOnlyList<string> Log,
+        RootlessLifecycleSimulator.Result? Lifecycle = null,
+        PackageProvenance? Provenance = null);
 
     public async Task<Outcome> RunAsync(Request r, Action<Stage, string>? progress, CancellationToken ct)
     {
@@ -91,13 +94,35 @@ public sealed class RootlessAppWorkflow(IProcessRunner runner, TimeProvider time
         if (!val.Passed)
             return new(Stage.Validate, false, "Validation failed: " + string.Join("; ", val.Checks.Where(c => c.Status == VerificationStatus.Failed).Select(c => c.Name)), app, pkg, val, null, log);
 
-        if (!r.ExportHandoff) return new(Stage.Done, true, null, app, pkg, val, null, log);
+        // Lifecycle: install → configure → remove in a throwaway folder (no privileges, nothing outside it touched).
+        RootlessLifecycleSimulator.Result? life = null;
+        if (r.SimulateLifecycle)
+        {
+            life = await RootlessLifecycleSimulator.RunAsync(pkg.DebPath, ct).ConfigureAwait(false);
+            foreach (var c in life.Checks) Log(Stage.Validate, $"[{c.Status}] Lifecycle · {c.Name}: {c.Detail}");
+            if (!life.Passed)
+                return new(Stage.Validate, false, "Package lifecycle failed: " + string.Join("; ", life.Checks.Where(c => c.Status == VerificationStatus.Failed).Select(c => c.Name)), app, pkg, val, null, log, life);
+        }
+        var prov = Complete(r.Provenance, app, val, life, r.DeviceIosVersion);
+        if (prov.Local is { } lb) Log(Stage.Validate, $"Local build: {lb.BuiltBy} · {lb.Toolchain ?? "toolchain not recorded in the app"} · {lb.Host} · {lb.SourceVisibility} source");
+
+        if (!r.ExportHandoff) return new(Stage.Done, true, null, app, pkg, val, null, log, life, prov);
 
         // Handoff.
         var folder = Path.Combine(r.OutputDir, $"{r.Spec.PackageId}_{r.Spec.Version.Replace(':', '_')}-candidate-handoff");
-        var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, r.Provenance, r.Texts, pkg.SignedFiles, time.GetUtcNow(), ct, r.Context).ConfigureAwait(false);
+        var handoff = await CandidateHandoff.ExportAsync(folder, pkg.DebPath, app, r.Spec, val, prov, r.Texts, pkg.SignedFiles, time.GetUtcNow(), ct, r.Context, life).ConfigureAwait(false);
         Log(Stage.Handoff, $"Exported {handoff.Files.Count} files to {folder}");
         foreach (var m in handoff.Missing) Log(Stage.Handoff, "MISSING " + m);
-        return new(Stage.Done, true, null, app, pkg, val, handoff, log);
+        return new(Stage.Done, true, null, app, pkg, val, handoff, log, life, prov);
+    }
+
+    /// <summary>A local build's provenance, completed with what was measured: the app's Xcode and the validation results.</summary>
+    public static PackageProvenance Complete(PackageProvenance p, IosAppBundle app, RootlessAppDebValidator.Result val, RootlessLifecycleSimulator.Result? life, string? deviceIos)
+    {
+        if (p.Local is not { } lb) return p;
+        var passed = val.Checks.Count(c => c.Status is VerificationStatus.Passed or VerificationStatus.PassedWithWarnings);
+        var validation = $"HCG Executable Maker rootless validator: {(val.Passed ? "passed" : "FAILED")} ({passed}/{val.Checks.Count} checks{(deviceIos is null ? "" : $", device iOS {deviceIos}")})"
+                         + (life is null ? "; lifecycle not simulated" : "; " + life.Summary);
+        return p with { Local = lb with { Toolchain = lb.Toolchain ?? LocalBuild.ToolchainFrom(app), Validation = lb.Validation ?? validation } };
     }
 }

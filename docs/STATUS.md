@@ -5,6 +5,21 @@ desktop apps (docs/ELECTRON.md), guided toolchain setup (docs/TOOLCHAINS.md) and
 (docs/HCG-ACCOUNT.md — not live until HCG's external setup is done) to 0.2.0.
 0.2.0 contained M0.1, M0.2 (Windows installer) and M0.5 (Mobile Build Studio), merged into `main` with founder approval.
 
+# HCG Impactor (unreleased)
+
+Details: docs/IMPACTOR.md.
+
+| Area | Implemented | Automated tests (synthetic) | Real Apple tools (macOS CI) | Physical device |
+|---|---|---|---|---|
+| IPA Inspector | yes (all platforms) | yes | Xcode-built HelloIOS IPA | — |
+| Signing / re-signing | macOS (`codesign`) | planner, entitlements | synthetic identity and profile; verified by Apple's `codesign` | **not yet validated** |
+| Devices, installation, launch | macOS (`devicectl`) | JSON parsing, workflow with fake devices | device list; real error output translated (no device on CI) | **not yet validated** |
+| Wireless installation | same path when CoreDevice reports a network device | — | — | not validated |
+| Windows / Linux signing | not implemented (inspection and plans only) | — | — | — |
+
+Physical-device validation (owner's MacBook Pro, Xcode 27.2): pending. Record the result here using the steps in
+docs/IMPACTOR.md › Physical device validation.
+
 # HCG Nexus, HCG Mail iOS, HCG Sentinel (unreleased, not pushed)
 
 Details: docs/HCG-PROJECTS.md. Repositories inspected at Nexus c7cd62c, Mail 46d4228, Sentinel 810c6f9.

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    HCG Impactor — iOS / iPadOS app inspection, signing, device management, installation and deployment diagnostics.
+    A self-contained module: its own namespaces, interfaces and storage. It reuses Executable Maker's Packaging layer
+    (property lists, provisioning profiles, Keychain listing, Mach-O) and Core (process runner), and has no UI. The
+    Avalonia workspace and the command line in HCG.ExecutableMaker.App are thin heads over it, so a standalone HCG
+    Impactor app can reference this project unchanged.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\HCG.ExecutableMaker.Packaging\HCG.ExecutableMaker.Packaging.csproj" />
+    <!-- The Xcode project writer (internal) for the provisioning stub project. -->
+    <ProjectReference Include="..\HCG.ExecutableMaker.Porting\HCG.ExecutableMaker.Porting.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />
+  </ItemGroup>
+</Project>

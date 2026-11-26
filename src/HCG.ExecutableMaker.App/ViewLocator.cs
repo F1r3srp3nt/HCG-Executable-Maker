@@ -19,6 +19,7 @@ public sealed class ViewLocator : IDataTemplate
         [typeof(ArtifactsViewModel)] = () => new ArtifactsView(),
         [typeof(ShipToStoreViewModel)] = () => new ShipToStoreView(),
         [typeof(UnleashifyViewModel)] = () => new UnleashifyView(),
+        [typeof(ImpactorViewModel)] = () => new ImpactorView(),
         [typeof(ToolchainsViewModel)] = () => new ToolchainsView(),
         [typeof(SigningViewModel)] = () => new SigningView(),
         [typeof(SettingsViewModel)] = () => new SettingsView(),

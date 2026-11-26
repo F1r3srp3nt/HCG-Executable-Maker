@@ -28,6 +28,8 @@
   <SolidColorBrush x:Key="Hcg.Brush.Divider" Color="#1FD9E2EB" />
   <SolidColorBrush x:Key="Hcg.Brush.Cyan" Color="#00D9FF" />
   <SolidColorBrush x:Key="Hcg.Brush.CyanSoft" Color="#1F00D9FF" />
+  <SolidColorBrush x:Key="Hcg.Brush.Violet" Color="#9B5CFF" />
+  <SolidColorBrush x:Key="Hcg.Brush.VioletSoft" Color="#269B5CFF" />
   <SolidColorBrush x:Key="Hcg.Brush.CyanFaint" Color="#0F00D9FF" />
   <SolidColorBrush x:Key="Hcg.Brush.Blue" Color="#178BFF" />
   <SolidColorBrush x:Key="Hcg.Brush.Silver" Color="#D9E2EB" />

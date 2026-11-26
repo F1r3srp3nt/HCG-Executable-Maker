@@ -78,6 +78,14 @@ public static class Composition
         services.AddSingleton<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>();
         services.AddSingleton<IProjectSigningStore, HCG.ExecutableMaker.Infrastructure.Persistence.SqliteProjectSigningStore>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck>();
+        // HCG Impactor: IPA inspection, signing (codesign with Keychain identities), devices (devicectl), installation, history.
+        services.AddSingleton(sp => new HCG.Impactor.Storage.ImpactorStore(sp.GetRequiredService<IAppPaths>().Root));
+        services.AddSingleton<HCG.Impactor.ISigningInventorySource>(sp => new HCG.Impactor.Signing.SigningInventorySource(sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>()));
+        services.AddSingleton<HCG.Impactor.IAppSigner>(sp => new HCG.Impactor.MacOS.MacAppSigner(sp.GetRequiredService<IProcessRunner>()));
+        services.AddSingleton<HCG.Impactor.IDeviceService>(sp => new HCG.Impactor.MacOS.MacDeviceService(sp.GetRequiredService<IProcessRunner>()));
+        services.AddSingleton<HCG.Impactor.ImpactorService>();
+        services.AddSingleton(sp => new HCG.Impactor.MacOS.XcodeProvisioningAssistant(sp.GetRequiredService<IProcessRunner>(),
+            Path.Combine(sp.GetRequiredService<IAppPaths>().Root, "impactor"), sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.ProvisioningProfileStore>()));
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService>();
@@ -147,6 +155,7 @@ public static class Composition
         services.AddSingleton<StorePublishingAuthority>();
         services.AddSingleton<ShipToStoreViewModel>();
         services.AddSingleton<UnleashifyViewModel>();
+        services.AddSingleton<ImpactorViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();
