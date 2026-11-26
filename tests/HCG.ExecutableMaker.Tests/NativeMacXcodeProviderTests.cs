@@ -315,6 +315,9 @@ public sealed class NativeMacXcodeProviderTests : IDisposable
         var f = XcodeDiagnostics.Analyze(bad, "Failed", null, ["/b/xcode/source"]);
         Assert.Contains(f.TestFailures, t => t.File == "Packages/FieldKitCore/Tests/FieldKitCoreTests/FieldSummaryTests.swift" && t.Line == 5);
         Assert.Equal(["Test Suite 'All tests' failed at 2026-11-26 01:00:00.010."], f.ResultLines);
+        // With --filter (how Maker runs a scheme's package targets), XCTest's top suite is 'Selected tests' (Xcode 26.6, CI run 45741987759).
+        Assert.Equal(["Test Suite 'Selected tests' passed at 2026-11-26 02:53:51.952."],
+            XcodeDiagnostics.Analyze(["Test Suite 'Selected tests' started at 2026-11-26 02:53:51.942.", "Test Suite 'Selected tests' passed at 2026-11-26 02:53:51.952."], "Succeeded", null, null).ResultLines);
     }
 
     [Fact]

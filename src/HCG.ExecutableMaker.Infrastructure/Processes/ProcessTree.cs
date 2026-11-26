@@ -25,18 +25,41 @@ public static class ProcessTree
             try { process.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             return;
         }
+        // The root alone is paused while the tree is collected, so it cannot start a child between the listing and its
+        // own death (that child would be re-parented to launchd and escape: CI run 45741987759, an `xcodebuild -sdk …
+        // -version PlatformPath` that `xcodebuild -list` started as it was cancelled). The root is always killed at the
+        // end, so it is never left stopped.
+        Signal(root, OperatingSystem.IsMacOS() ? 17 : 19);   // SIGSTOP
         var killed = new HashSet<int>();
-        for (var pass = 0; pass < 3; pass++)
+        try
         {
-            var tree = Descendants(root, killed);
-            if (pass > 0 && tree.All(killed.Contains)) break;
-            foreach (var pid in tree)
+            for (var pass = 0; pass < 3; pass++)
             {
-                if (!killed.Add(pid)) continue;
-                try { using var p = Process.GetProcessById(pid); p.Kill(); }   // SIGKILL; a stopped process dies too
-                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                var tree = Descendants(root, killed);
+                if (pass > 0 && tree.All(p => p == root || killed.Contains(p))) break;
+                // Deepest first: a parent dies only after its children, so none is re-parented while still alive.
+                foreach (var pid in tree.Reverse())
+                {
+                    if (pid == root || !killed.Add(pid)) continue;
+                    KillOne(pid);
+                }
             }
         }
+        finally { KillOne(root); }
+    }
+
+    private static void KillOne(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); p.Kill(); }   // SIGKILL; a stopped process dies too
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "kill", SetLastError = true)]
+    private static extern int SysKill(int pid, int signal);
+
+    private static void Signal(int pid, int signal)
+    {
+        try { SysKill(pid, signal); } catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { }
     }
 
     /// <summary>The root and every process whose parent chain leads to it (or to an already-killed member), from ps.</summary>
