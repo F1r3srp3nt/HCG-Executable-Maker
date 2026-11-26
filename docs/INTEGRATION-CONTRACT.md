@@ -12,9 +12,13 @@ The contract is a command-line interface of the installed application's own exec
 | Windows | `HCGExecutableMaker.exe` in the installation or portable folder |
 | Linux | `HCGExecutableMaker` in the portable folder |
 
-Versions that do not know `--integration` (0.4.0 before this contract) exit 0 and start the UI, so clients must first
-read `--version` and only then call `--integration describe`, and treat anything that is not a JSON document with
-`"contract": "hcg.executable-maker.integration/1"` as **contract not available**.
+**Discovery marker.** Versions that do not know `--integration` (0.4.0 before this contract) treat it as a normal
+start and open their window. Before running anything, a client checks that the contract name
+`hcg.executable-maker.integration/1` occurs (UTF-16, as .NET stores string literals) in `HCGExecutableMaker.dll` next
+to the executable, or in the executable itself for single-file builds. This read-only check is part of the contract and
+stays valid for every version 1 build. Then the client reads `--version`, calls `--integration describe`, and treats
+anything that is not a JSON document with `"contract": "hcg.executable-maker.integration/1"` as **contract not
+available**.
 
 ## `--integration describe`
 
