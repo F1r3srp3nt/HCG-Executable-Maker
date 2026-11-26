@@ -1023,7 +1023,11 @@ jobs:
           (cd "$OUT/deskloop" && zip -qry ../DeskLoop-main.zip DeskLoop-main)
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/DeskLoop-main.zip" --xcode-mac --select-xcode "$HCG_XCODE" \
             --cancel-after-seconds 2 --output "$OUT/cancel" --screenshots "$OUT/screens" --prefix deskloop-cancel
-          ! pgrep -fl xcodebuild || { echo "xcodebuild still running after cancellation"; exit 1; }
+          # Nothing may keep running. A short query a cancelled xcodebuild had just started (`xcodebuild -sdk … -version
+          # PlatformPath`, re-parented to launchd before it could be killed) may take a moment to end on its own: allow
+          # 10 s, then fail if any xcodebuild is still there.
+          for i in $(seq 1 10); do pgrep -q xcodebuild || break; sleep 1; done
+          ! pgrep -fl xcodebuild || { echo "xcodebuild still running 10 s after cancellation"; exit 1; }
           ! find "$OUT/cancel" -name INSTALL-COMMAND-WAS-RUN | grep . || { echo "INSTALL.command was run"; exit 1; }
 
       - name: MotionWallpaper — ZIP import → detection → preflight → Release build (Apple silicon, default) → .app + ZIP + DMG

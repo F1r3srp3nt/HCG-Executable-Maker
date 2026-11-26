@@ -25,11 +25,26 @@ public static class ProcessTree
             try { process.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             return;
         }
-        // The root alone is paused while the tree is collected, so it cannot start a child between the listing and its
-        // own death (that child would be re-parented to launchd and escape: CI run 45741987759, an `xcodebuild -sdk …
+        if (!OperatingSystem.IsLinux())
+        {
+            // macOS: never pause anything. Pausing the root (below) hung the macOS test runs (CI runs 45763414237 and
+            // 45770183303: builds and probes that should finish waited until the 5-minute inactivity limit). So this
+            // keeps the behaviour those runs had before: collect, SIGKILL every member, up to three passes.
+            var done = new HashSet<int>();
+            for (var pass = 0; pass < 3; pass++)
+            {
+                var tree = Descendants(root, done);
+                if (pass > 0 && tree.All(done.Contains)) break;
+                foreach (var pid in tree)
+                    if (done.Add(pid)) KillOne(pid);
+            }
+            return;
+        }
+        // Linux: the root alone is paused while the tree is collected, so it cannot start a child between the listing and
+        // its own death (that child would be re-parented to init and escape: CI run 45741987759, an `xcodebuild -sdk …
         // -version PlatformPath` that `xcodebuild -list` started as it was cancelled). The root is always killed at the
         // end, so it is never left stopped.
-        Signal(root, OperatingSystem.IsMacOS() ? 17 : 19);   // SIGSTOP
+        Signal(root, 19);   // SIGSTOP (Linux)
         var killed = new HashSet<int>();
         try
         {
@@ -47,11 +62,9 @@ public static class ProcessTree
         }
         finally
         {
-            // SIGKILL straight to the pid: Process.GetProcessById(root).Kill() did not kill a stopped root on macOS (CI run
-            // 45763414237: a cancelled `sleep 60` stayed stopped and the runner waited for it until the step timed out).
+            // SIGKILL straight to the pid, then SIGCONT, so the root is never left stopped whatever happened above.
             if (Signal(root, 9) != 0) KillOne(root);
-            // Never leave the root stopped, whatever happened above (SIGCONT to a process already dead is harmless).
-            Signal(root, OperatingSystem.IsMacOS() ? 19 : 18);   // SIGCONT
+            Signal(root, 18);   // SIGCONT (Linux)
         }
     }
 
