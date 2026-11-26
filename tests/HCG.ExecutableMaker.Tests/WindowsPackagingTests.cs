@@ -106,6 +106,11 @@ public sealed class WindowsPackagingTests : IDisposable
         var c = await StoreArtifacts.DetectAsync(zip.Path);
         Assert.Equal(["x64"], c.Architectures);
         Assert.Equal(("github-actions", new string('a', 40)), (c.Provenance!.BuildProvider, c.Provenance.SourceCommit));
+
+        // The Store's validation summary names the binaries as what they are: Windows PE, never Mach-O.
+        var summary = StoreProvenance.Report(passport.AsObject()).Summary;
+        Assert.Contains("1 Windows PE, NOT all signed, method not claimed", summary);
+        Assert.DoesNotContain("Mach-O", summary);
     }
 
     private string InnoSetup(string name, ushort loaderMachine = 0x014C)

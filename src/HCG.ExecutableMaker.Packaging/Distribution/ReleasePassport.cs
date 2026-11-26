@@ -339,7 +339,9 @@ public static class ReleasePassport
         if (cs is null) return "not stated";
         var all = cs["all_signed"] is JsonValue a && a.TryGetValue<bool>(out var ab) ? (ab ? "all signed" : "NOT all signed") : "signing not inspected";
         var ents = cs["entitlements"] is JsonObject e && e.Count > 0 ? "; entitlements: " + string.Join("; ", e.Select(kv => $"{kv.Key} ({string.Join(", ", (kv.Value as JsonArray ?? []).Select(x => x!.GetValue<string>()))})")) : "; no entitlements";
-        return $"{cs["binaries"]?.ToJsonString() ?? "?"} Mach-O, {all}, method {Str(cs, "method_claimed") ?? "not claimed"}{ents}";
+        // The binary kind follows the passport's platform: Windows files carry PE programs (Authenticode), Apple ones Mach-O.
+        var kind = Str(passport, "platform") == "windows" ? "Windows PE" : "Mach-O";
+        return $"{cs["binaries"]?.ToJsonString() ?? "?"} {kind}, {all}, method {Str(cs, "method_claimed") ?? "not claimed"}{ents}";
     }
 
     private static string? Str(JsonNode? n, string key) => n?[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;

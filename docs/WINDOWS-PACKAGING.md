@@ -9,7 +9,8 @@ This page describes the reusable parts that replace those steps.
 
 ```
 HCGExecutableMaker --package-windows --identity app.json --app-dir <already-built folder> --arch x64|arm64 \
-    [--formats installer,zip,folder] [--out DIR] [--dist DIR] [--built-with ".NET SDK 10.0.100"]
+    [--formats installer,zip,folder] [--out DIR] [--dist DIR] [--built-with ".NET SDK 10.0.100"] \
+    [--provider github-actions --run-id <workflow run ID>]
 HCGExecutableMaker --package-windows --identity app.json --source <project folder> [--project src/App/App.csproj] \
     [--targets win-x64,win-arm64]
 ```
@@ -106,7 +107,8 @@ HCGExecutableMaker --package-windows … --authenticode-thumbprint <SHA-1> --tim
 - the architecture installed;
 - `windows.installed_program` (machine, subsystem, product and file version, company) and `windows.bootstrapper`;
 - the source commit as Git states it;
-- the build provider;
+- the build provider and run ID: `executable-maker-local` by default; inside a workflow run, pass
+  `--provider github-actions --run-id ${{ github.run_id }}` (the real run's ID, never an invented one);
 - the toolchain (`--built-with`, Executable Maker, Inno Setup);
 - the artifact checks;
 - `code_signing` from Authenticode, for the file and each program: status, signer, thumbprint, digest, chain,

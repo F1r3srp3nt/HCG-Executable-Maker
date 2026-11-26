@@ -22,7 +22,7 @@ namespace HCG.ExecutableMaker.App;
 ///     [--identity app.json] --name "Product" --publisher "Company" --app-id com.company.product --version 1.2.0[-beta.1]
 ///     [--exe Product.exe] [--assembly-name Product] [--icon icon.png] [--description "…"] [--install-folder "Product"]
 ///     [--formats installer,zip,folder] [--out DIR] [--dist DIR] [--dist-name "{name}-{version}-{rid}"]
-///     [--build-number N] [--product-key key] [--edition id] [--built-with ".NET SDK 10.0.100"]
+///     [--build-number N] [--product-key key] [--edition id] [--built-with ".NET SDK 10.0.100"] [--provider github-actions] [--run-id N]
 ///     [--store-product id [--store-edition id] [--channel beta|stable] [--distribution free|paid|…] [--note "…"]…]   → store-submission.json
 ///     [--authenticode-thumbprint SHA1 --timestamp-url URL --approve-signing]   (Windows; signs the program and the Setup.exe)
 /// HCGExecutableMaker --windows-signing-doctor &lt;file.exe|portable.zip|folder&gt;
@@ -224,6 +224,17 @@ internal static class WindowsPackagingCommand
         }
         else { Console.Error.WriteLine("Choose what to package: --app-dir <already-built folder> --arch x64|arm64, or --source <project folder>."); return 2; }
 
+        // How the build ran, as the caller states it (e.g. --provider github-actions --run-id 123 inside a workflow run):
+        // recorded in every passport this command wrote, which the Store manifest then reports.
+        if (Arg("--provider") is { } provider || Arg("--run-id") is not null)
+            foreach (var (_, _, passport) in produced.Where(p => p.Passport is not null))
+            {
+                var p = JsonNode.Parse(File.ReadAllText(passport!))!.AsObject();
+                if (Arg("--provider") is { } pv) p["build"]!["provider"] = pv;
+                if (long.TryParse(Arg("--run-id"), out var runId)) p["build"]!["run_id"] = runId;
+                if (ReleasePassport.ValidateBuildHalf(p) is { Count: > 0 } problems) { Console.Error.WriteLine($"{Path.GetFileName(passport)}: {string.Join("; ", problems)}"); return 6; }
+                File.WriteAllText(passport!, p.ToJsonString(new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }) + "\n");
+            }
         foreach (var (rid, file, passport) in produced) Console.WriteLine($"  {file} · SHA-256 {Checksums.Sha256FileAsync(file).GetAwaiter().GetResult()}{(passport is null ? "" : " · passport " + Path.GetFileName(passport))}");
         var shipFiles = produced.Select(p => p.File).ToList();
         if (dist is not null)
