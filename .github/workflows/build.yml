@@ -288,6 +288,45 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  ship-to-store-private:
+    name: Ship to Store with public publication off (TEST HCG Store, genuine executable, diagnostics, private draft, resumable upload, passport, Release Manager)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # HCG Store's private-submissions mode and status API (store branch, proposed in docs/PUBLISHING.md §6a; not merged
+      # or deployed there). Switch to main once HCG Store merges it.
+      STORE_REF: claude/private-submissions
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: F1r3srp3nt/store
+          ref: ${{ env.STORE_REF }}
+          path: hcg-store
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: HCG Store (TEST) dependencies
+        run: cd hcg-store/web-hcg-store && npm ci --no-audit --no-fund
+      - name: Build HCG Executable Maker
+        run: dotnet build src/HCG.ExecutableMaker.App -c Release
+      - name: Genuine executable → Executable Maker ZIP + passport → private draft on the TEST HCG Store, public publication off
+        run: tools/ci/ship-to-store-private-e2e.sh hcg-store/web-hcg-store "$RUNNER_TEMP/ship-private"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ship-to-store-private-evidence
+          path: |
+            ${{ runner.temp }}/ship-private/*.txt
+            ${{ runner.temp }}/ship-private/*.log
+            ${{ runner.temp }}/ship-private/*.json
+          retention-days: 14
+
   windows-packaging:
     name: Windows packaging of an already-built app (own identity, Authenticode against Get-AuthenticodeSignature, bootstrapper vs installed arch, passports, Store manifest)
     needs: test

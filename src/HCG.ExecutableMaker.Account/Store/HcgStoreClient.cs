@@ -38,6 +38,64 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
         catch (JsonException) { return null; }
     }
 
+    /// <summary>
+    /// One request as it happened, for diagnostics: status, content type, the error code and message HCG Store gave, and a
+    /// short, redacted excerpt of the body. Never throws for an HTTP answer; transport failures are reported in
+    /// <see cref="StoreProbe.Transport"/>. With <paramref name="withToken"/>, the HCG Connect access token is sent (never
+    /// recorded).
+    /// </summary>
+    public async Task<StoreProbe> ProbeAsync(string path, bool withToken, CancellationToken ct = default)
+    {
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(Origin, path));
+        var sentToken = false;
+        if (withToken && await accessToken(ct).ConfigureAwait(false) is { Length: > 0 } token)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            sentToken = true;
+        }
+        try
+        {
+            using var response = await http.SendAsync(request, ct).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var type = response.Content.Headers.ContentType?.MediaType;
+            string? code = null, message = null;
+            if (!response.IsSuccessStatusCode)
+            {
+                response.Content = new StringContent(body);
+                if (type is not null) response.Content.Headers.ContentType = new MediaTypeHeaderValue(type);
+                var e = await StoreError.ReadAsync(response, ct).ConfigureAwait(false);
+                (code, message) = (e.Code, e.Message);
+            }
+            return new StoreProbe(path, (int)response.StatusCode, type, StoreProbe.Excerpt(body), code, message, null, sentToken, started.Elapsed) { Body = body };
+        }
+        catch (HttpRequestException ex)
+        {
+            var (code, what) = ex.HttpRequestError switch
+            {
+                HttpRequestError.NameResolutionError => ("dns_failure", $"the name {Origin.Host} does not resolve (DNS)"),
+                HttpRequestError.SecureConnectionError => ("tls_failure", $"a secure (HTTPS) connection to {Origin.Host} failed; the certificate may be missing or invalid"),
+                HttpRequestError.ConnectionError => ("connection_failed", $"no connection to {Origin.Host} could be made (refused, or no network)"),
+                HttpRequestError.ProxyTunnelError => ("proxy_failure", $"the proxy refused the connection to {Origin.Host}"),
+                _ => ("store_unreachable", $"{Origin.Host} could not be reached"),
+            };
+            return new StoreProbe(path, 0, null, null, code, $"{what} ({Security.SecretRedactor.RedactCredentials(ex.Message)})", code, sentToken, started.Elapsed);
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return new StoreProbe(path, 0, null, null, "store_timeout", $"{Origin.Host} did not answer in time", "store_timeout", sentToken, started.Elapsed);
+        }
+    }
+
+    /// <summary>HCG Store's own account of what works (GET /api/v1/publishing/status), and the request as it happened.</summary>
+    public async Task<(StorePublishingStatus? Status, StoreProbe Probe)> StatusAsync(bool withToken, CancellationToken ct = default)
+    {
+        var probe = await ProbeAsync("api/v1/publishing/status", withToken, ct).ConfigureAwait(false);
+        if (probe.Status != 200 || probe.Body is null) return (null, probe);
+        try { return (JsonSerializer.Deserialize<StorePublishingStatus>(probe.Body, Json), probe); }
+        catch (JsonException) { return (null, probe); }
+    }
+
     public Task<StoreWhoAmI> WhoAmIAsync(CancellationToken ct = default) => SendAsync<StoreWhoAmI>(HttpMethod.Get, "api/v1/publishing/whoami", null, ct);
     public async Task<IReadOnlyList<StoreProduct>> ProductsAsync(CancellationToken ct = default) => (await SendAsync<StoreProductList>(HttpMethod.Get, "api/v1/publishing/products", null, ct).ConfigureAwait(false)).Products;
     public Task<StoreProduct> CreateDraftProductAsync(string id, string title, CancellationToken ct = default) => SendAsync<StoreProduct>(HttpMethod.Post, "api/v1/publishing/products", new { id, title }, ct);
@@ -49,6 +107,12 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
     public Task<StoreRelease> RemoveArtifactAsync(string artifactId, CancellationToken ct = default) => SendAsync<StoreRelease>(HttpMethod.Delete, $"api/v1/publishing/artifacts/{Uri.EscapeDataString(artifactId)}", null, ct);
     public Task<StoreRelease> SubmitAsync(string releaseId, CancellationToken ct = default) => SendAsync<StoreRelease>(HttpMethod.Post, $"api/v1/publishing/releases/{Uri.EscapeDataString(releaseId)}/submit", new { }, ct);
     public Task<StoreRelease> WithdrawAsync(string releaseId, string reason, CancellationToken ct = default) => SendAsync<StoreRelease>(HttpMethod.Post, $"api/v1/publishing/releases/{Uri.EscapeDataString(releaseId)}/withdraw", new { reason }, ct);
+    /// <summary>Attaches an HCG Release Passport to a verified file of a draft. HCG Store accepts it only when it names this
+    /// exact file (name, size, SHA-256 and SHA-512 of the stored bytes); otherwise it answers 422 passport_mismatch.</summary>
+    public Task<StoreArtifactResult> AttachPassportAsync(string artifactId, System.Text.Json.Nodes.JsonObject passport, CancellationToken ct = default) =>
+        SendAsync<StoreArtifactResult>(HttpMethod.Post, $"api/v1/publishing/artifacts/{Uri.EscapeDataString(artifactId)}/passport", passport, ct);
+    /// <summary>Release Manager: every release of every product this account may submit or approve, with its stage.</summary>
+    public Task<StoreReleaseManager> ReleaseManagerAsync(CancellationToken ct = default) => SendAsync<StoreReleaseManager>(HttpMethod.Get, "api/v1/publishing/manager", null, ct);
     public Task<StoreDownloadUrl> DownloadUrlAsync(string artifactId, CancellationToken ct = default) => SendAsync<StoreDownloadUrl>(HttpMethod.Post, $"api/v1/publishing/artifacts/{Uri.EscapeDataString(artifactId)}/download-url", new { }, ct);
 
     /// <summary>
@@ -423,6 +487,24 @@ public sealed record StoreArtifactResult(StoreArtifact Artifact)
     public string? Message { get; init; }
 }
 public sealed record StoreDownloadUrl(string Url, long ExpiresAt, string? Sha256, string? Basis);
+public sealed record StoreReleaseManager(IReadOnlyList<StoreManagedRelease> Releases, bool? AuditIntact);
+/// <summary>A release as HCG Store's Release Manager lists it (metadata only).</summary>
+public sealed record StoreManagedRelease
+{
+    public required string Id { get; init; }
+    public required string ProductId { get; init; }
+    public string? ProductTitle { get; init; }
+    public string? EditionId { get; init; }
+    public required string Version { get; init; }
+    public required string Build { get; init; }
+    public required string Status { get; init; }
+    /// <summary>draft · validation-pending · uploaded · validation-failed · awaiting-approval · approved · published · …</summary>
+    public string? Stage { get; init; }
+    public int Files { get; init; }
+    public string? RequestedEligibility { get; init; }
+    public string? ApprovedEligibility { get; init; }
+    public bool MayApprove { get; init; }
+}
 internal sealed record StoreChunkResult(long Received, long Size);
 
 public static class StoreOrigin

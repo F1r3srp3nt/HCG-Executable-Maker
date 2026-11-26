@@ -21,7 +21,9 @@ namespace HCG.ExecutableMaker.App;
 /// [--withdraw "reason"] withdraw (roll back) --release
 /// [--sign-in]         sign in first when no session is stored
 /// --manifest &lt;store-submission.json&gt;   take the release and the files from a submission manifest (private draft only)
-/// --store-status      read the Store's public health and the publishing API's answer; changes nothing
+/// --store-status      connection diagnostics: eleven separate checks with HCG Store's actual answers (redacted;
+///                     changes nothing). Exit 0 when private drafts can be uploaded, 5 when not, 4 when unreachable.
+/// [--diagnostics-out &lt;file&gt;] also write the diagnostics text to a file; with --sign-in, signs in first when needed
 /// </code>
 /// Exit code 0 when every requested step succeeded.
 /// </summary>
@@ -41,7 +43,7 @@ internal static class ShipToStoreCommand
         using var services = Composition.Build(paths);
         var account = services.GetRequiredService<HcgAccountService>();
         Console.WriteLine(HostInfo.BuildIdentity);
-        if (args.Contains("--store-status")) return StoreStatus(services, StoreOrigin.Parse(Arg("--store")));
+        if (args.Contains("--store-status")) return StoreStatus(services, StoreOrigin.Parse(Arg("--store")), Arg("--diagnostics-out"), args.Contains("--sign-in"));
         account.InitializeAsync().GetAwaiter().GetResult();
         if (!account.IsSignedIn && args.Contains("--sign-in"))
         {
@@ -113,7 +115,9 @@ internal static class ShipToStoreCommand
             foreach (var a in r.Artifacts) Console.WriteLine($"  {a.FileName}: {a.Status} · SHA-256 {a.Sha256 ?? a.DeclaredSha256}" +
                                                              (a.Kind is null ? "" : $" · {StoreArtifacts.KindName(a.Kind)}{(a.KindCheckedByStore ? " (checked by HCG Store)" : "")}") +
                                                              (a.Readiness is { } rd ? $"\n    HCG Store: {rd.Label}" : ""));
+            foreach (var i in result.Items.Where(i => i.Passport is not null)) Console.WriteLine($"  {i.FileName}: Release Passport {i.Passport}");
             Console.WriteLine($"Review in HCG Store: {r.ReviewUrl}");
+            PrintManager(client, r.Id);
             var ok = result.AllVerified;
             if (args.Contains("--verify-download"))
                 foreach (var a in r.Artifacts.Where(a => a.Status == "verified"))
@@ -127,6 +131,7 @@ internal static class ShipToStoreCommand
                 features.RequireAsync(MakerFeatures.StorePublish, storeOrigin: origin).GetAwaiter().GetResult();
                 var s = client.SubmitAsync(r.Id).GetAwaiter().GetResult();
                 Console.WriteLine($"Submitted for manual review: {s.Status}. An approver approves it in HCG Store; nothing is published automatically.");
+                PrintManager(client, r.Id);
             }
             return ok ? 0 : 1;
         }
@@ -147,33 +152,39 @@ internal static class ShipToStoreCommand
         }
     }
 
+    /// <summary>What HCG Store's Release Manager lists for this release, read back from the Store.</summary>
+    private static void PrintManager(HcgStoreClient client, string releaseId)
+    {
+        try
+        {
+            var m = client.ReleaseManagerAsync().GetAwaiter().GetResult();
+            Console.WriteLine(m.Releases.FirstOrDefault(x => x.Id == releaseId) is { } e
+                ? $"Release Manager: {e.ProductTitle ?? e.ProductId} {e.Version} build {e.Build} — stage {e.Stage ?? e.Status}, {e.Files} file(s); audit trail {(m.AuditIntact == true ? "intact" : "NOT intact")}"
+                : $"Release Manager: release {releaseId} is not listed.");
+        }
+        catch (HcgStoreException ex) { Console.WriteLine($"Release Manager: not read ({ex.Code}, HTTP {ex.Status}: {ex.Message})"); }
+    }
+
     /// <summary>
-    /// What the HCG Store server at this address states about itself (public health, no sign-in), and how its
-    /// publishing API answers this account. Read only. The deployed server can be older than the Store's main branch.
+    /// Ship to Store connection diagnostics without the UI: the same eleven checks as the page, each with HCG Store's actual
+    /// answer and what to do. Read only; nothing is created, uploaded, submitted or published. Redacted.
     /// </summary>
-    private static int StoreStatus(IServiceProvider services, Uri? origin)
+    private static int StoreStatus(IServiceProvider services, Uri? origin, string? writeTo, bool signIn)
     {
         var factory = services.GetRequiredService<StoreClientFactory>();
         origin ??= factory.OriginAsync().GetAwaiter().GetResult();
-        var client = factory.Create(origin);
-        try
+        var account = services.GetRequiredService<HcgAccountService>();
+        account.InitializeAsync().GetAwaiter().GetResult();
+        if (!account.IsSignedIn && signIn)
         {
-            var h = client.HealthAsync().GetAwaiter().GetResult();
-            Console.WriteLine(h is null ? $"{origin}: not an HCG Store server (no JSON health answer)."
-                : $"{origin}: status {h.Status}, mode {h.Mode}, HCG Connect {h.HcgConnect}, entitlements {h.EntitlementAuthority}, payments {h.Payments}, protected downloads {h.ProtectedDownloads}" +
-                  (h.Publishing is { } pub ? $", publishing {pub}" : " (publishing is not stated by this server's health answer)"));
+            ISystemBrowser browser = account.Configuration.UsesLocalIdentityServer ? new HcgSessionCommand.LocalTestServerBrowser() : new HcgSessionCommand.ProcessBrowser();
+            account.SignInAsync(browser).GetAwaiter().GetResult();
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { Console.WriteLine($"{origin}: unreachable — {ex.Message}"); return 4; }
-        if (!services.GetRequiredService<HcgAccountService>().IsSignedIn) { Console.WriteLine("Publishing API: not checked (not signed in to HCG)."); return 0; }
-        try
-        {
-            var who = client.WhoAmIAsync().GetAwaiter().GetResult();
-            Console.WriteLine($"Publishing API: enabled; signed in as {who.Email ?? who.Sub}; publisher permission {who.PublisherPermission}; approver permission {who.ApproverPermission}.");
-        }
-        catch (HcgStoreException ex)
-        {
-            Console.WriteLine($"Publishing API: {StoreDiagnosis.Classify(ex, origin).Explanation} ({ex.Code}, HTTP {ex.Status}: {ex.Message})");
-        }
-        return 0;
+        var ctx = new StoreDiagnosticsContext(account.IsSignedIn, account.Identity?.Email, account.Message, account.Configuration, HostInfo.ProductVersion);
+        var report = StoreConnectionDiagnostics.RunAsync(factory.Create(origin), ctx, account.GetAccessTokenAsync).GetAwaiter().GetResult();
+        var text = report.ToText();
+        Console.Write(text);
+        if (writeTo is not null) File.WriteAllText(writeTo, text);
+        return report["connectivity"].State == StoreCheckState.Failed ? 4 : report.CanUpload ? 0 : 5;
     }
 }

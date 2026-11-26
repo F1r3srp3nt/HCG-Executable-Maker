@@ -2,6 +2,29 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Ship to Store connection repair
+
+### Added
+- **Connection diagnostics** on the Ship to Store page and `--ship-to-store --store-status`: eleven separate checks
+  instead of one status (Store connectivity, API version, HCG Connect sign-in, Maker's own client registration, token
+  validity, publishing permission, authorised products, private draft creation, artifact upload, release submission,
+  public publication). Each one shows HCG Store's actual answer to the request, what to do, and who does it.
+  **Copy diagnostics** copies them; the text contains no token, cookie or credential. The checks are read-only and
+  nothing is created.
+- **Products from HCG Store with Refresh**: the actual list of products and editions HCG lets the account submit to.
+  The selection is kept on refresh. A draft product is only for products that are not in the catalogue.
+- **Release Passport attachment**: after HCG Store verifies a file, the passport next to it is attached. HCG Store
+  matches it to the stored bytes (SHA-256 and SHA-512). A missing or refused passport never fails the upload.
+- **Release Manager read-back**: after an upload or a submission, the page and the command line show what HCG Store's
+  Release Manager lists for the release (stage, files, audit trail).
+- `tools/ci/ship-to-store-private-e2e.sh` and CI job `ship-to-store-private`: a genuine executable through the whole
+  private flow against the TEST HCG Store, with public publication off.
+
+### Changed
+- The authentication checks verify that the token was issued to Maker's own client (`hcg-executable-maker-desktop-*`).
+  A token issued to HCG Store Manager or to HCG Store's web sign-in is refused.
+- Signed out, opening Ship to Store contacts no Store; **Check connection** runs the diagnostics.
+
 ## [Unreleased] — Windows packaging, Authenticode and the deployed HCG Store
 
 Reusable parts from HCG Mail for Windows 0.1.0-beta.1 (docs/WINDOWS-PACKAGING.md).

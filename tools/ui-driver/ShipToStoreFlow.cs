@@ -107,7 +107,8 @@ internal static partial class Program
         page.StoreUrl = store;
         await page.ConnectCommand.ExecuteAsync(null);
         Log($"Connection: [{page.Connection}] {page.ConnectionDetail}");
-        Check(page.Connection == "Connected", "HCG Store accepted the HCG Connect session and listed the products HCG allows this account to publish");
+        foreach (var c in page.Diagnostics) Log($"  [{c.Check.StateLabel}] {c.Check.Title}: {c.Check.Summary}");
+        Check(page.Report?.CanUpload == true && page.Products.Count > 0, "Connection diagnostics: HCG Store accepted the HCG Connect session (Maker's own client), HCG's permission, and listed the products HCG allows this account to publish");
         page.SelectedProduct = page.Products.FirstOrDefault(p => p.Id == Arg("ship-product", "fixture-quasar-shell"));
         page.SelectedEdition = page.Editions.FirstOrDefault(e => e.Id == Arg("ship-edition", "standard"));
         page.Build = Arg("ship-build-number", "1");
@@ -122,7 +123,7 @@ internal static partial class Program
         Check(page.Files.All(f => f.State == "Verified by HCG Store"), "The build's file was uploaded and verified by HCG Store (SHA-256)");
         Check(page.ReviewUrl?.StartsWith(store, StringComparison.Ordinal) == true, "A link to review the draft in HCG Store is shown");
         await Task.Delay(TimeSpan.FromSeconds(Arg("settle-seconds") is { } st ? double.Parse(st, System.Globalization.CultureInfo.InvariantCulture) : 5));
-        Check(page.Connection == "Connected", $"The page still shows the Store it shipped to (a late answer from an earlier Connect does not overwrite it): [{page.Connection}] {page.ConnectionDetail}");
+        Check(page.Report?.CanUpload == true && page.Report.Origin.ToString().StartsWith(store, StringComparison.Ordinal), $"The page still shows the Store it shipped to (a late answer from an earlier Connect does not overwrite it): [{page.Connection}] {page.ConnectionDetail}");
         File.WriteAllText(Path.Combine(output, "ship-build.json"), JsonSerializer.Serialize(new { releaseId = page.ReleaseId, reviewUrl = page.ReviewUrl, file = zip.Path, sha256 = zip.Sha256 }));
         Shot("ship-build-uploaded");
 

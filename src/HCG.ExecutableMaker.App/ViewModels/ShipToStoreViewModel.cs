@@ -53,6 +53,15 @@ public sealed partial class ShipFileItem(StoreArtifactCandidate candidate) : Obs
 
 public sealed record Choice(string Value, string Name);
 
+/// <summary>One Ship to Store diagnostic as shown on the page.</summary>
+public sealed record ShipCheckItem(StoreCheck Check)
+{
+    public StatusTag Chip => new(Check.StateLabel, Check.Tone);
+    public bool HasResponse => Check.Response is { Length: > 0 };
+    public bool HasAction => Check.Action is { Length: > 0 };
+    public string ActionText => (Check.WhoActs is { } w ? $"What to do ({w}): " : "What to do: ") + Check.Action;
+}
+
 /// <summary>
 /// Ship to Store: one release of one product, with files for several platforms, uploaded to HCG Store as a private draft.
 /// HCG Connect identifies the person; HCG decides whether they may publish; an approver releases it manually in HCG Store.
@@ -75,6 +84,13 @@ public sealed partial class ShipToStoreViewModel(
     [ObservableProperty, NotifyPropertyChangedFor(nameof(ConnectionTag))] private string _connectionTone = "neutral";
     public StatusTag ConnectionTag => new(Connection, ConnectionTone);
     [ObservableProperty] private string? _connectionDetail;
+    /// <summary>The eleven Ship to Store checks, each with HCG Store's actual answer and what to do.</summary>
+    public ObservableCollection<ShipCheckItem> Diagnostics { get; } = [];
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasDiagnostics))] private StoreDiagnosticsReport? _report;
+    public bool HasDiagnostics => Report is not null;
+    [ObservableProperty] private bool _isChecking;
+    [ObservableProperty] private string? _productsNote;
+    [ObservableProperty] private string? _releaseManagerStage;
     public ObservableCollection<StoreProduct> Products { get; } = [];
     [ObservableProperty, NotifyPropertyChangedFor(nameof(Editions), nameof(HasEditions), nameof(CanUseHcgRepo))] private StoreProduct? _selectedProduct;
     public IReadOnlyList<StoreEdition> Editions => SelectedProduct?.Editions ?? [];
@@ -131,6 +147,12 @@ public sealed partial class ShipToStoreViewModel(
         // From the Artifacts page: the files to ship.
         else if (parameter is IEnumerable<string> paths) foreach (var p in paths) await AddFileAsync(p);
         else if (parameter is string one) await AddFileAsync(one);
+        // Signed out, opening the page contacts no Store; "Check connection" runs the diagnostics (public checks too) on request.
+        if (account.Status != HcgAccountStatus.SignedIn)
+        {
+            (Connection, ConnectionTone, ConnectionDetail) = ("Sign in required", "warning", "Sign in with HCG Connect on the Account page. Check connection shows, step by step, what HCG Store says about uploading.");
+            return;
+        }
         await ConnectAsync();
     }
 
@@ -145,52 +167,55 @@ public sealed partial class ShipToStoreViewModel(
     [RelayCommand]
     private async Task ConnectAsync()
     {
-        // Only the latest Connect may change the page: an earlier one (e.g. to the previous address) that answers late
+        // Only the latest check may change the page: an earlier one (e.g. to the previous address) that answers late
         // must not overwrite the newer result.
         var generation = ++_connectGeneration;
-        Products.Clear();
-        if (account.Status != HcgAccountStatus.SignedIn)
-        {
-            (Connection, ConnectionTone, ConnectionDetail) = ("Sign in required", "warning", "Sign in with HCG Connect on the Account page. HCG Store accepts only HCG accounts that HCG has allowed to publish.");
-            return;
-        }
         if (Client() is not { } client) return;
-        (Connection, ConnectionTone, ConnectionDetail) = ("Connecting…", "info", $"Contacting {client.Origin.Host}…");
-        // The shared feature-access service asks HCG Store for the staff publishing permission (same as the command line).
-        var decision = await features.CheckNowAsync(MakerFeatures.StorePublish, storeOrigin: client.Origin);
-        if (generation != _connectGeneration) return;
-        if (!decision.IsAllowed)
-        {
-            (Connection, ConnectionTone) = decision.State switch
-            {
-                FeatureAccessState.NotPermitted => (StorePublishingAuthority.Label(decision) ?? "No publishing permission", "warning"),
-                // The precise cause (Store server not deployed here, publishing switched off, API missing, …), never a
-                // generic "not available".
-                FeatureAccessState.NotAvailableYet => (StorePublishingAuthority.Label(decision) ?? "Publishing not available", "warning"),
-                FeatureAccessState.SignInRequired => (StorePublishingAuthority.Label(decision) ?? "Not accepted", "error"),
-                FeatureAccessState.Unavailable => (StorePublishingAuthority.Label(decision) ?? "Unreachable", "error"),
-                _ => (decision.StateLabel, "warning"),
-            };
-            ConnectionDetail = decision.Explanation + (decision.RemedyText is { Length: > 0 } r ? " " + r : "");
-            return;
-        }
+        IsChecking = true;
+        (Connection, ConnectionTone, ConnectionDetail) = ("Checking…", "info", $"Checking HCG Store at {client.Origin.Host}, step by step…");
         try
         {
-            var who = await client.WhoAmIAsync();
-            var products = await client.ProductsAsync();
+            var ctx = new StoreDiagnosticsContext(account.Status == HcgAccountStatus.SignedIn, account.Identity?.Email, account.Message, account.Configuration, HostInfo.ProductVersion);
+            var report = await StoreConnectionDiagnostics.RunAsync(client, ctx, account.GetAccessTokenAsync);
             if (generation != _connectGeneration) return;
-            foreach (var p in products) Products.Add(p);
-            (Connection, ConnectionTone) = Products.Count > 0 ? ("Connected", "success") : ("No publishing permission", "warning");
-            ConnectionDetail = Products.Count > 0
-                ? $"Signed in as {who.Email ?? who.Sub}. HCG allows you to publish {Products.Count} product(s). Files up to {Format.Bytes(who.MaxUploadBytes)}."
-                : $"Signed in as {who.Email ?? who.Sub}, but HCG has not granted this account permission to publish any HCG Store product ({who.PublisherPermission}).";
-            await settings.SaveAsync((await settings.LoadAsync()) with { HcgStoreUrl = client.Origin.ToString() });
+            Report = report;
+            Diagnostics.Clear();
+            foreach (var c in report.Checks) Diagnostics.Add(new ShipCheckItem(c));
+            (Connection, ConnectionTone) = report.Headline;
+            ConnectionDetail = report.CanUpload
+                ? $"You can upload private drafts to {client.Origin.Host}. {report["publication"].Summary}"
+                : report.Checks.FirstOrDefault(c => c.State == StoreCheckState.Failed) is { } f ? f.Summary + (f.Action is { } a ? " " + a : "") : "See the checks below.";
+            ApplyProducts(report.Products, report["products"].Summary);
+            if (report.CanUpload) await settings.SaveAsync((await settings.LoadAsync()) with { HcgStoreUrl = client.Origin.ToString() });
         }
-        catch (HcgStoreException ex)
-        {
-            if (generation != _connectGeneration) return;
-            (Connection, ConnectionTone, ConnectionDetail) = (ex.Status switch { 401 => "Not accepted", 403 => "No publishing permission", 404 => "Publishing not enabled", 0 => "Unreachable", _ => "Error" }, "error", ex.Message);
-        }
+        catch (OperationCanceledException) { }
+        finally { if (generation == _connectGeneration) IsChecking = false; }
+    }
+
+    /// <summary>Copies the diagnostics as plain text (redacted: no token, cookie or credential).</summary>
+    [RelayCommand]
+    private async Task CopyDiagnosticsAsync()
+    {
+        if (Report is { } r) await shell.CopyAsync(r.ToText());
+    }
+
+    /// <summary>Reloads the products HCG lets you submit, keeping the selected product and edition when they still exist.</summary>
+    [RelayCommand]
+    private async Task RefreshProductsAsync()
+    {
+        if (Client() is not { } client) return;
+        try { ApplyProducts(await client.ProductsAsync(), null); }
+        catch (HcgStoreException ex) { ProductsNote = StoreDiagnosis.Classify(ex, client.Origin).Explanation; }
+    }
+
+    private void ApplyProducts(IReadOnlyList<StoreProduct> products, string? note)
+    {
+        var (productId, editionId) = (SelectedProduct?.Id, SelectedEdition?.Id);
+        Products.Clear();
+        foreach (var p in products) Products.Add(p);
+        SelectedProduct = Products.FirstOrDefault(p => p.Id == productId);
+        SelectedEdition = SelectedProduct?.Editions.FirstOrDefault(e => e.Id == editionId);
+        ProductsNote = note ?? (Products.Count > 0 ? $"{Products.Count} product(s) from HCG Store, refreshed {DateTime.Now:HH:mm}." : "HCG Store lists no product you may submit to.");
     }
 
     [RelayCommand]
@@ -289,6 +314,7 @@ public sealed partial class ShipToStoreViewModel(
         {
             var result = await service.ShipAsync(Request(), Files.Select(f => f.Candidate).ToList(), ReleaseId, progress, _cts.Token);
             ShowRelease(result.Release);
+            await SyncReleaseManagerAsync(client, result.Release.Id);
             Summary = (result.ContinuedExistingDraft ? "Continued your existing draft for this version and build (no second release was created). " : "") + (result.AllVerified
                 ? $"All {result.Items.Count} file(s) are in HCG Store, verified by SHA-256. The release is a private draft until you submit it and an approver approves it in HCG Store."
                 : "Some files did not make it. Fix the problem and press Retry: verified files are kept, interrupted uploads resume.");
@@ -304,6 +330,19 @@ public sealed partial class ShipToStoreViewModel(
     }
 
     [RelayCommand] private void Cancel() => _cts?.Cancel();
+
+    /// <summary>What HCG Store's Release Manager shows for this release (read back from the Store, not assumed).</summary>
+    private async Task SyncReleaseManagerAsync(HcgStoreClient client, string releaseId)
+    {
+        try
+        {
+            var m = await client.ReleaseManagerAsync();
+            ReleaseManagerStage = m.Releases.FirstOrDefault(r => r.Id == releaseId) is { } r
+                ? $"Release Manager: {r.ProductTitle ?? r.ProductId} {r.Version} (build {r.Build}) · {r.Stage ?? r.Status} · {r.Files} file(s){(m.AuditIntact == true ? " · audit trail intact" : "")}"
+                : "Release Manager does not list this release yet.";
+        }
+        catch (HcgStoreException ex) { ReleaseManagerStage = "Release Manager could not be read: " + ex.Message; }
+    }
 
     private void ShowRelease(StoreRelease r)
     {
@@ -322,6 +361,7 @@ public sealed partial class ShipToStoreViewModel(
         {
             await features.RequireAsync(MakerFeatures.StorePublish, storeOrigin: client.Origin);
             ShowRelease(await client.SubmitAsync(ReleaseId));
+            await SyncReleaseManagerAsync(client, ReleaseId);
         }
         catch (HcgStoreException ex) { await dialogs.AlertAsync("Not submitted", ex.Message); }
         catch (FeatureAccessDeniedException ex) { await dialogs.AlertAsync("Not submitted", ex.Decision.Explanation + " " + ex.Decision.RemedyText); }
@@ -336,7 +376,7 @@ public sealed partial class ShipToStoreViewModel(
     [RelayCommand]
     private void NewRelease()
     {
-        ReleaseId = null; ReviewUrl = null; ReleaseStatus = ""; Summary = null; CanSubmit = false;
+        ReleaseId = null; ReviewUrl = null; ReleaseStatus = ""; Summary = null; CanSubmit = false; ReleaseManagerStage = null;
         foreach (var f in Files) { f.State = "Ready to upload"; f.Progress = 0; f.Detail = null; f.Tone = "neutral"; }
     }
 

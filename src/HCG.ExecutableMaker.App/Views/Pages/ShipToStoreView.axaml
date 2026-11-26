@@ -18,20 +18,48 @@
           <TextBlock Classes="label" Text="1 · HCG STORE" />
           <Grid ColumnDefinitions="*,Auto,Auto">
             <TextBox Text="{Binding StoreUrl}" Watermark="https://store.hakmicapitalgroup.com/" />
-            <Button Grid.Column="1" Margin="8,0,0,0" Content="Connect" Command="{Binding ConnectCommand}" />
+            <Button Grid.Column="1" Margin="8,0,0,0" Content="Check connection" Command="{Binding ConnectCommand}" IsEnabled="{Binding !IsChecking}" />
             <Button Grid.Column="2" Margin="8,0,0,0" Classes="ghost" Content="Account…" Command="{Binding OpenAccountCommand}" />
           </Grid>
           <StackPanel Orientation="Horizontal" Spacing="10">
             <c:StatusChip Status="{Binding ConnectionTag}" />
           </StackPanel>
           <TextBlock Classes="muted" FontSize="12.5" Text="{Binding ConnectionDetail}" TextWrapping="Wrap" />
+          <Expander Header="Connection diagnostics" IsExpanded="True" IsVisible="{Binding HasDiagnostics}">
+            <StackPanel Spacing="8">
+              <ItemsControl ItemsSource="{Binding Diagnostics}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ShipCheckItem">
+                    <Border Classes="inset" Padding="10" Margin="0,0,0,6">
+                      <Grid ColumnDefinitions="110,*">
+                        <c:StatusChip Status="{Binding Chip}" VerticalAlignment="Top" HorizontalAlignment="Left" />
+                        <StackPanel Grid.Column="1" Spacing="3">
+                          <TextBlock FontWeight="SemiBold" Text="{Binding Check.Title}" />
+                          <SelectableTextBlock FontSize="12.5" Text="{Binding Check.Summary}" TextWrapping="Wrap" />
+                          <SelectableTextBlock Classes="mono muted" FontSize="11" Text="{Binding Check.Response}" TextWrapping="Wrap" IsVisible="{Binding HasResponse}" />
+                          <TextBlock FontSize="12" Text="{Binding ActionText}" TextWrapping="Wrap" IsVisible="{Binding HasAction}" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="small" Content="Copy diagnostics" Command="{Binding CopyDiagnosticsCommand}" />
+                <TextBlock Classes="muted" FontSize="11.5" VerticalAlignment="Center" Text="Copied text contains no token, cookie or password." />
+              </StackPanel>
+            </StackPanel>
+          </Expander>
         </StackPanel>
       </Border>
 
       <!-- 2 · PRODUCT -->
       <Border Classes="card">
         <StackPanel Spacing="10">
-          <TextBlock Classes="label" Text="2 · PRODUCT" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="label" Text="2 · PRODUCT" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="small" Content="Refresh" Command="{Binding RefreshProductsCommand}" ToolTip.Tip="Reload the products and editions HCG lets you submit to" />
+          </Grid>
           <ComboBox ItemsSource="{Binding Products}" SelectedItem="{Binding SelectedProduct}" HorizontalAlignment="Stretch" PlaceholderText="Products HCG allows you to publish">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="st:StoreProduct">
@@ -44,7 +72,8 @@
               <DataTemplate x:DataType="st:StoreEdition"><TextBlock Text="{Binding Name}" /></DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
-          <Expander Header="Create a draft product">
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding ProductsNote}" TextWrapping="Wrap" />
+          <Expander Header="Product not in the catalogue? Create a draft product">
             <StackPanel Spacing="8">
               <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="A draft product exists only in HCG Store. Its releases can be private or for internal testing; public release needs HCG to add it to the catalogue with a central product ID." />
               <TextBox Text="{Binding NewProductId}" Watermark="product-id (lowercase, dashes)" />
@@ -144,6 +173,7 @@
             <Button Classes="ghost" Content="New release" Command="{Binding NewReleaseCommand}" IsEnabled="{Binding !IsShipping}" />
           </StackPanel>
           <TextBlock FontSize="12.5" Text="{Binding ReleaseStatus}" />
+          <TextBlock FontSize="12.5" Text="{Binding ReleaseManagerStage}" TextWrapping="Wrap" />
           <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding ReviewUrl}" />
           <TextBlock FontSize="12.5" Text="{Binding Summary}" TextWrapping="Wrap" />
         </StackPanel>

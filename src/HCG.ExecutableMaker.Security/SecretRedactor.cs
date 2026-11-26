@@ -39,6 +39,31 @@ public static partial class SecretRedactor
         return result;
     }
 
+    /// <summary>
+    /// For diagnostics that must stay readable (server answers, status lines): every token, key and credential pattern
+    /// above, and values of fields whose NAME is a credential (access_token, refresh_token, id_token, token, password,
+    /// secret, client_secret, cookie, authorization, code_verifier, api_key) — but not the broad "secret-looking name"
+    /// rule, which would also hide ordinary words such as "authentication: Signed in" or "entitlementAuthority".
+    /// </summary>
+    public static string RedactCredentials(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return text ?? "";
+        var result = text;
+        foreach (var (kind, pattern, group) in Patterns)
+        {
+            if (kind == "Secret assignment") continue;
+            result = pattern.Replace(result, m => group == 0 ? Mask : m.Value.Replace(m.Groups[group].Value, Mask));
+        }
+        result = CredentialFieldRegex().Replace(result, m => m.Groups[1].Value + Mask + m.Groups[3].Value);
+        return CredentialHeaderRegex().Replace(result, m => m.Groups[1].Value + Mask);
+    }
+
+    [GeneratedRegex(@"(?i)(""(?:access_token|refresh_token|id_token|token|password|secret|client_secret|cookie|set-cookie|authorization|code_verifier|api_key|apikey)""\s*:\s*"")([^""]*)("")")]
+    private static partial Regex CredentialFieldRegex();
+
+    [GeneratedRegex(@"(?im)^(\s*(?:set-cookie|cookie|authorization)\s*:\s*).+$")]
+    private static partial Regex CredentialHeaderRegex();
+
     /// <summary>What kinds of secrets the text appears to contain, with 1-based line numbers (for explaining flags).</summary>
     public static IReadOnlyList<Finding> Scan(string? text)
     {
