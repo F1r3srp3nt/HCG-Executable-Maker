@@ -10,7 +10,7 @@ case "$(uname -s)" in Darwin) platform=macos; format=MacAppBundle;; Linux) platf
 case "$(uname -m)" in arm64|aarch64) arch=arm64;; *) arch=x64;; esac
 
 "$maker" --integration describe > "$work/describe.json"
-python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['contract']=='hcg.executable-maker.integration/1', d; print('describe:', d['buildIdentity'])" "$work/describe.json"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['contract']=='hcg.executable-maker.integration/1', d; assert d['targets'], d; print('describe:', d['buildIdentity'])" "$work/describe.json"
 
 cat > "$work/refused.json" <<JSON
 {"contract":"hcg.executable-maker.integration/1","requestId":"refused","source":{"kind":"directory","path":"$repo/tests/Fixtures/HelloAvalonia"},

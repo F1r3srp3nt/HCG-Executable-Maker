@@ -94,6 +94,7 @@ internal static class IntegrationCommand
                 ["runtime"] = RuntimeInformation.FrameworkDescription,
             },
             ["operations"] = new JsonArray("describe", "build"),
+            ["targets"] = targets,
             ["cancellation"] = new JsonArray("signal", "cancelFile"),
             ["buildProviders"] = new JsonArray(new JsonObject
             {
