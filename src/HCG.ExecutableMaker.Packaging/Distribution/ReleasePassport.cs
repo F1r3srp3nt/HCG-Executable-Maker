@@ -207,6 +207,79 @@ public static class ReleasePassport
         };
     }
 
+    /// <summary>
+    /// The build half for a desktop artifact built through <c>hcg.executable-maker.integration/1</c> (an <c>.app</c>,
+    /// <c>.dmg</c>, ZIP or folder). Only what the build measured: artifact bytes, provider, toolchain, the verification
+    /// checks. Code signing is reported from the artifact's own "Code signature" check, never assumed; every device
+    /// level stays <c>not-recorded</c>. A directory artifact's SHA-256 is Executable Maker's deterministic manifest digest.
+    /// </summary>
+    public static JsonObject DesktopBuildHalf(BuildRecord build, ArtifactRecord artifact, string issuedBy, string? repository = null, string? commit = null)
+    {
+        var s = build.Settings;
+        var failed = artifact.Checks.Any(c => c.Status == VerificationStatus.Failed);
+        var warned = artifact.Checks.Any(c => c.Status is VerificationStatus.PassedWithWarnings or VerificationStatus.NotVerifiable);
+        var signature = artifact.Checks.FirstOrDefault(c => c.Name.Contains("signature", StringComparison.OrdinalIgnoreCase));
+        JsonObject Level(string state, string note) => new() { ["state"] = state, ["by"] = "HCG Executable Maker", ["note"] = note };
+        var platform = s.Platform switch { TargetPlatform.MacOS => "macos", TargetPlatform.Windows => "windows", TargetPlatform.Linux => "linux", _ => s.Platform.ToString().ToLowerInvariant() };
+        var arch = s.Architecture == TargetArchitecture.Arm64 ? "arm64" : s.Architecture == TargetArchitecture.Universal ? "universal" : "x64";
+        return new JsonObject
+        {
+            ["format"] = Format,
+            ["formatVersion"] = FormatVersion,
+            ["issuer"] = new JsonObject
+            {
+                ["part"] = "build", ["system"] = "HCG Executable Maker", ["version"] = issuedBy,
+                ["note"] = "the build half of a desktop build requested through hcg.executable-maker.integration/1",
+            },
+            ["product"] = new JsonObject { ["key"] = null, ["name"] = s.Identity.ApplicationName, ["store_slug"] = null, ["central_id"] = null },
+            ["edition"] = null,
+            ["platform"] = platform,
+            ["architecture"] = arch,
+            ["package"] = s.Identity.ApplicationId,
+            ["version"] = s.Identity.Version,
+            ["source"] = new JsonObject { ["repository"] = repository, ["commit"] = commit, ["branch"] = null },
+            ["build"] = new JsonObject
+            {
+                ["provider"] = "executable-maker-local",
+                ["toolchain"] = build.ToolchainVersions.TryGetValue(ToolchainIds.DotNetSdk, out var sdk) ? ".NET SDK " + sdk : null,
+                ["built_at"] = (build.EndedAt ?? build.StartedAt).ToString("O"),
+                ["run_id"] = null,
+                ["artifact"] = null,
+            },
+            ["artifact"] = new JsonObject
+            {
+                ["filename"] = artifact.FileName, ["sha256"] = artifact.Sha256, ["size"] = artifact.SizeBytes,
+                ["kind"] = artifact.Kind == ArtifactKind.Directory ? "directory (sha256 of Executable Maker's file manifest)" : "file",
+                ["format"] = artifact.Format.ToString(),
+            },
+            ["validation"] = new JsonObject
+            {
+                ["levels"] = new JsonObject
+                {
+                    ["static_inspection"] = Level(failed ? "failed" : warned ? "passed-with-warnings" : "passed", $"{artifact.Checks.Count} verification checks of the built artifact"),
+                    ["maintainer_script_review"] = Level("not-applicable", "desktop artifact: no maintainer scripts"),
+                    ["script_free_lifecycle"] = Level("not-applicable", "desktop artifact: no package lifecycle"),
+                    ["device_installation"] = Level("not-recorded", "no device test is recorded by the builder"),
+                    ["application_launch"] = Level("not-recorded", "no device test is recorded by the builder"),
+                    ["runtime_verification"] = Level("not-recorded", "no device test is recorded by the builder"),
+                },
+                ["tool"] = issuedBy,
+                ["checks"] = new JsonArray(artifact.Checks.Select(c => (JsonNode?)new JsonObject { ["check"] = c.Name, ["status"] = c.Status.ToString(), ["detail"] = c.Detail }).ToArray()),
+            },
+            ["device_evidence"] = new JsonArray(),
+            ["approvals"] = new JsonArray(),
+            ["distribution"] = new JsonObject { ["note"] = "channel and access are assigned by the distribution authority" },
+            ["publication"] = new JsonObject { ["note"] = "not published: Executable Maker never publishes" },
+            ["repository_signing"] = new JsonObject { ["scope"] = RepositorySigningScope, ["status"] = RepositorySigningNotFromBuilder },
+            ["code_signing"] = new JsonObject
+            {
+                ["scope"] = CodeSigningScope,
+                ["method_claimed"] = null,
+                ["observed"] = signature is null ? "no code-signature check ran for this artifact" : $"{signature.Status}: {signature.Detail}",
+            },
+        };
+    }
+
     /// <summary>The passport's platform for a Debian architecture, as HCG Repo names it (tools/hcgrepo/passport.py).</summary>
     public static string Platform(string architecture) => architecture switch
     {

@@ -32,6 +32,10 @@ internal static class Program
         // `HCGExecutableMaker --impactor <command> …`: HCG Impactor (inspect, sign, devices, install, diagnose) without the UI.
         if (args.Contains("--impactor"))
             return ImpactorCommand.Run(args);
+        // `HCGExecutableMaker --integration describe|build …`: the versioned integration contract for other HCG apps
+        // (hcg.executable-maker.integration/1, docs/INTEGRATION-CONTRACT.md), e.g. HCG Executable Maker Unleashed.
+        if (args.Contains("--integration"))
+            return IntegrationCommand.Run(args);
         // `HCGExecutableMaker --hcg-session status|sign-in|sign-out`: the HCG account services without the UI (no tokens printed).
         if (args.Contains("--hcg-session"))
             return HcgSessionCommand.Run(args);

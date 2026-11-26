@@ -5,6 +5,12 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 ## [Unreleased] — HCG Impactor
 
 ### Added
+- **Integration contract `hcg.executable-maker.integration/1`** (`--integration describe | build`,
+  [docs/INTEGRATION-CONTRACT.md](docs/INTEGRATION-CONTRACT.md)) for other HCG apps on the same computer, first HCG
+  Executable Maker Unleashed: version, providers, per-target format availability and toolchains; structured .NET
+  desktop build requests through the normal import → inspection → build → packaging → verification path, JSON-line
+  events, diagnostics, artifacts with SHA-256, cancellation (signal or cancel file) and a desktop Release Passport build
+  half (`ReleasePassport.DesktopBuildHalf`, schema-validated). Smoke test: `tools/ci/integration-contract-check.sh`.
 - **Ship to Repo** (Unleashify › Build output, `--ship-to-repo submit|status|show`), under HCG Repo's Executable Maker
   submission contract (`docs/EXECUTABLE_MAKER_SUBMISSION.md` in HCG Repo).
   - **Submit:** `release submit --handoff … --result-json …`; HCG Repo validates the exact .deb into its private

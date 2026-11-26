@@ -185,6 +185,7 @@ removed from the build process. Only build projects you trust. Details: [`docs/S
 
 ## Documentation
 
+- [`docs/INTEGRATION-CONTRACT.md`](docs/INTEGRATION-CONTRACT.md) — `hcg.executable-maker.integration/1`: how other HCG apps (HCG Executable Maker Unleashed) discover and drive this installed Executable Maker
 - [`docs/IMPACTOR.md`](docs/IMPACTOR.md) — HCG Impactor: IPA inspection, signing, devices, installation, diagnostics
 - [`docs/MOBILE-BUILDS.md`](docs/MOBILE-BUILDS.md) — Mobile Build Studio overview, output matrix, signing modes, CLI
 - [`docs/ANDROID-BUILDING.md`](docs/ANDROID-BUILDING.md) · [`docs/IOS-BUILDING.md`](docs/IOS-BUILDING.md) ·
