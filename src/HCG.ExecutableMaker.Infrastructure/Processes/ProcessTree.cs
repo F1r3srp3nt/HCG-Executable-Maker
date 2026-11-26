@@ -45,7 +45,14 @@ public static class ProcessTree
                 }
             }
         }
-        finally { KillOne(root); }
+        finally
+        {
+            // SIGKILL straight to the pid: Process.GetProcessById(root).Kill() did not kill a stopped root on macOS (CI run
+            // 45763414237: a cancelled `sleep 60` stayed stopped and the runner waited for it until the step timed out).
+            if (Signal(root, 9) != 0) KillOne(root);
+            // Never leave the root stopped, whatever happened above (SIGCONT to a process already dead is harmless).
+            Signal(root, OperatingSystem.IsMacOS() ? 19 : 18);   // SIGCONT
+        }
     }
 
     private static void KillOne(int pid)
@@ -57,9 +64,10 @@ public static class ProcessTree
     [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "kill", SetLastError = true)]
     private static extern int SysKill(int pid, int signal);
 
-    private static void Signal(int pid, int signal)
+    /// <summary>kill(2); 0 when the signal was sent, -1 otherwise (including when libc's kill cannot be called).</summary>
+    private static int Signal(int pid, int signal)
     {
-        try { SysKill(pid, signal); } catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { }
+        try { return SysKill(pid, signal); } catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { return -1; }
     }
 
     /// <summary>The root and every process whose parent chain leads to it (or to an already-killed member), from ps.</summary>
