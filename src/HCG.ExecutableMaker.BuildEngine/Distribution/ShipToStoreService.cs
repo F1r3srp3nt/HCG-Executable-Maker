@@ -78,13 +78,23 @@ public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessServi
                 {
                     if (existing is not null) await client.RemoveArtifactAsync(existing.Id, ct).ConfigureAwait(false);
                     Report(new(f.FileName, ShipItemState.Declaring, 0, f.SizeBytes, "Declaring the file to HCG Store…"));
-                    var declared = await client.DeclareArtifactAsync(release.Id, new StoreArtifactRequest
+                    var body = new StoreArtifactRequest
                     {
                         FileName = f.FileName, Platform = f.Platform!, Format = f.Format!, SizeBytes = f.SizeBytes, Sha256 = f.Sha256,
                         Architectures = f.Architectures, MinimumOs = f.MinimumOs, Signing = DeclaredSigning(f), Package = f.Package, Kind = f.Kind,
                         SourceCommit = f.Provenance?.SourceCommit, BuildProvider = f.Provenance?.BuildProvider, Toolchain = f.Provenance?.Toolchain,
                         ValidationReport = f.Provenance?.ValidationReport,
-                    }, ct).ConfigureAwait(false);
+                    };
+                    StoreDeclaredArtifact declared;
+                    try { declared = await client.DeclareArtifactAsync(release.Id, body, ct).ConfigureAwait(false); }
+                    catch (HcgStoreException ex) when (RejectsOnlyProvenance(ex))
+                    {
+                        // The deployed HCG Store's strict schema predates build provenance (Ship to Store v2). The file is declared
+                        // without it, and its Release Passport keeps it. Nothing else is dropped: any other refusal still fails.
+                        Report(new(f.FileName, ShipItemState.Declaring, 0, f.SizeBytes,
+                            "This HCG Store does not accept build provenance yet (source commit, provider, toolchain, validation report): declared without it; the Release Passport keeps it."));
+                        declared = await client.DeclareArtifactAsync(release.Id, body with { SourceCommit = null, BuildProvider = null, Toolchain = null, ValidationReport = null }, ct).ConfigureAwait(false);
+                    }
                     artifactId = declared.Artifact.Id;
                     url = declared.Upload;
                 }
@@ -108,6 +118,21 @@ public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessServi
     }
 
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(2);
+
+    private static readonly string[] ProvenanceFields = ["sourceCommit", "buildProvider", "toolchain", "validationReport"];
+
+    /// <summary>
+    /// HCG Store's answer when its schema has no build provenance yet (the deployed 835ac1a server):
+    /// 400 invalid_request "request: Unrecognized keys: \"sourceCommit\", …" — and no other field is refused.
+    /// </summary>
+    public static bool RejectsOnlyProvenance(HcgStoreException ex)
+    {
+        if (ex.Status != 400 || ex.Code != "invalid_request") return false;
+        var m = System.Text.RegularExpressions.Regex.Match(ex.Message, "^request: Unrecognized keys?: (?<keys>(\"[A-Za-z]+\"(, )?)+)$");
+        if (!m.Success) return false;
+        var keys = System.Text.RegularExpressions.Regex.Matches(m.Groups["keys"].Value, "\"([A-Za-z]+)\"").Select(k => k.Groups[1].Value).ToList();
+        return keys.Count > 0 && keys.All(k => ProvenanceFields.Contains(k));
+    }
 
     /// <summary>What is reported to HCG Store about signing: the platform tool's result, or "unsigned" when the file
     /// carries no signature structure at all (a fact, not an assumption). Never upgraded beyond what was checked.</summary>

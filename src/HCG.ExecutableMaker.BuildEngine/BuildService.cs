@@ -759,6 +759,23 @@ public sealed class BuildService(
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {dir}: {ex.Message}"); }
                 }
             }
+            // A Windows desktop build: a Release Passport (build half) next to each installer and ZIP, with the installed
+            // program's PE facts and Authenticode read from the bytes, and the source commit as Git states it.
+            if (settings.Platform == TargetPlatform.Windows && !isSwift && !isElectron && settings.Native is null && settings.MacXcode is null
+                && settings.Architecture is TargetArchitecture.X64 or TargetArchitecture.Arm64
+                && HCG.ExecutableMaker.Packaging.Windows.PeFile.Read(Path.Combine(packagingInput, exeName)) is not null)
+            {
+                var winSource = Directory.Exists(request.Project.SourceLocation)
+                    ? await HCG.ExecutableMaker.Packaging.Distribution.SourceProvenance.ReadAsync(new WorkerRunner(worker, worker.CreateEnvironment().Environment), report.Find(ToolchainIds.Git)?.ExecutablePath, request.Project.SourceLocation, overall.Token).ConfigureAwait(false)
+                    : HCG.ExecutableMaker.Packaging.Distribution.SourceProvenance.Unknown;
+                var sdkVersion = report.Find(ToolchainIds.DotNetSdk)?.Version;
+                Windows.WindowsPackagingService.WritePassports(new Windows.WindowsPackagingService.Request
+                {
+                    AppDirectory = packagingInput, ExecutableFileName = exeName, Identity = settings.Identity, Architecture = settings.Architecture,
+                    Formats = settings.PackagingFormats, OutputDirectory = settings.OutputDirectory, Toolchains = report, Source = winSource,
+                    BuiltWith = sdkVersion is null ? null : $".NET SDK {sdkVersion}",
+                }, packagingInput, build.Artifacts, build.StartedAt, m => Log(BuildLogKind.Info, m));
+            }
             await File.WriteAllTextAsync(Path.Combine(outputRoot, OutputMarkerFile), HcgJson.Serialize(new
             {
                 buildId = build.Id,

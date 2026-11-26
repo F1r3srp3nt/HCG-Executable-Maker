@@ -20,6 +20,8 @@ namespace HCG.ExecutableMaker.App;
 /// [--submit]          submit the draft for MANUAL review in HCG Store (never approves)
 /// [--withdraw "reason"] withdraw (roll back) --release
 /// [--sign-in]         sign in first when no session is stored
+/// --manifest &lt;store-submission.json&gt;   take the release and the files from a submission manifest (private draft only)
+/// --store-status      read the Store's public health and the publishing API's answer; changes nothing
 /// </code>
 /// Exit code 0 when every requested step succeeded.
 /// </summary>
@@ -39,6 +41,7 @@ internal static class ShipToStoreCommand
         using var services = Composition.Build(paths);
         var account = services.GetRequiredService<HcgAccountService>();
         Console.WriteLine(HostInfo.BuildIdentity);
+        if (args.Contains("--store-status")) return StoreStatus(services, StoreOrigin.Parse(Arg("--store")));
         account.InitializeAsync().GetAwaiter().GetResult();
         if (!account.IsSignedIn && args.Contains("--sign-in"))
         {
@@ -66,16 +69,20 @@ internal static class ShipToStoreCommand
                 Console.WriteLine($"Release {w.Id}: {w.Status} ({w.WithdrawnReason})");
                 return w.Status == "withdrawn" ? 0 : 1;
             }
-            var product = Arg("--product") ?? throw new ArgumentException("--product is required");
+            (StoreReleaseRequest Release, IReadOnlyList<(string Path, string Sha256, long Size)> Files)? manifest =
+                Arg("--manifest") is { } mf ? StoreSubmission.Load(Path.GetFullPath(mf)) : null;
+            var product = manifest?.Release.ProductId ?? Arg("--product") ?? throw new ArgumentException("--product is required");
             if (Arg("--draft-product") is { } title)
             {
                 var p = client.CreateDraftProductAsync(product, title).GetAwaiter().GetResult();
                 Console.WriteLine($"Draft product {p.Id} ({p.Title}): {p.Note}");
             }
             var files = new List<StoreArtifactCandidate>();
-            foreach (var f in All("--file"))
+            foreach (var f in manifest is { } m0 ? m0.Files.Select(x => x.Path) : All("--file"))
             {
                 var c = StoreArtifacts.DetectAsync(Path.GetFullPath(f)).GetAwaiter().GetResult();
+                if (manifest is { } m1 && m1.Files.First(x => x.Path == f) is var declared && (declared.Sha256 != c.Sha256 || declared.Size != c.SizeBytes))
+                    throw new InvalidOperationException($"{c.FileName} changed since the submission manifest was made (SHA-256 {c.Sha256}, manifest {declared.Sha256}): nothing was sent.");
                 c = c with { Signing = StoreArtifacts.CheckSigningAsync(c, runner).GetAwaiter().GetResult() };
                 if (Arg("--passport") is { } passport && c.Sha256.Length == 64) c = c with { Provenance = StoreProvenance.ForFile(c.Path, c.Sha256, c.SizeBytes, Path.GetFullPath(passport)) };
                 Console.WriteLine($"File {c.FileName}: {c.Label} · {c.KindName}, {c.SizeBytes:N0} bytes, SHA-256 {c.Sha256}, signature {ShipToStoreService.DeclaredSigning(c).Status}" +
@@ -85,7 +92,7 @@ internal static class ShipToStoreCommand
                                   string.Concat(c.Problems.Select(x => "\n  PROBLEM " + x)) + string.Concat(c.Notes.Select(x => "\n  note " + x)));
                 files.Add(c);
             }
-            var request = new StoreReleaseRequest
+            var request = manifest?.Release ?? new StoreReleaseRequest
             {
                 ProductId = product, EditionId = Arg("--edition"), Version = Arg("--release-version") ?? "", Build = Arg("--build-number") ?? "",
                 Channel = Arg("--channel") ?? "beta", ReleaseNotes = All("--note").ToList(),
@@ -138,5 +145,35 @@ internal static class ShipToStoreCommand
             Console.Error.WriteLine(ex.Message);
             return 2;
         }
+    }
+
+    /// <summary>
+    /// What the HCG Store server at this address states about itself (public health, no sign-in), and how its
+    /// publishing API answers this account. Read only. The deployed server can be older than the Store's main branch.
+    /// </summary>
+    private static int StoreStatus(IServiceProvider services, Uri? origin)
+    {
+        var factory = services.GetRequiredService<StoreClientFactory>();
+        origin ??= factory.OriginAsync().GetAwaiter().GetResult();
+        var client = factory.Create(origin);
+        try
+        {
+            var h = client.HealthAsync().GetAwaiter().GetResult();
+            Console.WriteLine(h is null ? $"{origin}: not an HCG Store server (no JSON health answer)."
+                : $"{origin}: status {h.Status}, mode {h.Mode}, HCG Connect {h.HcgConnect}, entitlements {h.EntitlementAuthority}, payments {h.Payments}, protected downloads {h.ProtectedDownloads}" +
+                  (h.Publishing is { } pub ? $", publishing {pub}" : " (publishing is not stated by this server's health answer)"));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { Console.WriteLine($"{origin}: unreachable — {ex.Message}"); return 4; }
+        if (!services.GetRequiredService<HcgAccountService>().IsSignedIn) { Console.WriteLine("Publishing API: not checked (not signed in to HCG)."); return 0; }
+        try
+        {
+            var who = client.WhoAmIAsync().GetAwaiter().GetResult();
+            Console.WriteLine($"Publishing API: enabled; signed in as {who.Email ?? who.Sub}; publisher permission {who.PublisherPermission}; approver permission {who.ApproverPermission}.");
+        }
+        catch (HcgStoreException ex)
+        {
+            Console.WriteLine($"Publishing API: {StoreDiagnosis.Classify(ex, origin).Explanation} ({ex.Code}, HTTP {ex.Status}: {ex.Message})");
+        }
+        return 0;
     }
 }

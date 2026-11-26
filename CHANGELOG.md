@@ -2,6 +2,54 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Windows packaging, Authenticode and the deployed HCG Store
+
+Reusable parts from HCG Mail for Windows 0.1.0-beta.1 (docs/WINDOWS-PACKAGING.md).
+
+### Added
+- **Generic headless packaging:** `--package-windows`, with the product's own identity (`--identity app.json` or flags).
+  Nothing of Executable Maker's name or icon goes into the product, and the installer's upgrade identity is unchanged.
+- **Packaging of already-built folders** (`--app-dir --arch`), without building. The program's PE machine type must
+  match the target, and the folder is never changed.
+- **PE facts:** machine type, PE32/PE32+, subsystem, certificate table and version resource (`PeFile`).
+- **Bootstrapper and installed program are told apart:**
+  - the Inno Setup checks report the x86 loader separately from the installed program, whose architecture and
+    version must match the target;
+  - the Store takes a Setup.exe's architecture from its passport, never from the loader;
+  - portable ZIPs report their programs' architectures.
+- **Signing Doctor for Windows** (`--windows-signing-doctor`), the same on every OS. It checks the PE image digest
+  (a changed file fails), the signer's signature, an RFC 3161 timestamp or countersignature, and the chain for code
+  signing (trust reported apart from integrity). On Windows, Windows' own verdict is added. Store detection uses it
+  for `.exe` and Windows ZIPs.
+- **Authenticode signing** (`--authenticode-sign`, `--package-windows --approve-signing`): signtool with SHA-256 and an
+  RFC 3161 timestamp, with the person's own certificate by thumbprint. It runs only with an approval tied to the
+  file's SHA-256, and is verified afterwards.
+- **Windows Release Passport** for each installer and ZIP, from `--package-windows` and from every Windows .NET build.
+  It records the installed program, the bootstrapper, Authenticode for the file and each program, source, provider
+  and toolchain.
+- **Store submission manifest** (`store-submission.json`, `hcg.store-submission` v1). It holds the exact release and
+  artifact bodies of the deployed HCG Store's API, for a private draft only, with provenance kept apart.
+  `--ship-to-store --manifest` re-checks every file first. `--ship-to-store --store-status` reads the server's health
+  and publishing answer.
+- **Deployed HCG Store (835ac1a):**
+  - its strict artifact schema refuses build provenance; on exactly that answer, Maker declares again without it and
+    says so;
+  - `publishing_disabled` is reported as such.
+- CI job `windows-packaging` on a real Windows runner:
+  - an already-built fixture is packaged for x64 (signed after approval, with a throwaway certificate and a real
+    timestamp) and for ARM64 (unsigned);
+  - Maker's Authenticode verdicts are compared with `Get-AuthenticodeSignature` on Microsoft-signed `dotnet.exe`, on
+    the self-signed Setup.exe and on a tampered copy;
+  - the job checks bootstrapper vs installed machine types, passports, the manifest and checksums, and runs the
+    install, launch and uninstall test.
+- Regression tests: synthetic PE images with version resources, and signtool-shaped Authenticode signatures
+  (tampering, forgery, countersignature). They also cover already-built folders, passports, Store detection, the
+  manifest, and a fake of the deployed Store's strict schema.
+
+### Fixed
+- The Inno Setup "Code signature" check verifies the signature instead of only noting that a signature block is
+  present.
+
 ## [Unreleased] — HCG Impactor
 
 ### Added

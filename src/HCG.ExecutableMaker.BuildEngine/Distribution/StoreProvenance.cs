@@ -20,6 +20,8 @@ public static partial class StoreProvenance
     public sealed record Result(string? SourceCommit, string? BuildProvider, string? Toolchain, StoreValidationReport? ValidationReport, string? PassportPath, IReadOnlyList<string> Notes)
     {
         public static Result None(params string[] notes) => new(null, null, null, null, null, notes);
+        /// <summary>The architecture the passport states for this exact file (for an installer: the one it installs, not its bootstrapper's).</summary>
+        public string? Architecture { get; init; }
         public bool Complete => SourceCommit is not null && BuildProvider is not null && Toolchain is not null;
     }
 
@@ -65,7 +67,7 @@ public static partial class StoreProvenance
         var toolchain = Fit(Str(p["build"], "toolchain"), 200);
         if (commit is null) notes.Add("no source commit in the passport");
         if (toolchain is null) notes.Add("no toolchain in the passport");
-        return new(commit, provider, toolchain, Report(p), passportPath, notes);
+        return new(commit, provider, toolchain, Report(p), passportPath, notes) { Architecture = Str(p, "architecture") };
     }
 
     /// <summary>The uploader's validation as HCG Store records it: Maker's levels and the code signatures in the package (application code only).</summary>

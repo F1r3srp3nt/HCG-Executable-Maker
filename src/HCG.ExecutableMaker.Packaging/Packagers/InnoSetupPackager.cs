@@ -70,13 +70,28 @@ public sealed class InnoSetupPackager(IProcessRunner runner) : IPackager
         return [new PackagedOutput(Format, ArtifactKind.File, setupExe, Verify(setupExe, request))];
     }
 
-    internal static List<VerificationCheck> Verify(string setupExe, PackagingRequest request)
+    public static List<VerificationCheck> Verify(string setupExe, PackagingRequest request)
     {
         var checks = new List<VerificationCheck>();
         var info = BinaryInspector.Inspect(setupExe);
+        var loader = Windows.PeFile.Read(setupExe);
         checks.Add(info.Format == BinaryFormat.PortableExecutable
-            ? new VerificationCheck("Executable format", VerificationStatus.Passed, "Windows PE executable (Inno Setup loader)")
+            ? new VerificationCheck("Executable format", VerificationStatus.Passed, $"Windows PE executable (Inno Setup loader, {loader?.MachineName ?? "?"})")
             : new VerificationCheck("Executable format", VerificationStatus.Failed, $"Not a Windows executable ({info.Format})."));
+        // The bootstrapper and the program it installs are different files: Inno Setup's loader is a 32-bit x86 program on
+        // every target; the target is set by ArchitecturesAllowed. The installed program is checked on its own.
+        var target = request.Settings.Architecture switch { Domain.TargetArchitecture.X64 => "x64", Domain.TargetArchitecture.Arm64 => "arm64", var a => a.ToString().ToLowerInvariant() };
+        checks.Add(new VerificationCheck("Installer bootstrapper", VerificationStatus.Passed,
+            $"{loader?.MachineName ?? "?"} loader (Inno Setup's setup program runs as {loader?.MachineName ?? "?"} on every Windows); it installs for {target} only (ArchitecturesAllowed={target})"));
+        var exe = Path.Combine(request.PublishDirectory, request.ExecutableFileName);
+        var app = File.Exists(exe) ? Windows.PeFile.Read(exe) : null;
+        checks.Add(app is null
+            ? new VerificationCheck("Installed application", VerificationStatus.Failed, $"{request.ExecutableFileName} is not a Windows program; nothing would run after installation.")
+            : app.MachineName == target
+                ? new VerificationCheck("Installed application", VerificationStatus.Passed,
+                    $"{request.ExecutableFileName}: {app.MachineName}{(app.ProductVersion is { } pv ? $", product version {pv}" : "")}{(app.Version.GetValueOrDefault("CompanyName") is { Length: > 0 } co ? $", {co}" : "")}")
+                : new VerificationCheck("Installed application", VerificationStatus.Failed,
+                    $"{request.ExecutableFileName} is {app.MachineName}, but the installer targets {target}: it would install a program for the wrong architecture."));
 
         var publishBytes = Directory.EnumerateFiles(request.PublishDirectory, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length);
         var size = new FileInfo(setupExe).Length;
@@ -88,14 +103,22 @@ public sealed class InnoSetupPackager(IProcessRunner runner) : IPackager
             ? new VerificationCheck("Inno Setup data", VerificationStatus.Passed, "Setup data block present")
             : new VerificationCheck("Inno Setup data", VerificationStatus.PassedWithWarnings, "The Inno Setup data marker was not found; the installer could not be confirmed statically."));
 
-        checks.Add(HasAuthenticodeDirectory(setupExe)
-            ? new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings, "An Authenticode signature block is present (not validated here).")
-            : new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings,
-                "Not code-signed. Windows SmartScreen will warn users (More info → Run anyway). Authenticode signing is planned for M0.4."));
+        var sig = Windows.Authenticode.Inspect(setupExe);
+        checks.Add(sig.Status switch
+        {
+            "signed" => new VerificationCheck("Code signature", VerificationStatus.Passed, sig.Summary),
+            "invalid" => new VerificationCheck("Code signature", VerificationStatus.Failed, sig.Summary),
+            "signed-untrusted" => new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings, sig.Summary),
+            _ => new VerificationCheck("Code signature", VerificationStatus.PassedWithWarnings,
+                "Not Authenticode signed. Windows SmartScreen will warn users (More info → Run anyway). Sign it with an approved certificate: --authenticode-sign."),
+        });
         checks.Add(new VerificationCheck("Install test", VerificationStatus.NotVerifiable,
             "Not performed during the build (it would change this computer). Install/launch/uninstall is tested on the Windows CI runner."));
         return checks;
     }
+
+    /// <summary>True for an Inno Setup installer (its setup data marker): a 32-bit x86 bootstrapper on every target.</summary>
+    public static bool IsInnoSetupInstaller(string file) => ContainsMarker(file);
 
     internal static bool ContainsMarker(string file)
     {

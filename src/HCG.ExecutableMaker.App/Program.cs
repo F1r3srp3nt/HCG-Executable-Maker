@@ -32,6 +32,15 @@ internal static class Program
         // `HCGExecutableMaker --xcode-mac <folder|zip> …`: native macOS Xcode builds without the UI (see XcodeMacCommand).
         if (args.Contains("--xcode-mac"))
             return XcodeMacCommand.Run(args);
+        // `HCGExecutableMaker --package-windows …`: package an app (built here, or an already-built folder) with its own identity.
+        if (args.Contains("--package-windows"))
+            return WindowsPackagingCommand.Run(args);
+        // `HCGExecutableMaker --windows-signing-doctor <file|zip|folder>`: read-only Authenticode report.
+        if (args.Contains("--windows-signing-doctor"))
+            return WindowsPackagingCommand.SigningDoctor(args);
+        // `HCGExecutableMaker --authenticode-sign <file> --thumbprint … --timestamp-url … --approve <sha256>`: sign with explicit approval.
+        if (args.Contains("--authenticode-sign"))
+            return WindowsPackagingCommand.Sign(args);
         // `HCGExecutableMaker --mac-signing-doctor <App.app>`: read-only signing report of a macOS app.
         if (args.Contains("--mac-signing-doctor"))
             return XcodeMacCommand.SigningDoctor(args);

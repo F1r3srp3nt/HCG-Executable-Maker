@@ -25,6 +25,19 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
 
     // ───────────── API ─────────────
 
+    /// <summary>
+    /// The server's own public health answer (<c>GET /api/v1/health</c>, no sign-in): mode, sign-in, payments and protected
+    /// downloads as the deployed server states them. Null when the address answers but is not an HCG Store server.
+    /// </summary>
+    public async Task<StoreHealth?> HealthAsync(CancellationToken ct = default)
+    {
+        using var response = await http.GetAsync(new Uri(Origin, "api/v1/health"), ct).ConfigureAwait(false);
+        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode || !(response.Content.Headers.ContentType?.MediaType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false)) return null;
+        try { return JsonSerializer.Deserialize<StoreHealth>(text, Json); }
+        catch (JsonException) { return null; }
+    }
+
     public Task<StoreWhoAmI> WhoAmIAsync(CancellationToken ct = default) => SendAsync<StoreWhoAmI>(HttpMethod.Get, "api/v1/publishing/whoami", null, ct);
     public async Task<IReadOnlyList<StoreProduct>> ProductsAsync(CancellationToken ct = default) => (await SendAsync<StoreProductList>(HttpMethod.Get, "api/v1/publishing/products", null, ct).ConfigureAwait(false)).Products;
     public Task<StoreProduct> CreateDraftProductAsync(string id, string title, CancellationToken ct = default) => SendAsync<StoreProduct>(HttpMethod.Post, "api/v1/publishing/products", new { id, title }, ct);
@@ -294,6 +307,9 @@ public sealed record StoreProduct(string Id, string Title, string Source)
     public string? Note { get; init; }
 }
 public sealed record StoreEdition(string Id, string Name, IReadOnlyList<string> Platforms);
+
+/// <summary>HCG Store's public health answer, as the deployed server states it (fields it does not send stay null).</summary>
+public sealed record StoreHealth(string? Status, string? Mode, string? HcgConnect, string? EntitlementAuthority, string? Payments, string? ProtectedDownloads, string? Publishing);
 
 public sealed record StoreReleaseRequest
 {

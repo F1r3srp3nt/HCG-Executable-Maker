@@ -288,6 +288,155 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  windows-packaging:
+    name: Windows packaging of an already-built app (own identity, Authenticode against Get-AuthenticodeSignature, bootstrapper vs installed arch, passports, Store manifest)
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}\winpack
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          (Get-Item "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe").VersionInfo.ProductVersion
+
+      - name: Build HCG Executable Maker; publish the fixture app for x64 and ARM64 (the already-built folders)
+        shell: pwsh
+        run: |
+          dotnet build src/HCG.ExecutableMaker.App -c Release
+          foreach ($rid in 'win-x64', 'win-arm64') {
+            dotnet publish tests/Fixtures/HelloAvalonia/HelloAvalonia.csproj -c Release -r $rid --self-contained -o "$env:OUT\publish-$rid"
+            if ($LASTEXITCODE -ne 0) { throw "publish $rid failed" }
+          }
+          @{ name = 'Example Product'; publisher = 'Example AB'; applicationId = 'org.example.product'; version = '1.2.0-beta.1'; executable = 'HelloAvalonia.exe'
+             buildNumber = '7'; productKey = 'example-product'; edition = 'windows-desktop'; distName = 'ExampleProduct-{version}-{rid}'
+             store = @{ productId = 'example-product'; editionId = 'windows-desktop'; distribution = 'free'; releaseNotes = @('CI packaging check.') } } |
+            ConvertTo-Json -Depth 4 | Set-Content "$env:OUT\app.json" -Encoding utf8
+
+      - name: A throwaway self-signed code-signing certificate (current user; not trusted, deleted at the end)
+        shell: pwsh
+        run: |
+          $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=HCG CI Throwaway Signing (not trusted)' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(2)
+          "THUMB=$($c.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Refusals — signing without approval, wrong architecture
+        shell: pwsh
+        run: |
+          $maker = 'src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll'
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-x64" --arch x64 --formats zip --out "$env:OUT\refused" --authenticode-thumbprint $env:THUMB --timestamp-url http://timestamp.digicert.com
+          if ($LASTEXITCODE -ne 2) { throw "signing without --approve-signing must be refused (exit 2), got $LASTEXITCODE" }
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-x64" --arch arm64 --formats zip --out "$env:OUT\refused"
+          if ($LASTEXITCODE -ne 6) { throw "an x64 folder packaged as arm64 must fail (exit 6), got $LASTEXITCODE" }
+          if (Test-Path "$env:OUT\refused") { if (Get-ChildItem "$env:OUT\refused" -Recurse -File) { throw "a refused run wrote files" } }
+          exit 0
+
+      - name: Package — x64 signed (approved) and ARM64 unsigned, installer + ZIP, distribution names, passports, Store manifest
+        shell: pwsh
+        run: |
+          $maker = 'src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll'
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-x64" --arch x64 --formats installer,zip --out "$env:OUT\out" --dist "$env:OUT\dist-x64" `
+            --authenticode-thumbprint $env:THUMB --timestamp-url http://timestamp.digicert.com --approve-signing --built-with ".NET SDK $(dotnet --version)"
+          if ($LASTEXITCODE -ne 0) { throw "x64 packaging failed ($LASTEXITCODE)" }
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-arm64" --arch arm64 --formats installer,zip --out "$env:OUT\out" --dist "$env:OUT\dist-arm64"
+          if ($LASTEXITCODE -ne 0) { throw "arm64 packaging failed ($LASTEXITCODE)" }
+          Get-ChildItem "$env:OUT\dist-x64", "$env:OUT\dist-arm64" | Format-Table Name, Length
+
+      - name: Authenticode — Maker's verdict against Windows' own (Get-AuthenticodeSignature / WinVerifyTrust)
+        shell: pwsh
+        run: |
+          $maker = 'src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll'
+          function Doctor($file) { (dotnet $maker --windows-signing-doctor $file) -join "`n" }
+          # 1. A Microsoft-signed program: both say valid; Maker sees the timestamp.
+          $dotnet = (Get-Command dotnet).Source
+          $win = Get-AuthenticodeSignature $dotnet; $d = Doctor $dotnet; $d
+          if ($win.Status -ne 'Valid') { throw "dotnet.exe: Windows says $($win.Status)" }
+          if ($d -notmatch 'Overall: signed \(HCG Store: signed\)') { throw "dotnet.exe: Maker did not call a valid Microsoft signature signed" }
+          # 2. The Setup.exe signed with the throwaway certificate: intact, timestamped, NOT trusted — Windows: UnknownError (untrusted root).
+          $setup = (Get-ChildItem "$env:OUT\dist-x64" -Filter '*-Setup.exe').FullName
+          $w2 = Get-AuthenticodeSignature $setup; $d2 = Doctor $setup; $d2
+          "Windows: $($w2.Status) — $($w2.StatusMessage); timestamper: $($w2.TimeStamperCertificate.Subject)"
+          if ($w2.SignerCertificate.Thumbprint -ne $env:THUMB) { throw "Windows does not see our certificate on the Setup.exe" }
+          if ($w2.Status -eq 'Valid' -or $w2.Status -eq 'HashMismatch' -or $w2.Status -eq 'NotSigned') { throw "expected an untrusted-root verdict from Windows, got $($w2.Status)" }
+          if ($d2 -notmatch 'Overall: signed-untrusted \(HCG Store: invalid\)') { throw "Maker should call it intact but untrusted" }
+          if ($d2 -notmatch 'timestamp \(rfc3161\): .* — verified') { throw "Maker did not verify the RFC 3161 timestamp" }
+          if (-not $w2.TimeStamperCertificate) { throw "Windows sees no timestamp" }
+          # 3. One changed byte after signing: Windows HashMismatch, Maker invalid.
+          $bad = "$env:OUT\tampered-Setup.exe"; Copy-Item $setup $bad
+          $b = [IO.File]::ReadAllBytes($bad); $b[4096] = $b[4096] -bxor 0xFF; [IO.File]::WriteAllBytes($bad, $b)
+          $w3 = Get-AuthenticodeSignature $bad; $d3 = Doctor $bad; $d3
+          if ($w3.Status -ne 'HashMismatch') { throw "Windows: expected HashMismatch, got $($w3.Status)" }
+          if ($d3 -notmatch 'changed after signing') { throw "Maker did not detect the change" }
+          # 4. The signed program inside the x64 ZIP, and the unsigned ARM64 files.
+          $zip = (Get-ChildItem "$env:OUT\dist-x64" -Filter '*.zip').FullName; $dz = Doctor $zip; $dz
+          if ($dz -notmatch 'HelloAvalonia.exe \[x64\]: Authenticode signed, NOT trusted') { throw "the program in the ZIP should carry the approved signature" }
+          $arm = (Get-ChildItem "$env:OUT\dist-arm64" -Filter '*-Setup.exe').FullName
+          if ((Get-AuthenticodeSignature $arm).Status -ne 'NotSigned' -or (Doctor $arm) -notmatch 'Overall: unsigned') { throw "the ARM64 setup should be unsigned for both" }
+          exit 0
+
+      - name: Architecture — the installer's x86 bootstrapper vs the program it installs; passports and Store manifest
+        shell: pwsh
+        run: |
+          function Machine($p) { $b = [IO.File]::ReadAllBytes($p); '0x{0:X4}' -f [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 4) }
+          foreach ($a in @(@{ arch = 'x64'; m = '0x8664' }, @{ arch = 'arm64'; m = '0xAA64' })) {
+            $dist = "$env:OUT\dist-$($a.arch)"
+            $setup = (Get-ChildItem $dist -Filter '*-Setup.exe').FullName
+            if ((Machine $setup) -ne '0x014C') { throw "$setup bootstrapper is $(Machine $setup), expected x86 0x014C" }
+            $x = "$env:OUT\unzip-$($a.arch)"; Expand-Archive (Get-ChildItem $dist -Filter '*.zip').FullName $x -Force
+            $exe = (Get-ChildItem $x -Recurse -Filter HelloAvalonia.exe | Select-Object -First 1).FullName
+            if ((Machine $exe) -ne $a.m) { throw "$exe is $(Machine $exe), expected $($a.m)" }
+            foreach ($p in Get-ChildItem $dist -Filter '*.release-passport.json') {
+              $j = Get-Content $p.FullName -Raw | ConvertFrom-Json
+              "$($p.Name): architecture $($j.architecture); installed $($j.windows.installed_program.machine); bootstrapper $($j.windows.bootstrapper.machine); code signing $($j.code_signing.status); file $($j.artifact.filename)"
+              if ($j.architecture -ne $a.arch -or $j.windows.installed_program.machine -ne $a.arch) { throw "$($p.Name): wrong architecture" }
+              if ($p.Name -like '*-Setup.exe.*' -and $j.windows.bootstrapper.machine -ne 'x86') { throw "$($p.Name): bootstrapper not recorded as x86" }
+              if ($j.artifact.filename -ne $p.Name.Replace('.release-passport.json', '')) { throw "$($p.Name) names another file" }
+              if ($j.product.name -ne 'Example Product' -or $j.package -ne 'org.example.product') { throw "$($p.Name): not the product's identity" }
+            }
+            $m = Get-Content "$dist\store-submission.json" -Raw | ConvertFrom-Json
+            if ($m.release.eligibility -ne 'private' -or $m.publishes -ne $false) { throw "the manifest must ask for a private draft only" }
+            foreach ($art in $m.artifacts) {
+              "$($art.file): $($art.declare.kind) $($art.declare.architectures -join ',') signing $($art.declare.signing.status)"
+              if (($art.declare.architectures -join ',') -ne $a.arch) { throw "$($art.file): Store architectures $($art.declare.architectures) (expected $($a.arch), never the bootstrapper's x86)" }
+              if ($art.declare.PSObject.Properties.Name -contains 'sourceCommit') { throw "declare must hold only the deployed Store's fields" }
+            }
+            Push-Location $dist; Get-Content SHA256SUMS.txt | ForEach-Object { $h, $n = $_ -split '  '; if ((Get-FileHash $n -Algorithm SHA256).Hash.ToLowerInvariant() -ne $h) { throw "checksum $n" } }; Pop-Location
+            # Nothing of Executable Maker's own identity is in the product's installer metadata.
+            $vi = (Get-Item $setup).VersionInfo
+            "Setup version info: $($vi.ProductName) / $($vi.CompanyName) / $($vi.ProductVersion)"
+            if ("$($vi.ProductName)$($vi.CompanyName)" -match 'Executable Maker') { throw "the installer is branded with Executable Maker" }
+          }
+          exit 0
+
+      - name: Install, launch and uninstall the signed x64 installer (Executable Maker's installer test)
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem "$env:OUT\dist-x64" -Filter '*-Setup.exe').FullName
+          ./tools/installer-test/Test-Installer.ps1 -Setup $setup -AppName 'Example Product' -ExeName 'HelloAvalonia.exe' -Version '1.2.0-beta.1' -LaunchSeconds 8
+
+      - name: Remove the throwaway certificate
+        if: always()
+        shell: pwsh
+        run: if ($env:THUMB) { Remove-Item "Cert:\CurrentUser\My\$env:THUMB" -ErrorAction SilentlyContinue }; exit 0
+
+      - name: Upload the packages and evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-packaging
+          path: |
+            ${{ env.OUT }}\dist-x64
+            ${{ env.OUT }}\dist-arm64
+          if-no-files-found: warn
+          retention-days: 7
+
   windows-installer:
     name: Windows installer (build, install, launch, uninstall)
     needs: test

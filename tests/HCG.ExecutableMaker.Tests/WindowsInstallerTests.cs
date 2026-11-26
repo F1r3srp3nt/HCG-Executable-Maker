@@ -172,7 +172,7 @@ public class WindowsInstallerPackagingTests : IDisposable
     {
         var publish = _t.Combine("publish");
         Directory.CreateDirectory(publish);
-        File.WriteAllBytes(Path.Combine(publish, "App.exe"), [0x4D, 0x5A]);
+        TestPe.Write(Path.Combine(publish, "App.exe"), 0x8664, pe32Plus: true, version: ("1.0.0.0", "1.0.0", "Example AB", "App"));
         return new PackagingRequest
         {
             Settings = new BuildSettings
@@ -234,7 +234,12 @@ public class WindowsInstallerPackagingTests : IDisposable
         Assert.Contains(checks, c => c.Name == "Executable format" && c.Status == VerificationStatus.Passed);
         Assert.Contains(checks, c => c.Name == "Payload" && c.Status == VerificationStatus.Passed);
         Assert.Contains(checks, c => c.Name == "Inno Setup data" && c.Status == VerificationStatus.Passed);
-        Assert.Contains(checks, c => c.Name == "Code signature" && c.Detail.StartsWith("Not code-signed"));
+        Assert.Contains(checks, c => c.Name == "Code signature" && c.Detail.StartsWith("Not Authenticode signed"));
+        // The x86 bootstrapper is not the installed program: each is reported as what it is.
+        Assert.Contains(checks, c => c.Name == "Installer bootstrapper" && c.Detail.Contains("it installs for x64 only", StringComparison.Ordinal));
+        Assert.Contains(checks, c => c.Name == "Installed application" && c.Status == VerificationStatus.Passed && c.Detail == "App.exe: x64, product version 1.0.0, Example AB");
+        var arm = request with { Settings = request.Settings with { Architecture = TargetArchitecture.Arm64 } };
+        Assert.Contains(InnoSetupPackager.Verify(exe, arm), c => c.Name == "Installed application" && c.Status == VerificationStatus.Failed && c.Detail.Contains("App.exe is x64, but the installer targets arm64", StringComparison.Ordinal));
         Assert.Contains(checks, c => c.Name == "Install test" && c.Status == VerificationStatus.NotVerifiable);
 
         File.WriteAllBytes(exe, "not an exe"u8.ToArray());
