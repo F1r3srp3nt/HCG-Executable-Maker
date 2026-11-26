@@ -1,3 +1,4 @@
+using HCG.ExecutableMaker.BuildEngine.Distribution;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -230,5 +231,125 @@ public class StoreConnectionDiagnosticsTests
         Assert.Contains("\"entitlementAuthority\":\"hcg-ecosystem\"", text);
         Assert.Contains("[OK] Store server connectivity", text);
         Assert.Contains("[Off] Public publication", text);
+    }
+}
+
+/// <summary>Review follow-ups: tokens never go to a non-Store host; a failing token refresh still yields a report; redaction of camelCase names.</summary>
+public class StoreDiagnosticsHardeningTests
+{
+    private static HttpResponseMessage Html() => new(HttpStatusCode.OK) { Content = new StringContent("<!doctype html><title>Not a Store</title>", Encoding.UTF8, "text/html") };
+
+    [Fact]
+    public async Task The_sign_in_is_never_sent_to_an_address_that_is_not_an_HCG_Store_server()
+    {
+        var seen = new List<string?>();
+        var handler = new Lambda(r => { seen.Add(r.Headers.Authorization?.Parameter); return Html(); });
+        var client = new HcgStoreClient(new HttpClient(handler), new Uri("https://example.test/"), _ => Task.FromResult<string?>("secret-token-value"));
+        var report = await StoreConnectionDiagnostics.RunAsync(client, new(true, "dev@example.test", "Signed in.", HcgConnectConfiguration.Production), _ => Task.FromResult<string?>("secret-token-value"));
+        Assert.Equal(StoreCheckState.Failed, report["connectivity"].State);
+        Assert.All(seen, b => Assert.Null(b));
+        Assert.Contains("not sent", report["products"].Summary);
+    }
+
+    [Fact]
+    public async Task A_token_refresh_that_throws_still_produces_a_report_naming_the_sign_in()
+    {
+        var handler = new Lambda(r => r.RequestUri!.AbsolutePath == "/api/v1/health"
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"ok\",\"mode\":\"production\"}", Encoding.UTF8, "application/json") }
+            : new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{\"error\":{\"code\":\"publishing_disabled\",\"message\":\"off\"}}", Encoding.UTF8, "application/json") });
+        Func<CancellationToken, Task<string?>> broken = _ => throw new InvalidOperationException("The keychain could not be written.");
+        var client = new HcgStoreClient(new HttpClient(handler), new Uri("https://store.test/"), broken);
+        var report = await StoreConnectionDiagnostics.RunAsync(client, new(true, "dev@example.test", "Signed in.", HcgConnectConfiguration.Production), broken);
+        Assert.Equal(StoreCheckState.Failed, report["auth"].State);
+        Assert.Contains("keychain could not be written", report["auth"].Summary);
+        Assert.Equal(11, report.Checks.Count);
+    }
+
+    [Theory]
+    [InlineData("{\"accessToken\":\"opaque-0123456789\"}", "opaque-0123456789")]
+    [InlineData("{\"refreshToken\":\"opaque-0123456789\"}", "opaque-0123456789")]
+    [InlineData("{\"token\":\"opaque-0123456789\"}", "opaque-0123456789")]
+    [InlineData("{\"sessionId\":\"opaque-0123456789\"}", "opaque-0123456789")]
+    public void Credential_fields_are_redacted_in_snake_and_camel_case(string json, string secret) =>
+        Assert.DoesNotContain(secret, Security.SecretRedactor.RedactCredentials(json));
+
+    [Fact]
+    public void The_Stores_token_status_words_are_kept() =>
+        Assert.Contains("\"token\":\"expired\"", Security.SecretRedactor.RedactCredentials("{\"caller\":{\"token\":\"expired\",\"reason\":\"The access token has expired.\"}}"));
+
+    private sealed class Lambda(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct) => Task.FromResult(answer(r));
+    }
+}
+
+/// <summary>Release Passport attachment never turns a verified upload into a failure, and never hides a passport that disagrees with the file.</summary>
+public sealed class ShipPassportAttachmentTests : IDisposable
+{
+    private readonly string _dir = Directory.CreateTempSubdirectory("hcg-passport-").FullName;
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch (IOException) { } }
+
+    private sealed class Store : HttpMessageHandler
+    {
+        public readonly MemoryStream Bytes = new();
+        public System.Text.Json.Nodes.JsonObject? Passport;
+        public long Size;
+        public string Sha = "";
+        private static HttpResponseMessage J(int s, object b) => new((HttpStatusCode)s) { Content = new StringContent(JsonSerializer.Serialize(b), Encoding.UTF8, "application/json") };
+        private object Artifact(string status) => new { id = "art-1", fileName = "Q.exe", platform = "windows", format = "exe", sizeBytes = Size, declaredSha256 = Sha, sha256 = status == "verified" ? Sha : null, status };
+        private object Release(string status) => new { id = "rel-1", productId = "p", version = "1.0.0", build = "1", status = "draft", artifacts = status == "none" ? Array.Empty<object>() : new[] { Artifact(status) } };
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+        {
+            var p = r.RequestUri!.AbsolutePath;
+            if (p == "/api/v1/publishing/releases" && r.Method == HttpMethod.Post) return J(201, Release("none"));
+            if (p.EndsWith("/artifacts")) { var d = JsonDocument.Parse(await r.Content!.ReadAsStringAsync(ct)).RootElement; Size = d.GetProperty("sizeBytes").GetInt64(); Sha = d.GetProperty("sha256").GetString()!;
+                return J(201, new { artifact = Artifact("awaiting-upload"), uploadUrl = "https://store.test/up/1", expiresAt = 0, chunkBytes = 1 << 20 }); }
+            if (p == "/up/1" && r.Method == HttpMethod.Get) return J(200, new { received = Bytes.Length, size = Size });
+            if (p == "/up/1") { await r.Content!.CopyToAsync(Bytes, ct); return J(200, new { received = Bytes.Length, size = Size }); }
+            if (p.EndsWith("/complete")) return J(200, new { artifact = Artifact("verified") });
+            if (p.EndsWith("/passport")) { Passport = System.Text.Json.Nodes.JsonNode.Parse(await r.Content!.ReadAsStringAsync(ct))!.AsObject(); return J(200, new { artifact = Artifact("verified") }); }
+            if (p == "/api/v1/publishing/releases/rel-1") return J(200, Release("verified"));
+            return J(404, new { error = new { code = "not_found", message = "Not found." } });
+        }
+    }
+
+    private async Task<(ShipResult Result, Store Store)> Ship(Func<string, string, object> passport)
+    {
+        var file = Path.Combine(_dir, "Q.exe");
+        await File.WriteAllBytesAsync(file, [(byte)'M', (byte)'Z', .. new byte[2048]]);
+        var c = await StoreArtifacts.DetectAsync(file);
+        var pp = file + ".release-passport.json";
+        await File.WriteAllTextAsync(pp, JsonSerializer.Serialize(passport(c.FileName, c.Sha256)));
+        c = c with { Provenance = new StoreProvenance.Result("0123abcd", "local", ".NET", null, pp, []) };
+        var store = new Store();
+        var client = new HcgStoreClient(new HttpClient(store), new Uri("https://store.test/"), _ => Task.FromResult<string?>("t"));
+        var req = new StoreReleaseRequest { ProductId = "p", Version = "1.0.0", Build = "1", Distribution = "free", Eligibility = "private" };
+        return (await new ShipToStoreService(client).ShipAsync(req, [c], null, null, CancellationToken.None), store);
+    }
+
+    [Fact]
+    public async Task A_matching_passport_is_attached_with_the_SHA_512_computed_from_the_file()
+    {
+        var (r, store) = await Ship((name, sha) => new { format = "hcg.release-passport", formatVersion = 1, artifact = new { filename = name, sha256 = sha, size = 2050 } });
+        Assert.True(r.AllVerified);
+        Assert.Equal("attached", r.Items.Single().Passport);
+        Assert.Equal(128, store.Passport!["artifact"]!["sha512"]!.GetValue<string>().Length);
+    }
+
+    [Theory]
+    [InlineData("sha512-differs")]
+    [InlineData("filename-not-text")]
+    [InlineData("other-file")]
+    public async Task A_passport_that_disagrees_is_not_sent_and_the_upload_stays_verified(string defect)
+    {
+        var (r, store) = await Ship((name, sha) => defect switch
+        {
+            "sha512-differs" => new { format = "hcg.release-passport", formatVersion = 1, artifact = new { filename = name, sha256 = sha, size = 2050, sha512 = new string('0', 128) } },
+            "filename-not-text" => new { format = "hcg.release-passport", formatVersion = 1, artifact = (object)new { filename = 5, sha256 = sha, size = 2050 } },
+            _ => new { format = "hcg.release-passport", formatVersion = 1, artifact = (object)new { filename = "Other.exe", sha256 = sha, size = 2050 } },
+        });
+        Assert.True(r.AllVerified);
+        Assert.Equal("refused", r.Items.Single().Passport);
+        Assert.Null(store.Passport);
     }
 }

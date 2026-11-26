@@ -58,7 +58,8 @@ public static partial class SecretRedactor
         return CredentialHeaderRegex().Replace(result, m => m.Groups[1].Value + Mask);
     }
 
-    [GeneratedRegex(@"(?i)(""(?:access_token|refresh_token|id_token|token|password|secret|client_secret|cookie|set-cookie|authorization|code_verifier|api_key|apikey)""\s*:\s*"")([^""]*)("")")]
+    // snake_case and camelCase names; "token" keeps the Store's status words (valid, expired, …), which are not secrets.
+    [GeneratedRegex(@"(?i)(""(?:access_?token|refresh_?token|id_?token|password|secret|client_?secret|cookie|set-cookie|authorization|code_?verifier|api_?key|session_?id|token(?=""\s*:\s*""(?!(?:valid|expired|invalid|unverifiable|not-checked)"")))""\s*:\s*"")([^""]*)("")")]
     private static partial Regex CredentialFieldRegex();
 
     [GeneratedRegex(@"(?im)^(\s*(?:set-cookie|cookie|authorization)\s*:\s*).+$")]

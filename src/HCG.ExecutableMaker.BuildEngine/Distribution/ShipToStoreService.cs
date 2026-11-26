@@ -61,6 +61,9 @@ public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessServi
                 if (existing is { Status: "verified" } && existing.Sha256 == f.Sha256)
                 {
                     var skip = new ShipItemProgress(f.FileName, ShipItemState.Skipped, f.SizeBytes, f.SizeBytes, "Already uploaded and verified (same SHA-256).", existing.Id, existing.Sha256);
+                    // A retry after an interruption (or against an HCG Store that now takes passports) still attaches it.
+                    var (pp, pnote) = await AttachPassportAsync(existing.Id, f, ct).ConfigureAwait(false);
+                    skip = skip with { Passport = pp, Detail = skip.Detail + (pnote is null ? "" : " " + pnote) };
                     items.Add(skip); Report(skip);
                     continue;
                 }
@@ -129,39 +132,40 @@ public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessServi
     public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
-    /// Attaches the file's HCG Release Passport (<c>&lt;file&gt;.release-passport.json</c>) to the verified file, so reviewers
-    /// see the build evidence. Only a passport that names these exact bytes is sent (HCG Store checks name, size, SHA-256 and
-    /// SHA-512 again); the passport file is never rewritten. A missing or refused passport never fails the upload.
+    /// Attaches the file's HCG Release Passport to the verified file, so reviewers see the build evidence. Only the passport
+    /// that provenance accepted for these exact bytes is used (never one re-discovered after it was rejected), and only when
+    /// it names this file and its SHA-256. HCG Store checks name, size, SHA-256 and SHA-512 again. The passport is sent as
+    /// it is, except that a missing SHA-512 is filled in from the file (a stated SHA-512 that differs is refused here). It
+    /// never fails the upload: any problem is reported as a note.
     /// </summary>
     private async Task<(string Passport, string? Note)> AttachPassportAsync(string artifactId, StoreArtifactCandidate f, CancellationToken ct)
     {
-        var path = f.Provenance?.PassportPath ?? StoreProvenance.FindPassport(f.Path);
-        if (path is null || !File.Exists(path)) return ("not-found", "No Release Passport next to the file.");
-        System.Text.Json.Nodes.JsonObject passport;
-        try { passport = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false))!.AsObject(); }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { return ("refused", $"The Release Passport could not be read ({ex.Message})."); }
-        var art = passport["artifact"] as System.Text.Json.Nodes.JsonObject;
-        var named = art?["filename"]?.GetValue<string>();
-        var sha = art?["sha256"]?.GetValue<string>();
-        if (named != f.FileName || sha != f.Sha256)
-            return ("refused", $"The Release Passport next to the file describes {named ?? "another file"}{(sha == f.Sha256 ? "" : " with a different SHA-256")}; not attached.");
-        // HCG Store compares the SHA-512 of the stored bytes too: computed here from the same file, the passport is not changed.
-        var body = passport.DeepClone().AsObject();
-        await using (var stream = File.OpenRead(f.Path))
-            body["artifact"]!["sha512"] = Convert.ToHexStringLower(await System.Security.Cryptography.SHA512.HashDataAsync(stream, ct).ConfigureAwait(false));
         try
         {
+            var path = f.Provenance?.PassportPath;
+            if (path is null || !File.Exists(path)) return ("not-found", "No Release Passport for these bytes.");
+            if (System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(path, ct).ConfigureAwait(false)) is not System.Text.Json.Nodes.JsonObject passport
+                || passport["artifact"] is not System.Text.Json.Nodes.JsonObject art)
+                return ("refused", "The Release Passport is not an object with an artifact section; not attached.");
+            static string? Text(System.Text.Json.Nodes.JsonNode? n) => n is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<string>(out var t) ? t : null;
+            var named = Text(art["filename"]);
+            var sha = Text(art["sha256"]);
+            if (named != f.FileName || sha != f.Sha256)
+                return ("refused", $"The Release Passport describes {named ?? "another file"}{(sha == f.Sha256 ? "" : " with a different SHA-256")}; not attached.");
+            string localSha512;
+            await using (var stream = File.OpenRead(f.Path))
+                localSha512 = Convert.ToHexStringLower(await System.Security.Cryptography.SHA512.HashDataAsync(stream, ct).ConfigureAwait(false));
+            var stated = Text(art["sha512"]);
+            if (stated is not null && !string.Equals(stated, localSha512, StringComparison.OrdinalIgnoreCase))
+                return ("refused", "The Release Passport states a SHA-512 that differs from the file's; not attached.");
+            var body = passport.DeepClone().AsObject();
+            body["artifact"]!["sha512"] = localSha512;
             await client.AttachPassportAsync(artifactId, body, ct).ConfigureAwait(false);
-            return ("attached", "Release Passport attached (HCG Store matched it to the stored bytes).");
+            return ("attached", "Release Passport attached (HCG Store matched it to the stored bytes" + (stated is null ? "; SHA-512 computed by Executable Maker from the file" : "") + ").");
         }
-        catch (HcgStoreException ex) when (ex.Status is 404 or 405)
-        {
-            return ("unsupported", "This HCG Store does not take Release Passports yet; the passport stays with the file.");
-        }
-        catch (HcgStoreException ex)
-        {
-            return ("refused", $"HCG Store did not attach the Release Passport: {ex.Message}");
-        }
+        catch (HcgStoreException ex) when (ex.Status is 404 or 405) { return ("unsupported", "This HCG Store does not take Release Passports yet; the passport stays with the file."); }
+        catch (HcgStoreException ex) { return ("refused", $"HCG Store did not attach the Release Passport: {ex.Message}"); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return ("refused", $"The Release Passport could not be attached ({ex.Message})."); }
     }
 
     private static readonly string[] ProvenanceFields = ["sourceCommit", "buildProvider", "toolchain", "validationReport"];

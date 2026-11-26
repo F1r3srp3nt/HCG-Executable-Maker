@@ -49,7 +49,12 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
         var started = System.Diagnostics.Stopwatch.StartNew();
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(Origin, path));
         var sentToken = false;
-        if (withToken && await accessToken(ct).ConfigureAwait(false) is { Length: > 0 } token)
+        string? token = null;
+        // A refresh failure is not this probe's to report (the sign-in check does): the request goes without the token.
+        if (withToken)
+            try { token = await accessToken(ct).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { token = null; }
+        if (token is { Length: > 0 })
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             sentToken = true;

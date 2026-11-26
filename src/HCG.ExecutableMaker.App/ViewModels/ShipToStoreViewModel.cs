@@ -189,6 +189,13 @@ public sealed partial class ShipToStoreViewModel(
             if (report.CanUpload) await settings.SaveAsync((await settings.LoadAsync()) with { HcgStoreUrl = client.Origin.ToString() });
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // Never leave the previous Store's products and checks on screen after a check that failed.
+            if (generation != _connectGeneration) return;
+            Report = null; Diagnostics.Clear(); Products.Clear();
+            (Connection, ConnectionTone, ConnectionDetail) = ("Check failed", "error", Security.SecretRedactor.RedactCredentials(ex.Message));
+        }
         finally { if (generation == _connectGeneration) IsChecking = false; }
     }
 

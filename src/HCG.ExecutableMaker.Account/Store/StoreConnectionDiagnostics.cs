@@ -169,7 +169,8 @@ public static class StoreConnectionDiagnostics
 
         // 2 · API version: the status endpoint (with the sign-in when there is one, for checks 5–7).
         var signedIn = ctx.SignedIn;
-        var (status, statusProbe) = reachable ? await client.StatusAsync(withToken: signedIn, ct).ConfigureAwait(false) : (null, health);
+        // The sign-in goes only to a server that answered as an HCG Store (never to a web page or another service).
+        var (status, statusProbe) = reachable ? await client.StatusAsync(withToken: signedIn && isStore, ct).ConfigureAwait(false) : (null, health);
         var olderServer = status is null && reachable && statusProbe.Status == 404 && statusProbe.ErrorCode is { Length: > 0 };
         checks.Add(!reachable ? Skipped("api", "API version compatibility", "the server did not answer")
             : status is null
@@ -275,6 +276,7 @@ public static class StoreConnectionDiagnostics
         var stages = status?.Stages;
         var submissionsOn = status is not null ? stages?.DraftCreation?.Available == true : (bool?)null;
         if (token is null) checks.Add(Skipped("products", "Authorized product availability", "not signed in"));
+        else if (!isStore) checks.Add(Skipped("products", "Authorized product availability", "the address is not an HCG Store server, so your sign-in is not sent there"));
         else if (submissionsOn == false || olderServer)
             checks.Add(new("products", "Authorized product availability", StoreCheckState.Off,
                 "Ship to Store is switched off on this server, so it lists no products.", stages?.DraftCreation?.Reason ?? statusProbe.ErrorMessage, statusProbe.Line, "HCG Store administrator"));
