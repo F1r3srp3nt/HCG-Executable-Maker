@@ -882,6 +882,7 @@ jobs:
       - name: Evidence outside HCG — plain xcodebuild and swift test on the fixture (how Xcode itself sees the scheme's tests)
         continue-on-error: true
         run: |
+          set +e
           mkdir -p "$OUT/plain" && cp -R tests/Fixtures/MacXcode/FieldKit "$OUT/plain/FieldKit" && cd "$OUT/plain/FieldKit"
           xcodebuild -project FieldKit.xcodeproj -scheme FieldKit -showTestPlans 2>&1 | tail -20 || true
           echo "== xcodebuild test -project (no HCG)"
@@ -928,7 +929,8 @@ jobs:
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac tests/Fixtures/MacXcode/FieldKit --trust --test \
             --formats app,zip,dmg,pkg,xcarchive --out "$OUT/ok" 2>&1 | tee "$OUT/ok.txt"
           grep -q "^Result: SUCCEEDED" "$OUT/ok.txt"
-          grep -q "TEST SUCCEEDED" "$OUT/ok.txt"
+          grep -q "Tests: FieldKitCoreTests (swift test in Packages/FieldKitCore)" "$OUT/ok.txt"
+          grep -q "Test Suite 'All tests' passed" "$OUT/ok.txt"
           dir="$(dirname "$(sed -n 's/^Artifact: \(.*\.zip\) · .*/\1/p' "$OUT/ok.txt" | head -1)")"
           echo "OK_DIR=$dir" >> "$GITHUB_ENV"
           ls -la "$dir"

@@ -47,6 +47,10 @@ public static class MacXcodePassport
         };
     }
 
+    private static bool TestsPassed(string verdict) =>
+        verdict.Contains("TEST SUCCEEDED", StringComparison.Ordinal) || verdict.StartsWith("Test Suite 'All tests' passed", StringComparison.Ordinal)
+        || (verdict.StartsWith("✔ Test run with", StringComparison.Ordinal) && verdict.Contains("passed", StringComparison.Ordinal));
+
     public static string ArchitectureName(IReadOnlyList<string> archs) =>
         archs.Contains("arm64") && archs.Contains("x86_64") ? "universal" : archs.FirstOrDefault() ?? "unknown";
 
@@ -69,10 +73,11 @@ public static class MacXcodePassport
             ? new JsonObject
             {
                 ["run"] = true,
-                ["result"] = diagnostics is null ? "unknown" : diagnostics.TestFailures.Count == 0 && diagnostics.ResultLines.Any(l => l.Contains("TEST SUCCEEDED", StringComparison.Ordinal)) ? "passed"
+                ["result"] = diagnostics is null ? "unknown" : diagnostics.TestFailures.Count == 0 && diagnostics.ResultLines.Any(TestsPassed)
+                    && !diagnostics.ResultLines.Any(l => l.Contains("TEST FAILED", StringComparison.Ordinal) || l.StartsWith("Test Suite 'All tests' failed", StringComparison.Ordinal) || l.StartsWith("✘ Test run", StringComparison.Ordinal)) ? "passed"
                     : diagnostics.TestFailures.Count > 0 ? "failed" : "unknown",
                 ["failures"] = diagnostics?.TestFailures.Count,
-                ["by"] = "xcodebuild test (the scheme's Test action)",
+                ["by"] = "the scheme's Test action: xcodebuild test for the project's test targets, swift test for local Swift package test targets",
             }
             : new JsonObject { ["run"] = false, ["result"] = "not-run" };
         return ReleasePassport.ForArtifact(new ReleasePassport.ArtifactFacts(

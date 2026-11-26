@@ -106,6 +106,8 @@ public sealed record IosSchemeInfo(string Name, string File, bool Shared)
     public IReadOnlyList<string> TestTargets { get; init; } = [];
     /// <summary>The configuration the Test action uses (usually Debug).</summary>
     public string? TestConfiguration { get; init; }
+    /// <summary>Each test target's ReferencedContainer as the scheme states it (e.g. "container:Packages/Core" for a local Swift package's tests).</summary>
+    public IReadOnlyDictionary<string, string> TestContainers { get; init; } = new Dictionary<string, string>();
 }
 
 /// <summary>

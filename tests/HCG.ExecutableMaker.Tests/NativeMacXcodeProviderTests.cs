@@ -234,6 +234,9 @@ public sealed class NativeMacXcodeProviderTests : IDisposable
         var t = p.AppTargets.Single();
         Assert.Equal(["Debug", "Release"], t.ConfigurationFacts.Select(c => c.Name));
         Assert.True(t.ConfigurationFacts.Single(c => c.Name == "Release").AppSandbox);
+        var (own, packages) = MacXcodeProjectAnalyzer.TestsOf(p, p.Schemes.Single(s => s.Name == "OffensiveFrontier"));
+        Assert.Empty(own);
+        Assert.Equal([new MacXcodePackageTest("Packages/OffensiveFrontierCore", "OffensiveFrontierCoreTests")], packages);
     }
 
     // ------------------------------------------------------------------ the xcodebuild plan
@@ -271,6 +274,47 @@ public sealed class NativeMacXcodeProviderTests : IDisposable
         Assert.Contains("/b/xcode/FieldKit.xcarchive", steps.Single(s => s.Process.Arguments.Contains("archive")).Process.Arguments);
         // Without packages, tests or an archive: no such steps.
         Assert.Equal(4, MacXcodeBuildPlanner.Plan(Settings(Options()), Layout(), "/src", "/X/xcodebuild", null, new Dictionary<string, string>()).Count);
+    }
+
+    /// <summary>
+    /// xcodebuild finds no test bundle for a project scheme whose tests are a local package's ("There are no test bundles
+    /// available to test", Xcode 26.6, plain xcodebuild and Maker alike): those targets run with the package's swift test.
+    /// </summary>
+    [Fact]
+    public async Task A_local_packages_test_targets_run_with_swift_test_and_the_projects_own_with_xcodebuild_only_testing()
+    {
+        var a = await MacXcodeTests.Service().InspectAsync(Path.Combine(Fixtures.RepoRoot, "tests", "Fixtures", "MacXcode", "FieldKit"), MacXcodeTests.MacReport(_t), CancellationToken.None);
+        var p = a.MacXcode!.Projects.Single();
+        Assert.Equal("container:Packages/FieldKitCore", p.Schemes.Single().TestContainers["FieldKitCoreTests"]);
+        var (own, packages) = MacXcodeProjectAnalyzer.TestsOf(p, p.Schemes.Single());
+        Assert.Empty(own);
+        Assert.Equal([new MacXcodePackageTest("Packages/FieldKitCore", "FieldKitCoreTests")], packages);
+
+        var o = Options(tests: true) with { PackageTests = packages };
+        var steps = MacXcodeBuildPlanner.Plan(Settings(o), Layout(), "/src", "/X/xcodebuild", null, new Dictionary<string, string>());
+        Assert.DoesNotContain(steps, s => s.Process.Arguments.Contains("test") && s.Process.Executable == "/X/xcodebuild");
+        var swift = Assert.Single(steps, s => s.Process.Executable == "/usr/bin/xcrun");
+        Assert.Equal(["swift", "test", "--package-path", "/b/xcode/source/Packages/FieldKitCore", "--scratch-path", "/b/xcode/swiftpm/Packages_FieldKitCore", "--filter", "^FieldKitCoreTests\\."],
+            swift.Process.Arguments);
+
+        // A test target of the project itself runs with xcodebuild, only that target.
+        var mixed = MacXcodeBuildPlanner.Plan(Settings(o with { ProjectTestTargets = ["FieldKitUITests"] }), Layout(), "/src", "/X/xcodebuild", null, new Dictionary<string, string>());
+        Assert.Contains("-only-testing:FieldKitUITests", mixed.Single(s => s.Process.Executable == "/X/xcodebuild" && s.Process.Arguments.Contains("test")).Process.Arguments);
+        Assert.Single(mixed, s => s.Process.Executable == "/usr/bin/xcrun");
+    }
+
+    [Fact]
+    public void Swift_tests_own_verdicts_and_failures_are_read()
+    {
+        string[] ok = ["Test Suite 'All tests' started at 2026-11-26 01:00:00.000.", "Test Suite 'All tests' passed at 2026-11-26 01:00:00.010.",
+            "\t Executed 2 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds"];
+        var r = XcodeDiagnostics.Analyze(ok, "Succeeded", null, null);
+        Assert.Equal(["Test Suite 'All tests' passed at 2026-11-26 01:00:00.010."], r.ResultLines);
+        string[] bad = ["/b/xcode/source/Packages/FieldKitCore/Tests/FieldKitCoreTests/FieldSummaryTests.swift:5: error: -[FieldKitCoreTests.FieldSummaryTests testAverage] : XCTAssertEqual failed: (\"2.5\") is not equal to (\"2.0\")",
+            "Test Case '-[FieldKitCoreTests.FieldSummaryTests testAverage]' failed (0.002 seconds).", "Test Suite 'All tests' failed at 2026-11-26 01:00:00.010."];
+        var f = XcodeDiagnostics.Analyze(bad, "Failed", null, ["/b/xcode/source"]);
+        Assert.Contains(f.TestFailures, t => t.File == "Packages/FieldKitCore/Tests/FieldKitCoreTests/FieldSummaryTests.swift" && t.Line == 5);
+        Assert.Equal(["Test Suite 'All tests' failed at 2026-11-26 01:00:00.010."], f.ResultLines);
     }
 
     [Fact]

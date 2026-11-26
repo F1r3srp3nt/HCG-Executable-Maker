@@ -305,6 +305,31 @@ public static partial class MacXcodeProjectAnalyzer
         project.Schemes.FirstOrDefault(s => s.ArchiveTargets.Contains(target.Name))
         ?? project.Schemes.FirstOrDefault(s => s.Name == target.Name);
 
+    /// <summary>
+    /// The scheme's test targets split by where they live. A target whose ReferencedContainer is a local Swift package
+    /// of the project (container:&lt;path&gt;, relative to the project's folder, with its Package.swift in the source) is
+    /// a package test, run with that package's swift test; every other target belongs to the project.
+    /// </summary>
+    public static (IReadOnlyList<string> ProjectTargets, IReadOnlyList<MacXcodePackageTest> PackageTests) TestsOf(MacXcodeProjectInfo project, IosSchemeInfo? scheme)
+    {
+        if (scheme is null) return ([], []);
+        var projectDir = Path.GetDirectoryName(project.ProjectPath)?.Replace('\\', '/') ?? "";
+        var local = project.PackageReferences.Where(r => r.IsLocal && r.ManifestPath is not null).ToList();
+        List<string> own = [];
+        List<MacXcodePackageTest> packages = [];
+        foreach (var target in scheme.TestTargets)
+        {
+            var container = scheme.TestContainers.GetValueOrDefault(target);
+            var rel = container is { } c && c.StartsWith("container:", StringComparison.Ordinal) ? c["container:".Length..].TrimEnd('/') : null;
+            var pkg = rel is null || rel.EndsWith(".xcodeproj", StringComparison.Ordinal) ? null
+                : local.FirstOrDefault(r => Normalize(r.Location) == Normalize(rel));
+            if (pkg is not null) packages.Add(new MacXcodePackageTest(Path.GetDirectoryName(pkg.ManifestPath!)!.Replace('\\', '/'), target));
+            else own.Add(target);
+        }
+        return (own, packages);
+        string Normalize(string path) => Path.GetFullPath(Path.Combine("/", projectDir, path)).TrimEnd('/');
+    }
+
     /// <summary>Top-level string values of an XML property list (Info.plist as committed; values may contain $(VARS)).</summary>
     private static Dictionary<string, string>? ReadPlistStrings(SourceIndex index, string path)
     {

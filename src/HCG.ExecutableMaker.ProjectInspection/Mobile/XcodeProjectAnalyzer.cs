@@ -25,12 +25,15 @@ public static partial class XcodeProjectAnalyzer
             var archive = doc.Descendants("BuildActionEntry").Where(e => (string?)e.Attribute("buildForArchiving") == "YES")
                 .Select(e => (string?)e.Descendants("BuildableReference").FirstOrDefault()?.Attribute("BlueprintName")).OfType<string>().ToList();
             var test = doc.Descendants("TestAction").FirstOrDefault();
-            var tests = test?.Descendants("TestableReference").Where(t => (string?)t.Attribute("skipped") != "YES")
-                .Select(t => (string?)t.Descendants("BuildableReference").FirstOrDefault()?.Attribute("BlueprintName")).OfType<string>().Distinct().ToList() ?? [];
+            var refs = test?.Descendants("TestableReference").Where(t => (string?)t.Attribute("skipped") != "YES")
+                .Select(t => t.Descendants("BuildableReference").FirstOrDefault()).Where(b => b?.Attribute("BlueprintName") is not null).ToList() ?? [];
+            var tests = refs.Select(b => (string)b!.Attribute("BlueprintName")!).Distinct().ToList();
+            var containers = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var b in refs) if ((string?)b!.Attribute("ReferencedContainer") is { } c) containers.TryAdd((string)b.Attribute("BlueprintName")!, c);
             return info with
             {
                 ArchiveTargets = archive, ArchiveConfiguration = (string?)doc.Descendants("ArchiveAction").FirstOrDefault()?.Attribute("buildConfiguration"),
-                TestTargets = tests, TestConfiguration = (string?)test?.Attribute("buildConfiguration"),
+                TestTargets = tests, TestConfiguration = (string?)test?.Attribute("buildConfiguration"), TestContainers = containers,
             };
         }
         catch (System.Xml.XmlException) { return info; }

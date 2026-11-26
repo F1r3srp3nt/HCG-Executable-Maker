@@ -116,6 +116,13 @@ internal static class XcodeMacCommand
             DisplayName = target.DisplayName, DeploymentTarget = target.DeploymentTarget, SignLocallyAdHoc = args.Contains("--sign-ad-hoc"),
             LicenseFiles = xp.LicenseFiles, RunTests = args.Contains("--test"), CreateArchive = args.Contains("--archive") || formats.Contains(PackagingFormat.MacXcodeArchive),
         };
+        if (options.RunTests)
+        {
+            var (own, packageTests) = MacXcodeProjectAnalyzer.TestsOf(xp, xp.Schemes.FirstOrDefault(s => s.Name == options.Scheme));
+            options = options with { ProjectTestTargets = own, PackageTests = packageTests };
+            Console.WriteLine("Tests: " + (own.Count + packageTests.Count == 0 ? "the scheme's Test action (xcodebuild test)"
+                : string.Join("; ", own.Select(t => $"{t} (xcodebuild test)").Concat(packageTests.Select(t => $"{t.TestTarget} (swift test in {t.PackageDirectory})")))));
+        }
         var settings = new BuildSettings
         {
             ProjectRelativePath = xp.ProjectPath,

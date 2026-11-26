@@ -187,8 +187,20 @@ public sealed record MacXcodeBuildOptions
     public bool SignLocallyAdHoc { get; init; }
     /// <summary>Licence/attribution files (relative to the source) shipped next to the app and inside the DMG.</summary>
     public IReadOnlyList<string> LicenseFiles { get; init; } = [];
-    /// <summary>Run the scheme's test action (xcodebuild test) after the build. A failed test fails the build.</summary>
+    /// <summary>
+    /// Run the scheme's tests after the build; a failed test fails the build. Test targets in the project run with
+    /// <c>xcodebuild test -only-testing:</c>; test targets of a local Swift package in the source (which xcodebuild
+    /// does not build for a project scheme: "There are no test bundles available to test") run with that package's
+    /// <c>swift test</c>, from the same Xcode.
+    /// </summary>
     public bool RunTests { get; init; }
+    /// <summary>The scheme's test targets that belong to the project itself.</summary>
+    public IReadOnlyList<string> ProjectTestTargets { get; init; } = [];
+    /// <summary>The scheme's test targets that belong to a local Swift package in the source.</summary>
+    public IReadOnlyList<MacXcodePackageTest> PackageTests { get; init; } = [];
     /// <summary>Also produce an .xcarchive (xcodebuild archive) of the same scheme and configuration.</summary>
     public bool CreateArchive { get; init; }
 }
+
+/// <summary>A scheme test target that belongs to a local Swift package: the package folder (relative to the imported source) and the test target.</summary>
+public sealed record MacXcodePackageTest(string PackageDirectory, string TestTarget);

@@ -753,7 +753,7 @@ public sealed class BuildService(
                     xcodeArtifacts.Add((a.FileName, a.Sha256, a.SizeBytes, a.Format.DisplayName(), passportFile));
                 }
                 // The build folder keeps only the result bundle (for Xcode); the source copy and derived data are not needed.
-                foreach (var dir in new[] { xcodeLayout!.SourceCopy, xcodeLayout.DerivedData, xcodeLayout.SourcePackages })
+                foreach (var dir in new[] { xcodeLayout!.SourceCopy, xcodeLayout.DerivedData, xcodeLayout.SourcePackages, xcodeLayout.SwiftPMScratch })
                 {
                     try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {dir}: {ex.Message}"); }

@@ -213,6 +213,9 @@ Highlights:
   - **Steps:** `xcodebuild -list -json` checks the scheme and configuration; packages are resolved
     (`-resolvePackageDependencies`, remote packages only); the build follows; then the optional `test` (on this Mac's
     architecture) and `archive`.
+  - **Tests:** a local Swift package's test targets run with that package's `swift test`, from the same Xcode.
+    `xcodebuild test` on the project finds no test bundle for them (seen on Xcode 26.6, with and without HCG). The
+    project's own test targets run with `xcodebuild test -only-testing:`.
   - **Outputs:** PKG installer (unsigned) and Xcode archive (zipped `.xcarchive` with dSYMs), alongside .app, ZIP and
     DMG.
   - **Signing Doctor** for macOS apps (`--mac-signing-doctor`, read only). It tells unsigned, ad hoc, development,

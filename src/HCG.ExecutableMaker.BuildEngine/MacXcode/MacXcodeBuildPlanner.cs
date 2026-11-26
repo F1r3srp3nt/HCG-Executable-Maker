@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HCG.ExecutableMaker.BuildEngine.Mobile;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -17,6 +18,8 @@ public static class MacXcodeBuildPlanner
     public sealed record Layout(string WorkRoot, string SourceCopy, string Container, bool IsWorkspace, string DerivedData, string ResultBundle, string SourcePackages)
     {
         public string TestResultBundle => ResultBundle[..^".xcresult".Length] + "-Tests.xcresult";
+        /// <summary>Build products of local Swift packages' swift test runs.</summary>
+        public string SwiftPMScratch => Path.Combine(WorkRoot, "swiftpm");
         public string ArchivePath => ResultBundle[..^".xcresult".Length] + ".xcarchive";
     }
 
@@ -156,12 +159,23 @@ public static class MacXcodeBuildPlanner
             new ProcessSpec { Executable = xcodebuild, Arguments = [.. common, "-resultBundlePath", layout.ResultBundle, .. overrides, "build"], WorkingDirectory = workDir, Environment = env }));
         if (o.RunTests)
         {
-            // The scheme's Test action, with its own configuration (usually Debug), on this Mac's architecture.
-            var testOverrides = Overrides(o, projectArchs).Where(x => x.Setting is not ("ARCHS" or "ONLY_ACTIVE_ARCH")).Select(x => $"{x.Setting}={x.Value}");
-            steps.Add(new(BuildStage.Compiling, $"Run the tests of {o.Scheme} (xcodebuild test)",
-                new ProcessSpec { Executable = xcodebuild, Arguments = [.. container, "-scheme", o.Scheme, "-destination", $"platform=macOS,arch={hostArch}",
-                    "-derivedDataPath", layout.DerivedData, "-clonedSourcePackagesDirPath", layout.SourcePackages, "-resultBundlePath", layout.TestResultBundle, .. testOverrides, "test"],
-                    WorkingDirectory = workDir, Environment = env }));
+            var testOverrides = Overrides(o, projectArchs).Where(x => x.Setting is not ("ARCHS" or "ONLY_ACTIVE_ARCH")).Select(x => $"{x.Setting}={x.Value}").ToList();
+            var split = o.ProjectTestTargets.Count + o.PackageTests.Count > 0;
+            // The scheme's Test action, with its own configuration (usually Debug), on this Mac's architecture. When the
+            // targets are known, only the project's own (xcodebuild has no test bundle for a local package's targets).
+            if (!split || o.ProjectTestTargets.Count > 0)
+                steps.Add(new(BuildStage.Compiling, $"Run the tests of {o.Scheme} (xcodebuild test{(split ? ": " + string.Join(", ", o.ProjectTestTargets) : "")})",
+                    new ProcessSpec { Executable = xcodebuild, Arguments = [.. container, "-scheme", o.Scheme, "-destination", $"platform=macOS,arch={hostArch}",
+                        "-derivedDataPath", layout.DerivedData, "-clonedSourcePackagesDirPath", layout.SourcePackages, "-resultBundlePath", layout.TestResultBundle,
+                        .. o.ProjectTestTargets.Select(t => "-only-testing:" + t), .. testOverrides, "test"],
+                        WorkingDirectory = workDir, Environment = env }));
+            // A local Swift package's test targets: that package's swift test, from the same Xcode (xcrun follows
+            // DEVELOPER_DIR), on the copy, with its build products in HCG's build folder.
+            foreach (var (dir, targets) in o.PackageTests.GroupBy(t => t.PackageDirectory, StringComparer.Ordinal).Select(g => (g.Key, g.Select(t => t.TestTarget).ToList())))
+                steps.Add(new(BuildStage.Compiling, $"Run the tests of the local Swift package {dir} ({string.Join(", ", targets)}) with swift test",
+                    new ProcessSpec { Executable = "/usr/bin/xcrun", Arguments = ["swift", "test", "--package-path", Path.Combine(layout.SourceCopy, dir),
+                        "--scratch-path", Path.Combine(layout.SwiftPMScratch, dir.Replace('/', '_')), .. targets.SelectMany(t => new[] { "--filter", "^" + Regex.Escape(t) + "\\." })],
+                        WorkingDirectory = layout.SourceCopy, Environment = env }));
         }
         if (o.CreateArchive || s.PackagingFormats.Contains(PackagingFormat.MacXcodeArchive))
             steps.Add(new(BuildStage.Packaging, $"Archive {o.Scheme} ({o.Configuration}) into an .xcarchive (xcodebuild archive)",

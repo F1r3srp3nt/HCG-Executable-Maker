@@ -85,6 +85,8 @@ public static partial class XcodeDiagnostics
             }
 
             if (ResultLine().Match(line) is { Success: true } rl) { results.Add(rl.Value.Trim()); continue; }
+            // swift test's own verdicts (XCTest's "All tests" suite, Swift Testing's run summary).
+            if (SwiftTestSummary().Match(line) is { Success: true } summary) { results.Add(summary.Value.Trim()); continue; }
 
             if (TestCaseFailed().Match(line) is { Success: true } tc)
             {
@@ -277,6 +279,7 @@ public static partial class XcodeDiagnostics
     [GeneratedRegex(@"^=== BUILD TARGET (?<t>.+?) OF PROJECT (?<p>.+?) WITH")] private static partial Regex OldTarget();
     [GeneratedRegex(@"^\(\d+ failures?\)$")] private static partial Regex FailureCount();
     [GeneratedRegex(@"\*\* (?:BUILD|TEST|ARCHIVE|CLEAN|ANALYZE|EXPORT|TEST BUILD|TEST EXECUTE) (?:SUCCEEDED|FAILED|INTERRUPTED) \*\*.*$")] private static partial Regex ResultLine();
+    [GeneratedRegex(@"^(?:Test Suite 'All tests' (?:passed|failed)|[✔✘] Test run with \d+ tests?.*(?:passed|failed)).*$")] private static partial Regex SwiftTestSummary();
     [GeneratedRegex(@"^(?<file>/[^:\n]+?):(?<line>\d+):(?:(?<col>\d+):)? (?<sev>error|warning|note): (?<msg>.+)$")] private static partial Regex FileDiagnostic();
     [GeneratedRegex(@"^(?<file>/[^:\n]+?): (?<sev>error|warning): (?<msg>.+)$")] private static partial Regex PathDiagnostic();
     [GeneratedRegex(@"^(?:(?<tool>xcodebuild|ld|clang|swift-frontend|swift|codesign|ibtool|actool|PhaseScriptExecution|SwiftPM|xcrun): )?(?<sev>error|warning): (?<msg>.+)$")] private static partial Regex ToolError();
@@ -288,3 +291,4 @@ public static partial class XcodeDiagnostics
     [GeneratedRegex(@"(?i)resolve package|package resolution|dependencies could not be resolved|could not find (?:package|module)|missing package product|no such module|failed to clone|unable to (?:resolve|fetch)|package\.resolved|repository not found|swift package")] private static partial Regex DependencyText();
     [GeneratedRegex(@"(?i)does not contain a scheme|scheme .* is not configured|is not currently configured for the|unable to find a destination|the workspace .* does not|project .* cannot be opened|no such (?:project|workspace)|no test bundles available|is not configured for the test action|scheme .* has no tests")] private static partial Regex ProjectText();
 }
+

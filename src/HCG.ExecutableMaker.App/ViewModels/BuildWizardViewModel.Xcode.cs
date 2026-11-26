@@ -58,7 +58,9 @@ public sealed partial class BuildWizardViewModel
         var scheme = SelectedXcodeProject?.Schemes.FirstOrDefault(x => x.Name == value);
         XcodeHasTests = scheme is { TestTargets.Count: > 0 };
         XcodeTestsNote = scheme is null ? "" : scheme.TestTargets.Count == 0 ? $"The scheme {value} has no tests in its Test action."
-            : $"Test action: {string.Join(", ", scheme.TestTargets)}{(scheme.TestConfiguration is { } tc ? $" ({tc})" : "")}, run on this Mac's architecture.";
+            : "Tests: " + string.Join("; ", MacXcodeProjectAnalyzer.TestsOf(SelectedXcodeProject!, scheme) is var (own, pkgs)
+                ? own.Select(t => $"{t} (xcodebuild test{(scheme.TestConfiguration is { } tc ? ", " + tc : "")})").Concat(pkgs.Select(t => $"{t.TestTarget} (swift test in {t.PackageDirectory})"))
+                : []) + ", on this Mac's architecture.";
         if (!XcodeHasTests) XcodeRunTests = false;
         XcodeOptionsChanged();
     }
@@ -176,6 +178,8 @@ public sealed partial class BuildWizardViewModel
             DeploymentTarget = t.DeploymentTarget,
             SignLocallyAdHoc = XcodeSignLocallyAdHoc,
             RunTests = XcodeRunTests && XcodeHasTests,
+            ProjectTestTargets = XcodeRunTests ? MacXcodeProjectAnalyzer.TestsOf(p, p.Schemes.FirstOrDefault(s => s.Name == SelectedXcodeScheme)).ProjectTargets : [],
+            PackageTests = XcodeRunTests ? MacXcodeProjectAnalyzer.TestsOf(p, p.Schemes.FirstOrDefault(s => s.Name == SelectedXcodeScheme)).PackageTests : [],
             CreateArchive = XcodeCreateArchive,
             LicenseFiles = p.LicenseFiles,
         };

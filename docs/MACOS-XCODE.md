@@ -106,8 +106,14 @@ project and runs none of its scripts.
 | Resolve dependencies (remote packages only) | `-resolvePackageDependencies -clonedSourcePackagesDirPath <build>` | resolution fails (shown as a *dependency* error) |
 | Build settings | `-showBuildSettings -json` | — (the product's real name and path come from here) |
 | Compile | `build` with the result bundle | xcodebuild fails; the Swift/clang errors are listed with file, line and target |
-| Test (optional) | `test -destination platform=macOS,arch=<this Mac>` | a test fails (XCTest and Swift Testing) |
+| Test (optional) | the project's own test targets: `test -only-testing:<target> -destination platform=macOS,arch=<this Mac>`. A local Swift package's test targets: `xcrun swift test --package-path <package> --filter <target>` (see below) | a test fails (XCTest and Swift Testing) |
 | Archive (optional, or when *Xcode archive* is chosen) | `archive -archivePath <build>/<scheme>.xcarchive` | archiving fails |
+
+**Local package tests.** When a scheme's Test action runs a local Swift package's test target
+(`ReferencedContainer = "container:Packages/…"`), `xcodebuild test` on the project reports "There are no test bundles
+available to test." That is what Xcode 26.6 does, with or without HCG (CI evidence on the FieldKit fixture). HCG runs
+those targets with that package's `swift test`, from the same Xcode, on the build copy. Its build products go in HCG's
+build folder. The project's own test targets still run with `xcodebuild test`.
 
 The `.app` is taken from the build settings' product path and validated (identity, architectures, minimum macOS,
 icon, signature). Then it is packaged.
