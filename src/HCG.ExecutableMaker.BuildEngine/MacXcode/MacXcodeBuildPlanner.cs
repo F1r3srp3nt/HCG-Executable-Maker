@@ -19,7 +19,7 @@ public static class MacXcodeBuildPlanner
     {
         public string TestResultBundle => ResultBundle[..^".xcresult".Length] + "-Tests.xcresult";
         /// <summary>Build products of local Swift packages' swift test runs.</summary>
-        public string SwiftPMScratch => Path.Combine(WorkRoot, "swiftpm");
+        public string SwiftPMScratch => WorkRoot.TrimEnd('/') + "/swiftpm";   // a macOS path, whatever OS plans it
         public string ArchivePath => ResultBundle[..^".xcresult".Length] + ".xcarchive";
     }
 
@@ -173,8 +173,8 @@ public static class MacXcodeBuildPlanner
             // DEVELOPER_DIR), on the copy, with its build products in HCG's build folder.
             foreach (var (dir, targets) in o.PackageTests.GroupBy(t => t.PackageDirectory, StringComparer.Ordinal).Select(g => (g.Key, g.Select(t => t.TestTarget).ToList())))
                 steps.Add(new(BuildStage.Compiling, $"Run the tests of the local Swift package {dir} ({string.Join(", ", targets)}) with swift test",
-                    new ProcessSpec { Executable = "/usr/bin/xcrun", Arguments = ["swift", "test", "--package-path", Path.Combine(layout.SourceCopy, dir),
-                        "--scratch-path", Path.Combine(layout.SwiftPMScratch, dir.Replace('/', '_')), .. targets.SelectMany(t => new[] { "--filter", "^" + Regex.Escape(t) + "\\." })],
+                    new ProcessSpec { Executable = "/usr/bin/xcrun", Arguments = ["swift", "test", "--package-path", layout.SourceCopy.TrimEnd('/') + "/" + dir,
+                        "--scratch-path", layout.SwiftPMScratch + "/" + dir.Replace('/', '_'), .. targets.SelectMany(t => new[] { "--filter", "^" + Regex.Escape(t) + "\\." })],
                         WorkingDirectory = layout.SourceCopy, Environment = env }));
         }
         if (o.CreateArchive || s.PackagingFormats.Contains(PackagingFormat.MacXcodeArchive))
