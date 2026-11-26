@@ -48,7 +48,7 @@ public static class MacXcodePassport
     }
 
     private static bool TestsPassed(string verdict) =>
-        verdict.Contains("TEST SUCCEEDED", StringComparison.Ordinal) || verdict.StartsWith("Test Suite 'All tests' passed", StringComparison.Ordinal)
+        verdict.Contains("TEST SUCCEEDED", StringComparison.Ordinal) || verdict.StartsWith("Test Suite 'All tests' passed", StringComparison.Ordinal) || verdict.StartsWith("Test Suite 'Selected tests' passed", StringComparison.Ordinal)
         || (verdict.StartsWith("✔ Test run with", StringComparison.Ordinal) && verdict.Contains("passed", StringComparison.Ordinal));
 
     public static string ArchitectureName(IReadOnlyList<string> archs) =>
@@ -74,7 +74,7 @@ public static class MacXcodePassport
             {
                 ["run"] = true,
                 ["result"] = diagnostics is null ? "unknown" : diagnostics.TestFailures.Count == 0 && diagnostics.ResultLines.Any(TestsPassed)
-                    && !diagnostics.ResultLines.Any(l => l.Contains("TEST FAILED", StringComparison.Ordinal) || l.StartsWith("Test Suite 'All tests' failed", StringComparison.Ordinal) || l.StartsWith("✘ Test run", StringComparison.Ordinal)) ? "passed"
+                    && !diagnostics.ResultLines.Any(l => l.Contains("TEST FAILED", StringComparison.Ordinal) || l.StartsWith("Test Suite 'All tests' failed", StringComparison.Ordinal) || l.StartsWith("Test Suite 'Selected tests' failed", StringComparison.Ordinal) || l.StartsWith("✘ Test run", StringComparison.Ordinal)) ? "passed"
                     : diagnostics.TestFailures.Count > 0 ? "failed" : "unknown",
                 ["failures"] = diagnostics?.TestFailures.Count,
                 ["by"] = "the scheme's Test action: xcodebuild test for the project's test targets, swift test for local Swift package test targets",

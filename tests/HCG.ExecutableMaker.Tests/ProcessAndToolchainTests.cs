@@ -109,6 +109,32 @@ public class ProcessRunnerTests
         static string Read(string path) { try { return File.ReadAllText(path); } catch (IOException) { return ""; } catch (UnauthorizedAccessException) { return ""; } }
     }
 
+    /// <summary>
+    /// A root that keeps starting children while it is killed (CI run 45741987759: `xcodebuild -list`, cancelled, left the
+    /// `xcodebuild -sdk … -version PlatformPath` it had just started). A child started between the tree's listing and the
+    /// root's death used to be re-parented to init and escape. The root is now paused while the tree is collected and
+    /// killed last, so nothing it started survives.
+    /// </summary>
+    [LinuxFact]
+    public async Task A_root_that_keeps_starting_children_leaves_none_of_them_running()
+    {
+        var marker = "8" + Random.Shared.Next(100000, 999999);
+        var r = await _runner.RunAsync(new ProcessSpec
+        {
+            Executable = "/bin/sh", Arguments = ["-c", $"while :; do sleep {marker} & done"], Timeout = TimeSpan.FromSeconds(1),
+        }, null, CancellationToken.None);
+        Assert.True(r.TimedOut);
+        await Task.Delay(500);
+        var alive = Directory.GetDirectories("/proc").Select(d => Path.GetFileName(d)).Where(n => n.All(char.IsDigit))
+            .Select(pid => (Pid: pid, Cmd: Read($"/proc/{pid}/cmdline").Replace('\0', ' '), Stat: Read($"/proc/{pid}/stat")))
+            .Where(p => p.Cmd.Contains(marker, StringComparison.Ordinal) && p.Stat.Length > 0 && p.Stat[(p.Stat.LastIndexOf(')') + 2)..].Split(' ')[0] != "Z")
+            .ToList();
+        foreach (var a in alive) { try { System.Diagnostics.Process.GetProcessById(int.Parse(a.Pid)).Kill(); } catch (Exception) { } }   // clean up a failure
+        Assert.True(alive.Count == 0, $"{alive.Count} escaped: " + string.Join("; ", alive.Take(5).Select(a => a.Cmd)));
+
+        static string Read(string path) { try { return File.ReadAllText(path); } catch (IOException) { return ""; } catch (UnauthorizedAccessException) { return ""; } }
+    }
+
     [UnixFact]
     public async Task A_command_that_really_hangs_still_times_out_and_is_killed()
     {

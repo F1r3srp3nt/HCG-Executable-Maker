@@ -279,7 +279,7 @@ public static partial class XcodeDiagnostics
     [GeneratedRegex(@"^=== BUILD TARGET (?<t>.+?) OF PROJECT (?<p>.+?) WITH")] private static partial Regex OldTarget();
     [GeneratedRegex(@"^\(\d+ failures?\)$")] private static partial Regex FailureCount();
     [GeneratedRegex(@"\*\* (?:BUILD|TEST|ARCHIVE|CLEAN|ANALYZE|EXPORT|TEST BUILD|TEST EXECUTE) (?:SUCCEEDED|FAILED|INTERRUPTED) \*\*.*$")] private static partial Regex ResultLine();
-    [GeneratedRegex(@"^(?:Test Suite 'All tests' (?:passed|failed)|[✔✘] Test run with \d+ tests?.*(?:passed|failed)).*$")] private static partial Regex SwiftTestSummary();
+    [GeneratedRegex(@"^(?:Test Suite '(?:All|Selected) tests' (?:passed|failed)|[✔✘] Test run with \d+ tests?.*(?:passed|failed)).*$")] private static partial Regex SwiftTestSummary();
     [GeneratedRegex(@"^(?<file>/[^:\n]+?):(?<line>\d+):(?:(?<col>\d+):)? (?<sev>error|warning|note): (?<msg>.+)$")] private static partial Regex FileDiagnostic();
     [GeneratedRegex(@"^(?<file>/[^:\n]+?): (?<sev>error|warning): (?<msg>.+)$")] private static partial Regex PathDiagnostic();
     [GeneratedRegex(@"^(?:(?<tool>xcodebuild|ld|clang|swift-frontend|swift|codesign|ibtool|actool|PhaseScriptExecution|SwiftPM|xcrun): )?(?<sev>error|warning): (?<msg>.+)$")] private static partial Regex ToolError();

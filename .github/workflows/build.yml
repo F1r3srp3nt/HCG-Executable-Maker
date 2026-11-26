@@ -930,7 +930,8 @@ jobs:
             --formats app,zip,dmg,pkg,xcarchive --out "$OUT/ok" 2>&1 | tee "$OUT/ok.txt"
           grep -q "^Result: SUCCEEDED" "$OUT/ok.txt"
           grep -q "Tests: FieldKitCoreTests (swift test in Packages/FieldKitCore)" "$OUT/ok.txt"
-          grep -q "Test Suite 'All tests' passed" "$OUT/ok.txt"
+          # swift test --filter names its top suite 'Selected tests' (CI run 45741987759), without a filter 'All tests'.
+          grep -qE "Test Suite '(All|Selected) tests' passed" "$OUT/ok.txt"
           dir="$(dirname "$(sed -n 's/^Artifact: \(.*\.zip\) · .*/\1/p' "$OUT/ok.txt" | head -1)")"
           echo "OK_DIR=$dir" >> "$GITHUB_ENV"
           ls -la "$dir"
