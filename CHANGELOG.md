@@ -2,6 +2,66 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Apple Signing Assistant
+
+### Added
+- **Apple Signing Assistant** (Mobile Build Studio, native Xcode iOS projects). Before compiling it reads the effective
+  build settings (`xcodebuild -showBuildSettings`, so xcconfig files and `Config/Local.xcconfig` count), the project's
+  Signing Vault profile, and this Mac's identities and profiles. It then decides the signing for the destination and
+  passes it as build settings for this build only; the project is never modified. See docs/APPLE-SIGNING-ASSISTANT.md.
+- **Build destinations:**
+  - iOS Simulator (Debug);
+  - Physical iPhone / iPad (Debug): a new **iOS device build**, signed with Apple Development;
+  - iOS distribution archive;
+  - TestFlight and App Store: the App Store Connect .ipa, exported locally and never uploaded;
+  - macOS development and Developer ID (existing macOS Xcode provider).
+- **Debug/Release are explicit.** Simulator and device builds default to Debug, so development features such as
+  Unimatch's Development Run stay available. Distribution builds must be Release: a Debug distribution build, or a
+  Release configuration that compiles with `DEBUG`, is refused before compiling.
+- **Simulator builds never need a team.** A project without one is signed to run locally (ad hoc, entitlements kept).
+- **Device signing checks:**
+  - team (chosen, saved in Signing Vault, or the project's own);
+  - Apple Development identity with its private key;
+  - development profile for the bundle identifier;
+  - entitlements;
+  - registration of intended devices;
+  - iPad family.
+
+  Xcode-managed provisioning (`-allowProvisioningUpdates -allowProvisioningDeviceRegistration`) is used only when
+  authorized.
+- **"Use team …"** for teams with a usable identity on this Mac. The chosen team is remembered in the project's signing
+  profile.
+- **A bundle identifier for one build** overrides the project's identifier variable (for example `UNIMATCH_BUNDLE_ID`).
+- **Resolve Signing.**
+  - Missing teams, certificates, profiles or device registrations, before or during the build, including xcodebuild's
+    "requires a development team" and "No profiles for", become `HCG-SIGNING-RESOLVE`.
+  - **Resolve Signing** opens Signing & Security for the project, and the build can be started again without
+    re-importing.
+- `mobile-build`: `--output ios-device`, `--device-family`, `--bundle-id`, `--allow-provisioning-updates`,
+  `--destination app-store`.
+
+### Changed
+- A signed iOS archive without a development team now stops before compiling with the reason and Resolve Signing.
+  Previously it failed inside xcodebuild with exit code 65.
+
+### Tests
+- 22 Signing Assistant tests:
+  - Unimatch's effective settings;
+  - every destination;
+  - team source order;
+  - provisioning authorization;
+  - private key, profile, entitlements, device and iPad checks;
+  - the Debug distribution refusal;
+  - bundle-identifier variable override;
+  - xcodebuild error recognition;
+  - the device-build planner.
+- CI (macOS) with the Unimatch-shaped `tests/Fixtures/SigningProbe`:
+  - Simulator Debug without a team (ad hoc, contains the Development Run);
+  - device Debug stopped without a team;
+  - Xcode's signing error becomes Resolve Signing;
+  - Debug archive refused;
+  - Release archive without the Development Run.
+
 ## [Unreleased] — Build Readiness Center
 
 ### Added

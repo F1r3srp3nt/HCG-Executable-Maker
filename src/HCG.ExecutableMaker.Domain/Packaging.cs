@@ -32,6 +32,8 @@ public enum PackagingFormat
     MacXcodeArchive,
     /// <summary>A file produced by HCG Server's Build Host (unsigned build output, test report or log), downloaded and checksum-verified.</summary>
     BuildHostOutput,
+    /// <summary>iOS .app built for physical devices and signed for development (installable on registered devices).</summary>
+    IosDeviceApp,
 }
 
 public enum PackagingAvailability
@@ -79,6 +81,7 @@ public static class PackagingFormatNames
         PackagingFormat.AndroidAab => "Android App Bundle (.aab)",
         PackagingFormat.AndroidApkSet => "Android APK set (.apks)",
         PackagingFormat.IosSimulatorApp => "iOS Simulator app (.app)",
+        PackagingFormat.IosDeviceApp => "iOS device app (.app, development signed)",
         PackagingFormat.IosArchive => "Xcode archive (.xcarchive)",
         PackagingFormat.IosIpa => "iOS app package (.ipa)",
         PackagingFormat.JailbreakDeb => "Jailbreak package (.deb, Theos)",

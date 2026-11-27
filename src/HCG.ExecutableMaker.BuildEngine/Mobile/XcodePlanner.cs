@@ -42,7 +42,7 @@ public static class XcodePlanner
         var o = input.Options;
         var c = ResolveContainer(input);
         var derived = Path.Combine(input.WorkDirectory, "DerivedData");
-        var configuration = o.Variant ?? (o.Output == MobileOutput.IosSimulatorApp ? "Debug" : "Release");
+        var configuration = input.Configuration ?? o.Variant ?? AppleDestinations.Of(o).DefaultConfiguration();
         MobileArgs.RequireToken(configuration, "configuration", out configuration);
         var common = new List<string> { c.Flag, c.Path, "-scheme", c.Scheme, "-configuration", configuration, "-derivedDataPath", derived };
 
@@ -50,7 +50,9 @@ public static class XcodePlanner
         {
             case MobileOutput.IosSimulatorApp:
             {
-                var args = new List<string>(common) { "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator", "-resultBundlePath", ResultBundle(input, c.Scheme, "simulator"), "COMPILER_INDEX_STORE_ENABLE=NO", "build" };
+                var args = new List<string>(common) { "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator", "-resultBundlePath", ResultBundle(input, c.Scheme, "simulator"), "COMPILER_INDEX_STORE_ENABLE=NO" };
+                args.AddRange(input.SigningArguments ?? []);
+                args.Add("build");
                 var products = Path.Combine(derived, "Build", "Products", configuration + "-iphonesimulator");
                 return new MobilePlan([Step(input, BuildStage.Compiling, $"xcodebuild build ({c.Scheme}, Simulator)", args)],
                     [new OutputRule(PackagingFormat.IosSimulatorApp, products, "*.app", IsDirectory: true, Recursive: false)])
@@ -58,13 +60,26 @@ public static class XcodePlanner
                     Notes = ["Simulator builds run only in the iOS Simulator. They are not installable on devices and not distributable."],
                 };
             }
+            case MobileOutput.IosDeviceApp:
+            {
+                // A physical iPhone/iPad build: compiled for iphoneos and signed for development, in the chosen
+                // configuration (Debug unless chosen otherwise, so Debug-only development features stay available).
+                var notes = new List<string>();
+                var args = new List<string>(common) { "-sdk", "iphoneos", "-destination", "generic/platform=iOS", "-resultBundlePath", ResultBundle(input, c.Scheme, "device"), "COMPILER_INDEX_STORE_ENABLE=NO" };
+                args.AddRange(input.SigningArguments ?? SigningArguments(o, notes));
+                args.Add("build");
+                var products = Path.Combine(derived, "Build", "Products", configuration + "-iphoneos");
+                notes.Add($"{(o.DeviceFamily == AppleDeviceFamily.IPad ? "iPad" : "iPhone")} build ({configuration}): installable only on devices registered in the development profile. Not for distribution.");
+                return new MobilePlan([Step(input, BuildStage.Compiling, $"xcodebuild build ({c.Scheme}, {(o.DeviceFamily == AppleDeviceFamily.IPad ? "iPad" : "iPhone")} device, {configuration})", args)],
+                    [new OutputRule(PackagingFormat.IosDeviceApp, products, "*.app", IsDirectory: true, Recursive: false)]) { Notes = notes };
+            }
             case MobileOutput.IosArchive:
             case MobileOutput.IosIpa:
             {
                 var archive = ArchivePath(input, c.Scheme);
                 var args = new List<string>(common) { "-destination", "generic/platform=iOS", "-archivePath", archive, "-resultBundlePath", ResultBundle(input, c.Scheme, "archive"), "COMPILER_INDEX_STORE_ENABLE=NO" };
                 var notes = new List<string>();
-                args.AddRange(SigningArguments(o, notes));
+                args.AddRange(input.SigningArguments ?? SigningArguments(o, notes));
                 args.Add("archive");
                 var outputs = o.Output == MobileOutput.IosArchive
                     ? new List<OutputRule> { new(PackagingFormat.IosArchive, input.WorkDirectory, c.Scheme + ".xcarchive", IsDirectory: true, Recursive: false) }

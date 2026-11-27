@@ -16,7 +16,10 @@
 //        [--from-app App.app] [--output ios-simulator --trust]
 //   --port-mac runs Mobile Build Studio's "Port a Mac app to iOS" path (import copy + MacProjectPort retargeting);
 //   --from-app first reads the built Mac app's bundle identifier (like "From Mac app…") and requires the source to match.
-//   kinds: android-debug-apk | android-release-apk | android-aab | aab-to-apk | ios-simulator | ios-archive | ios-ipa
+//   kinds: android-debug-apk | android-release-apk | android-aab | aab-to-apk | ios-simulator | ios-device | ios-archive | ios-ipa
+//   iOS: [--device-family iphone|ipad] [--bundle-id ID] [--allow-provisioning-updates] [--destination testflight|app-store]
+//   (the Apple Signing Assistant runs before compilation: simulator builds need no team; device builds need Apple
+//   Development signing; distribution builds must be Release)
 //
 // --trust is REQUIRED: building executes the project's build scripts (Gradle wrapper, Xcode run phases).
 // --expect-failure turns a build that fails with the given message into exit code 0 (used by CI to prove that HCG
@@ -69,7 +72,13 @@ IProjectInspector[] inspectors =
 var projects = new ProjectService(new ProjectImporter(paths, TimeProvider.System), new ProjectInspectionService(inspectors, TimeProvider.System),
     new SqliteProjectRepository(db), new SqliteSettingsStore(db), toolchains, paths, TimeProvider.System, NullLogger<ProjectService>.Instance);
 var buildRepo = new SqliteBuildRepository(db);
-var service = new MobileBuildService(new LocalProcessBuildWorker(runner), toolchains, buildRepo, new MobileArtifactVerifier(runner), paths, TimeProvider.System);
+// The Apple Signing Assistant, as in the app: this Mac's keychain and installed profiles, and project signing settings.
+var signingAssistant = new HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService(
+    new HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService(new HCG.ExecutableMaker.Packaging.Signing.MacAppleKeychain(runner),
+        HCG.ExecutableMaker.Packaging.Signing.ProvisioningProfileStore.ForCurrentUser(), TimeProvider.System),
+    new SqliteProjectSigningStore(db), TimeProvider.System);
+var service = new MobileBuildService(new LocalProcessBuildWorker(runner), toolchains, buildRepo, new MobileArtifactVerifier(runner), paths, TimeProvider.System,
+    signingAssistant: signingAssistant);
 
 var report = await toolchains.GetAsync();
 Console.WriteLine($"Host: {report.Host.DisplayName}");
@@ -121,6 +130,7 @@ var outputKind = kind switch
     "ios-simulator" => MobileOutput.IosSimulatorApp,
     "ios-archive" => MobileOutput.IosArchive,
     "ios-ipa" => MobileOutput.IosIpa,
+    "ios-device" => MobileOutput.IosDeviceApp,
     _ => throw new ArgumentException("Unknown --output " + kind),
 };
 var options = new MobileBuildOptions
@@ -139,6 +149,10 @@ var options = new MobileBuildOptions
     },
     DevelopmentTeam = Option("--team"),
     ProvisioningProfile = Option("--profile"),
+    DeviceFamily = Option("--device-family") == "ipad" ? AppleDeviceFamily.IPad : AppleDeviceFamily.IPhone,
+    BundleIdentifier = Option("--bundle-id"),
+    AllowProvisioningUpdates = args.Contains("--allow-provisioning-updates"),
+    Destination = Option("--destination") == "app-store" ? AppleBuildDestination.AppStore : null,
     ExportMethod = Option("--export") switch
     {
         "app-store-connect" => IosExportMethod.AppStoreConnect,
