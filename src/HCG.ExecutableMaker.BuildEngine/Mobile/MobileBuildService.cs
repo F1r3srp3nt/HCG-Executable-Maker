@@ -549,6 +549,9 @@ public sealed partial class MobileBuildService(
             addMessage(new BuildMessage(DiagnosticSeverity.Info, $"{v.Title}: {v.Detail}", VerifyCode));
         if (verification.Where(v => v.Outcome == SigningCheckOutcome.Failed).ToList() is { Count: > 0 } wrong)
         {
+            // A Debug distribution build breaks a rule before it is evidence of anything: the rule leads the refusal.
+            if (HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.DebugDistribution(destination, configuration) is { } rule)
+                wrong.Insert(0, new HCG.ExecutableMaker.BuildEngine.Signing.BuildVerificationCheck(rule.Title, rule.Outcome, rule.Detail, rule.Remedy));
             foreach (var v in wrong) addMessage(new BuildMessage(DiagnosticSeverity.Error, $"{v.Title}: {v.Detail}{(v.Remedy is null ? "" : " Fix: " + v.Remedy)}", VerifyCode));
             throw new BuildValidationException("This build is not what was asked for. " + string.Join(" ", wrong.Select(v => v.Detail + (v.Remedy is null ? "" : " Fix: " + v.Remedy))));
         }

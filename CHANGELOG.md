@@ -28,6 +28,9 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - **iOS signing refusal names every gap.** When the Apple Signing Assistant refuses a device build or development IPA,
   the missing certificate found before it ran ("no code-signing identities were found for this destination") is part of
   the refusal again, next to the missing team, instead of only a warning in the log.
+- **A Debug distribution archive is refused by its rule first.** The build verification that runs before the Apple
+  Signing Assistant refused a Debug distribution archive only for the development flag it would ship; the refusal now
+  starts with the rule ("… must be a Release build") and keeps the flag as evidence.
 
 ## [Unreleased] — Build Provider (HCG Server Build Host in the New Build wizard)
 

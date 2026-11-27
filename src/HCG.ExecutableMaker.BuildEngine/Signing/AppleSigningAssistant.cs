@@ -114,6 +114,17 @@ public static partial class AppleSigningAssistant
 {
     public const string ResolveCode = "HCG-SIGNING-RESOLVE";
 
+    /// <summary>
+    /// The rule that a distribution destination is never a Debug build: the Failed check when it is, else null. Checked
+    /// first wherever a distribution build is refused, so the refusal names the rule before any evidence for it.
+    /// </summary>
+    public static SigningCheck? DebugDistribution(AppleBuildDestination destination, string configuration) =>
+        destination.IsDistribution() && configuration.Contains("debug", StringComparison.OrdinalIgnoreCase)
+            ? new("Build configuration", SigningCheckCategory.Route, SigningCheckScope.Local, SigningCheckOutcome.Failed,
+                $"{destination.Label()} must be a Release build, but “{configuration}” was chosen. Debug builds can contain development-only code (for example a Development Run limited to Debug).",
+                "Choose Release for distribution. Use “Physical iPhone/iPad (Debug)” to test development functionality on a device.")
+            : null;
+
     public static AppleSigningPlan Plan(AppleSigningInput input)
     {
         var o = input.Options;
@@ -129,10 +140,8 @@ public static partial class AppleSigningAssistant
         // ---- configuration safeguards ----
         if (destination.IsDistribution())
         {
-            if (isDebugConfig)
-                checks.Add(new("Build configuration", SigningCheckCategory.Route, SigningCheckScope.Local, SigningCheckOutcome.Failed,
-                    $"{destination.Label()} must be a Release build, but “{config}” was chosen. Debug builds can contain development-only code (for example a Development Run limited to Debug).",
-                    "Choose Release for distribution. Use “Physical iPhone/iPad (Debug)” to test development functionality on a device."));
+            if (DebugDistribution(destination, config) is { } debugRefused)
+                checks.Add(debugRefused);
             else if (input.App?.CompilationConditions is { } cond && Regex.IsMatch(cond, @"(^|\s)DEBUG(\s|$)"))
                 checks.Add(new("Build configuration", SigningCheckCategory.Route, SigningCheckScope.Local, SigningCheckOutcome.Failed,
                     $"The “{config}” configuration compiles with DEBUG (SWIFT_ACTIVE_COMPILATION_CONDITIONS = {cond}), so development-only code would be included.",

@@ -612,6 +612,37 @@ public class MobileBuildServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Debug_distribution_archive_is_refused_by_the_Release_rule_first_with_the_leaking_flag_as_evidence()
+    {
+        // Regression (CI run 46056819189): verifying the build before the Apple Signing Assistant refused a Debug
+        // distribution archive only for its development flag, without the rule it breaks (distribution is Release).
+        var report = _k.Report(TargetPlatform.MacOS, ToolchainIds.Xcode, ToolchainIds.IosSdk);
+        var p = await Project("HelloIOS", report);
+        static string Settings(string conditions) => $$"""
+            [{ "target": "HelloIOS", "buildSettings": { "PRODUCT_TYPE": "com.apple.product-type.application", "WRAPPER_EXTENSION": "app",
+               "PRODUCT_BUNDLE_IDENTIFIER": "com.hakmicapital.helloios", "CODE_SIGN_STYLE": "Automatic",
+               "SWIFT_ACTIVE_COMPILATION_CONDITIONS": "{{conditions}}" } }]
+            """;
+        var worker = new ScriptedMobileWorker((spec, onOutput, _) =>
+        {
+            var args = spec.Arguments.ToList();
+            var config = args[args.IndexOf("-configuration") + 1];
+            onOutput(OutputStream.StdOut, Settings(config == "Debug" ? "DEBUG PROBE_DEVELOPMENT_RUN" : ""));
+            return ScriptedMobileWorker.Exit(0);
+        });
+        var service = new MobileBuildService(worker, new FixedToolchains(report), _builds, new MobileArtifactVerifier(new HCG.ExecutableMaker.Infrastructure.Processes.ProcessRunner()), _paths,
+            TimeProvider.System, signingAssistant: new HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService(null, null, TimeProvider.System));
+        var options = new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosArchive, Variant = "Debug", Signing = MobileSigningMode.Unsigned };
+        var build = await service.RunAsync(Request(p, options), new Observer(), CancellationToken.None);
+
+        Assert.Equal(BuildStatus.Failed, build.Status);
+        Assert.Contains("must be a Release build", build.FailureReason);
+        Assert.Contains("PROBE_DEVELOPMENT_RUN", build.FailureReason);
+        Assert.True(build.FailureReason!.IndexOf("must be a Release build", StringComparison.Ordinal) < build.FailureReason.IndexOf("PROBE_DEVELOPMENT_RUN", StringComparison.Ordinal));
+        Assert.All(worker.Calls, c => Assert.Contains("-showBuildSettings", c.Arguments)); // nothing compiled
+    }
+
+    [Fact]
     public async Task Ipa_export_is_refused_for_an_unsigned_archive()
     {
         var report = _k.Report(TargetPlatform.MacOS, MobileTestKit.Apple);
