@@ -5,27 +5,61 @@
              xmlns:st="using:HCG.ExecutableMaker.Account.Store"
              x:Class="HCG.ExecutableMaker.App.Views.Pages.ShipToStoreView"
              x:DataType="vm:ShipToStoreViewModel">
+  <UserControl.Styles>
+    <!-- Selected rows keep the text readable: a soft cyan wash and a cyan edge instead of the accent fill. -->
+    <Style Selector="ListBox.studio ListBoxItem">
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+    </Style>
+    <Style Selector="ListBox.studio ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.CyanFaint}" />
+    </Style>
+    <Style Selector="ListBox.studio ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.CyanSoft}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Hcg.Brush.Cyan}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="ListBox.studio ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.CyanSoft}" />
+    </Style>
+    <Style Selector="ListBox.studio ListBoxItem:selected:focus /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hcg.Brush.CyanSoft}" />
+    </Style>
+    <Style Selector="ListBox.studio ListBoxItem:selected">
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextPrimary}" />
+    </Style>
+  </UserControl.Styles>
+  <!-- Distribution Studio (navigation entry: Ship to Store). Opening it uploads nothing and changes no release. -->
   <ScrollViewer>
-    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="16">
-      <Border Classes="callout">
-        <TextBlock FontSize="12.5" TextWrapping="Wrap"
-                   Text="Ship to Store uploads a release to HCG Store as a private draft. HCG Connect identifies you and HCG decides whether you may publish. A person with HCG's approver permission reviews and approves it in HCG Store; nothing is published automatically, and nothing is sent to TestFlight or any external store." />
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="16" MaxWidth="1280">
+      <!-- HEADER -->
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*">
+          <c:BrandMark Height="54" Width="128" VerticalAlignment="Center" />
+          <StackPanel Grid.Column="1" Margin="18,0,0,0" Spacing="4" VerticalAlignment="Center">
+            <TextBlock Text="DISTRIBUTION STUDIO" FontSize="20" FontWeight="Bold" LetterSpacing="2" Foreground="{DynamicResource Hcg.Brush.MetalText}" />
+            <TextBlock Classes="muted" FontSize="12.5" TextWrapping="Wrap"
+                       Text="Private drafts, uploads and version management in HCG Store, from the same publishing API as HCG Store Manager and the website. HCG Connect identifies you and HCG decides what you may publish. A person approves and publishes in HCG Store; nothing is published automatically." />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <c:StatusChip Status="{Binding ConnectionTag}" />
+              <TextBlock Classes="muted" FontSize="11.5" VerticalAlignment="Center" Text="{Binding CapabilitiesText}" TextWrapping="Wrap" />
+            </StackPanel>
+          </StackPanel>
+        </Grid>
       </Border>
 
-      <!-- 1 · STORE -->
+      <!-- 1 · CONNECTION -->
       <Border Classes="card">
         <StackPanel Spacing="10">
-          <TextBlock Classes="label" Text="1 · HCG STORE" />
+          <TextBlock Classes="label" Text="1 · CONNECTION" />
           <Grid ColumnDefinitions="*,Auto,Auto">
             <TextBox Text="{Binding StoreUrl}" Watermark="https://store.hakmicapitalgroup.com/" />
             <Button Grid.Column="1" Margin="8,0,0,0" Content="Check connection" Command="{Binding ConnectCommand}" IsEnabled="{Binding !IsChecking}" />
             <Button Grid.Column="2" Margin="8,0,0,0" Classes="ghost" Content="Account…" Command="{Binding OpenAccountCommand}" />
           </Grid>
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <c:StatusChip Status="{Binding ConnectionTag}" />
-          </StackPanel>
           <TextBlock Classes="muted" FontSize="12.5" Text="{Binding ConnectionDetail}" TextWrapping="Wrap" />
-          <Expander Header="Connection diagnostics" IsExpanded="True" IsVisible="{Binding HasDiagnostics}">
+          <Expander Header="Connection diagnostics (each check with HCG Store's actual answer)" IsExpanded="{Binding DiagnosticsExpanded}" IsVisible="{Binding HasDiagnostics}">
             <StackPanel Spacing="8">
               <ItemsControl ItemsSource="{Binding Diagnostics}">
                 <ItemsControl.ItemTemplate>
@@ -44,6 +78,7 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+              <TextBlock Classes="muted" FontSize="11.5" TextWrapping="Wrap" Text="{Binding DeviceContext}" />
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Classes="small" Content="Copy diagnostics" Command="{Binding CopyDiagnosticsCommand}" />
                 <TextBlock Classes="muted" FontSize="11.5" VerticalAlignment="Center" Text="Copied text contains no token, cookie or password." />
@@ -53,48 +88,178 @@
         </StackPanel>
       </Border>
 
-      <!-- 2 · PRODUCT -->
+      <!-- 2 · CATALOGUE -->
       <Border Classes="card">
         <StackPanel Spacing="10">
           <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="label" Text="2 · PRODUCT" VerticalAlignment="Center" />
-            <Button Grid.Column="1" Classes="small" Content="Refresh" Command="{Binding RefreshProductsCommand}" ToolTip.Tip="Reload the products and editions HCG lets you submit to" />
+            <TextBlock Classes="label" Text="2 · PRODUCTS YOU MAY MANAGE" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="small" Content="Refresh" Command="{Binding RefreshProductsCommand}" ToolTip.Tip="Ask HCG Store again for the products HCG lets you manage" />
           </Grid>
-          <ComboBox ItemsSource="{Binding Products}" SelectedItem="{Binding SelectedProduct}" HorizontalAlignment="Stretch" PlaceholderText="Products HCG allows you to publish">
-            <ComboBox.ItemTemplate>
-              <DataTemplate x:DataType="st:StoreProduct">
-                <TextBlock><Run Text="{Binding Title}" FontWeight="SemiBold" /><Run Text="  " /><Run Text="{Binding Source}" Foreground="{DynamicResource Hcg.Brush.TextMuted}" /></TextBlock>
+          <WrapPanel>
+            <TextBox Text="{Binding Search}" Watermark="Search name, identifier, summary or category" MinWidth="280" Width="360" Margin="0,0,8,8" />
+            <ComboBox ItemsSource="{Binding StatusFilters}" SelectedItem="{Binding StatusFilter}" MinWidth="170" Margin="0,0,8,8">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:Choice"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+            <ComboBox ItemsSource="{Binding PlatformFilters}" SelectedItem="{Binding PlatformFilter}" MinWidth="170" Margin="0,0,8,8">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:Choice"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+          </WrapPanel>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding ProductsNote}" TextWrapping="Wrap" />
+          <ListBox Classes="studio" ItemsSource="{Binding Catalogue}" SelectedItem="{Binding SelectedItem}" MaxHeight="420" Background="Transparent">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:CatalogueItem">
+                <Grid ColumnDefinitions="52,*" Margin="0,4">
+                  <Panel Width="44" Height="44" VerticalAlignment="Top">
+                    <Border CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Hcg.Brush.MetalBorder}" Background="{DynamicResource Hcg.Brush.CyanFaint}" IsVisible="{Binding !HasIcon}">
+                      <TextBlock Text="{Binding Initials}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Hcg.Brush.MetalText}" />
+                    </Border>
+                    <Border CornerRadius="10" ClipToBounds="True" IsVisible="{Binding HasIcon}">
+                      <Image Source="{Binding Icon}" Stretch="UniformToFill" />
+                    </Border>
+                  </Panel>
+                  <StackPanel Grid.Column="1" Spacing="2">
+                    <WrapPanel>
+                      <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center" />
+                      <c:StatusChip Status="{Binding Status}" Margin="0,0,8,0" />
+                      <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Identifier}" VerticalAlignment="Center" />
+                    </WrapPanel>
+                    <TextBlock FontSize="12" Text="{Binding Summary}" TextWrapping="Wrap" IsVisible="{Binding HasSummary}" />
+                    <TextBlock Classes="muted" FontSize="11.5" TextWrapping="Wrap"><Run Text="{Binding Category}" /><Run Text="  ·  " /><Run Text="{Binding Platforms}" /></TextBlock>
+                    <TextBlock Classes="muted" FontSize="11.5" TextWrapping="Wrap"><Run Text="{Binding Editions}" /><Run Text="  ·  " /><Run Text="{Binding Current}" /></TextBlock>
+                  </StackPanel>
+                </Grid>
               </DataTemplate>
-            </ComboBox.ItemTemplate>
-          </ComboBox>
+            </ListBox.ItemTemplate>
+          </ListBox>
           <ComboBox ItemsSource="{Binding Editions}" SelectedItem="{Binding SelectedEdition}" IsVisible="{Binding HasEditions}" HorizontalAlignment="Stretch" PlaceholderText="Edition">
             <ComboBox.ItemTemplate>
               <DataTemplate x:DataType="st:StoreEdition"><TextBlock Text="{Binding Name}" /></DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
-          <TextBlock Classes="muted" FontSize="12" Text="{Binding ProductsNote}" TextWrapping="Wrap" />
-          <Expander Header="Product not in the catalogue? Create a draft product">
-            <StackPanel Spacing="8">
-              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="A draft product exists only in HCG Store. Its releases can be private or for internal testing; public release needs HCG to add it to the catalogue with a central product ID." />
-              <TextBox Text="{Binding NewProductId}" Watermark="product-id (lowercase, dashes)" />
-              <TextBox Text="{Binding NewProductTitle}" Watermark="Product name" />
-              <Button Classes="small" Content="Create draft product" Command="{Binding CreateDraftProductCommand}" HorizontalAlignment="Left" />
-            </StackPanel>
-          </Expander>
         </StackPanel>
       </Border>
 
-      <!-- 3 · RELEASE -->
+      <!-- 3 · OPERATION -->
       <Border Classes="card">
         <StackPanel Spacing="10">
-          <TextBlock Classes="label" Text="3 · RELEASE" />
+          <TextBlock Classes="label" Text="3 · OPERATION" />
+          <WrapPanel>
+            <RadioButton GroupName="op" Content="Add New Update" IsChecked="{Binding IsNewUpdate}" Margin="0,0,18,6" />
+            <RadioButton GroupName="op" Content="Add New Product" IsChecked="{Binding IsNewProduct}" Margin="0,0,18,6" />
+            <RadioButton GroupName="op" Content="Add to Listed Product" IsChecked="{Binding IsAddToListed}" Margin="0,0,18,6" />
+            <RadioButton GroupName="op" Content="Manage Existing Versions" IsChecked="{Binding IsManageVersions}" Margin="0,0,18,6" />
+          </WrapPanel>
+          <Border Classes="callout"><TextBlock FontSize="12.5" TextWrapping="Wrap" Text="{Binding OperationNote}" /></Border>
+
+          <!-- New product -->
+          <StackPanel Spacing="8" IsVisible="{Binding IsNewProduct}">
+            <Grid ColumnDefinitions="*,12,*">
+              <StackPanel><TextBlock Classes="formlabel" Text="NAME" /><TextBox Text="{Binding NewProductTitle}" Watermark="HCG Notes" /></StackPanel>
+              <StackPanel Grid.Column="2"><TextBlock Classes="formlabel" Text="IDENTIFIER" /><TextBox Text="{Binding NewProductId}" Watermark="hcg-notes (lowercase, dashes)" /></StackPanel>
+            </Grid>
+            <TextBlock Classes="formlabel" Text="DESCRIPTION" />
+            <TextBox Text="{Binding NewProductDescription}" AcceptsReturn="True" MinHeight="60" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="*,12,*,12,*">
+              <StackPanel><TextBlock Classes="formlabel" Text="CATEGORY" /><TextBox Text="{Binding NewProductCategory}" Watermark="productivity" /></StackPanel>
+              <StackPanel Grid.Column="2"><TextBlock Classes="formlabel" Text="EDITION (PROPOSED)" /><TextBox Text="{Binding NewProductEdition}" Watermark="macos" /></StackPanel>
+              <StackPanel Grid.Column="4"><TextBlock Classes="formlabel" Text="INITIAL VERSION" /><TextBox Text="{Binding NewProductVersion}" Watermark="0.1.0" /></StackPanel>
+            </Grid>
+            <TextBlock Classes="formlabel" Text="PLATFORMS" />
+            <ItemsControl ItemsSource="{Binding NewProductPlatforms}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PlatformToggle"><CheckBox Content="{Binding Name}" IsChecked="{Binding IsSelected}" Margin="0,0,14,0" /></DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <WrapPanel>
+              <Button Classes="small" Content="Icon…" Command="{Binding PickIconCommand}" Margin="0,0,8,6" />
+              <TextBlock Classes="muted" FontSize="11.5" Text="{Binding NewProductIcon}" VerticalAlignment="Center" Margin="0,0,16,6" />
+              <Button Classes="small" Content="Banner…" Command="{Binding PickBannerCommand}" Margin="0,0,8,6" />
+              <TextBlock Classes="muted" FontSize="11.5" Text="{Binding NewProductBanner}" VerticalAlignment="Center" Margin="0,0,0,6" />
+            </WrapPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="primary" Content="Create private product draft" Command="{Binding CreateDraftProductCommand}" />
+              <Button Content="Export registration request for HCG…" Command="{Binding ExportRegistrationCommand}" />
+            </StackPanel>
+            <TextBlock FontSize="12.5" Text="{Binding NewProductResult}" TextWrapping="Wrap" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- 4 · VERSIONS (history, comparison, manage) -->
+      <Border Classes="card" IsVisible="{Binding HasProduct}">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+              <TextBlock Classes="label" Text="4 · RELEASE HISTORY AND VERSIONS" VerticalAlignment="Center" />
+              <TextBlock FontWeight="SemiBold" Text="{Binding ProductHeading}" VerticalAlignment="Center" />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="small" Content="Reload history" Command="{Binding LoadHistoryCommand}" />
+            <Button Grid.Column="2" Classes="small ghost" Margin="8,0,0,0" Content="Open Release Manager" Command="{Binding OpenReleaseManagerCommand}" />
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding HistoryNote}" TextWrapping="Wrap" />
+          <ListBox Classes="studio" ItemsSource="{Binding History}" SelectedItem="{Binding SelectedRelease}" MaxHeight="300" Background="Transparent">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:ReleaseItem">
+                <StackPanel Spacing="2" Margin="0,3">
+                  <WrapPanel>
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Margin="0,0,8,0" VerticalAlignment="Center" />
+                    <c:StatusChip Status="{Binding Status}" />
+                  </WrapPanel>
+                  <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  <TextBlock Classes="warning" FontSize="11.5" Text="{Binding Requests}" TextWrapping="Wrap" IsVisible="{Binding HasRequests}" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <TextBlock Classes="formlabel" Text="VERSION COMPARISON" />
+          <Border Classes="inset"><SelectableTextBlock FontSize="12.5" Text="{Binding ComparisonSummary}" TextWrapping="Wrap" /></Border>
+          <ItemsControl ItemsSource="{Binding Findings}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:StudioFindingItem">
+                <Grid ColumnDefinitions="96,*" Margin="0,0,0,4">
+                  <c:StatusChip Status="{Binding Chip}" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="1" FontSize="12.5" Text="{Binding Message}" TextWrapping="Wrap" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- Add to listed product -->
+          <Border Classes="callout" IsVisible="{Binding IsAddToListed}"><TextBlock FontSize="12.5" Text="{Binding AdditionPlan}" TextWrapping="Wrap" /></Border>
+
+          <!-- Manage versions: recorded availability requests (explicit confirmation) -->
+          <StackPanel Spacing="8" IsVisible="{Binding IsManageVersions}">
+            <TextBlock Classes="formlabel" Text="AVAILABILITY REQUEST FOR THE SELECTED RELEASE" />
+            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Disable, restore, supersede or make current are recorded in HCG Store for the people who approve and publish. Nothing changes until they act. Other platforms, architectures and channels are not touched, and no file is deleted." />
+            <Grid ColumnDefinitions="200,12,*,12,160">
+              <ComboBox ItemsSource="{Binding AvailabilityActions}" SelectedItem="{Binding AvailabilityAction}" HorizontalAlignment="Stretch" PlaceholderText="Action" IsEnabled="{Binding HasTargetRelease}">
+                <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:Choice"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBox Grid.Column="2" Text="{Binding RequestReason}" Watermark="Reason (shown to the people who decide)" />
+              <TextBox Grid.Column="4" Text="{Binding RequestConfirm}" Watermark="Type the version" />
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Send request" Command="{Binding SendAvailabilityRequestCommand}" IsEnabled="{Binding HasTargetRelease}" />
+              <Button Classes="ghost" Content="Open release in HCG Store" Command="{Binding OpenReviewCommand}" IsEnabled="{Binding HasTargetRelease}" />
+            </StackPanel>
+            <TextBlock FontSize="12.5" Text="{Binding RequestResult}" TextWrapping="Wrap" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- 5 · RELEASE CONFIGURATION -->
+      <Border Classes="card" IsVisible="{Binding ShowsUpload}">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="5 · RELEASE CONFIGURATION" />
           <Grid ColumnDefinitions="*,12,*,12,*">
             <StackPanel><TextBlock Classes="formlabel" Text="VERSION (SEMVER)" /><TextBox Text="{Binding Version}" Watermark="1.2.0" /></StackPanel>
             <StackPanel Grid.Column="2"><TextBlock Classes="formlabel" Text="BUILD NUMBER" /><TextBox Text="{Binding Build}" Watermark="42" /></StackPanel>
             <StackPanel Grid.Column="4"><TextBlock Classes="formlabel" Text="CHANNEL" />
               <ComboBox ItemsSource="{Binding Channels}" SelectedItem="{Binding Channel}" HorizontalAlignment="Stretch"><ComboBox.ItemTemplate><DataTemplate x:DataType="vm:Choice"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox></StackPanel>
           </Grid>
-          <TextBlock Classes="formlabel" Text="RELEASE NOTES (ONE PER LINE)" />
+          <TextBlock Classes="formlabel" Text="RELEASE NOTES (ONE PER LINE; NEEDED BEFORE SUBMISSION)" />
           <TextBox Text="{Binding ReleaseNotes}" AcceptsReturn="True" MinHeight="70" TextWrapping="Wrap" />
           <TextBlock Classes="formlabel" Text="COMPATIBILITY NOTES (MINIMUM OS AND ARCHITECTURES ARE READ FROM THE FILES)" />
           <TextBox Text="{Binding CompatibilityNotes}" AcceptsReturn="True" MinHeight="50" TextWrapping="Wrap" />
@@ -108,17 +273,44 @@
           <CheckBox IsChecked="{Binding AlsoHcgRepo}" IsVisible="{Binding CanUseHcgRepo}">
             <TextBlock TextWrapping="Wrap" Text="Also deliver .deb packages through HCG Repo (Sileo), with HCG Store checking ownership" />
           </CheckBox>
+          <TextBlock Classes="formlabel" Text="AFTER APPROVAL AND PUBLICATION (A REQUEST FOR THE PUBLISHER)" />
+          <CheckBox IsChecked="{Binding MakeCurrent}" IsEnabled="{Binding CanRequestPublication}">
+            <TextBlock TextWrapping="Wrap" Text="Make this the current release after approval and publication." />
+          </CheckBox>
+          <CheckBox IsChecked="{Binding SupersedeCompatible}" IsEnabled="{Binding CanRequestPublication}">
+            <TextBlock TextWrapping="Wrap" Text="Supersede the previous compatible release (same channel; only releases whose every platform and architecture this one provides)." />
+          </CheckBox>
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding PublicationRequestNote}" />
+          <ItemsControl ItemsSource="{Binding Discrepancies}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:StudioFindingItem">
+                <Grid ColumnDefinitions="96,*" Margin="0,0,0,4">
+                  <c:StatusChip Status="{Binding Chip}" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="1" FontSize="12.5" Text="{Binding Message}" TextWrapping="Wrap" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
         </StackPanel>
       </Border>
 
-      <!-- 4 · FILES -->
-      <Border Classes="card">
+      <!-- 6 · ARTIFACTS -->
+      <Border Classes="card" IsVisible="{Binding ShowsUpload}">
         <StackPanel Spacing="10">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="label" Text="4 · FILES (ONE PER PLATFORM)" VerticalAlignment="Center" />
-            <Button Grid.Column="1" Classes="small" Content="Add files…" Command="{Binding AddFilesCommand}" IsEnabled="{Binding !IsShipping}" />
-          </Grid>
-          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Windows .exe .msi .msix .zip · macOS .zip (app) .dmg .pkg · iOS/iPadOS .ipa (device builds) · Linux .deb .rpm .AppImage · jailbroken iOS .deb. iOS Simulator builds are not accepted. Platform, kind, SHA-256, minimum OS and signatures are checked on this computer first; HCG Store checks the hash, the format and the kind again." />
+          <TextBlock Classes="label" Text="6 · ARTIFACTS (SEVERAL FILES PER DRAFT; NO REBUILD)" />
+          <WrapPanel>
+            <Button Classes="small" Content="Latest build" Command="{Binding AddLatestBuildCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,8,8" />
+            <ComboBox ItemsSource="{Binding BuildHistory}" SelectedItem="{Binding SelectedBuild}" PlaceholderText="Build History" Width="320" Margin="0,0,4,8">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:BuildChoice"><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Classes="small" Content="Add build" Command="{Binding AddSelectedBuildCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,8,8" />
+            <ComboBox ItemsSource="{Binding Vault}" SelectedItem="{Binding SelectedVault}" PlaceholderText="Artifact Vault" Width="320" Margin="0,0,4,8">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:VaultChoice"><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Classes="small" Content="Add artifact" Command="{Binding AddSelectedVaultCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,8,8" />
+            <Button Classes="small" Content="Choose files…" Command="{Binding AddFilesCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,8,8" />
+          </WrapPanel>
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Windows .exe .msi .msix .zip · macOS .zip (app) .dmg .pkg · iOS/iPadOS .ipa (device builds) · Linux .deb .rpm .AppImage · jailbroken iOS .deb. Platform, architecture, format, size, SHA-256, signing, notarization and the Release Passport are read from each file on this computer; HCG Store checks the hash, the format and the kind again. Build provenance is reported only from a Release Passport of the exact bytes." />
           <Border Classes="inset" Padding="10" IsVisible="{Binding HasBuildOrigin}">
             <StackPanel Spacing="4">
               <TextBlock FontSize="12.5" Text="{Binding BuildOrigin}" TextWrapping="Wrap" />
@@ -135,7 +327,11 @@
                 <Border Classes="inset" Padding="12" Margin="0,0,0,8">
                   <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Spacing="3">
-                      <TextBlock FontWeight="SemiBold"><Run Text="{Binding FileName}" /><Run Text="  ·  " /><Run Text="{Binding Platform}" /><Run Text="  ·  " /><Run Text="{Binding Size}" /></TextBlock>
+                      <WrapPanel>
+                        <TextBlock FontWeight="SemiBold" Margin="0,0,8,0" VerticalAlignment="Center"><Run Text="{Binding FileName}" /><Run Text="  ·  " /><Run Text="{Binding Platform}" /><Run Text="  ·  " /><Run Text="{Binding Size}" /></TextBlock>
+                        <c:StatusChip Status="{Binding SourceTag}" />
+                      </WrapPanel>
+                      <TextBlock FontSize="12" Text="{Binding Architectures, StringFormat='Architecture: {0}'}" />
                       <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding Sha256, StringFormat='SHA-256  {0}'}" TextWrapping="Wrap" />
                       <StackPanel Orientation="Horizontal" Spacing="8">
                         <TextBlock FontSize="12" FontWeight="SemiBold" Text="{Binding Kind}" VerticalAlignment="Center" />
@@ -143,10 +339,11 @@
                       </StackPanel>
                       <TextBlock FontSize="12" Text="{Binding InstallDetail}" TextWrapping="Wrap" />
                       <TextBlock FontSize="12" Text="{Binding Signing}" ToolTip.Tip="{Binding SigningEvidence}" />
+                      <TextBlock Classes="muted" FontSize="12" Text="{Binding Passport}" TextWrapping="Wrap" />
                       <TextBlock Classes="muted" FontSize="12" Text="{Binding Provenance}" TextWrapping="Wrap" />
                       <TextBlock Classes="warning" FontSize="12" Text="{Binding Problems}" IsVisible="{Binding HasProblems}" TextWrapping="Wrap" />
                       <ProgressBar Value="{Binding Progress}" Maximum="100" Height="6" Margin="0,4,0,0" />
-                      <TextBlock FontSize="12" Text="{Binding State}" />
+                      <TextBlock FontSize="12"><Run Text="{Binding State}" /><Run Text="  " /><Run Text="{Binding Speed}" Foreground="{DynamicResource Hcg.Brush.Cyan}" /></TextBlock>
                       <SelectableTextBlock Classes="muted" FontSize="11.5" Text="{Binding Detail}" TextWrapping="Wrap" />
                     </StackPanel>
                     <Button Grid.Column="1" Classes="small ghost" Content="Remove" VerticalAlignment="Top"
@@ -159,23 +356,50 @@
         </StackPanel>
       </Border>
 
-      <!-- 5 · UPLOAD AND REVIEW -->
-      <Border Classes="card">
+      <!-- 7 · UPLOAD AND REVIEW -->
+      <Border Classes="card" IsVisible="{Binding ShowsUpload}">
         <StackPanel Spacing="10">
-          <TextBlock Classes="label" Text="5 · UPLOAD AND REVIEW" />
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <Button Classes="primary" Command="{Binding ShipCommand}" IsEnabled="{Binding !IsShipping}">
-              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Export}" /><TextBlock Text="Ship to Store (private draft)" /></StackPanel>
+          <TextBlock Classes="label" Text="7 · UPLOAD TO PRIVATE STAGING" />
+          <WrapPanel>
+            <Button Classes="primary" Command="{Binding ShipCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,10,8">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Export}" /><TextBlock Text="Upload private draft (Retry resumes)" /></StackPanel>
             </Button>
-            <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding IsShipping}" />
-            <Button Content="Submit for review…" Command="{Binding SubmitCommand}" IsEnabled="{Binding CanSubmit}" />
-            <Button Classes="ghost" Content="Open review in HCG Store" Command="{Binding OpenReviewCommand}" IsVisible="{Binding ReviewUrl, Converter={x:Static ObjectConverters.IsNotNull}}" />
-            <Button Classes="ghost" Content="New release" Command="{Binding NewReleaseCommand}" IsEnabled="{Binding !IsShipping}" />
-          </StackPanel>
-          <TextBlock FontSize="12.5" Text="{Binding ReleaseStatus}" />
+            <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding IsShipping}" Margin="0,0,10,8" />
+            <Button Content="Submit for review…" Command="{Binding SubmitCommand}" IsEnabled="{Binding CanSubmit}" Margin="0,0,10,8" />
+            <Button Classes="ghost" Content="Open in Store Release Manager" Command="{Binding OpenReviewCommand}" IsVisible="{Binding ReviewUrl, Converter={x:Static ObjectConverters.IsNotNull}}" Margin="0,0,10,8" />
+            <Button Classes="ghost" Content="New release" Command="{Binding NewReleaseCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,10,8" />
+          </WrapPanel>
+          <TextBlock FontSize="12.5" Text="{Binding ReleaseStatus}" TextWrapping="Wrap" />
           <TextBlock FontSize="12.5" Text="{Binding ReleaseManagerStage}" TextWrapping="Wrap" />
           <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding ReviewUrl}" />
           <TextBlock FontSize="12.5" Text="{Binding Summary}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <!-- 8 · SYNCHRONIZATION CENTER -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="label" Text="8 · SYNCHRONIZATION CENTER" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="small" Content="Refresh" Command="{Binding RefreshSyncCommand}" />
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding SyncNote}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Sync}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SyncItem">
+                <Border Classes="inset" Width="280" Margin="0,0,10,10" Padding="10">
+                  <StackPanel Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <c:StatusChip Status="{Binding Chip}" />
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Title}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" FontSize="11.5" Text="{Binding Items}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
         </StackPanel>
       </Border>
     </StackPanel>

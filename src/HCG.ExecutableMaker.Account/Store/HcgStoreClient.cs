@@ -92,18 +92,39 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
         }
     }
 
-    /// <summary>HCG Store's own account of what works (GET /api/v1/publishing/status), and the request as it happened.</summary>
-    public async Task<(StorePublishingStatus? Status, StoreProbe Probe)> StatusAsync(bool withToken, CancellationToken ct = default)
-    {
-        var probe = await ProbeAsync("api/v1/publishing/status", withToken, ct).ConfigureAwait(false);
-        if (probe.Status != 200 || probe.Body is null) return (null, probe);
-        try { return (JsonSerializer.Deserialize<StorePublishingStatus>(probe.Body, Json), probe); }
-        catch (JsonException) { return (null, probe); }
-    }
-
     public Task<StoreWhoAmI> WhoAmIAsync(CancellationToken ct = default) => SendAsync<StoreWhoAmI>(HttpMethod.Get, "api/v1/publishing/whoami", null, ct);
+    /// <summary>What this Store allows right now (<c>GET /api/v1/publishing/capabilities</c>; needs a publishing permission).</summary>
+    public Task<StoreCapabilities> CapabilitiesAsync(CancellationToken ct = default) => SendAsync<StoreCapabilities>(HttpMethod.Get, "api/v1/publishing/capabilities", null, ct);
     public async Task<IReadOnlyList<StoreProduct>> ProductsAsync(CancellationToken ct = default) => (await SendAsync<StoreProductList>(HttpMethod.Get, "api/v1/publishing/products", null, ct).ConfigureAwait(false)).Products;
+    /// <summary>Creates a Store-internal draft product. HCG Store servers without descriptive draft fields refuse unknown
+    /// fields, so description, category and platforms are sent only when given.</summary>
     public Task<StoreProduct> CreateDraftProductAsync(string id, string title, CancellationToken ct = default) => SendAsync<StoreProduct>(HttpMethod.Post, "api/v1/publishing/products", new { id, title }, ct);
+    public async Task<StoreProduct> CreateDraftProductAsync(StoreDraftProductRequest request, CancellationToken ct = default)
+    {
+        // HCG Store answers a created draft with its platforms as plain names (the product list states them per platform).
+        var d = await SendAsync<StoreDraftProductCreated>(HttpMethod.Post, "api/v1/publishing/products", request, ct).ConfigureAwait(false);
+        return new StoreProduct(d.Id, d.Title, d.Source ?? "draft")
+        {
+            Summary = d.Description, Category = d.Category, DevelopmentStatus = "draft", Note = d.Note,
+            Platforms = d.Platforms.Select(p => new StoreProductPlatform(p, "planned")).ToList(),
+        };
+    }
+    /// <summary>Every release of one product (newest first): the version history as HCG Store holds it.</summary>
+    public async Task<IReadOnlyList<StoreRelease>> ReleasesAsync(string productId, CancellationToken ct = default) =>
+        (await SendAsync<StoreReleaseList>(HttpMethod.Get, $"api/v1/publishing/releases?productId={Uri.EscapeDataString(productId)}", null, ct).ConfigureAwait(false)).Releases;
+    /// <summary>Records an availability request (disable · restore · supersede · make-current) for the people who approve
+    /// and publish. HCG Store changes nothing; <paramref name="confirmVersion"/> must be the release's version.</summary>
+    public Task<StoreRequestRecorded> RequestAsync(string releaseId, string action, string reason, string confirmVersion, CancellationToken ct = default) =>
+        SendAsync<StoreRequestRecorded>(HttpMethod.Post, $"api/v1/publishing/releases/{Uri.EscapeDataString(releaseId)}/requests", new { action, reason, confirm = confirmVersion }, ct);
+
+    /// <summary>The Store's public release resolution for a product (no sign-in; contains no download URLs).</summary>
+    public async Task<StoreResolution?> ResolutionAsync(string productId, CancellationToken ct = default)
+    {
+        var probe = await ProbeAsync($"api/public/v1/release-resolution/{Uri.EscapeDataString(productId)}", withToken: false, ct).ConfigureAwait(false);
+        if (probe.Status != 200 || probe.Body is null) return null;
+        try { return JsonSerializer.Deserialize<StoreResolution>(probe.Body, Json); }
+        catch (JsonException) { return null; }
+    }
     public Task<StoreRelease> CreateReleaseAsync(StoreReleaseRequest request, CancellationToken ct = default) => SendAsync<StoreRelease>(HttpMethod.Post, "api/v1/publishing/releases", request, ct);
     public Task<StoreRelease> ReleaseAsync(string releaseId, CancellationToken ct = default) => SendAsync<StoreRelease>(HttpMethod.Get, $"api/v1/publishing/releases/{Uri.EscapeDataString(releaseId)}", null, ct);
     public Task<StoreDeclaredArtifact> DeclareArtifactAsync(string releaseId, StoreArtifactRequest request, CancellationToken ct = default) => SendAsync<StoreDeclaredArtifact>(HttpMethod.Post, $"api/v1/publishing/releases/{Uri.EscapeDataString(releaseId)}/artifacts", request, ct);
@@ -366,7 +387,51 @@ public sealed record StoreUploadProgress(long Received, long Total, int Failures
     public double Fraction => Total == 0 ? 1 : (double)Received / Total;
 }
 
-public sealed record StoreWhoAmI(string Sub, string? Email, string Via, string? PublisherPermission, string? ApproverPermission, long MaxUploadBytes, int ChunkBytes);
+public sealed record StoreWhoAmI(string Sub, string? Email, string Via, string? PublisherPermission, string? ApproverPermission, long MaxUploadBytes, int ChunkBytes)
+{
+    /// <summary>disabled · uploads · enabled (null from Stores that predate it).</summary>
+    public string? PublishingMode { get; init; }
+    public StoreCapabilityFlags? Capabilities { get; init; }
+}
+
+/// <summary>HCG Store's <c>GET /api/v1/publishing/capabilities</c>.</summary>
+public sealed record StoreCapabilities
+{
+    public int ApiVersion { get; init; }
+    public long MaxUploadBytes { get; init; }
+    public int ChunkBytes { get; init; }
+    public int UploadUrlTtlSeconds { get; init; }
+    public IReadOnlyList<string> BuildProviders { get; init; } = [];
+    public string? ApprovalAndPublication { get; init; }
+    public string? PublishingMode { get; init; }
+    public StoreCapabilityFlags? Capabilities { get; init; }
+    public bool OffersEnabled { get; init; }
+}
+
+/// <summary>Independent switches HCG Store reports. A flag a Store does not send stays false: nothing is assumed.</summary>
+public sealed record StoreCapabilityFlags
+{
+    public bool Products { get; init; }
+    public bool Drafts { get; init; }
+    public bool Uploads { get; init; }
+    public bool ResumableUploads { get; init; }
+    public bool Passports { get; init; }
+    public bool Submission { get; init; }
+    public bool Approval { get; init; }
+    public bool Publication { get; init; }
+    public bool PublicDelivery { get; init; }
+    public bool Offers { get; init; }
+    /// <summary>Distribution Studio: official product metadata in the product list.</summary>
+    public bool ProductMetadata { get; init; }
+    /// <summary>Distribution Studio: a draft may carry a make-current / supersede request for the publisher.</summary>
+    public bool PublicationRequests { get; init; }
+    /// <summary>Distribution Studio: recorded disable / restore / supersede / make-current requests.</summary>
+    public bool AvailabilityRequests { get; init; }
+    /// <summary>Distribution Studio: publication can supersede only compatible releases (same channel, covered platforms).</summary>
+    public bool SupersedeCompatible { get; init; }
+    public bool Withdraw { get; init; }
+}
+
 public sealed record StoreProductList(IReadOnlyList<StoreProduct> Products);
 public sealed record StoreProduct(string Id, string Title, string Source)
 {
@@ -374,6 +439,78 @@ public sealed record StoreProduct(string Id, string Title, string Source)
     public string? CentralId { get; init; }
     public IReadOnlyList<string> HcgRepo { get; init; } = [];
     public string? Note { get; init; }
+    // Official metadata (HCG Store with the productMetadata capability, or the public release resolution). Null when the
+    // Store did not state it; never filled in by Maker.
+    public string? Slug { get; init; }
+    public string? Summary { get; init; }
+    public string? Category { get; init; }
+    public string? DevelopmentStatus { get; init; }
+    public IReadOnlyList<StoreProductPlatform> Platforms { get; init; } = [];
+    /// <summary>The Store's own public media URL for the official icon.</summary>
+    public string? Icon { get; init; }
+    public string? Cover { get; init; }
+    public string? CurrentReleaseId { get; init; }
+    public string? ProductUrl { get; init; }
+}
+public sealed record StoreProductPlatform(string Platform, string? Support)
+{
+    public IReadOnlyList<string> Architectures { get; init; } = [];
+}
+public sealed record StoreDraftProductRequest
+{
+    public required string Id { get; init; }
+    public required string Title { get; init; }
+    public string? Description { get; init; }
+    public string? Category { get; init; }
+    public IReadOnlyList<string>? Platforms { get; init; }
+}
+public sealed record StoreReleaseList(IReadOnlyList<StoreRelease> Releases);
+/// <summary>HCG Store's answer to creating a draft product (POST /publishing/products).</summary>
+public sealed record StoreDraftProductCreated(string Id, string Title)
+{
+    public string? Source { get; init; }
+    public string? Description { get; init; }
+    public string? Category { get; init; }
+    public IReadOnlyList<string> Platforms { get; init; } = [];
+    public string? Note { get; init; }
+}
+/// <summary>A request recorded by HCG Store (it changes nothing itself).</summary>
+public sealed record StoreRequestRecorded(bool Recorded, string? Note)
+{
+    public IReadOnlyList<StoreReleaseRequestEntry> Requests { get; init; } = [];
+}
+public sealed record StoreReleaseRequestEntry
+{
+    public long Seq { get; init; }
+    public long At { get; init; }
+    /// <summary>The HCG account (subject) that made the request.</summary>
+    public string? By { get; init; }
+    public string? Action { get; init; }
+    public string? Reason { get; init; }
+    public string? Via { get; init; }
+    public string? Status { get; init; }
+}
+/// <summary>What the submitter asks the publisher to do when this release is published (applied only by HCG Store, at
+/// publication, by a person with HCG's publication permission).</summary>
+public sealed record StorePublicationRequest(bool MakeCurrent, string SupersedePrevious)
+{
+    public string? Note { get; init; }
+}
+/// <summary>HCG Store's public release resolution (no sign-in; no download URLs).</summary>
+public sealed record StoreResolution
+{
+    public StoreResolutionProduct? Product { get; init; }
+    public IReadOnlyList<JsonElement> Releases { get; init; } = [];
+}
+public sealed record StoreResolutionProduct
+{
+    public string? Id { get; init; }
+    public string? Slug { get; init; }
+    public string? Name { get; init; }
+    public string? Summary { get; init; }
+    public string? DevelopmentStatus { get; init; }
+    public string? ProductUrl { get; init; }
+    public IReadOnlyList<StoreProductPlatform> Platforms { get; init; } = [];
 }
 public sealed record StoreEdition(string Id, string Name, IReadOnlyList<string> Platforms);
 
@@ -394,6 +531,8 @@ public sealed record StoreReleaseRequest
     /// <summary>private · internal-testing · public (what the publisher asks for; an approver decides).</summary>
     public required string Eligibility { get; init; }
     public IReadOnlyList<string> Destinations { get; init; } = ["hcg-store"];
+    /// <summary>Sent only to Stores with the publicationRequests capability (older Stores refuse unknown fields).</summary>
+    public StorePublicationRequest? PublicationRequest { get; init; }
 }
 
 public sealed record StoreCompatibility
@@ -459,6 +598,14 @@ public sealed record StoreRelease
     public bool? AuditIntact { get; init; }
     /// <summary>True when HCG Store returned an existing draft for the same request (a retry) instead of creating one.</summary>
     public bool? Reused { get; init; }
+    public StoreCompatibility? Compatibility { get; init; }
+    /// <summary>draft · validation-pending · uploaded · validation-failed · awaiting-approval · approved · published · superseded · withdrawn.</summary>
+    public string? Stage { get; init; }
+    public long? CreatedAt { get; init; }
+    public long? PublishedAt { get; init; }
+    public string? SupersededBy { get; init; }
+    public StorePublicationRequest? PublicationRequest { get; init; }
+    public IReadOnlyList<StoreReleaseRequestEntry> Requests { get; init; } = [];
 }
 
 public sealed record StoreArtifact
@@ -476,6 +623,7 @@ public sealed record StoreArtifact
     public string? Kind { get; init; }
     public bool KindCheckedByStore { get; init; }
     public StoreReadiness? Readiness { get; init; }
+    public IReadOnlyList<string> Architectures { get; init; } = [];
 }
 
 public sealed record StoreUploadUrl(string UploadUrl, long ExpiresAt, int ChunkBytes)
@@ -509,6 +657,14 @@ public sealed record StoreManagedRelease
     public string? RequestedEligibility { get; init; }
     public string? ApprovedEligibility { get; init; }
     public bool MayApprove { get; init; }
+    public bool MayPublish { get; init; }
+    public string? Channel { get; init; }
+    public string? ReviewUrl { get; init; }
+    public long? CreatedAt { get; init; }
+    public long? PublishedAt { get; init; }
+    public string? SupersededBy { get; init; }
+    public StorePublicationRequest? PublicationRequest { get; init; }
+    public IReadOnlyList<StoreReleaseRequestEntry> Requests { get; init; } = [];
 }
 internal sealed record StoreChunkResult(long Received, long Size);
 

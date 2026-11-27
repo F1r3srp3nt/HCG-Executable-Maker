@@ -22,6 +22,12 @@ public static partial class StoreProvenance
         public static Result None(params string[] notes) => new(null, null, null, null, null, notes);
         /// <summary>The architecture the passport states for this exact file (for an installer: the one it installs, not its bootstrapper's).</summary>
         public string? Architecture { get; init; }
+        /// <summary>The application name, version, build number and platform the passport states for these exact bytes (verified
+        /// facts for Distribution Studio's discrepancy check; null when the passport does not state them).</summary>
+        public string? ProductName { get; init; }
+        public string? Version { get; init; }
+        public string? BuildNumber { get; init; }
+        public string? Platform { get; init; }
         public bool Complete => SourceCommit is not null && BuildProvider is not null && Toolchain is not null;
     }
 
@@ -67,7 +73,12 @@ public static partial class StoreProvenance
         var toolchain = Fit(Str(p["build"], "toolchain"), 200);
         if (commit is null) notes.Add("no source commit in the passport");
         if (toolchain is null) notes.Add("no toolchain in the passport");
-        return new(commit, provider, toolchain, Report(p), passportPath, notes) { Architecture = Str(p, "architecture") };
+        return new(commit, provider, toolchain, Report(p), passportPath, notes)
+        {
+            Architecture = Str(p, "architecture"), ProductName = Str(p["product"], "name"), Version = Str(p, "version"),
+            BuildNumber = p["build_number"] is JsonValue bn ? (bn.TryGetValue<string>(out var bs) ? bs : bn.TryGetValue<long>(out var bl) ? bl.ToString(System.Globalization.CultureInfo.InvariantCulture) : null) : null,
+            Platform = Str(p, "platform"),
+        };
     }
 
     /// <summary>The uploader's validation as HCG Store records it: Maker's levels and the code signatures in the package (application code only).</summary>

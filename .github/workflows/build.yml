@@ -288,15 +288,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  ship-to-store-private:
-    name: Ship to Store with public publication off (TEST HCG Store, genuine executable, diagnostics, private draft, resumable upload, passport, Release Manager)
+  distribution-studio:
+    name: Distribution Studio acceptance 1–18 (TEST HCG Store, real catalogue, genuine executables, resumable upload, passports, supersede, uploads mode)
     needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
-      # HCG Store's private-submissions mode and status API (store branch, proposed in docs/PUBLISHING.md §6a; not merged
-      # or deployed there). Switch to main once HCG Store merges it.
-      STORE_REF: claude/private-submissions
+      # HCG Store's Distribution Studio additions (store branch claude/distribution-studio-api, proposed in
+      # docs/PUBLISHING.md for founder review; not merged or deployed there). Switch to main once HCG Store merges it.
+      STORE_REF: claude/distribution-studio-api
     steps:
       - uses: actions/checkout@v7
       - uses: actions/checkout@v7
@@ -314,18 +314,19 @@ jobs:
         run: cd hcg-store/web-hcg-store && npm ci --no-audit --no-fund
       - name: Build HCG Executable Maker and the headless UI driver
         run: dotnet build src/HCG.ExecutableMaker.App -c Release && dotnet build tools/ui-driver -c Release
-      - name: Genuine executable → Executable Maker ZIP + passport → private draft on the TEST HCG Store, public publication off
-        run: tools/ci/ship-to-store-private-e2e.sh hcg-store/web-hcg-store "$RUNNER_TEMP/ship-private"
+      - name: Acceptance 1–18 against the TEST HCG Store (Maker never publishes; a person's browser approval is simulated by the TEST server)
+        run: tools/ci/distribution-studio-e2e.sh hcg-store/web-hcg-store "$RUNNER_TEMP/studio"
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ship-to-store-private-evidence
+          name: distribution-studio-evidence
           path: |
-            ${{ runner.temp }}/ship-private/*.txt
-            ${{ runner.temp }}/ship-private/*.log
-            ${{ runner.temp }}/ship-private/*.json
-            ${{ runner.temp }}/ship-private/shots
+            ${{ runner.temp }}/studio/*.txt
+            ${{ runner.temp }}/studio/*.log
+            ${{ runner.temp }}/studio/*.json
+            ${{ runner.temp }}/studio/registration
+            ${{ runner.temp }}/studio/shots
           retention-days: 14
 
   windows-packaging:

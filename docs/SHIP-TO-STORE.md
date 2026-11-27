@@ -1,6 +1,7 @@
-# Ship to Store
+# Ship to Store — Distribution Studio
 
-**Ship to Store** (sidebar, "Ship to Store…" on the result of a successful build in New Build and Mobile Build Studio,
+The **Ship to Store** sidebar entry opens **Distribution Studio** (see [Distribution Studio](#distribution-studio)
+below). **Ship to Store** (sidebar, "Ship to Store…" on the result of a successful build in New Build and Mobile Build Studio,
 and on every artifact) uploads a release to HCG Store
 (`store.hakmicapitalgroup.com`) as a **private draft**. HCG Store's server side is in the `F1r3srp3nt/store` repository
 (`web-hcg-store/server/src/publishing.ts`, documented in `web-hcg-store/docs/PUBLISHING.md`).
@@ -84,29 +85,42 @@ with what to ship instead and the list of accepted types.
 
 ```
 HCGExecutableMaker --ship-to-store [--sign-in] --store https://store.hakmicapitalgroup.com \
-  --product <id> [--edition <id>] [--draft-product "Title"] --release-version 1.2.0 --build-number 42 \
-  --file app.ipa --file app-win.zip [--note "…"] [--distribution paid] [--eligibility private] [--hcg-repo] \
-  [--release <id>] [--verify-download] [--submit]
+  --product <id> [--edition <id>] --release-version 1.2.0 --build-number 42 \
+  --file app.ipa --file app-win.zip [--note "…"] [--compat-note "…"] [--distribution paid] [--eligibility private] [--hcg-repo] \
+  [--make-current] [--supersede-compatible] [--release <id>] [--verify-download] [--submit]
+HCGExecutableMaker --ship-to-store --product <id> --add-to-release <release id> --file app-win-arm64.zip     # Add to Listed Product
+HCGExecutableMaker --ship-to-store --product <id> --draft-product "Title" [--description "…"] [--category c] [--platform p]… \
+  [--registration-out <folder>] [--icon icon.png] [--banner banner.png] [--edition e] [--release-version 0.1.0]
+HCGExecutableMaker --ship-to-store --store-catalogue                       # products you may manage, metadata, history
+HCGExecutableMaker --ship-to-store --store-history --product <id>
+HCGExecutableMaker --ship-to-store --store-compare --product <id> --release-version V --build-number B [--file …]   # exit 6 = HCG Store would refuse
+HCGExecutableMaker --ship-to-store --store-request disable|restore|supersede|make-current --release <id> --reason "…" --confirm <version>
 HCGExecutableMaker --ship-to-store --release <id> --withdraw "reason"
 HCGExecutableMaker --ship-to-store --store-status [--sign-in] [--store <url>] [--diagnostics-out diagnostics.txt]
 ```
 
-`--store-status` prints the eleven connection checks below (exit 0 ready to upload private drafts, 5 not ready,
-4 unreachable). After each upload the command attaches the file's Release Passport and prints what HCG Store's
-Release Manager lists for the release.
+`--store-status` prints the ten connection checks below (exit 0 ready to upload private drafts, 5 not ready,
+4 unreachable). Before an upload the command prints the version comparison and refuses a version HCG Store would
+refuse (exit 6). After each upload it attaches the file's Release Passport, prints the transfer speed, and prints what
+HCG Store's Release Manager lists for the release.
 
 ## Verification
 
-`tools/ci/ship-to-store-private-e2e.sh <store>/web-hcg-store <out>` (CI job `ship-to-store-private`) runs against the
-TEST HCG Store with `HCG_STORE_PUBLISHING=submissions` and the mock HCG Connect provider: a **genuine executable**
-(a .NET console program published for Windows x64 from a git commit) is packaged by Executable Maker into a portable
-ZIP with its Release Passport; the diagnostics are checked with Ship to Store switched off (every stage named with the
-server's reason) and on (ten checks OK, public publication Off, no token in the output); then a private draft, a
-resumable upload with a dropped chunk, HCG Store's SHA-256 equal to the file's and to the bytes downloaded back, the
-Release Passport attached, submission, and Release Manager listing the release as awaiting approval with an intact
-audit trail. Unauthorised uploads are refused (an account without `store.publish`, no sign-in, a forged upload URL,
-bytes that differ from the declared SHA-256), approval works in the browser, and public publication is refused
-(`publication_disabled`) with nothing public.
+`tools/ci/distribution-studio-e2e.sh <store>/web-hcg-store <out>` (CI job `distribution-studio`) runs the Distribution
+Studio acceptance tests 1–18 against the TEST HCG Store (HCG Store branch `claude/distribution-studio-api`, **real
+catalogue**, so HCG Mail is a listed product) and the mock HCG Connect provider. Genuine executables (a .NET console
+program published for Windows x64 and ARM64 from a git commit) are packaged by Executable Maker into portable ZIPs with
+Release Passports. The run covers: the authorised catalogue with official metadata; HCG Mail, Add New Update, version
+comparison; import, inspection, passport, upload to private staging; an upload **interrupted by killing the app** and
+resumed at the byte HCG Store had; exact server checksums and the bytes downloaded back; the same release in Release
+Manager from Maker, the website's browser session and HCG Store Manager's client; Windows ARM64 added to the published
+1.0.0 as a new revision (the published release unchanged); a private product draft and its registration request;
+version history; a supersede request (make current + supersede compatible) and a recorded availability request;
+publication before approval failing with 1.0.0 still published; publication by a person superseding only the
+compatible x64 release while the ARM64 revision and the beta channel stay published; unauthorised accounts, no sign-in
+and forged upload URLs refused; and `uploads` mode (as production) where authorised private uploads work while approval
+answers `publication_disabled`. The real app's Distribution Studio page is driven headlessly against the same Store for
+the screenshots.
 
 `tools/ci/ship-to-store-e2e.sh <store>/web-hcg-store <out>` (26 checks) runs the whole flow against a local HCG Store in
 TEST mode with the mock HCG Connect provider (nothing real is contacted):
@@ -127,35 +141,70 @@ TEST mode with the mock HCG Connect provider (nothing real is contacted):
   again continues the same draft. Then an approver opens the draft in HCG Store in a browser session and presses
   *Download to review*: the bytes' SHA-256 equals the build's. A customer gets 404 for the draft, anonymous 401.
 
+## Distribution Studio
+
+The Ship to Store page is **Distribution Studio**: the same publishing API as HCG Store's website and HCG Store Manager
+(`/api/v1/publishing/*`), so a release created in Maker appears in Release Manager and on the website with the same
+release ID and audit trail, and the other way round. Opening it uploads nothing and changes no release; signed out it
+contacts no Store.
+
+| Section | What it does | Where the facts come from |
+|---|---|---|
+| Connection | Ten checks, Copy diagnostics, the Store's capability flags | `health`, `whoami`, `capabilities`, `products`, `manager` |
+| Products you may manage | Name, icon, identifier, category, status, platforms, editions, current release; search, status and platform filters, **Refresh** (asks HCG Store again; no copy is kept) | `GET /publishing/products` (official metadata with the `productMetadata` capability; otherwise HCG Store's public release resolution for summary, status and platforms). Icons only from the Store's own origin |
+| Operation | **Add New Update**, **Add New Product**, **Add to Listed Product**, **Manage Existing Versions** | — |
+| Release history | Every release of the product with status, channel, platforms and architectures, requests | `GET /publishing/releases?productId=` |
+| Version comparison | Current published (the one HCG Store names current, else the newest published), latest private draft, latest local build, proposed version, published platforms and architectures; duplicates (refused), continued drafts, revisions, downgrades, identical bytes already in the Store, platform overlaps. A newer local build never disables anything | `DistributionStudio.Compare` |
+| Release configuration | Version, build, channel, notes, distribution, eligibility; **Make this the current release after approval and publication** and **Supersede previous compatible release** | Sent as `publicationRequest` only to a Store with `publicationRequests`; applied by HCG Store only when a person publishes |
+| Artifacts | Latest build, Build History, Artifact Vault, files from disk; several files per draft; no rebuild. Each file shows **Maker build** or **Selected manually** | Facts from the file (platform, architecture, format, size, SHA-256, signing, notarization) and its Release Passport; provenance only from a passport of the exact bytes |
+| Metadata | Typed values may differ from the files' facts, but each discrepancy (passport version/build/architecture, package version) is shown and recorded in the draft's compatibility notes | `DistributionStudio.Discrepancies` |
+| Upload | Inspection, SHA-256, passport attachment, private draft; resumable chunks with progress, **transfer speed**, Cancel, Retry; server verification; **Open in Store Release Manager** | The existing Ship to Store upload protocol (no second one) |
+| Synchronization Center | Local artifacts, uploaded and verified, private drafts, pending review, published, current, superseded or withdrawn, upload failures, conflicts | Release Manager's answer and this session's upload results only |
+
+**Add New Product** creates a private product draft (name, identifier, description, category, platforms — descriptive
+fields only to a Store that takes them) and writes a **registration request** for HCG
+(`<id>-registration-request/request.json` with the proposed edition, initial version, icon and banner and their
+SHA-256). It is not uploaded; the central product ID, editions, official artwork and listing are HCG's decisions, and
+no access is granted.
+
+**Add to Listed Product** (Windows ARM64, a macOS DMG, a Linux package, a portable ZIP next to an installer): an open
+draft takes the files; a submitted, approved or published release is never changed, so a new revision is prepared
+(same version, next build) and the earlier release keeps every file.
+
+**Manage Existing Versions**: disable, restore, supersede and make current are **requests** recorded in HCG Store for
+the people who approve and publish (`POST /publishing/releases/:id/requests`, typed version to confirm). They change
+nothing by themselves. Supersede happens only at publication, in the same transaction, so a failed publication
+supersedes nothing; "compatible" scope keeps other platforms, architectures and channels; files are never deleted.
+
+**HCG UEM readiness**: the diagnostics include this device's description (OS, architecture, Maker version) marked
+"reported, not attested". Maker is not a device trust authority; uploads do not depend on HCG UEM. When HCG issues
+device-aware permissions, HCG Store decides them as it decides `store.publish` today.
+
 ## Connection diagnostics
 
-**Check connection** on the Ship to Store page (and `--store-status`) runs eleven separate checks instead of one
-status, shows HCG Store's actual answer to each request, and says what to do and who does it. It is read-only: no
-draft is created and nothing is uploaded. **Copy diagnostics** copies them as text; the copy (like the page) contains no
-access token, refresh token, cookie or password (`SecretRedactor.RedactCredentials`). Signed out, opening the page
-contacts no Store; **Check connection** still runs the server checks.
+**Check connection** (and `--store-status`) runs ten separate checks against the publishing contract as deployed,
+shows HCG Store's actual answer to each request, and says what to do and who does it. It is read-only: no draft is
+created and nothing is uploaded. **Copy diagnostics** copies them as text; the copy (like the page) contains no access
+token, refresh token, cookie or password (`SecretRedactor.RedactCredentials`). Signed out, opening the page contacts no
+Store; **Check connection** still runs the public checks. The token is sent only to a server that answered as HCG Store.
 
 | # | Check | How it is decided |
 |---|---|---|
-| 1 | Store server connectivity | `GET /api/v1/health` (public). DNS, TLS, connection, timeout and "a web page answered" are told apart |
-| 2 | API version compatibility | `GET /api/v1/publishing/status`: publishing API version and the oldest client it accepts. A server without the status API (HCG Store 835ac1a, deployed) is named as such |
-| 3 | HCG Connect authentication | The Account page's PKCE session, and an access token obtained from it |
-| 4 | Desktop client registration | Maker's own registration (`hcg-executable-maker-desktop-production`, client `fb9b6edf-…`), the token's `client_id` equal to it (a token issued to HCG Store Manager or HCG Store's web client is refused), and HCG Store's answer that the client is registered (`HCG_STORE_PUBLISHING_CLIENT_IDS`) |
-| 5 | Token validity | Expiry and scopes on this Mac; signature, issuer and expiry as HCG Store verified them (valid / expired / invalid / unverifiable) |
-| 6 | Product publishing permissions | HCG's personal grant `store.publish` on `hcg.store`, as HCG Store asked HCG (a purchase or a role never counts) |
-| 7 | Authorized product availability | The actual catalogue HCG lets this account submit to (`GET /api/v1/publishing/products`), with editions |
-| 8 | Private draft creation | HCG Store's stage state plus the permission (nothing is created to test it) |
-| 9 | Artifact upload availability | Same, with the chunk size and file size limit |
-| 10 | Release submission | Same; a person approves in HCG Store |
-| 11 | Public publication | Shown as **Off** when HCG Store has it switched off. Uploading and leaving a release waiting privately does not need it; Maker never publishes |
+| 1 | Server availability | `GET /api/v1/health` (public). DNS, TLS, connection, timeout and "a web page answered" are told apart |
+| 2 | Live API version | `GET /api/v1/publishing/capabilities` → `apiVersion` and the capability flags (it needs a publishing permission) |
+| 3 | Publishing mode | `health.publishing` (`disabled` · `uploads` · `enabled`), else whoami/capabilities `publishingMode` |
+| 4 | Private upload availability | The mode, the Store's `uploads` flag and the permission; chunk size and size limit |
+| 5 | HCG Connect authentication | The Account page's PKCE session; HCG Store verifying the token (whoami); expiry on this Mac |
+| 6 | Executable Maker client authorization | The token's `client_id` equals Maker's issued client (`hcg-executable-maker-desktop-production`, `fb9b6edf-…`), never HCG Store Manager's; HCG Store accepting it (a refusal names `HCG_STORE_PUBLISHING_CLIENT_IDS`; the client ID itself is never changed) |
+| 7 | Central publisher permission | HCG's personal grant `store.publish` on `hcg.store`, as HCG Store asked HCG (capabilities 403 `not_publisher` = not granted) |
+| 8 | Authorized catalogue | `GET /api/v1/publishing/products`, with editions and metadata |
+| 9 | Release Manager connectivity | `GET /api/v1/publishing/manager`: releases listed and the audit trail state |
+| 10 | Public publication | **Off** unless HCG Store states it on. Not needed for private uploads; Maker never publishes |
 
-### "Publishing switched off" (0.4.0) and private submissions
-
-HCG Store as deployed (835ac1a) has `HCG_STORE_PUBLISHING=disabled`, which switches off private drafts and uploads
-along with publication. HCG Store branch `claude/private-submissions` adds `HCG_STORE_PUBLISHING=submissions`: private
-drafts, resumable uploads, Release Passports, submission and review work, while public publication answers
-`publication_disabled` and nothing is delivered. It also adds the status API these diagnostics read. Turning it on in
-production is HCG Store's decision (its `docs/PUBLISHING.md` §6a); nothing on the Mac changes it.
+Live production (checked 26 Nov 2026 without signing in): `health` answers `status ok, mode production, hcgConnect
+configured, payments disabled, protectedDownloads disabled, publishing uploads`; every publishing route needs a
+sign-in. Checks 5–9 therefore need the physical test on the Mac (see
+[DISTRIBUTION-STUDIO-PRODUCTION-TEST.md](DISTRIBUTION-STUDIO-PRODUCTION-TEST.md)).
 
 ### Products and editions
 
@@ -165,20 +214,16 @@ products are selected, never re-created; **Create a draft product** is only for 
 
 ## Not available yet (blockers)
 
-1. **Private submissions are not switched on in production.** The HCG Store server runs (835ac1a on Fly.io) with
-   `HCG_STORE_PUBLISHING=disabled`; every publishing route answers `publishing_disabled`, which 0.4.0 showed as
-   "Publishing switched off". The private-submissions mode and status API are on HCG Store branch
-   `claude/private-submissions`, not merged or deployed; deploying and setting `HCG_STORE_PUBLISHING=submissions` is
-   the founder's decision (HCG Store `docs/PUBLISHING.md` §6a). The last HCG Store deploys failed (Fly API token 401).
-2. **Central permission IDs** for publishing and release approval are not issued by HCG, and the entitlement API must
-   serve them (`HCG_STORE_PUBLISHER_CENTRAL_ID`, `HCG_STORE_RELEASE_APPROVER_CENTRAL_ID`). The deployed `/check`
-   only answers for `feature_key: "download"`, so against live HCG publishing fails closed until then. Diagnostics
-   check 6 names this.
-3. **HCG Store must allow Executable Maker's client**: HCG issued `fb9b6edf-2bfc-4b5e-a354-dbb1af697029`; the Store's
-   `HCG_STORE_PUBLISHING_CLIENT_IDS` must list it (commented in its `fly.toml`). Diagnostics check 4 names this.
-4. **Release record (founder question).** Decision D6 keeps releases with HCG Store, so nothing is needed from the
-   main HCG backend. Still open: whether a release approved in HCG Store must also be added to the Store's
-   founder-reviewed `catalogue/releases.json` before public delivery (`web-hcg-store/docs/PUBLISHING.md` §7).
-5. HCG Repo does not list Store-held packages yet (`web-hcg-store/docs/PUBLISHING.md` §5).
-
-Until 1–3 are done Ship to Store works only against a TEST Store; the diagnostics show which of them is missing.
+1. **Distribution Studio's Store additions are not deployed.** Production HCG Store runs `HCG_STORE_PUBLISHING=uploads`
+   (private drafts and uploads on, approval and publication off). Official product metadata in the product list,
+   publication requests, compatible supersede and availability requests are on HCG Store branch
+   `claude/distribution-studio-api` (not merged or deployed; HCG Store `docs/PUBLISHING.md`, founder review). Until
+   then Maker shows names and editions from the product list plus the public release resolution, sends no publication
+   or availability request (it says so), and everything else works.
+2. **Signed-in production checks** (client authorization, `store.publish`, catalogue, Release Manager) can only be run
+   with a real HCG sign-in on the Mac: see the production test plan. Whether HCG Store lists Maker's client in
+   `HCG_STORE_PUBLISHING_CLIENT_IDS`, and whether HCG has granted `store.publish`, is shown by checks 6 and 7.
+3. **Release record (founder question).** Decision D6 keeps releases with HCG Store. Whether an approved release must
+   also be added to the Store's founder-reviewed `catalogue/releases.json` before public delivery is open
+   (`web-hcg-store/docs/PUBLISHING.md` §7).
+4. HCG Repo does not list Store-held packages yet (`web-hcg-store/docs/PUBLISHING.md` §5).

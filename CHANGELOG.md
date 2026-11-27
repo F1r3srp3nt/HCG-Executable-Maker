@@ -2,6 +2,81 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Distribution Studio (Ship to Store)
+
+### Added
+- **Distribution Studio**: the Ship to Store page (the sidebar entry keeps its name), with the HCG logo:
+  - connection;
+  - the products you may manage;
+  - an operation selector: **Add New Update**, **Add New Product**, **Add to Listed Product**, **Manage Existing
+    Versions**;
+  - release history and version comparison;
+  - release configuration;
+  - artifacts;
+  - upload to private staging;
+  - the **Synchronization Center**.
+
+  Opening it uploads nothing and changes no release.
+- **Catalogue from HCG Store**:
+  - shows official name, icon, identifier, category, status, platforms, editions and current release;
+  - search, status and platform filters, and **Refresh**;
+  - with the Store's `productMetadata` capability the metadata comes from the product list; otherwise the summary,
+    status and platforms come from the Store's public release resolution;
+  - icons are loaded only from the Store's own origin, and nothing is kept as a local copy.
+- **Version comparison** (`DistributionStudio.Compare`):
+  - shows the current published release (the one the Store names current, else the newest published), the latest
+    private draft, the latest local build, the proposed version, and the published platforms and architectures;
+  - refuses duplicates and names the draft a retry continues;
+  - flags revisions, downgrades, identical bytes already in the Store, and platform overlaps;
+  - a newer local build never disables anything.
+- **Metadata discrepancies**: a typed version, build or architecture that differs from the Release Passport or the
+  package is shown and recorded in the draft's compatibility notes. Verified facts are never overwritten.
+- **Artifact sources**: latest build, Build History, Artifact Vault, files from disk, several per draft, no rebuild.
+  Each file is labelled **Maker build** or **Selected manually**, and provenance comes only from a passport of the
+  exact bytes.
+- **Publication request**: "Make this the current release after approval and publication" and "Supersede previous
+  compatible release". Sent only to a Store with the `publicationRequests` capability, and applied by HCG Store only
+  when a person publishes.
+- **Availability requests**: disable, restore, supersede and make current, with the version typed to confirm. HCG Store
+  records them for the people who approve and publish; they change nothing.
+- **Add to Listed Product**: an open draft takes the files. A published release is never changed; a new revision is
+  prepared instead (same version, next build).
+- **Add New Product**: a private product draft (descriptive fields only to a Store that takes them), plus a central
+  **registration request** for HCG (name, description, category, platforms, edition, initial version, icon and banner
+  with SHA-256). It is not uploaded.
+- **Upload transfer speed**, plus **Open in Store Release Manager** and the website's Release Manager page.
+- **Command line**: `--store-catalogue`, `--store-history`, `--store-compare` (exit 6 when the Store would refuse),
+  `--store-request`, `--make-current`, `--supersede-compatible`, `--add-to-release`, `--compat-note`, and
+  `--description`, `--category`, `--platform` and `--registration-out` for `--draft-product`.
+- **HCG UEM readiness**: the diagnostics show this device's description marked "reported, not attested". Maker is not a
+  device trust authority.
+- `tools/ci/distribution-studio-e2e.sh` and the CI job `distribution-studio`: acceptance tests 1–18 against the TEST
+  HCG Store with the real catalogue (HCG Mail), genuine Windows x64 and ARM64 executables, and screenshots of the page.
+- `docs/DISTRIBUTION-STUDIO-PRODUCTION-TEST.md`: the controlled production test on the MacBook Pro (one private
+  draft, nothing published).
+
+### Changed
+- **Connection diagnostics follow the live HCG Store contract**. Production has no `/publishing/status`; it answers
+  `401` there. There are now ten checks:
+  - server availability;
+  - live API version;
+  - publishing mode (`disabled` · `uploads` · `enabled`);
+  - private upload availability;
+  - HCG Connect authentication;
+  - Executable Maker client authorization (the issued client `fb9b6edf-…`, never replaced; a Store refusal names
+    `HCG_STORE_PUBLISHING_CLIENT_IDS`);
+  - central publisher permission;
+  - authorized catalogue;
+  - Release Manager connectivity;
+  - public publication.
+
+  They are read from `health`, `whoami`, `capabilities`, `products` and `manager`, and capability flags are never
+  assumed. When everything is OK the diagnostics fold away.
+
+### Removed
+- `tools/ci/ship-to-store-private-e2e.sh` and the CI job `ship-to-store-private`. They targeted the deleted HCG Store
+  branch `claude/private-submissions`; production uses `uploads` mode instead.
+
 ## [Unreleased] — Ship to Store connection repair
 
 ### Added

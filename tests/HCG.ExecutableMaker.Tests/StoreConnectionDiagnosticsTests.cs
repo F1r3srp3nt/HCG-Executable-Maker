@@ -9,8 +9,9 @@ using Xunit;
 namespace HCG.ExecutableMaker.Tests;
 
 /// <summary>
-/// Ship to Store connection diagnostics: eleven separate checks instead of one "Publishing switched off", with HCG Store's
-/// actual answers, what to do, and nothing secret in what is shown or copied.
+/// Distribution Studio connection diagnostics against HCG Store's live publishing contract (health, whoami, capabilities,
+/// products, Release Manager): ten separate checks with HCG Store's actual answers, what to do, and nothing secret in what
+/// is shown or copied.
 /// </summary>
 public class StoreConnectionDiagnosticsTests
 {
@@ -30,6 +31,7 @@ public class StoreConnectionDiagnosticsTests
 
     private static HttpResponseMessage Json(int status, object body) =>
         new((HttpStatusCode)status) { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
+    private static HttpResponseMessage Error(int status, string code, string message) => Json(status, new { error = new { code, message } });
 
     /// <summary>An access token shaped like HCG Connect's (unsigned here: HCG Store verifies the real ones).</summary>
     private static string Token(string clientId, long? exp = null, string scope = "openid email profile")
@@ -38,39 +40,38 @@ public class StoreConnectionDiagnosticsTests
         return $"{B64(new { alg = "ES256" })}.{B64(new { sub = "user-1", email = "dev@example.test", client_id = clientId, scope, exp = exp ?? DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds() })}.c2lnbmF0dXJl";
     }
 
-    private static readonly object Health = new { status = "ok", mode = "production", hcgConnect = "configured", entitlementAuthority = "hcg-ecosystem", payments = "disabled", protectedDownloads = "disabled" };
+    /// <summary>The live production health answer (store.hakmicapitalgroup.com, 26 Nov 2026).</summary>
+    private static object Health(string publishing = "uploads") => new { status = "ok", mode = "production", hcgConnect = "configured", entitlementAuthority = "hcg-ecosystem", payments = "disabled", protectedDownloads = "disabled", publishing };
 
-    private static object Status(string publishing, object? caller) => new
+    private static object Flags(string mode, bool studio = true) => new
     {
-        apiVersion = 1, minimumClientApiVersion = 1, features = new[] { "status", "private-submissions" }, server = new { mode = "production" }, publishing,
-        hcgConnect = new { configured = true, issuer = "https://example.supabase.co/auth/v1" }, desktopClients = new { registered = 1 },
-        permissions = new { scope = "hcg.store", submit = "store.publish", approve = "store.release.approve", publish = (string?)null },
-        stages = new
-        {
-            draftCreation = Stage(publishing != "disabled"), artifactUpload = Stage(publishing != "disabled"), passportAttachment = Stage(publishing != "disabled"),
-            releaseSubmission = Stage(publishing != "disabled"), approval = Stage(publishing != "disabled", "browser"),
-            publicPublication = new { available = publishing == "enabled", where = "browser", reason = publishing == "enabled" ? null : "Public publication is switched off on this HCG Store server (HCG_STORE_PUBLISHING=submissions)." },
-        },
-        limits = new { maxUploadBytes = 2048L * 1048576, chunkBytes = 8 * 1048576, uploadUrlTtlSeconds = 900 },
-        caller,
+        products = true, drafts = true, uploads = true, resumableUploads = true, passports = true, submission = true,
+        approval = mode == "enabled", publication = mode == "enabled", publicDelivery = false, offers = false,
+        productMetadata = studio, publicationRequests = studio, availabilityRequests = studio, supersedeCompatible = studio, withdraw = studio,
     };
-    private static object Stage(bool on, string where = "app") => new { available = on, where, reason = on ? null : "Ship to Store is switched off on this HCG Store server (HCG_STORE_PUBLISHING=disabled)." };
-
-    private static object Caller(string token = "valid", string? clientId = null, bool registered = true, string submit = "granted", string? reason = null) => new
-    {
-        token, reason, sub = "user-1", email = "dev@example.test", expiresAt = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds(), scopes = new[] { "openid", "email", "profile" },
-        clientId = clientId ?? Maker.ClientId, clientRegistered = registered, clientReason = registered ? null : "This HCG Connect client is not registered for publishing on this Store (HCG_STORE_PUBLISHING_CLIENT_IDS).",
-        permissions = new { submit, approve = "not-granted", publish = "switched-off" }, authorizedProducts = submit == "granted" ? 2 : (int?)null,
-    };
+    private static object WhoAmI(string mode = "uploads") => new { sub = "user-1", email = "dev@example.test", via = "desktop", publisherPermission = "store.publish", approverPermission = (string?)null, maxUploadBytes = 2048L * 1048576, chunkBytes = 8 * 1048576, publishingMode = mode, capabilities = Flags(mode) };
+    private static object Caps(string mode = "uploads", bool studio = true) => new { apiVersion = 1, maxUploadBytes = 2048L * 1048576, chunkBytes = 8 * 1048576, uploadUrlTtlSeconds = 900, approvalAndPublication = "browser-only", publishingMode = mode, capabilities = Flags(mode, studio) };
 
     private static readonly object Products = new
     {
         products = new object[]
         {
-            new { id = "hcg-mail", title = "HCG Mail", source = "catalogue", editions = new[] { new { id = "windows-desktop", name = "Windows", platforms = new[] { "windows" } }, new { id = "macos", name = "macOS", platforms = new[] { "macos" } } } },
+            new { id = "hcg-mail", title = "HCG Mail", source = "catalogue", editions = new[] { new { id = "windows-desktop", name = "Windows", platforms = new[] { "windows" } }, new { id = "macos", name = "macOS", platforms = new[] { "macos" } } }, icon = "https://store.hakmicapitalgroup.com/media/products/hcg-mail/icon-256.webp", category = "communication" },
             new { id = "hcg-executable-maker", title = "HCG Executable Maker", source = "catalogue", editions = Array.Empty<object>() },
         },
     };
+    private static readonly object Manager = new { releases = new[] { new { id = "rel-0000000000000001", productId = "hcg-mail", version = "1.0.0", build = "1", status = "draft", stage = "uploaded", files = 1 } }, auditIntact = true };
+
+    private static Func<HttpRequestMessage, HttpResponseMessage> Live(string mode = "uploads", Func<string, HttpResponseMessage?>? over = null) => req =>
+        over?.Invoke(req.RequestUri!.AbsolutePath) ?? req.RequestUri!.AbsolutePath switch
+        {
+            "/api/v1/health" => Json(200, Health(mode)),
+            "/api/v1/publishing/whoami" => Json(200, WhoAmI(mode)),
+            "/api/v1/publishing/capabilities" => Json(200, Caps(mode)),
+            "/api/v1/publishing/products" => Json(200, Products),
+            "/api/v1/publishing/manager" => Json(200, Manager),
+            _ => Error(404, "not_found", "Not found."),
+        };
 
     private static async Task<(StoreDiagnosticsReport Report, Routes Http)> Run(Func<HttpRequestMessage, HttpResponseMessage> answer, string? token, bool signedIn = true)
     {
@@ -80,102 +81,110 @@ public class StoreConnectionDiagnosticsTests
         return (await StoreConnectionDiagnostics.RunAsync(client, ctx, _ => Task.FromResult(token)), http);
     }
 
-    private static readonly string[] Ids = ["connectivity", "api", "auth", "client", "token", "permissions", "products", "draft", "upload", "submission", "publication"];
-
     [Fact]
-    public async Task The_deployed_server_with_publishing_switched_off_gets_eleven_separate_findings_not_one_generic_status()
-    {
-        // HCG Store as deployed today (835ac1a): health answers; every publishing route, including status, answers 404 publishing_disabled.
-        var (r, _) = await Run(req => req.RequestUri!.AbsolutePath == "/api/v1/health" ? Json(200, Health)
-            : Json(404, new { error = new { code = "publishing_disabled", message = "Publishing is not enabled on this Store." } }), Token(Maker.ClientId!));
-        Assert.Equal(Ids, r.Checks.Select(c => c.Id));
-        Assert.Equal(StoreCheckState.Passed, r["connectivity"].State);
-        Assert.Contains("mode production", r["connectivity"].Summary);
-        Assert.Equal(StoreCheckState.Warning, r["api"].State);
-        Assert.Contains("predates the status API", r["api"].Summary);
-        Assert.Equal(StoreCheckState.Passed, r["auth"].State);
-        Assert.Contains("hcg-executable-maker-desktop-production", r["client"].Summary);
-        Assert.Equal(StoreCheckState.Off, r["products"].State);
-        foreach (var id in new[] { "draft", "upload", "submission" })
-        {
-            Assert.Equal(StoreCheckState.Failed, r[id].State);
-            Assert.Contains("publishing_disabled", r[id].Summary);
-            Assert.Contains("HCG_STORE_PUBLISHING=submissions", r[id].Action);
-            Assert.Equal("HCG Store administrator", r[id].WhoActs);
-            Assert.Contains("GET /api/v1/publishing/status", r[id].Response);   // the server's actual answer is shown
-        }
-        Assert.Equal(StoreCheckState.Off, r["publication"].State);
-        Assert.False(r.CanUpload);
-        Assert.Equal("error", r.Headline.Tone);
-    }
-
-    [Fact]
-    public async Task Private_submissions_with_publication_off_are_ready_to_upload_and_list_the_authorised_products()
+    public async Task Uploads_mode_with_the_issued_client_and_permission_is_ready_and_states_every_capability()
     {
         var token = Token(Maker.ClientId!);
-        var (r, http) = await Run(req => req.RequestUri!.AbsolutePath switch
-        {
-            "/api/v1/health" => Json(200, Health),
-            "/api/v1/publishing/status" => Json(200, Status("submissions", Caller())),
-            "/api/v1/publishing/products" => Json(200, Products),
-            _ => Json(404, new { }),
-        }, token);
-        Assert.All(Ids.Except(["publication"]), id => Assert.Equal(StoreCheckState.Passed, r[id].State));
+        var (r, http) = await Run(Live(), token);
+        Assert.Equal(StoreConnectionDiagnostics.CheckIds, r.Checks.Select(c => c.Id));
+        Assert.All(r.Checks.Where(c => c.Id != "publication"), c => Assert.Equal(StoreCheckState.Passed, c.State));
         Assert.Equal(StoreCheckState.Off, r["publication"].State);
         Assert.True(r.CanUpload);
         Assert.Equal(("Ready to upload private drafts", "success"), r.Headline);
-        Assert.Equal(["hcg-mail", "hcg-executable-maker"], r.Products.Select(p => p.Id));
-        Assert.Contains("HCG Mail (2 editions)", r["products"].Summary);
+        Assert.Equal("uploads", r.PublishingMode);
+        Assert.Contains("v1", r["api"].Summary);
+        Assert.Contains("uploads: private drafts", r["mode"].Summary);
+        Assert.Contains("hcg-executable-maker-desktop-production", r["client"].Summary);
+        Assert.Contains(HcgConnectConfiguration.ProductionClientId, r["client"].Summary);
         Assert.Contains("8 MB chunks", r["upload"].Summary);
-        // The health check is public; the token goes only to the calls that need it, never anywhere else.
+        Assert.Contains("HCG Mail (2 editions)", r["products"].Summary);
+        Assert.Contains("1 release(s)", r["manager"].Summary);
+        Assert.Equal(["hcg-mail", "hcg-executable-maker"], r.Products.Select(p => p.Id));
+        Assert.Equal("communication", r.Products[0].Category);
+        // The health check is public; the token goes only to the publishing calls.
         Assert.Contains(http.Seen, s => s.Path == "/api/v1/health" && s.Bearer is null);
-        Assert.Contains(http.Seen, s => s.Path == "/api/v1/publishing/status" && s.Bearer == token);
+        Assert.All(http.Seen.Where(s => s.Path.StartsWith("/api/v1/publishing/")), s => Assert.Equal(token, s.Bearer));
+        Assert.DoesNotContain(http.Seen, s => s.Path == "/api/v1/publishing/status");
+    }
+
+    [Fact]
+    public async Task Disabled_publishing_is_named_with_who_fixes_it_and_nothing_is_uploaded()
+    {
+        var (r, _) = await Run(Live("disabled", path => path == "/api/v1/health" ? null : Error(404, "publishing_disabled", "Publishing is not enabled on this Store.")), Token(Maker.ClientId!));
+        Assert.Equal(StoreCheckState.Failed, r["mode"].State);
+        Assert.Contains("HCG_STORE_PUBLISHING=uploads", r["mode"].Action);
+        Assert.Equal("HCG Store administrator", r["mode"].WhoActs);
+        Assert.Equal(StoreCheckState.Failed, r["upload"].State);
+        Assert.False(r.CanUpload);
+    }
+
+    [Fact]
+    public async Task Disabled_public_publication_does_not_block_authorised_private_uploads()
+    {
+        var (r, _) = await Run(Live("uploads"), Token(Maker.ClientId!));
+        Assert.Equal(StoreCheckState.Off, r["publication"].State);
+        Assert.Equal(StoreCheckState.Passed, r["upload"].State);
+        Assert.True(r.CanUpload);
+        var (enabled, _) = await Run(Live("enabled"), Token(Maker.ClientId!));
+        Assert.Equal(StoreCheckState.Passed, enabled["publication"].State);
     }
 
     [Fact]
     public async Task A_token_issued_to_another_application_is_never_used_as_Makers_own()
     {
-        var (r, _) = await Run(req => req.RequestUri!.AbsolutePath switch
-        {
-            "/api/v1/health" => Json(200, Health),
-            "/api/v1/publishing/status" => Json(200, Status("submissions", Caller(clientId: StoreManagerClient))),
-            _ => Json(200, Products),
-        }, Token(StoreManagerClient));
+        var (r, _) = await Run(Live(), Token(StoreManagerClient));
         Assert.Equal(StoreCheckState.Failed, r["client"].State);
         Assert.Contains(StoreManagerClient, r["client"].Summary);
         Assert.Contains("never HCG Store Manager's", r["client"].Summary);
         Assert.False(r.CanUpload);
     }
 
-    [Theory]
-    [InlineData("client", "HCG Store administrator")]
-    [InlineData("expired", "you")]
-    [InlineData("permission", "HCG")]
-    public async Task Each_refusal_names_its_cause_and_who_fixes_it(string cause, string who)
+    [Fact]
+    public async Task A_Store_that_does_not_accept_Makers_client_says_so_and_keeps_the_issued_client_ID()
     {
-        var caller = cause switch
-        {
-            "client" => Caller(registered: false),
-            "expired" => Caller(token: "expired", reason: "The access token has expired."),
-            _ => Caller(submit: "not-granted"),
-        };
-        var (r, _) = await Run(req => req.RequestUri!.AbsolutePath switch
-        {
-            "/api/v1/health" => Json(200, Health),
-            "/api/v1/publishing/status" => Json(200, Status("submissions", caller)),
-            "/api/v1/publishing/products" => cause == "permission" ? Json(200, new { products = Array.Empty<object>() }) : Json(200, Products),
-            _ => Json(404, new { }),
-        }, Token(Maker.ClientId!));
-        var check = cause switch { "client" => r["client"], "expired" => r["token"], _ => r["permissions"] };
-        Assert.Equal(StoreCheckState.Failed, check.State);
-        Assert.Equal(who, check.WhoActs);
-        Assert.False(string.IsNullOrWhiteSpace(check.Action));
-        Assert.Contains(cause switch { "client" => "HCG_STORE_PUBLISHING_CLIENT_IDS", "expired" => "expired", _ => "store.publish" }, check.Summary + check.Action);
+        var (r, _) = await Run(Live(over: p => p == "/api/v1/publishing/whoami" ? Error(401, "invalid_token", "HCG Connect did not confirm this sign-in: This application is not allowed to publish to HCG Store.") : null), Token(Maker.ClientId!));
+        Assert.Equal(StoreCheckState.Failed, r["client"].State);
+        Assert.Equal("HCG Store administrator", r["client"].WhoActs);
+        Assert.Contains("HCG_STORE_PUBLISHING_CLIENT_IDS", r["client"].Action);
+        Assert.Contains(HcgConnectConfiguration.ProductionClientId, r["client"].Action);
+        Assert.Contains("stays as HCG issued it", r["client"].Action);
+        Assert.NotEqual(StoreCheckState.Passed, r["permission"].State);
         Assert.False(r.CanUpload);
     }
 
     [Fact]
-    public async Task An_unreachable_server_a_web_page_and_a_newer_API_are_told_apart()
+    public async Task An_account_without_the_central_publisher_permission_cannot_upload()
+    {
+        var (r, _) = await Run(Live(over: p => p switch
+        {
+            "/api/v1/publishing/capabilities" => Error(403, "not_publisher", "HCG has not granted your account a publishing permission."),
+            "/api/v1/publishing/products" => Json(200, new { products = Array.Empty<object>() }),
+            _ => null,
+        }), Token(Maker.ClientId!));
+        Assert.Equal(StoreCheckState.Failed, r["permission"].State);
+        Assert.Equal("HCG", r["permission"].WhoActs);
+        Assert.Contains("store.publish", r["permission"].Action);
+        Assert.Equal(StoreCheckState.Failed, r["products"].State);
+        Assert.Equal(StoreCheckState.Failed, r["upload"].State);
+        Assert.False(r.CanUpload);
+    }
+
+    [Fact]
+    public async Task An_expired_sign_in_is_named_and_a_newer_API_asks_for_an_update()
+    {
+        var (expired, _) = await Run(Live(), Token(Maker.ClientId!, exp: DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds()));
+        Assert.Equal(StoreCheckState.Failed, expired["auth"].State);
+        Assert.Contains("expired", expired["auth"].Summary);
+
+        var newer = JsonSerializer.SerializeToNode(Caps())!.AsObject();
+        newer["apiVersion"] = 2;
+        var (api, _) = await Run(Live(over: p => p == "/api/v1/publishing/capabilities" ? Json(200, newer) : null), Token(Maker.ClientId!));
+        Assert.Equal(StoreCheckState.Failed, api["api"].State);
+        Assert.Contains("Update HCG Executable Maker", api["api"].Action);
+    }
+
+    [Fact]
+    public async Task An_unreachable_server_and_a_web_page_are_told_apart()
     {
         var (dns, _) = await Run(_ => throw new HttpRequestException(HttpRequestError.NameResolutionError, "No such host is known."), Token(Maker.ClientId!));
         Assert.Equal(StoreCheckState.Failed, dns["connectivity"].State);
@@ -184,53 +193,59 @@ public class StoreConnectionDiagnosticsTests
 
         var (page, _) = await Run(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<!doctype html><title>HCG Store</title>", Encoding.UTF8, "text/html") }, Token(Maker.ClientId!));
         Assert.Contains("web page", page["connectivity"].Summary);
-
-        var newer = JsonSerializer.SerializeToNode(Status("submissions", Caller()))!.AsObject();
-        newer["minimumClientApiVersion"] = 2;
-        var (api, _) = await Run(req => req.RequestUri!.AbsolutePath == "/api/v1/health" ? Json(200, Health) : Json(200, newer), Token(Maker.ClientId!));
-        Assert.Equal(StoreCheckState.Failed, api["api"].State);
-        Assert.Contains("Update HCG Executable Maker", api["api"].Action);
     }
 
     [Fact]
-    public async Task Signed_out_the_server_is_still_checked_and_sign_in_is_the_named_step()
+    public async Task Signed_out_the_public_server_facts_are_still_shown_and_sign_in_is_the_named_step()
     {
-        var (r, http) = await Run(req => req.RequestUri!.AbsolutePath switch
-        {
-            "/api/v1/health" => Json(200, Health),
-            "/api/v1/publishing/status" => Json(200, Status("submissions", null)),
-            _ => Json(401, new { error = new { code = "sign_in_required", message = "Sign in with HCG Connect." } }),
-        }, token: null, signedIn: false);
+        var (r, http) = await Run(Live(), token: null, signedIn: false);
         Assert.Equal(StoreCheckState.Passed, r["connectivity"].State);
+        Assert.Equal(StoreCheckState.Passed, r["mode"].State);
+        Assert.Equal(StoreCheckState.Warning, r["upload"].State);
         Assert.Equal(StoreCheckState.Failed, r["auth"].State);
         Assert.Contains("Account page", r["auth"].Action);
-        Assert.Equal(StoreCheckState.NotChecked, r["token"].State);
+        Assert.Equal(StoreCheckState.NotChecked, r["permission"].State);
+        Assert.Equal(["/api/v1/health"], http.Seen.Select(s => s.Path));
         Assert.All(http.Seen, s => Assert.Null(s.Bearer));
+    }
+
+    [Fact]
+    public async Task An_older_Store_without_capability_flags_is_read_without_assuming_them()
+    {
+        var oldCaps = new { apiVersion = 1, maxUploadBytes = 1L << 30, chunkBytes = 8 << 20, uploadUrlTtlSeconds = 900 };
+        var oldWho = new { sub = "user-1", email = "dev@example.test", via = "desktop", publisherPermission = "store.publish", maxUploadBytes = 1L << 30, chunkBytes = 8 << 20 };
+        var (r, _) = await Run(Live(over: p => p switch
+        {
+            "/api/v1/health" => Json(200, new { status = "ok", mode = "production", hcgConnect = "configured" }),
+            "/api/v1/publishing/whoami" => Json(200, oldWho),
+            "/api/v1/publishing/capabilities" => Json(200, oldCaps),
+            _ => null,
+        }), Token(Maker.ClientId!));
+        Assert.Null(r.Flags);
+        Assert.Equal(StoreCheckState.Warning, r["mode"].State);
+        Assert.Contains("none stated", r["api"].Summary);
+        Assert.Equal(StoreCheckState.Off, r["publication"].State);
+        Assert.True(r.CanUpload);
     }
 
     [Fact]
     public async Task Copied_diagnostics_contain_no_token_cookie_or_credential_but_keep_ordinary_words()
     {
         var token = Token(Maker.ClientId!);
-        var leaky = JsonSerializer.SerializeToNode(Status("submissions", Caller()))!.AsObject();
+        var leaky = JsonSerializer.SerializeToNode(Health())!.AsObject();
         leaky["debug"] = new System.Text.Json.Nodes.JsonObject { ["access_token"] = token, ["refresh_token"] = "r-0123456789abcdef", ["cookie"] = "__Host-hcg_store_session=abcdef0123456789" };
-        var (r, _) = await Run(req => req.RequestUri!.AbsolutePath switch
-        {
-            "/api/v1/health" => Json(200, Health),
-            "/api/v1/publishing/status" => Json(200, leaky),
-            "/api/v1/publishing/products" => Json(200, Products),
-            _ => Json(404, new { }),
-        }, token);
+        var (r, _) = await Run(Live(over: p => p == "/api/v1/health" ? Json(200, leaky) : null), token);
         var text = r.ToText();
         Assert.DoesNotContain(token, text);
         Assert.DoesNotContain(token.Split('.')[1], text);
         Assert.DoesNotContain("r-0123456789abcdef", text);
         Assert.DoesNotContain("abcdef0123456789", text);
-        // Redaction does not hide ordinary words that merely look like credential names.
         Assert.Contains("HCG Connect authentication: Signed in as dev@example.test", text);
         Assert.Contains("\"entitlementAuthority\":\"hcg-ecosystem\"", text);
-        Assert.Contains("[OK] Store server connectivity", text);
+        Assert.Contains("[OK] Server availability", text);
         Assert.Contains("[Off] Public publication", text);
+        Assert.Contains("publishing uploads", text);
+        Assert.Contains("Capabilities: products, drafts, uploads", text);
     }
 }
 
@@ -262,7 +277,7 @@ public class StoreDiagnosticsHardeningTests
         var report = await StoreConnectionDiagnostics.RunAsync(client, new(true, "dev@example.test", "Signed in.", HcgConnectConfiguration.Production), broken);
         Assert.Equal(StoreCheckState.Failed, report["auth"].State);
         Assert.Contains("keychain could not be written", report["auth"].Summary);
-        Assert.Equal(11, report.Checks.Count);
+        Assert.Equal(10, report.Checks.Count);
     }
 
     [Theory]
