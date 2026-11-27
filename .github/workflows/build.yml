@@ -871,6 +871,154 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  build-readiness-go:
+    name: Build Readiness — HCG Server-shaped Go helper contract (missing Go blocked, chosen per project, universal helper, launch; Homebrew install only with approval)
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/readiness-out
+      FIXTURE: tests/Fixtures/AgentHelperApp
+      # What an app opened from Finder gets: no shell PATH, so Go from a toolcache or a custom folder is not visible.
+      FINDER_PATH: /usr/bin:/bin:/usr/sbin:/sbin
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+
+      - name: A real Go 1.25 installed outside every place HCG looks automatically
+        run: |
+          mkdir -p "$OUT/screens"
+          GO_BIN="$(go env GOROOT)/bin/go"
+          echo "GO_BIN=$GO_BIN" >> "$GITHUB_ENV"
+          "$GO_BIN" version
+          PRE="$(ls /opt/homebrew/bin/go /usr/local/bin/go /usr/local/go/bin/go /opt/homebrew/opt/go/libexec/bin/go /usr/local/opt/go/libexec/bin/go "$HOME"/sdk/go*/bin/go 2>/dev/null | head -1 || true)"
+          echo "PRE_GO=$PRE" >> "$GITHUB_ENV"
+          echo "Go already in a standard location on this runner image: ${PRE:-none}"
+          ls -l /opt/homebrew/bin/brew /usr/local/bin/brew 2>&1 || true
+
+      - name: Build HCG and the UI driver
+        run: |
+          dotnet build tools/ui-driver -c Release
+          echo "DOTNET=$(command -v dotnet)" >> "$GITHUB_ENV"
+
+      - name: CLI — Go not reachable — the build is not ready, and the fixes are listed (nothing installed)
+        run: |
+          set -o pipefail
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          rc=0
+          env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/rd-missing" \
+            "$DOTNET" "$app" --build-readiness "$FIXTURE" --json "$OUT/readiness-missing.json" | tee "$OUT/readiness-missing.txt" || rc=$?
+          echo "exit code $rc"
+          grep -q '^swift: Ready' "$OUT/readiness-missing.txt"
+          grep -q '^lipo: Ready' "$OUT/readiness-missing.txt"
+          grep -q 'declared by macos/AgentHelperApp/AppPackaging.json › prebuild “Build the host agent (Go) as a universal helper” requires “go >= 1.25”' "$OUT/readiness-missing.txt"
+          if [ -n "$PRE_GO" ]; then
+            echo "This image already has Go at $PRE_GO: HCG must find it there (Finder-style launch)."
+            grep -q "^go: Ready" "$OUT/readiness-missing.txt"
+            grep -q "using $PRE_GO" "$OUT/readiness-missing.txt"
+          else
+            [ "$rc" = 5 ]
+            grep -q '^go: NotFound' "$OUT/readiness-missing.txt"
+            grep -q 'how to get it: Official Go download — https://go.dev/dl/' "$OUT/readiness-missing.txt"
+            if [ -x /opt/homebrew/bin/brew ]; then grep -q 'install (needs approval): Install with Homebrew (Apple Silicon) — /opt/homebrew/bin/brew install go' "$OUT/readiness-missing.txt"; fi
+            [ ! -e /opt/homebrew/bin/go ] && echo "Nothing was installed by the check."
+          fi
+
+      - name: CLI — a Go location chosen for all projects is verified, saved and used
+        run: |
+          set -o pipefail
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/rd-chosen" \
+            "$DOTNET" "$app" --build-readiness "$FIXTURE" --tool-path "go=$(dirname "$(dirname "$GO_BIN")")" | tee "$OUT/readiness-chosen.txt"
+          v="$("$GO_BIN" version | sed -E 's/.*go([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')"
+          grep -q "^Saved for all projects: Go $v at $GO_BIN" "$OUT/readiness-chosen.txt"
+          grep -q "^go: Ready" "$OUT/readiness-chosen.txt"
+          grep -q "using $GO_BIN (version $v; Chosen in HCG for all projects)" "$OUT/readiness-chosen.txt"
+          grep -q '^READY' "$OUT/readiness-chosen.txt"
+
+      - name: New Build wizard — Start Build stops before compiling, Go is chosen for this project, the build resumes
+        run: |
+          args=(--source "$FIXTURE" --package macos/AgentHelperApp --product AgentHelperApp --name "Agent Helper"
+                --bundle-id com.hakmicapital.agenthelper --version 1.0.0 --build-number 1 --arch universal --formats app,zip
+                --expect-contract-helpers Contents/Helpers/hcg-agent --confirm-contract
+                --output "$OUT/wizard" --screenshots "$OUT/screens" --prefix readiness)
+          if [ -z "$PRE_GO" ]; then args+=(--expect-readiness-blocker go --choose-tool "go=$GO_BIN"); fi
+          env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" TMPDIR="$TMPDIR" \
+            "$DOTNET" tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll "${args[@]}"
+          python3 - "$OUT/wizard/readiness-build.json" "${PRE_GO:-$GO_BIN}" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          go = d["ToolchainVersions"].get("go", "")
+          print("Go recorded by the build:", go)
+          assert sys.argv[2] in go, (go, sys.argv[2])
+          PY
+
+      - name: The universal helper is in the app, both slices run, and the launched app runs its host agent
+        run: |
+          app="$(find "$OUT/wizard/artifacts" -maxdepth 3 -name 'Agent Helper.app' -type d | head -1)"
+          h="$app/Contents/Helpers/hcg-agent"
+          ls -l "$h"
+          archs="$(lipo -archs "$h")"; echo "helper slices: $archs"
+          echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64
+          "$h" version | tee /dev/stderr | grep -qx "hcg-agent 1.0.0 (darwin/arm64)"
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then arch -x86_64 "$h" version | tee /dev/stderr | grep -qx "hcg-agent 1.0.0 (darwin/amd64)"
+          else echo "Rosetta is not installed on this runner: the x86_64 slice is verified with lipo and file only"; file "$h"; fi
+          codesign --verify --strict --deep --verbose=2 "$app"
+          rm -f "$TMPDIR/hcg-agent-helper-probe.txt"
+          tools/ui-driver/verify-macos-app.sh "$app" "$OUT/screens/launch-agent-helper.png" "arm64 x86_64"
+          echo "--- what the launched app's helper printed:"; cat "$TMPDIR/hcg-agent-helper-probe.txt"
+          grep -qx "helper=hcg-agent 1.0.0 (darwin/arm64)" "$TMPDIR/hcg-agent-helper-probe.txt"
+
+      - name: Install Dependency — refused without approval, then Homebrew installs Go only after --approve
+        run: |
+          set -o pipefail
+          if [ -n "$PRE_GO" ] || [ ! -x /opt/homebrew/bin/brew ] || [ -d /opt/homebrew/opt/go ]; then
+            echo "Homebrew Go is already installed or Homebrew is absent on this image: the install path is covered by unit tests only."; exit 0
+          fi
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          run() { env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/rd-install" "$DOTNET" "$app" --build-readiness "$FIXTURE" "$@"; }
+          rc=0; run --install go | tee "$OUT/install-unapproved.txt" || rc=$?
+          [ "$rc" = 4 ]
+          grep -q '^Install command (not run): /opt/homebrew/bin/brew install go$' "$OUT/install-unapproved.txt"
+          [ ! -e /opt/homebrew/bin/go ] && echo "Without --approve nothing was installed."
+          run --install go --approve | tee "$OUT/install-approved.txt"
+          grep -q '^go: Ready' <(sed -n '/^Installed. Checking again:/,$p' "$OUT/install-approved.txt")
+          grep -q 'using /opt/homebrew/bin/go (version .*Homebrew (Apple Silicon)' "$OUT/install-approved.txt"
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload Build Readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-readiness-go
+          path: |
+            ${{ github.workspace }}/readiness-out/screens
+            ${{ github.workspace }}/readiness-out/*.txt
+            ${{ github.workspace }}/readiness-out/*.json
+            ${{ github.workspace }}/readiness-out/wizard/*.json
+            ${{ github.workspace }}/readiness-out/wizard/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
   electron-macos:
     name: Electron — Presentation Studio through the New Build wizard (arm64 .app, zip, dmg; launch; packaged-app e2e)
     needs: test

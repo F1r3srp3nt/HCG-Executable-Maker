@@ -47,7 +47,8 @@ public sealed class BuildService(
     IAppPaths paths,
     TimeProvider time,
     ILogger<BuildService>? logger = null,
-    IExecutableLocator? executables = null)
+    IExecutableLocator? executables = null,
+    Readiness.BuildReadinessService? readiness = null)
 {
     private readonly IExecutableLocator _executables = executables ?? new ExecutableLocator();
     public const string OutputMarkerFile = ".hcg-build.json";
@@ -388,7 +389,8 @@ public sealed class BuildService(
                     var output = new StringBuilder();
                     var r = await worker.RunAsync(spec, (_, line) => { lock (output) output.AppendLine(line); }, ct).ConfigureAwait(false);
                     return (r.ExitCode, output.ToString());
-                }, scrub.Environment, overall.Token).ConfigureAwait(false);
+                }, scrub.Environment, overall.Token,
+                    readiness is null ? null : (name, minimum, ct) => readiness.ResolveForBuildAsync(name, minimum, request.Project.Id, ct)).ConfigureAwait(false);
                 if (toolError is not null)
                 {
                     Fail(BuildStatus.Failed, toolError);

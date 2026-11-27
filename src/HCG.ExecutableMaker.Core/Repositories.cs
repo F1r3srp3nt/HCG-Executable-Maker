@@ -45,6 +45,12 @@ public sealed record AppSettings
     /// <summary>App Store Connect API key ID (for altool --validate-app). The .p8 key stays in ~/.appstoreconnect/private_keys.</summary>
     public string? AppStoreConnectKeyId { get; init; }
     public string? AppStoreConnectIssuerId { get; init; }
+    /// <summary>Build Readiness: tool locations chosen for all projects ("go" → /usr/local/go/bin/go). Verified before saving.</summary>
+    public Dictionary<string, string>? ToolPaths { get; init; }
+    /// <summary>Reusable toolchain profiles (named sets of tool locations) that projects can use.</summary>
+    public List<ToolchainProfile>? ToolchainProfiles { get; init; }
+    /// <summary>Project ID → profile ID. A project without an entry uses <see cref="ToolPaths"/> and automatic detection.</summary>
+    public Dictionary<string, string>? ProjectToolchainProfiles { get; init; }
 }
 
 public interface ISettingsStore

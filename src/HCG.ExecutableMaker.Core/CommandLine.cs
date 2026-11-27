@@ -15,6 +15,7 @@ public static class CommandLine
     [
         "--toolchain-report", "--ship-to-store", "--release-passport", "--ship-to-repo", "--rootless-deb", "--rootless-deb-validate", "--xcode-mac",
         "--package-windows", "--windows-signing-doctor", "--authenticode-sign", "--mac-signing-doctor", "--impactor", "--hcg-session",
+        "--build-readiness",
     ];
 
     /// <summary>The command <paramref name="args"/> names; <see cref="MakerVersion"/> when only <c>--version</c> is given; null for the UI.</summary>

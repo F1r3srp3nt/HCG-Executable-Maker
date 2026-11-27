@@ -14,6 +14,8 @@
 //   Packaging contract (AppPackaging.json): --expect-contract-command "<argv as shown>" proves the command is shown and the
 //       build is refused until confirmed; --expect-contract-helpers Contents/Helpers/x[,…]; --confirm-contract ticks
 //       “Run these commands while building”.
+//   Build Readiness: --expect-readiness-blocker go proves Start Build stops before compiling and offers the fixes;
+//       --choose-tool go=/path/to/go then saves it in the project's toolchain profile and Start Build is pressed again.
 // Usage (Electron app, built with the project's own electron-builder workflow):
 //   dotnet run --project tools/ui-driver -- --electron --source <folder|zip> [--project <dir>] [--arch arm64|x64]
 //       [--formats app,zip,dmg | folder] [--expect-name N] [--expect-bundle-id ID] [--expect-version V] --output <dir> --screenshots <dir>
@@ -416,8 +418,34 @@ internal static partial class Program
         Check(!wizard.StartBuildCommand.CanExecute(null), "Build refused before trust is confirmed");
         wizard.TrustAcknowledged = true;
         Shot("build-summary");
-        await wizard.StartBuildCommand.ExecuteAsync(null);
+        // Build Readiness: with a required tool missing, Start Build is stopped before compilation and the panel offers
+        // the fixes; the tool is then chosen for this project (the Choose for this project… action) and Start Build resumes.
+        if (Arg("expect-readiness-blocker") is { } blocked)
+        {
+            await wizard.StartBuildCommand.ExecuteAsync(null);
+            var report = wizard.Readiness.Report;
+            foreach (var i in report?.Items ?? []) Log($"Readiness {i.Requirement.ToolId}: {i.State} — {i.Detail} [{string.Join(" | ", i.Install.Select(o => o.Label + ": " + (o.CommandLine ?? o.Url)))}]");
+            Check(!wizard.HasBuildStarted && wizard.ShowReadiness, "Start Build stops before compiling and shows Build Readiness");
+            var item = report?.Blockers.FirstOrDefault(b => b.Requirement.ToolId == blocked);
+            Check(item is not null, $"Build Readiness names {blocked} as missing");
+            Check(item?.OfficialUrl is { Length: > 0 }, $"{blocked}: the official download is offered");
+            if (OperatingSystem.IsMacOS() && File.Exists("/opt/homebrew/bin/brew"))
+                Check(item?.Install.Any(o => o.Runnable && o.CommandLine == $"/opt/homebrew/bin/brew install {blocked}") == true, $"{blocked}: Install with Homebrew (Apple Silicon) is offered, to run only after approval");
+            ShotScrolledToEnd("readiness-blocked");
+            if (Arg("choose-tool") is { } choose && choose.Split('=', 2) is [var tool, var path])
+            {
+                var readiness = _services!.GetRequiredService<HCG.ExecutableMaker.BuildEngine.Readiness.BuildReadinessService>();
+                var (check, saved) = await readiness.ChooseLocationAsync(tool, path, item?.Requirement.MinimumVersion,
+                    new HCG.ExecutableMaker.BuildEngine.Readiness.ToolPathScope.Project(wizard.Project!.Id, wizard.Project.Name));
+                Log($"Chosen for this project: {check.Detail}");
+                Check(saved, $"{tool} at {path} verified and saved in the project's toolchain profile");
+            }
+            await wizard.StartBuildCommand.ExecuteAsync(null);
+        }
+        else await wizard.StartBuildCommand.ExecuteAsync(null);
         await WaitUntil(() => !wizard.IsBuilding, TimeSpan.FromMinutes(40), "build");
+        if (wizard.Readiness.Report is { } after)
+            foreach (var i in after.Items) Log($"Readiness at build: {i.Requirement.ToolId}: {i.State} — {(i.Selected is { } sel ? $"{sel.Path} {sel.Version} ({sel.Source})" : i.Detail)}");
         var result = wizard.Result;
         Check(result?.Status == BuildStatus.Succeeded, $"Build {result?.Status}: {wizard.ResultDetail}");
         Shot("results");
