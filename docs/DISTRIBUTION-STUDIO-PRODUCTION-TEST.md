@@ -11,7 +11,7 @@ diagnostics are redacted. What production offers is described in [PRODUCTION-COM
 |---|---|---|
 | A1 | Download the CI artifact **`hcg-executable-maker-macos`** of the commit on `main`. It contains `HCG-Executable-Maker-<version>-osx-arm64.app.zip`, its `.release-passport.json` and `SHA256SUMS-macos.txt`. | |
 | A2 | `shasum -a 256 HCG-Executable-Maker-*-osx-arm64.app.zip` | Equal to the line in `SHA256SUMS-macos.txt` **and** to `artifact.sha256` in the passport. |
-| A3 | Unzip, move **HCG Executable Maker.app** to Applications, open it with right-click → Open (ad hoc signed, not notarized). | The window opens. The sidebar shows the HCG logo. Arm64 native: Activity Monitor › Kind "Apple". |
+| A3 | Unzip, move **HCG Executable Maker.app** to Applications. It is ad hoc signed and not notarized (the passport says so: Gatekeeper rejects a downloaded copy), so clear the download quarantine once: `xattr -cr "/Applications/HCG Executable Maker.app"`, then open it. | The window opens. The sidebar shows the HCG logo. Arm64 native: Activity Monitor › Kind "Apple". |
 | A4 | Terminal: `"/Applications/HCG Executable Maker.app/Contents/MacOS/HCGExecutableMaker" --version` | Version and `Source: <40-character commit>` equal to `source.commit` in the passport and to the commit on `main`. |
 | A5 | Click **Ship to Store**. | **Distribution Studio** opens. "Sign in required"; nothing is contacted or uploaded. |
 
