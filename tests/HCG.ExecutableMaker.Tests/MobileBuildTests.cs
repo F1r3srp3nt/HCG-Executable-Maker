@@ -580,6 +580,35 @@ public class MobileBuildServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_device_build_without_a_certificate_is_decided_by_the_signing_assistant_not_refused_before_it()
+    {
+        // Regression (CI run 46030261572): the generic capability check refused a device build for "No Apple Development
+        // certificate" before the build's verification and the Apple Signing Assistant ran, so Xcode-managed provisioning
+        // (which can create that certificate) and Resolve Signing were never reached.
+        var report = _k.Report(TargetPlatform.MacOS, ToolchainIds.Xcode, ToolchainIds.IosSdk); // no signing identities on this Mac
+        var p = await Project("HelloIOS", report);
+        var option = HCG.ExecutableMaker.ProjectInspection.Mobile.MobileCapabilities.Evaluate(p.Analysis!.Mobile!, report).Single(o => o.Output == MobileOutput.IosDeviceApp);
+        Assert.False(option.IsAvailable); // no identities on this test host
+        var options = new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosDeviceApp, Signing = MobileSigningMode.AppleAutomatic, AllowProvisioningUpdates = true };
+
+        var worker = new ScriptedMobileWorker((_, _, _) => ScriptedMobileWorker.Exit(1)); // -showBuildSettings unreadable
+        var assisted = new MobileBuildService(worker, new FixedToolchains(report), _builds, new MobileArtifactVerifier(new HCG.ExecutableMaker.Infrastructure.Processes.ProcessRunner()), _paths,
+            TimeProvider.System, signingAssistant: new HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService(null, null, TimeProvider.System));
+        var observer = new Observer();
+        var build = await assisted.RunAsync(Request(p, options), observer, CancellationToken.None);
+        Assert.Equal(BuildStatus.Failed, build.Status);
+        Assert.Contains("requires a development team", build.FailureReason);
+        Assert.DoesNotContain("is not available", build.FailureReason);
+        Assert.Contains("The Apple Signing Assistant checks this build's signing next", observer.Text);
+        Assert.All(worker.Calls, c => Assert.Contains("-showBuildSettings", c.Arguments)); // nothing compiled
+        Assert.Contains(build.Messages, m => m.Code == HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode);
+
+        // Without the assistant (e.g. not a native Xcode project), the capability check still refuses with its reason.
+        var plain = await Service(new ScriptedMobileWorker((_, _, _) => ScriptedMobileWorker.Exit(0)), report).RunAsync(Request(p, options), new Observer(), CancellationToken.None);
+        Assert.Contains("is not available", plain.FailureReason);
+    }
+
+    [Fact]
     public async Task Ipa_export_is_refused_for_an_unsigned_archive()
     {
         var report = _k.Report(TargetPlatform.MacOS, MobileTestKit.Apple);

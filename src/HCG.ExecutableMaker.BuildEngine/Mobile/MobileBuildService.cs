@@ -186,11 +186,23 @@ public sealed partial class MobileBuildService(
                 if (analysis is null) throw new BuildValidationException("This project was not recognized as a mobile project. Re-inspect it or import a supported Android/iOS/Flutter/.NET MAUI project.");
                 var option = MobileCapabilities.Evaluate(analysis, report).FirstOrDefault(x => x.Output == options.Output)
                              ?? throw new BuildValidationException($"{options.Output.DisplayName()} does not apply to this project.");
+                // The Apple Signing Assistant (below) decides signing for native Xcode iOS projects in full: team, identity,
+                // profile and devices, and whether Xcode-managed provisioning (authorized) can create what is missing.
+                // A signing gap found by the generic capability check is left to it, so it is reported with its remedy
+                // (Resolve Signing) and after the build's own verification, never as a dead end before it.
+                var assistantDecidesSigning = options.Framework == MobileFramework.NativeIos && signingAssistant is not null
+                                              && report.Host.Platform == TargetPlatform.MacOS && analysis.Ios is not null;
                 if (!option.IsAvailable)
                 {
-                    if (options.Output.Platform() == TargetPlatform.IOS && option.Reason is { } why && SigningReason().IsMatch(why))
-                        AddMessage(new BuildMessage(DiagnosticSeverity.Error, why, HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode));
-                    throw new BuildValidationException($"{options.Output.DisplayName()} is not available: {option.Reason}");
+                    var signingGap = options.Output.Platform() == TargetPlatform.IOS && option.Reason is { } why && SigningReason().IsMatch(why);
+                    if (signingGap && assistantDecidesSigning)
+                        Log(BuildLogKind.Warning, $"{options.Output.DisplayName()}: {option.Reason} The Apple Signing Assistant checks this build's signing next.");
+                    else
+                    {
+                        if (signingGap)
+                            AddMessage(new BuildMessage(DiagnosticSeverity.Error, option.Reason!, HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode));
+                        throw new BuildValidationException($"{options.Output.DisplayName()} is not available: {option.Reason}");
+                    }
                 }
                 // Apple signing: validate what this Mac can check before xcodebuild starts (keychain, verified profiles,
                 // team, bundle IDs, entitlements, devices). Checks that need Apple's services are logged as not verified.
@@ -205,7 +217,7 @@ public sealed partial class MobileBuildService(
                 // Apple Signing Assistant (native Xcode iOS projects): before anything compiles, read the project's
                 // effective build settings and decide how this destination is signed. Simulator builds need no team;
                 // device builds need Apple Development signing; distribution builds must be Release.
-                if (options.Framework == MobileFramework.NativeIos && signingAssistant is not null && report.Host.Platform == TargetPlatform.MacOS && analysis.Ios is not null)
+                if (assistantDecidesSigning)
                     (iosConfiguration, iosSigningArguments) = await PlanAppleSigningAsync(request, options, analysis, report, build, Log, AddMessage, overall.Token).ConfigureAwait(false);
 
             }

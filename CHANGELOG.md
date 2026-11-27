@@ -45,6 +45,11 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   unsigned`, the Sentinel archive matrix) again pass `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
   CODE_SIGN_IDENTITY=`. The Apple Signing Assistant's arguments replace the planner's, and its unsigned branch had
   dropped them, so Xcode asked for a development team.
+- **Device builds without a certificate.** For native Xcode iOS projects, a signing gap found by the generic
+  capability check (for example no Apple Development certificate in the keychain) is now decided by the Apple Signing
+  Assistant. It runs after the build's own verification (expected commit, development flags), knows that authorized
+  Xcode-managed provisioning can create the development certificate, and reports what is missing with Resolve
+  Signing. Before, the build stopped earlier with "not available".
 
 ## [Unreleased] — Apple Signing Assistant
 
