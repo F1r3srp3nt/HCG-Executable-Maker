@@ -40,6 +40,23 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - `mobile-build`: `--output ios-device`, `--device-family`, `--bundle-id`, `--allow-provisioning-updates`,
   `--destination app-store`.
 
+- **Development builds are verified before compiling** (Unimatch: the Development Run was missing because the device
+  build was a Release archive):
+  - The source commit of the imported copy is checked. A stale copy is refused, and an optional expected commit can be
+    given.
+  - The compilation flags are checked. Flags that are in Debug but not in Release are the project's development-only
+    flags (`UNIMATCH_DEVELOPMENT_RUN`).
+  - A development build reports `DEBUG` and those flags as active, and optional expected flags must be active.
+  - A distribution build must contain none of them.
+  - The build records the source commit, configuration, compilation flags and development-only flags. Mobile Build
+    Studio shows them under "What this build is".
+- **A development-signed .ipa** (export method Debugging) is a device development build: Debug by default, not a
+  distribution build.
+- **Install and open on a connected device.** After a development build, Mobile Build Studio lists paired iPhones and
+  iPads (devicectl) and installs the build after confirmation, then opens it. The device is added to the project's
+  intended devices in Signing Vault, so later builds check its registration in the development profile.
+- `mobile-build`: `--expect-commit SHA`, `--expect-flags DEBUG,FLAG`.
+
 ### Changed
 - A signed iOS archive without a development team now stops before compiling with the reason and Resolve Signing.
   Previously it failed inside xcodebuild with exit code 65.
@@ -99,7 +116,6 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   blocks Start Build, Go is chosen for the project, then the universal helper is built, the app is launched and the
   helper is run. A Homebrew install of Go runs only with `--approve`.
 
-## Distribution Studio final qualification
 ## [Unreleased] — HCG Server Build Host
 
 ### Added

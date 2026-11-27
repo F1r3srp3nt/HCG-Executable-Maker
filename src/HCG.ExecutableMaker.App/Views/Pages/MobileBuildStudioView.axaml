@@ -320,6 +320,16 @@
                 <ComboBox ItemsSource="{Binding StoreDestinations}" SelectedItem="{Binding SelectedStoreDestination}" HorizontalAlignment="Stretch" />
                 <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="HCG exports the signed .ipa locally. It never uploads to TestFlight or the App Store." />
               </StackPanel>
+              <UniformGrid Columns="2">
+                <StackPanel Margin="0,0,6,0">
+                  <TextBlock Classes="formlabel" Text="EXPECTED SOURCE COMMIT (OPTIONAL)" />
+                  <TextBox Text="{Binding ExpectedSourceCommit}" PlaceholderText="e.g. 74229fe" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                </StackPanel>
+                <StackPanel Margin="6,0,0,0">
+                  <TextBlock Classes="formlabel" Text="FLAGS THAT MUST BE ACTIVE (OPTIONAL)" />
+                  <TextBox Text="{Binding ExpectedFlags}" PlaceholderText="DEBUG, UNIMATCH_DEVELOPMENT_RUN" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+                </StackPanel>
+              </UniformGrid>
               <TextBlock Classes="formlabel" Text="BUNDLE IDENTIFIER FOR THIS BUILD (OPTIONAL)" />
               <TextBox Text="{Binding BundleIdentifierOverride}" PlaceholderText="Leave empty to use the project's own" FontFamily="{DynamicResource Hcg.Font.Mono}" />
               <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
@@ -492,6 +502,27 @@
               <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Stop}" /><TextBlock Text="Cancel" /></StackPanel>
             </Button>
           </StackPanel>
+          <Border Classes="callout" Padding="14" IsVisible="{Binding HasVerification}">
+            <StackPanel Spacing="6">
+              <TextBlock Classes="label" Text="WHAT THIS BUILD IS (VERIFIED BEFORE COMPILING)" />
+              <ItemsControl ItemsSource="{Binding VerificationLines}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String"><SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,2" /></DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+          <Border Classes="callout success" Padding="14" IsVisible="{Binding CanInstallOnDevice}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="label" Text="INSTALL ON A CONNECTED DEVICE" />
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <ComboBox ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}" HorizontalAlignment="Stretch" PlaceholderText="No device found" />
+                <Button Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="Refresh devices" Command="{Binding RefreshDevicesCommand}" />
+                <Button Grid.Column="2" Classes="primary small" Margin="8,0,0,0" Content="Install and open" Command="{Binding InstallOnDeviceCommand}" IsEnabled="{Binding !IsInstalling}" />
+              </Grid>
+              <SelectableTextBlock Text="{Binding DeviceMessage}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
           <Border Classes="callout warning" Padding="14" IsVisible="{Binding HasSigningResolution}">
             <StackPanel Spacing="8">
               <TextBlock Classes="label" Text="SIGNING NEEDS ATTENTION" />

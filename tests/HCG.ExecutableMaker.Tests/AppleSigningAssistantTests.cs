@@ -1,4 +1,5 @@
 using HCG.ExecutableMaker.BuildEngine.Mobile;
+using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.BuildEngine.Signing;
 using HCG.ExecutableMaker.Domain;
 using HCG.ExecutableMaker.ProjectInspection;
@@ -330,5 +331,117 @@ public sealed class AppleSigningAssistantTests
         Assert.Contains("#include? \"Local.xcconfig\"", xcconfig);
         var m = new MobileAnalysis { Framework = MobileFramework.NativeIos, Platforms = [TargetPlatform.IOS], Ios = Input(Options(MobileOutput.IosDeviceApp)).Analysis.Ios };
         Assert.Contains(MobileCapabilities.Evaluate(m, null), o => o.Output == MobileOutput.IosDeviceApp);
+    }
+}
+
+/// <summary>
+/// What a build is, verified before compiling: Unimatch's Debug build must have DEBUG and UNIMATCH_DEVELOPMENT_RUN,
+/// its Release archives must have neither, and the imported copy must be the expected, current commit.
+/// </summary>
+public sealed class DevelopmentBuildVerificationTests : IDisposable
+{
+    private readonly string _root = Directory.CreateTempSubdirectory("hcg-devverify-").FullName;
+    public void Dispose() { try { Directory.Delete(_root, true); } catch (IOException) { } }
+
+    private static XcodeTargetSettings App(string conditions) => new("Unimatch", new Dictionary<string, string>
+    {
+        ["PRODUCT_TYPE"] = "com.apple.product-type.application", ["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = conditions,
+    });
+
+    // Measured shape of Unimatch's settings (Base.xcconfig: [config=Debug] adds UNIMATCH_DEVELOPMENT_RUN).
+    private static readonly XcodeTargetSettings UnimatchDebug = App("DEBUG  UNIMATCH_DEVELOPMENT_RUN");
+    private static readonly XcodeTargetSettings UnimatchRelease = App("");
+
+    [Fact]
+    public void Unimatchs_development_only_flag_is_found_by_comparing_Debug_with_Release()
+    {
+        Assert.Equal(["UNIMATCH_DEVELOPMENT_RUN"], DevelopmentBuildVerification.DevelopmentOnlyFlags(UnimatchDebug, UnimatchRelease));
+        Assert.Empty(DevelopmentBuildVerification.DevelopmentOnlyFlags(UnimatchDebug, null));
+    }
+
+    [Fact]
+    public void The_iPhone_Debug_build_verifies_DEBUG_and_UNIMATCH_DEVELOPMENT_RUN_are_active()
+    {
+        var checks = DevelopmentBuildVerification.CompilationFlags(AppleBuildDestination.IPhoneDebug, "Debug", UnimatchDebug,
+            ["UNIMATCH_DEVELOPMENT_RUN"], ["DEBUG", "UNIMATCH_DEVELOPMENT_RUN"]);
+        Assert.All(checks, c => Assert.Equal(SigningCheckOutcome.Passed, c.Outcome));
+        Assert.Contains(checks, c => c.Title == "Development-only flags" && c.Detail.Contains("UNIMATCH_DEVELOPMENT_RUN"));
+    }
+
+    [Fact]
+    public void A_Release_device_build_explains_why_the_Development_Run_is_missing_and_expected_flags_fail()
+    {
+        var checks = DevelopmentBuildVerification.CompilationFlags(AppleBuildDestination.IPhoneDebug, "Release", UnimatchRelease,
+            ["UNIMATCH_DEVELOPMENT_RUN"], ["DEBUG", "UNIMATCH_DEVELOPMENT_RUN"]);
+        var dev = Assert.Single(checks, c => c.Title == "Development-only flags");
+        Assert.Equal(SigningCheckOutcome.Warning, dev.Outcome);
+        Assert.Contains("Release builds never include them", dev.Detail);
+        var expected = Assert.Single(checks, c => c.Title == "Expected flags");
+        Assert.Equal(SigningCheckOutcome.Failed, expected.Outcome);
+        Assert.Contains("DEBUG, UNIMATCH_DEVELOPMENT_RUN", expected.Detail);
+    }
+
+    [Fact]
+    public void A_local_opt_out_of_the_Development_Run_in_Debug_is_reported()
+    {
+        var checks = DevelopmentBuildVerification.CompilationFlags(AppleBuildDestination.IPhoneDebug, "Debug", App("DEBUG"), ["UNIMATCH_DEVELOPMENT_RUN"], []);
+        var dev = Assert.Single(checks, c => c.Title == "Development-only flags");
+        Assert.Equal(SigningCheckOutcome.Warning, dev.Outcome);
+        Assert.Contains("Config/Local.xcconfig", dev.Detail);
+    }
+
+    [Fact]
+    public void A_public_Release_archive_never_carries_the_development_flags()
+    {
+        var clean = DevelopmentBuildVerification.CompilationFlags(AppleBuildDestination.TestFlight, "Release", UnimatchRelease, ["UNIMATCH_DEVELOPMENT_RUN"], []);
+        Assert.Equal(SigningCheckOutcome.Passed, Assert.Single(clean).Outcome);
+        var leaked = DevelopmentBuildVerification.CompilationFlags(AppleBuildDestination.IosDistributionArchive, "Release", App("UNIMATCH_DEVELOPMENT_RUN"), ["UNIMATCH_DEVELOPMENT_RUN"], []);
+        Assert.Equal(SigningCheckOutcome.Failed, Assert.Single(leaked).Outcome);
+    }
+
+    [Fact]
+    public void A_development_ipa_is_a_device_development_build_and_defaults_to_Debug()
+    {
+        var o = new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosIpa, ExportMethod = IosExportMethod.Debugging };
+        Assert.Equal(AppleBuildDestination.IPhoneDebug, AppleDestinations.Of(o));
+        Assert.Equal("Debug", AppleDestinations.Of(o).DefaultConfiguration());
+        Assert.False(AppleDestinations.Of(o).IsDistribution());
+        Assert.True(AppleDestinations.Of(o with { ExportMethod = IosExportMethod.AppStoreConnect }).IsDistribution());
+    }
+
+    private ProjectRecord GitProject(string commit)
+    {
+        var src = Path.Combine(_root, "unimatch");
+        Directory.CreateDirectory(Path.Combine(src, ".git", "refs", "heads"));
+        File.WriteAllText(Path.Combine(src, ".git", "HEAD"), "ref: refs/heads/main\n");
+        File.WriteAllText(Path.Combine(src, ".git", "refs", "heads", "main"), commit + "\n");
+        var ws = Path.Combine(_root, "workspace");
+        Directory.CreateDirectory(ws);
+        var p = new ProjectRecord { Id = Guid.NewGuid(), Name = "Unimatch", SourceKind = ProjectSourceKind.Directory, SourceLocation = src, WorkspacePath = ws, ImportedAt = DateTimeOffset.UtcNow };
+        ImportRevisions.WriteAsync(p, ImportRevisions.Capture(p, TimeProvider.System), CancellationToken.None).GetAwaiter().GetResult();
+        return p;
+    }
+
+    private const string Commit74229fe = "74229fe930574972e4b4bddeef6078cdc47bdd54";
+
+    [Fact]
+    public void The_source_commit_is_verified_current_and_as_expected()
+    {
+        var p = GitProject(Commit74229fe);
+        var checks = DevelopmentBuildVerification.Source(p, "74229fe");
+        Assert.All(checks, c => Assert.Equal(SigningCheckOutcome.Passed, c.Outcome));
+        Assert.Contains(checks, c => c.Title == "Expected commit" && c.Detail.Contains("74229fe93057"));
+        Assert.Equal(SigningCheckOutcome.Failed, Assert.Single(DevelopmentBuildVerification.Source(p, "0123456"), c => c.Title == "Expected commit").Outcome);
+    }
+
+    [Fact]
+    public void A_stale_imported_copy_is_refused_so_old_code_is_never_installed_as_current()
+    {
+        var p = GitProject("1111111111111111111111111111111111111111");
+        File.WriteAllText(Path.Combine(p.SourceLocation, ".git", "refs", "heads", "main"), Commit74229fe + "\n"); // the user pulled 74229fe after importing
+        var source = Assert.Single(DevelopmentBuildVerification.Source(p, null));
+        Assert.Equal(SigningCheckOutcome.Failed, source.Outcome);
+        Assert.Contains("STALE", source.Detail);
+        Assert.Contains("Re-import", source.Remedy);
     }
 }

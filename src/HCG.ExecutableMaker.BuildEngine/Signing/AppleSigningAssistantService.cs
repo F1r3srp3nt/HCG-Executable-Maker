@@ -55,6 +55,16 @@ public sealed class AppleSigningAssistantService(AppleSigningAssetService? asset
         catch (Exception ex) when (ex is IOException or InvalidDataException or System.Xml.XmlException) { return []; }
     }
 
+    /// <summary>Adds a device the project was installed on to its intended devices (Signing Vault), so later builds check its registration.</summary>
+    public async Task RememberDeviceAsync(ProjectRecord project, string udid, CancellationToken ct)
+    {
+        if (store is null || string.IsNullOrWhiteSpace(udid)) return;
+        var saved = await store.LoadAsync(project.Id.ToString(), ct).ConfigureAwait(false)
+                    ?? new ProjectSigningConfiguration { ProjectId = project.Id.ToString() };
+        if (saved.IntendedDevices.Contains(udid, StringComparer.OrdinalIgnoreCase)) return;
+        await store.SaveAsync(saved with { IntendedDevices = [.. saved.IntendedDevices, udid], UpdatedAt = time.GetUtcNow() }, ct).ConfigureAwait(false);
+    }
+
     /// <summary>Remembers a team chosen in Resolve Signing in the project's signing profile (Signing Vault), so later builds reuse it.</summary>
     public async Task RememberTeamAsync(ProjectRecord project, string team, CancellationToken ct)
     {

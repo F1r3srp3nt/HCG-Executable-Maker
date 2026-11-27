@@ -501,6 +501,42 @@ public sealed partial class MobileBuildService(
         if (app is null) log(BuildLogKind.Warning, "The effective build settings could not be read; signing is checked from HCG's settings only.");
         else log(BuildLogKind.Info, $"Effective settings of {app.Target}: PRODUCT_BUNDLE_IDENTIFIER={app.BundleIdentifier ?? "(empty)"} · DEVELOPMENT_TEAM={app.Team ?? "(empty)"} · CODE_SIGN_STYLE={app.Style ?? "(default)"}" +
                                          (app.EntitlementsFile is { } ent ? $" · CODE_SIGN_ENTITLEMENTS={ent}" : "") + (app.CompilationConditions is { } cc ? $" · SWIFT_ACTIVE_COMPILATION_CONDITIONS={cc}" : ""));
+        // What this build is: its source commit, and its compilation flags compared with the other configuration
+        // (flags in Debug but not in Release are the project's development-only flags, e.g. a Development Run).
+        var other = configuration.Contains("debug", StringComparison.OrdinalIgnoreCase) ? "Release" : "Debug";
+        var otherConfig = analysis.Ios?.Configurations.FirstOrDefault(x => string.Equals(x, other, StringComparison.OrdinalIgnoreCase));
+        HCG.ExecutableMaker.BuildEngine.Signing.XcodeTargetSettings? otherApp = null;
+        if (otherConfig is not null)
+        {
+            var otherOutput = new StringBuilder();
+            var otherResult = await worker.RunAsync(spec with { Arguments = HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService.SettingsArguments(c.Flag, c.Path, c.Scheme, otherConfig, destination) },
+                (stream, line) => { if (stream == OutputStream.StdOut) lock (otherOutput) otherOutput.AppendLine(line); }, ct).ConfigureAwait(false);
+            if (otherResult.ExitCode == 0) otherApp = HCG.ExecutableMaker.BuildEngine.Signing.XcodeBuildSettings.App(HCG.ExecutableMaker.BuildEngine.Signing.XcodeBuildSettings.Parse(otherOutput.ToString()));
+        }
+        var debugIsBuilt = configuration.Contains("debug", StringComparison.OrdinalIgnoreCase);
+        var developmentOnly = HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.DevelopmentOnlyFlags(debugIsBuilt ? app : otherApp, debugIsBuilt ? otherApp : app);
+        var verification = HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.Source(request.Project, options.ExpectedSourceCommit)
+            .Concat(HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.CompilationFlags(destination, configuration, app, developmentOnly, options.ExpectedCompilationFlags))
+            .ToList();
+        foreach (var v in verification)
+            log(v.Outcome switch
+            {
+                SigningCheckOutcome.Failed => BuildLogKind.Error,
+                SigningCheckOutcome.Warning => BuildLogKind.Warning,
+                SigningCheckOutcome.Passed => BuildLogKind.Success,
+                _ => BuildLogKind.Info,
+            }, $"Verify · {v.Title}: {v.Outcome} — {v.Detail}" + (v.Remedy is { } vr && v.Outcome == SigningCheckOutcome.Failed ? " Fix: " + vr : ""));
+        if (ImportRevisions.Read(request.Project)?.Commit is { } sourceCommit) build.ToolchainVersions["source-commit"] = sourceCommit;
+        if (app?.CompilationConditions is { } conditions) build.ToolchainVersions["compilation-conditions"] = string.Join(" ", HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.Flags(conditions).Order(StringComparer.Ordinal));
+        build.ToolchainVersions["development-only-flags"] = developmentOnly.Count == 0 ? "(none)" : string.Join(" ", developmentOnly);
+        foreach (var v in verification.Where(v => v.Outcome == SigningCheckOutcome.Passed))
+            addMessage(new BuildMessage(DiagnosticSeverity.Info, $"{v.Title}: {v.Detail}", VerifyCode));
+        if (verification.Where(v => v.Outcome == SigningCheckOutcome.Failed).ToList() is { Count: > 0 } wrong)
+        {
+            foreach (var v in wrong) addMessage(new BuildMessage(DiagnosticSeverity.Error, $"{v.Title}: {v.Detail}{(v.Remedy is null ? "" : " Fix: " + v.Remedy)}", VerifyCode));
+            throw new BuildValidationException("This build is not what was asked for. " + string.Join(" ", wrong.Select(v => v.Detail + (v.Remedy is null ? "" : " Fix: " + v.Remedy))));
+        }
+
         var plan = await signingAssistant!.PlanAsync(request.Project, options, configuration, app, sourceDir, c.Path, ct).ConfigureAwait(false);
         foreach (var check in plan.Checks)
             log(check.Outcome switch
@@ -526,6 +562,9 @@ public sealed partial class MobileBuildService(
         if (plan.Arguments.Count > 0) log(BuildLogKind.Info, "Signing build settings for this build (the project's files are not changed): " + string.Join(" ", plan.Arguments));
         return (configuration, plan.Arguments);
     }
+
+    /// <summary>Build messages about what the build is (source commit, compilation flags).</summary>
+    public const string VerifyCode = "HCG-BUILD-VERIFY";
 
     [System.Text.RegularExpressions.GeneratedRegex(@"certificate|provisioning profile|code-signing|development team|Team ID", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
     private static partial System.Text.RegularExpressions.Regex SigningReason();

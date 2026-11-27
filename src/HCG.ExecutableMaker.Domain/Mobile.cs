@@ -311,6 +311,10 @@ public sealed record MobileBuildOptions
     public string? BundleIdentifier { get; init; }
     /// <summary>For an App Store Connect .ipa: TestFlight or App Store (the same signed export; HCG never uploads either).</summary>
     public AppleBuildDestination? Destination { get; init; }
+    /// <summary>The source commit (prefix, 7+ hex characters) the build must be made from; checked before compiling.</summary>
+    public string? ExpectedSourceCommit { get; init; }
+    /// <summary>Compilation flags that must be active in this build (e.g. DEBUG, UNIMATCH_DEVELOPMENT_RUN); checked before compiling.</summary>
+    public IReadOnlyList<string> ExpectedCompilationFlags { get; init; } = [];
 }
 
 public enum AppleDeviceFamily
@@ -346,6 +350,9 @@ public static class AppleDestinations
     {
         MobileOutput.IosSimulatorApp => AppleBuildDestination.IosSimulatorDebug,
         MobileOutput.IosDeviceApp => o.DeviceFamily == AppleDeviceFamily.IPad ? AppleBuildDestination.IPadDebug : AppleBuildDestination.IPhoneDebug,
+        // A development-signed .ipa is for registered devices, like a device build: Debug is allowed and expected.
+        MobileOutput.IosIpa when o.ExportMethod == IosExportMethod.Debugging =>
+            o.DeviceFamily == AppleDeviceFamily.IPad ? AppleBuildDestination.IPadDebug : AppleBuildDestination.IPhoneDebug,
         MobileOutput.IosIpa when o.ExportMethod == IosExportMethod.AppStoreConnect =>
             o.Destination == AppleBuildDestination.AppStore ? AppleBuildDestination.AppStore : AppleBuildDestination.TestFlight,
         _ => AppleBuildDestination.IosDistributionArchive,

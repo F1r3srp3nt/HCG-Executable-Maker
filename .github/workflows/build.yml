@@ -683,11 +683,25 @@ jobs:
       - name: SigningProbe — Simulator Debug builds with no team (signed to run locally) and contains the Debug-only Development Run
         run: |
           set -o pipefail
-          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-sim" --output ios-simulator --trust | tee "$OUT/probe-sim.txt"
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-sim" --output ios-simulator --trust \
+            --expect-commit "$GITHUB_SHA" --expect-flags DEBUG,PROBE_DEVELOPMENT_RUN | tee "$OUT/probe-sim.txt"
+          grep -q "Development-only flags: Passed — Active in this build: PROBE_DEVELOPMENT_RUN" "$OUT/probe-sim.txt"
+          grep -q "Expected commit: Passed" "$OUT/probe-sim.txt"
           app="$(find "$OUT/probe-sim" -name 'SigningProbe.app' -type d -path '*ios-simulator*' | head -1)"
           echo "app: $app"
           codesign -dv "$app" 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
           strings "$app/SigningProbe" | grep -q "SIGNINGPROBE-DEVELOPMENT-RUN" && echo "Debug build contains the Development Run (positive control)."
+
+      - name: SigningProbe — a build from another commit than expected is refused before compiling
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-commit" --output ios-simulator
+          --expect-commit 0000000 --trust --expect-failure "Expected commit 0000000"
+
+      - name: SigningProbe — a Release device build cannot pass as a development build (DEBUG and the Development Run are not active)
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-release-device" --output ios-device
+          --variant Release --signing automatic --allow-provisioning-updates --expect-flags DEBUG,PROBE_DEVELOPMENT_RUN --trust
+          --expect-failure "Expected DEBUG, PROBE_DEVELOPMENT_RUN to be active"
 
       - name: SigningProbe — iPhone Debug build without a team stops before compiling (Resolve Signing)
         run: >
@@ -706,7 +720,9 @@ jobs:
 
       - name: SigningProbe — Release archive (unsigned, inspection) excludes the Development Run
         run: |
-          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-archive" --output ios-archive --signing unsigned --trust
+          set -o pipefail
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-archive" --output ios-archive --signing unsigned --trust | tee "$OUT/probe-archive.txt"
+          grep -q "Development flags excluded: Passed" "$OUT/probe-archive.txt"
           exe="$(find "$OUT/probe-archive" -path '*Products/Applications/SigningProbe.app/SigningProbe' -type f | head -1)"
           echo "archived executable: $exe"
           [ -n "$exe" ]

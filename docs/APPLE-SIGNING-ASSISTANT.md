@@ -46,6 +46,27 @@ profile UUID): private keys stay in this Mac's keychain.
 `PRODUCT_BUNDLE_IDENTIFIER = $(UNIMATCH_BUNDLE_ID)`, Maker overrides that variable, so derived identifiers
 (`….uitests`) follow.
 
+## What the build is (verified before compiling)
+
+| Check | How | A development build | A distribution build |
+|---|---|---|---|
+| Source commit | The imported copy's commit (`import-revision.json`), compared with the original folder | Refused if stale; the optional expected commit must match | Same |
+| Configuration | Chosen explicitly; development destinations default to Debug | Debug | Release |
+| Compilation flags | `SWIFT_ACTIVE_COMPILATION_CONDITIONS` of this configuration, and of the other one | `DEBUG` and the development-only flags (Debug minus Release, e.g. `UNIMATCH_DEVELOPMENT_RUN`) are reported active; the optional expected flags must be active | None of the development-only flags may be active |
+
+The build record shows the source commit, configuration, compilation flags and development-only flags, and so does
+Mobile Build Studio ("What this build is").
+
+**Why Unimatch's Development Run was missing.** Before the iOS device build existed, a device install went through
+an archive or .ipa, and those were built Release. Unimatch enables `UNIMATCH_DEVELOPMENT_RUN` only for Debug, so the
+skip button was correctly absent. Now:
+- **iOS device build → iPhone → Debug** (also a development-signed .ipa) compiles with `DEBUG UNIMATCH_DEVELOPMENT_RUN`;
+- public Release archives never contain them.
+
+**Install and open.** After a development build, **Install on a connected device** lists paired iPhones and iPads
+(devicectl), installs after you confirm, and opens the app. The device is remembered in the project's Signing Vault
+profile, so later builds check its registration.
+
 ## When signing is missing: Resolve Signing
 
 - **Missing before the build:** if a team, certificate, profile or device registration is missing, the build stops
@@ -86,7 +107,11 @@ Unimatch's repository is private, so CI uses `tests/Fixtures/SigningProbe`, whic
 1. Mobile Build Studio → Unimatch → **iOS device build** → iPhone → Debug → Signing: Xcode-managed.
 2. **Use team …**, or type your Team ID.
 3. If no development profile exists yet, tick **Allow Xcode to update provisioning**.
-4. **Start Mobile Build.**
+4. Optionally enter **Expected source commit** `74229fe` and **Flags that must be active**
+   `DEBUG, UNIMATCH_DEVELOPMENT_RUN`.
+5. **Start Mobile Build.** "What this build is" shows commit 74229fe…, configuration Debug and
+   `DEBUG UNIMATCH_DEVELOPMENT_RUN`.
+6. **Install and open** on your iPhone. The welcome screen shows "Skip — Development Run Only".
 
 The log shows the effective settings, every signing check and the build settings passed. The .app is installable on
 the registered iPhone, for example with HCG Impactor.
