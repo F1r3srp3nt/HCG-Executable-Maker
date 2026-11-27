@@ -13,7 +13,7 @@ public sealed class SigningCapabilityItem(SigningCapability c)
     public string Description => c.Description;
     public string StatusText => c.StatusText;
     public string Tools => string.Join(", ", c.RequiredToolchainIds);
-    public StatusTag Status => new("Not implemented", "neutral");
+    public StatusTag Status => c.Implementation == SigningImplementationStatus.Implemented ? new("Implemented", "success") : new("Not implemented", "neutral");
     public StatusTag ToolStatus => !c.HostSupported ? new StatusTag("Other host", "neutral") : c.ToolsAvailable ? new StatusTag("Tools found", "success") : new StatusTag("Tools missing", "warning");
 }
 

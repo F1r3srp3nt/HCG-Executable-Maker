@@ -1158,7 +1158,8 @@
                     <Button Grid.Column="1" Classes="small" Content="Refresh certificates" Command="{Binding RefreshSigningCommand}" VerticalAlignment="Top" />
                   </Grid>
 
-                  <StackPanel Spacing="6" IsVisible="{Binding IsSwiftGui}">
+                  <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding SavedSigningNote}" IsVisible="{Binding HasSavedSigningNote}" />
+                  <StackPanel Spacing="6" IsVisible="{Binding CanSignForDistribution}">
                     <Grid ColumnDefinitions="*,Auto">
                       <TextBlock Classes="formlabel" Text="SIGNING" />
                       <c:StatusChip Grid.Column="1" Status="{Binding DeveloperIdState}" />
@@ -1188,7 +1189,7 @@
 
                   <StackPanel Spacing="6" IsVisible="{Binding ShowPkgOptions}">
                     <TextBlock Classes="formlabel" Text="INSTALLER PACKAGE SIGNATURE" />
-                    <ComboBox ItemsSource="{Binding InstallerIdentities}" SelectedItem="{Binding SelectedInstallerIdentity}" HorizontalAlignment="Stretch" IsEnabled="{Binding IsSwiftGui}" />
+                    <ComboBox ItemsSource="{Binding InstallerIdentities}" SelectedItem="{Binding SelectedInstallerIdentity}" HorizontalAlignment="Stretch" IsEnabled="{Binding CanSignForDistribution}" />
                     <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
                                Text="Unsigned packages are for testing on this Mac. Distribution needs a Developer ID Installer certificate and a Developer ID signed app, then notarization." />
                   </StackPanel>
@@ -1248,7 +1249,7 @@
                     </StackPanel>
                   </Expander>
 
-                  <CheckBox IsChecked="{Binding EntitlementsConfirmed}" IsVisible="{Binding IsSwiftGui}">
+                  <CheckBox IsChecked="{Binding EntitlementsConfirmed}" IsVisible="{Binding CanSignForDistribution}">
                     <StackPanel Spacing="1">
                       <TextBlock Text="I reviewed these entitlements" FontWeight="Medium" />
                       <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"

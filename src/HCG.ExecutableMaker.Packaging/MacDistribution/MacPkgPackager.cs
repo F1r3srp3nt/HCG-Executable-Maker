@@ -35,14 +35,30 @@ public sealed class MacPkgPackager(IProcessRunner runner) : IPackager
         var bundleName = PathGuard.SanitizeFileName(settings.Identity.ApplicationName, "Application") + ".app";
         var bundle = Path.Combine(request.OutputRoot, bundleName);
         if (!Directory.Exists(bundle)) throw new InvalidOperationException("The .app bundle must be created before the installer package.");
+        var version = InfoPlist.Read(Path.Combine(bundle, "Contents", "Info.plist")).GetValueOrDefault("CFBundleShortVersionString") ?? "1.0.0";
+        var output = Path.Combine(request.OutputRoot, ArtifactName(request));
+        var checks = await PackageAppAsync(bundle, output, settings.Identity.ApplicationName, version, signed ? distribution.PkgInstallerName : null, log, cancellationToken).ConfigureAwait(false);
+        return [new PackagedOutput(Format, ArtifactKind.File, output, checks)];
+    }
+
+    /// <summary>
+    /// Builds the installer package for an existing, already signed <paramref name="bundle"/> (it is copied, never changed):
+    /// installs exactly /Applications/&lt;name&gt;.app, not relocatable, no scripts. <paramref name="installerIdentityName"/>
+    /// null = unsigned package for local testing. <paramref name="version"/> is the package version (a release version such
+    /// as 1.0.0-beta.2 may differ from CFBundleShortVersionString).
+    /// </summary>
+    public async Task<IReadOnlyList<VerificationCheck>> PackageAppAsync(string bundle, string output, string title, string version, string? installerIdentityName,
+        IPackagingLog log, CancellationToken cancellationToken)
+    {
+        var signed = installerIdentityName is not null;
+        var bundleName = Path.GetFileName(bundle.TrimEnd('/', Path.DirectorySeparatorChar));
+        if (!Directory.Exists(bundle)) throw new InvalidOperationException($"{bundleName} does not exist.");
         var plist = InfoPlist.Read(Path.Combine(bundle, "Contents", "Info.plist"));
         var bundleId = plist.GetValueOrDefault("CFBundleIdentifier") ?? throw new InvalidOperationException("The .app has no CFBundleIdentifier.");
-        var version = plist.GetValueOrDefault("CFBundleShortVersionString") ?? "1.0.0";
         var exe = Path.Combine(bundle, "Contents", "MacOS", plist.GetValueOrDefault("CFBundleExecutable") ?? "");
         var archs = File.Exists(exe) ? MachO.ReadSlices(exe).Select(s => s.Architecture).Distinct().ToList() : [];
         var minimumOs = plist.GetValueOrDefault("LSMinimumSystemVersion");
 
-        var output = Path.Combine(request.OutputRoot, ArtifactName(request));
         if (File.Exists(output)) File.Delete(output);
         var staging = Path.Combine(Path.GetTempPath(), "hcg-pkg-" + Guid.NewGuid().ToString("N")[..10]);
         var root = Path.Combine(staging, "root");
@@ -59,17 +75,16 @@ public sealed class MacPkgPackager(IProcessRunner runner) : IPackager
                 log, cancellationToken).ConfigureAwait(false);
 
             var distributionXml = Path.Combine(staging, "distribution.xml");
-            await File.WriteAllTextAsync(distributionXml, DistributionXml(settings.Identity.ApplicationName, bundleId, version, "component.pkg", archs, minimumOs), cancellationToken).ConfigureAwait(false);
+            await File.WriteAllTextAsync(distributionXml, DistributionXml(title, bundleId, version, "component.pkg", archs, minimumOs), cancellationToken).ConfigureAwait(false);
             List<string> args = ["--distribution", distributionXml, "--package-path", staging];
-            if (signed) args.AddRange(["--sign", distribution.PkgInstallerName!]);
+            if (signed) args.AddRange(["--sign", installerIdentityName!, "--timestamp"]);
             args.Add(output);
-            log.Info(signed ? $"productbuild: signing with {distribution.PkgInstallerName}" : "productbuild: UNSIGNED package (local testing only; Gatekeeper blocks it on other Macs)");
+            log.Info(signed ? $"productbuild: signing with {installerIdentityName}" : "productbuild: UNSIGNED package (local testing only; Gatekeeper blocks it on other Macs)");
             await RunAsync("/usr/bin/productbuild", args, log, cancellationToken).ConfigureAwait(false);
             if (!File.Exists(output)) throw new InvalidOperationException("productbuild reported success but produced no package.");
 
-            var checks = await PkgInspector.InspectAsync(runner, output, bundle, bundleId, version, signed ? PkgInspector.ExpectedSigner.DeveloperIdInstaller : PkgInspector.ExpectedSigner.None,
+            return await PkgInspector.InspectAsync(runner, output, bundle, bundleId, version, signed ? PkgInspector.ExpectedSigner.DeveloperIdInstaller : PkgInspector.ExpectedSigner.None,
                 cancellationToken).ConfigureAwait(false);
-            return [new PackagedOutput(Format, ArtifactKind.File, output, checks)];
         }
         catch
         {

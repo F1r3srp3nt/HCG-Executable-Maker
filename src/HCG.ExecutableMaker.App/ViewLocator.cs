@@ -22,6 +22,7 @@ public sealed class ViewLocator : IDataTemplate
         [typeof(ImpactorViewModel)] = () => new ImpactorView(),
         [typeof(ToolchainsViewModel)] = () => new ToolchainsView(),
         [typeof(SigningViewModel)] = () => new SigningView(),
+        [typeof(MacSignExistingViewModel)] = () => new MacSignExistingView(),
         [typeof(SettingsViewModel)] = () => new SettingsView(),
         [typeof(AccountViewModel)] = () => new AccountView(),
         [typeof(SupportViewModel)] = () => new SupportView(),

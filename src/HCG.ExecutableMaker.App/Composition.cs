@@ -175,6 +175,7 @@ public static class Composition
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();
+        services.AddSingleton<MacSignExistingViewModel>();
         services.AddSingleton<SettingsViewModel>();
         overrides?.Invoke(services);
         return services.BuildServiceProvider();
