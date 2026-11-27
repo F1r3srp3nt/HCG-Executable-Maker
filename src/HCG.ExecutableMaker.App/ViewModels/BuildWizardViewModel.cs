@@ -59,8 +59,10 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller pkgTester,
         HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService validator,
         IProcessRunner processRunner,
-        HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator nativeConfigurator)
+        HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator nativeConfigurator,
+        BuildReadinessPanelViewModel readiness)
     {
+        Readiness = readiness;
         _processRunner = processRunner;
         _nativeConfigurator = nativeConfigurator;
         _signingReader = signingReader;
@@ -983,6 +985,30 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     private bool CanStartBuild() => TrustAcknowledged && !IsBuilding && Project is not null;
 
+    /// <summary>Build Readiness for the configured build: checked when Start Build is pressed, before anything compiles.</summary>
+    public BuildReadinessPanelViewModel Readiness { get; }
+    [ObservableProperty] private bool _showReadiness;
+
+    /// <summary>
+    /// Checks every tool this build needs. Returns false (and shows the Build Readiness panel with Install…, Choose
+    /// location… and Refresh) when something required is missing; Start Build then resumes once it is fixed.
+    /// </summary>
+    private async Task<bool> EnsureReadyAsync(BuildSettings settings)
+    {
+        if (Project is null || settings.Mobile is not null) return true;
+        var report = await Readiness.CheckAsync(Project.Name, Project.SourceDirectory, Project.Id, settings, Project.Analysis);
+        if (report is null || report.CanBuild)
+        {
+            ShowReadiness = report is not null && report.Items.Any(i => i.State != ReadinessState.Ready);
+            return true;
+        }
+        ShowReadiness = true;
+        await _dialogs.AlertAsync("Build Readiness",
+            string.Join("\n\n", report.Blockers.Select(b => b.Detail)) +
+            "\n\nThe Build Readiness panel under Start Build lets you install the tool (only after you approve the exact command), choose its location for this project or all projects, or open the official download. Press Start Build again when it is ready.");
+        return false;
+    }
+
     [RelayCommand(CanExecute = nameof(CanStartBuild))]
     private async Task StartBuildAsync()
     {
@@ -999,6 +1025,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             await _dialogs.AlertAsync("Configuration problem", ex.Message);
             return;
         }
+        if (!await EnsureReadyAsync(settings)) return;
 
         var allowOverwrite = false;
         var outputRoot = BuildService.OutputRootFor(settings);

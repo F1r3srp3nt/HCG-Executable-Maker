@@ -24,6 +24,9 @@ internal static class Program
         // e.g. to compare a Finder launch with a Terminal launch. Read-only; applies HCG's saved Xcode choice like the app.
         if (args.Contains("--toolchain-report"))
             return ToolchainReportCommand.Run();
+        // `HCGExecutableMaker --build-readiness <folder> …`: the tools a project needs and how to get them (see BuildReadinessCommand).
+        if (args.Contains("--build-readiness"))
+            return BuildReadinessCommand.Run(args);
         // `HCGExecutableMaker --ship-to-store …`: upload a release to HCG Store as a private draft (see ShipToStoreCommand).
         if (args.Contains("--ship-to-store"))
             return ShipToStoreCommand.Run(args);

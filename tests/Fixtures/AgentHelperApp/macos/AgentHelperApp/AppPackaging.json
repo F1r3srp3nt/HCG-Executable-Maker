@@ -1,0 +1,29 @@
+{
+  "schema": "hcg-app-packaging/1",
+  "description": "AgentHelperApp.app needs the Go host agent as a universal helper (the same contract shape as HCG Server).",
+  "product": "AgentHelperApp",
+  "bundle": {
+    "displayName": "Agent Helper",
+    "identifier": "com.hakmicapital.agenthelper",
+    "minimumMacOS": "13.0"
+  },
+  "prebuild": [
+    {
+      "description": "Build the host agent (Go) as a universal helper",
+      "requires": ["go >= 1.25"],
+      "workingDirectory": "../..",
+      "command": ["scripts/build-agent-helper.sh", "--output", "${HELPERS_DIR}/hcg-agent"]
+    }
+  ],
+  "helpers": [
+    {
+      "name": "hcg-agent",
+      "source": "${HELPERS_DIR}/hcg-agent",
+      "destination": "Contents/Helpers/hcg-agent",
+      "required": true,
+      "architectures": ["arm64", "x86_64"],
+      "sign": "before-app",
+      "verify": ["version"]
+    }
+  ]
+}

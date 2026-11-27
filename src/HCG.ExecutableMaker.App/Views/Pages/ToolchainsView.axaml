@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
              xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:p="using:HCG.ExecutableMaker.App.Views.Pages"
              x:Class="HCG.ExecutableMaker.App.Views.Pages.ToolchainsView"
              x:DataType="vm:ToolchainsViewModel">
   <ScrollViewer>
@@ -28,6 +29,18 @@
         </Grid>
       </Border>
       <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+
+      <!-- Build Readiness Center: what a project's builds need, checked before compilation -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Classes="label" Text="PROJECT" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding ReadinessProjects}" SelectedItem="{Binding ReadinessProject}" HorizontalAlignment="Stretch"
+                      PlaceholderText="Import a project to check what its builds need" />
+          </Grid>
+          <p:BuildReadinessPanel DataContext="{Binding Readiness}" />
+        </StackPanel>
+      </Border>
 
       <Border Classes="card" IsVisible="{Binding HasXcodePanel}">
         <StackPanel Spacing="10">

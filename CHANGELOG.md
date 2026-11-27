@@ -2,6 +2,44 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Build Readiness Center
+
+### Added
+- **Build Readiness Center** (Toolchains › Build Readiness, the New Build wizard, `--build-readiness`).
+  - Before compilation it checks every tool the build needs. Requirements are read from the packaging contract and
+    the scripts it runs, `go.mod`, `Package.swift`, `package.json`, `Cargo.toml`, `pyproject.toml`, `CMakeLists.txt`,
+    `global.json` and the chosen build kind.
+  - For each tool it shows the installed and required versions, its path and where the requirement comes from.
+  - Go, Swift, Xcode, .NET, Node.js/npm, Python, Rust/Cargo, JDK, CMake, Ninja, Clang, GCC, make, lipo, Git, Docker
+    and pkg-config are found on PATH and in their install locations: Homebrew (Apple Silicon and Intel), official
+    installers and version managers. See docs/BUILD-READINESS.md.
+- **Missing tools are explained, not just a failed build.** The panel offers:
+  - **Install…**, only after approving the exact command: a Homebrew catalogue formula, which upgrades nothing, or
+    Apple's Command Line Tools;
+  - **Choose for this project / all projects** (verified before saving);
+  - the official download and **Refresh Toolchains**.
+
+  Start Build resumes once the tool is ready. HCG never installs Homebrew or runs installer scripts.
+- **Toolchain profiles:** reusable per-project tool locations, so projects can use different SDK versions without
+  replacing a shared installation.
+- **Remote build hosts:** authorized hosts that report a compatible tool are listed. Nothing is sent.
+- **The packaging-contract build uses the same resolution.** HCG Server's Go helper now builds with Go from Homebrew,
+  `/usr/local/go`, `~/sdk` or a chosen location. A missing tool names Build Readiness (`HCG-READINESS`).
+
+### Tests
+- 44 Build Readiness tests:
+  - Go discovery on PATH, in Apple Silicon and Intel Homebrew, from the official installer and golang.org/dl, and at a
+    chosen location;
+  - version parsing and choosing a compatible installation among several;
+  - installer safeguards;
+  - HCG Server's contract (go.mod, script checks, universal lipo);
+  - profiles;
+  - remote hosts.
+- CI `build-readiness-go` (macOS) with the HCG Server-shaped fixture `tests/Fixtures/AgentHelperApp`: missing Go
+  blocks Start Build, Go is chosen for the project, then the universal helper is built, the app is launched and the
+  helper is run. A Homebrew install of Go runs only with `--approve`.
+
+## Distribution Studio final qualification
 ## [Unreleased] — HCG Server Build Host
 
 ### Added

@@ -97,6 +97,10 @@ public static class Composition
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppleCredentialsService>();
         services.AddSingleton<IPackager, InnoSetupPackager>();
         services.AddSingleton<PackagingRegistry>();
+        // Build Readiness: what a build needs, checked before compilation; installs only with the person's approval.
+        // Remote build hosts are whatever IBuildHost implementations are registered (none are, until the Build Host lands).
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.Readiness.BuildReadinessService(sp.GetRequiredService<IProcessRunner>(),
+            sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IToolchainService>(), sp.GetServices<IBuildHost>(), TimeProvider.System));
         services.AddSingleton<BuildService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator>();
@@ -172,6 +176,7 @@ public static class Composition
         services.AddSingleton<ShipToStoreViewModel>();
         services.AddSingleton<UnleashifyViewModel>();
         services.AddSingleton<ImpactorViewModel>();
+        services.AddTransient<BuildReadinessPanelViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();

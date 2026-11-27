@@ -71,17 +71,29 @@ public static partial class SwiftContractPlanner
     /// </summary>
     public static async Task<(IReadOnlyList<ResolvedTool> Tools, string? Error)> ResolveToolsAsync(
         SwiftPackagingContract contract, IExecutableLocator locator, Func<ProcessSpec, CancellationToken, Task<(int ExitCode, string Output)>> capture,
-        IReadOnlyDictionary<string, string> environment, CancellationToken ct)
+        IReadOnlyDictionary<string, string> environment, CancellationToken ct,
+        Func<string, string?, CancellationToken, Task<Readiness.ToolResolution>>? resolve = null)
     {
         var tools = new List<ResolvedTool>();
         foreach (var group in contract.Prebuild.SelectMany(p => p.Requires.Select(r => (Step: p, Req: r))).GroupBy(x => x.Req.Tool, StringComparer.Ordinal))
         {
             var name = group.Key;
-            var path = locator.Find(name, ExtraCandidates(name));
             var step = group.First().Step;
-            if (path is null)
-                return (tools, $"{name} is required to “{step.Description}” ({contract.Path}), but it was not found on PATH or in /opt/homebrew/bin, /usr/local/bin. Install {name}, then build again.");
             var minimum = group.Select(x => x.Req.MinimumVersion).OfType<string>().OrderByDescending(v => v, Comparer<string>.Create(SwiftCapabilities.Compare)).FirstOrDefault();
+            if (resolve is not null)
+            {
+                // Build Readiness: the project's toolchain profile, locations chosen in HCG, PATH, then every install
+                // location (Homebrew on Apple Silicon and Intel, official installers, version managers).
+                var r = await resolve(name, minimum, ct).ConfigureAwait(false);
+                if (r.Selected is null)
+                    return (tools, $"{contract.Path} needs {name}{(minimum is null ? "" : $" >= {minimum}")} to “{step.Description}”. {r.Detail} " +
+                        $"Open Toolchains › Build Readiness to install {name} (with your approval) or choose its location, then press Build again. [{ReadinessCode}]");
+                tools.Add(new ResolvedTool(name, r.Selected.Path, r.Selected.Version));
+                continue;
+            }
+            var path = locator.Find(name, ExtraCandidates(name));
+            if (path is null)
+                return (tools, $"{name} is required to “{step.Description}” ({contract.Path}), but it was not found on PATH or in /opt/homebrew/bin, /usr/local/bin. Install {name}, then build again. [{ReadinessCode}]");
             string? version = null;
             if (minimum is not null)
             {
@@ -100,11 +112,11 @@ public static partial class SwiftContractPlanner
         return (tools, null);
     }
 
-    private static IEnumerable<string> ExtraCandidates(string tool) => tool switch
-    {
-        "go" => ["/usr/local/go/bin/go", "/opt/homebrew/bin/go"],
-        _ => [],
-    };
+    /// <summary>Marks a build that stopped because a required tool is missing (the wizard offers Build Readiness).</summary>
+    public const string ReadinessCode = "HCG-READINESS";
+
+    private static IEnumerable<string> ExtraCandidates(string tool) =>
+        Readiness.ToolCatalog.Find(tool)?.Locations(HostInfo.CurrentPlatform).Where(l => !l.Contains('*') && !l.StartsWith('~')) ?? [];
 
     /// <summary>
     /// The contract's prebuild commands as build steps. Each runs directly (no shell) in its working directory with the

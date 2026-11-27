@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:p="using:HCG.ExecutableMaker.App.Views.Pages"
              xmlns:c="using:HCG.ExecutableMaker.App.Controls"
              x:Class="HCG.ExecutableMaker.App.Views.Pages.BuildWizardView"
              x:DataType="vm:BuildWizardViewModel">
@@ -1504,6 +1505,9 @@
                     <TextBlock Text="Start Build" />
                   </StackPanel>
                 </Button>
+                <Border Classes="card" Padding="14" IsVisible="{Binding ShowReadiness}">
+                  <p:BuildReadinessPanel DataContext="{Binding Readiness}" />
+                </Border>
               </StackPanel>
             </Border>
             <Border Grid.Column="1" Classes="card" Margin="9,0,0,0">
