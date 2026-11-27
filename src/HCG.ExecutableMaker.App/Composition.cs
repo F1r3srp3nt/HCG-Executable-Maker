@@ -109,6 +109,19 @@ public static class Composition
         var uploadHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         services.AddSingleton(hcgConfig);
         services.AddSingleton(credentialStore);
+        // Build providers: this computer (the existing worker), GitHub Actions (run recorded by the user) and HCG Server's
+        // Build Host (hcg.buildhost/1, loopback only; its client token lives in the OS credential store, never in a file).
+        services.AddSingleton(_ => new HCG.ExecutableMaker.BuildEngine.BuildHost.BuildHostCredentials(credentialStore));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostClient(
+            HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostClient.CreateHttpClient(),
+            sp.GetRequiredService<HCG.ExecutableMaker.BuildEngine.BuildHost.BuildHostCredentials>(), BuildHostCommand.SettingsFromEnvironment()));
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostProvider(
+            sp.GetRequiredService<HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostClient>(), sp.GetRequiredService<IAppPaths>(), TimeProvider.System,
+            sp.GetRequiredService<IBuildRepository>()));
+        services.AddSingleton<IBuildProvider>(sp => new LocalBuildProvider(sp.GetRequiredService<IBuildWorker>()));
+        services.AddSingleton<IBuildProvider>(_ => new GitHubActionsBuildProvider());
+        services.AddSingleton<IBuildProvider>(sp => sp.GetRequiredService<HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostProvider>());
+        services.AddSingleton<BuildProviderCatalog>();
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAuthClient(hcgHttp, hcgConfig, TimeProvider.System));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAccountService(hcgConfig, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAuthClient>(),
             credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>(),

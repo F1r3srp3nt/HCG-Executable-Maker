@@ -5,7 +5,7 @@ public enum IsolationLevel
 {
     /// <summary>Runs directly on this machine with the current user's privileges. Not sandboxed.</summary>
     None,
-    /// <summary>Reserved for a future container/VM/remote worker. No implementation exists in M0.1.</summary>
+    /// <summary>Runs inside an isolation sandbox: HCG Server's Build Host (Seatbelt/Landlock, owner-approved jobs).</summary>
     Isolated,
 }
 

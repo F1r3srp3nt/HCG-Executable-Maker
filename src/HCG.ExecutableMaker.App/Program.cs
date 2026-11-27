@@ -26,6 +26,9 @@ internal static class Program
         // `HCGExecutableMaker --rootless-deb …`: package an iOS app a build produced as a rootless jailbreak .deb (see RootlessDebCommand).
         if (args.Contains("--rootless-deb") || args.Contains("--rootless-deb-validate"))
             return RootlessDebCommand.Run(args);
+        // `HCGExecutableMaker --build-host status|projects|jobs|token|run …`: HCG Server's Build Host without the UI (see BuildHostCommand).
+        if (args.Contains("--build-host"))
+            return BuildHostCommand.Run(args);
         // `HCGExecutableMaker --hcg-session status|sign-in|sign-out`: the HCG account services without the UI (no tokens printed).
         if (args.Contains("--hcg-session"))
             return HcgSessionCommand.Run(args);

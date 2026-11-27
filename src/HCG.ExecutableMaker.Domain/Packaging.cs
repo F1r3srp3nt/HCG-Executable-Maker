@@ -28,6 +28,8 @@ public enum PackagingFormat
     IosIpa,
     /// <summary>Debian package for jailbroken iOS devices, built by Theos (a tweak, preference bundle, tool or app). Not an IPA.</summary>
     JailbreakDeb,
+    /// <summary>A file produced by HCG Server's Build Host (unsigned build output, test report or log), downloaded and checksum-verified.</summary>
+    BuildHostOutput,
 }
 
 public enum PackagingAvailability
@@ -78,6 +80,7 @@ public static class PackagingFormatNames
         PackagingFormat.IosArchive => "Xcode archive (.xcarchive)",
         PackagingFormat.IosIpa => "iOS app package (.ipa)",
         PackagingFormat.JailbreakDeb => "Jailbreak package (.deb, Theos)",
+        PackagingFormat.BuildHostOutput => "HCG Server Build Host output (unsigned)",
         _ => format.ToString(),
     };
 }

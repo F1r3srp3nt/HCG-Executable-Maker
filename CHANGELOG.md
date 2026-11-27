@@ -2,6 +2,19 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG Server Build Host provider
+
+### Added
+- **HCG Server's Build Host as a build provider** (`hcg.buildhost/1`), next to this computer's worker and GitHub
+  Actions (`IBuildProvider`, `BuildProviderCatalog`). Executable Maker submits a job for a pinned commit, shows
+  "Waiting for approval on HCG Server (hcg-agent build approve <job> --confirm <job>)" and never approves, follows the
+  job and its log, downloads artifacts (checked against the job record, `X-HCG-SHA256` and the bytes received; deleted
+  on mismatch), verifies the ES256-signed provenance (optionally pinned to HCG Server's key) and maps everything into a
+  `BuildRecord`. Loopback only, no proxy, no redirects; the client token is kept in the OS credential store.
+- Unleashify handoffs of Build Host builds write a native HCG Repo `submission.json` whose `source`/`build` come from
+  the signed provenance (`provider = "hcg-server-build-host"`, no run ID, artifact name or run repository).
+- `HCGExecutableMaker --build-host status|jobs|token|run`. See docs/HCG-SERVER-BUILD-HOST.md.
+
 ## [Unreleased] — Xcode projects that only wrap another build (HCG Mail)
 
 ### Fixed

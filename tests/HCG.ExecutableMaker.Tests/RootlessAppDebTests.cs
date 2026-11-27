@@ -274,6 +274,58 @@ public class RootlessAppDebTests
         Assert.Contains("Missing prerequisite: ldid", wf.Failure);
     }
 
+    [Fact]
+    public async Task A_Build_Host_build_exports_a_native_submission_without_any_CI_run()
+    {
+        var evidence = new BuildHostEvidence
+        {
+            Repository = "F1r3srp3nt/HCG-Sentinel", Commit = new string('e', 40), Toolchain = "Swift version 6.0.3 (swift-6.0.3-RELEASE)",
+            BuiltAt = "2026-11-25T20:01:53Z", JobId = "bj-20261125-195928-ca4aded0f4", KeyFingerprint = new string('f', 64), ApprovedBy = "owner",
+        };
+        var prov = PackageProvenance.FromBuildHost(evidence, packagedBy: "HCG Executable Maker 0.4.0");
+        Assert.Equal(BuildProviderIds.HcgServerBuildHost, prov.BuildProvider);
+        Assert.Null(prov.CiRunId);
+        Assert.Null(prov.ImportRepository); // nothing for a github-artifact import to pin
+
+        var wf = await new RootlessAppWorkflow(MachOFixture.FakeLdid(), TimeProvider.System).RunAsync(
+            Request(MachOFixture.App(_t.Combine("bh"), signed: false), prov: prov), null, CancellationToken.None);
+        Assert.True(wf.Succeeded, wf.Failure + "\n" + string.Join("\n", wf.Log));
+        var h = wf.Handoff!;
+        Assert.False(h.ImportRequestComplete);
+        Assert.False(File.Exists(Path.Combine(h.Folder, "import-request.toml")));
+        Assert.False(File.Exists(Path.Combine(h.Folder, "import-request.INCOMPLETE.toml")));
+        Assert.DoesNotContain(h.Missing, m => m.StartsWith("import-request.toml", StringComparison.Ordinal));
+
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(h.Folder, "submission.json")));
+        var root = doc.RootElement;
+        Assert.Equal("hcg.repo.artifact-submission", root.GetProperty("format").GetString());
+        var build = root.GetProperty("build");
+        Assert.Equal("hcg-server-build-host", build.GetProperty("provider").GetString());
+        Assert.Equal("2026-11-25T20:01:53Z", build.GetProperty("builtAt").GetString());
+        Assert.StartsWith("Swift version 6.0.3", build.GetProperty("toolchain").GetString());
+        foreach (var forbidden in new[] { "runId", "runUrl", "artifactName", "runRepository", "runCommit" })
+            Assert.False(build.TryGetProperty(forbidden, out _), forbidden);
+        var source = root.GetProperty("source");
+        Assert.Equal("F1r3srp3nt/HCG-Sentinel", source.GetProperty("repository").GetString());
+        Assert.Equal(new string('e', 40), source.GetProperty("commit").GetString());
+        Assert.False(source.GetProperty("dirty").GetBoolean());
+        Assert.Equal(wf.Validation!.Facts.Sha256, root.GetProperty("artifact").GetProperty("sha256").GetString());
+        Assert.Equal(["firmware", "uikittools"], root.GetProperty("dependencies").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal(["postinst", "postrm"], root.GetProperty("maintainerScripts").GetProperty("declared").EnumerateArray().Select(e => e.GetString()).ToArray());
+        Assert.Equal("ldid", root.GetProperty("signing").GetProperty("method").GetString()); // Maker signs after the unsigned Build Host build
+        Assert.Contains("var/jb/Applications/HCGSentinel.app/HCGSentinel", root.GetProperty("signing").GetProperty("signedFiles").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal("candidate", root.GetProperty("channel").GetString());
+
+        var provenanceJson = File.ReadAllText(Path.Combine(h.Folder, "provenance.json"));
+        Assert.Contains("\"provider\": \"hcg-server-build-host\"", provenanceJson);
+        Assert.Contains("\"ci_run_id\": null", provenanceJson);
+        Assert.Contains("release submit --handoff", File.ReadAllText(Path.Combine(h.Folder, "README.md")));
+
+        // A Build Host build never carries CI run fields.
+        var mixed = prov with { CiRunId = 1, CiArtifact = "x" };
+        Assert.Throws<ArgumentException>(mixed.Validate);
+    }
+
     private RootlessAppWorkflow.Request Request(string source, string? ldid = "/usr/local/bin/ldid", string? device = "16.5", PackageProvenance? prov = null, string access = "public", string? approval = null) =>
         new(source, _t.Combine("wf-" + Guid.NewGuid().ToString("N")[..6]), Spec(), prov ?? new("F1r3srp3nt/HCG-Sentinel", new string('a', 40), false),
             new("Toolkit for authorised testing of your own devices.", ["First rootless candidate of the standard app."], ["Sentinel's privileged helper is not part of this package."], access, "iPhone 13 Pro, iOS 16.5, Dopamine (rootless)", approval),

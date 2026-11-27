@@ -9,6 +9,8 @@ namespace HCG.ExecutableMaker.Packaging.Jailbreak;
 /// Where the package came from. Everything is recorded as given; nothing is inferred. <see cref="Repository"/> and
 /// <see cref="Commit"/> are the app's source; the CI fields name the run that built and uploaded the .deb (its own
 /// repository and the commit that run built, which HCG Repo's importer checks against the run's head).
+/// A build on HCG Server's Build Host has no CI run: it carries <see cref="BuildHost"/> (from the verified, signed
+/// provenance) instead, and no CI field may be set with it (<see cref="FromBuildHost"/>).
 /// </summary>
 public sealed record PackageProvenance(
     string? Repository,
@@ -20,11 +22,35 @@ public sealed record PackageProvenance(
     string? BuiltWith = null,
     string? PackagedBy = null,
     string? CiRepository = null,
-    string? CiCommit = null)
+    string? CiCommit = null,
+    BuildHostEvidence? BuildHost = null)
 {
     /// <summary>The run's repository and commit: given explicitly, or the app's own when its repository built it.</summary>
-    public string? ImportRepository => CiRepository ?? Repository;
-    public string? ImportCommit => CiCommit ?? (CiRepository is null ? Commit : null);
+    public string? ImportRepository => BuildHost is null ? CiRepository ?? Repository : null;
+    public string? ImportCommit => BuildHost is null ? CiCommit ?? (CiRepository is null ? Commit : null) : null;
+
+    /// <summary>HCG Repo's <c>build.provider</c> for this package.</summary>
+    public string BuildProvider => BuildHost is not null ? BuildProviderIds.HcgServerBuildHost
+        : CiRunId is not null ? BuildProviderIds.GitHubActions : BuildProviderIds.ExecutableMakerLocal;
+
+    /// <summary>
+    /// A package whose app was built by HCG Server's Build Host: the source is exactly what the signed provenance
+    /// vouches for (repository, commit, clean tree), and there is no CI run, artifact or run repository.
+    /// </summary>
+    public static PackageProvenance FromBuildHost(BuildHostEvidence evidence, string? packagedBy = null, string? builtWith = null) =>
+        new(evidence.Repository, evidence.Commit, evidence.Dirty, BuiltWith: builtWith ?? evidence.Toolchain, PackagedBy: packagedBy, BuildHost: evidence);
+
+    /// <summary>Refuses a provenance that mixes a Build Host build with CI run fields (HCG Repo refuses those for non-GitHub providers).</summary>
+    public void Validate()
+    {
+        if (BuildHost is null) return;
+        if (CiRunId is not null || CiArtifact is not null || CiRunUrl is not null || CiRepository is not null || CiCommit is not null)
+            throw new ArgumentException("A Build Host build has no CI run: run ID, artifact, run URL and run repository must not be set.");
+        if (BuildHost.Dirty || SourceDirty == true)
+            throw new ArgumentException("A Build Host build from a dirty tree cannot be submitted.");
+        if (!string.Equals(Repository, BuildHost.Repository, StringComparison.Ordinal) || !string.Equals(Commit, BuildHost.Commit, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The package's source must be the repository and commit the Build Host's signed provenance records.");
+    }
 }
 
 /// <summary>Texts for the HCG Repo review. The person packaging writes them; HCG adds only facts it measured.</summary>
@@ -74,6 +100,7 @@ public static class CandidateHandoff
     public static async Task<Output> ExportAsync(string folder, string debPath, IosAppBundle app, RootlessAppPackageSpec spec, RootlessAppDebValidator.Result validation,
         PackageProvenance provenance, CandidateTexts texts, IReadOnlyList<string> signedFiles, DateTimeOffset now, CancellationToken ct, HandoffContext? context = null)
     {
+        provenance.Validate();
         Directory.CreateDirectory(folder);
         var files = new List<string>();
         var missing = new List<string>();
@@ -97,6 +124,7 @@ public static class CandidateHandoff
                 ["ci_repository"] = provenance.ImportRepository, ["ci_commit"] = provenance.ImportCommit,
                 ["ci_run_id"] = provenance.CiRunId, ["ci_run_url"] = provenance.CiRunUrl, ["ci_artifact"] = provenance.CiArtifact,
             },
+            ["build"] = BuildBlock(provenance),
             ["app"] = new JsonObject
             {
                 ["bundle_id"] = app.BundleId, ["name"] = app.Name, ["short_version"] = app.ShortVersion, ["build_version"] = app.BuildVersion,
@@ -141,7 +169,7 @@ public static class CandidateHandoff
         // Changelog and known issues.
         var changelog = new StringBuilder($"# {spec.Name} changelog\n\n## {spec.Version}\n\n");
         changelog.Append($"Candidate beta (Beta / Experimental) for device testing");
-        if (provenance.Commit is { } c) changelog.Append($" ({provenance.Repository ?? "source"} commit `{c[..Math.Min(7, c.Length)]}`{(provenance.CiRunId is { } run ? $", CI run {run}" : "")})");
+        if (provenance.Commit is { } c) changelog.Append($" ({provenance.Repository ?? "source"} commit `{c[..Math.Min(7, c.Length)]}`{(provenance.CiRunId is { } run ? $", CI run {run}" : provenance.BuildHost is { } bh ? $", built by HCG Server's Build Host, job {bh.JobId}" : "")})");
         changelog.Append(".\n\n");
         foreach (var line in texts.Changes) changelog.Append("- ").Append(line).Append('\n');
         changelog.Append("- Packaged as a rootless app (`iphoneos-arm64`, `").Append(f.AppPath).Append("`) with gzip members.\n");
@@ -163,15 +191,119 @@ public static class CandidateHandoff
         // package.toml draft in HCG Repo's format.
         await Write("package.toml", PackageToml(spec, app, f, texts, issues)).ConfigureAwait(false);
 
-        // Import request: only a pinned, immutable source can be imported.
-        var complete = provenance is { ImportRepository: { Length: > 0 }, CiRunId: not null, CiArtifact: { Length: > 0 }, ImportCommit.Length: 40 };
-        var request = ImportRequest(spec, provenance, f.Sha256, complete);
-        await Write(complete ? "import-request.toml" : "import-request.INCOMPLETE.toml", request).ConfigureAwait(false);
-        if (!complete) missing.Add("import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact");
+        var complete = false;
+        if (provenance.BuildHost is { } buildHost)
+        {
+            // Build Host: no CI run to pin. A native HCG Repo submission (submission.json) carries the Build Host's signed
+            // source and build evidence; HCG Repo's Release Manager validates it, the owner approves the SHA-256, and
+            // `release prepare` writes the local-submission import request. No run ID is invented.
+            var submission = Submission(spec, app, f, validation, provenance, buildHost, signedFiles, debName, context);
+            await Write("submission.json", submission.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n").ConfigureAwait(false);
+        }
+        else
+        {
+            // Import request: only a pinned, immutable source can be imported.
+            complete = provenance is { ImportRepository: { Length: > 0 }, CiRunId: not null, CiArtifact: { Length: > 0 }, ImportCommit.Length: 40 };
+            var request = ImportRequest(spec, provenance, f.Sha256, complete);
+            await Write(complete ? "import-request.toml" : "import-request.INCOMPLETE.toml", request).ConfigureAwait(false);
+            if (!complete) missing.Add("import-request.toml: the package was not built by a CI run with an uploaded artifact, so it cannot be pinned; build it in CI (or attach it to a tagged release) and fill in run_id/artifact");
+        }
 
         await Write("DEVICE-TEST.md", DeviceTest(spec, app, f, context, debName)).ConfigureAwait(false);
-        await Write("README.md", Readme(spec, f, files, complete, missing, context)).ConfigureAwait(false);
+        await Write("README.md", Readme(spec, f, files, complete, missing, context, provenance.BuildHost)).ConfigureAwait(false);
         return new Output(folder, files, complete, missing);
+    }
+
+    /// <summary>provenance.json's <c>build</c> block: the provider and, for the Build Host, the signed evidence (no CI run).</summary>
+    private static JsonObject BuildBlock(PackageProvenance p)
+    {
+        var o = new JsonObject { ["provider"] = p.BuildProvider };
+        if (p.BuildHost is { } e)
+        {
+            o["toolchain"] = e.Toolchain;
+            o["built_at"] = e.BuiltAt;
+            o["build_host"] = new JsonObject
+            {
+                ["job"] = e.JobId, ["key_fingerprint"] = e.KeyFingerprint, ["device_id"] = e.DeviceId, ["device_name"] = e.DeviceName,
+                ["approved_by"] = e.ApprovedBy, ["signing"] = e.SigningMethod,
+            };
+        }
+        return o;
+    }
+
+    private static readonly string[] MaintainerScriptNames = ["preinst", "postinst", "prerm", "postrm", "config"];
+
+    /// <summary>
+    /// A native HCG Repo artifact submission (<c>hcg.repo.artifact-submission</c> v1) for a package whose app the Build
+    /// Host built. <c>source</c> and <c>build</c> come from the verified provenance's <c>submission</c> block;
+    /// <c>build</c> never has runId, runUrl, artifactName or runRepository. Every other field is measured from the .deb.
+    /// </summary>
+    public static JsonObject Submission(RootlessAppPackageSpec spec, IosAppBundle app, RootlessAppDebValidator.Facts f, RootlessAppDebValidator.Result validation,
+        PackageProvenance provenance, BuildHostEvidence buildHost, IReadOnlyList<string> signedFiles, string debName, HandoffContext? context = null)
+    {
+        var packagedWith = string.Join(", ", new[] { provenance.PackagedBy }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        var source = new JsonObject { ["repository"] = buildHost.Repository, ["commit"] = buildHost.Commit.ToLowerInvariant(), ["dirty"] = false };
+        if (context?.Revision?.Branch is { } branch) source["branch"] = branch;
+        var m = new JsonObject
+        {
+            ["format"] = "hcg.repo.artifact-submission", ["formatVersion"] = 1,
+            ["package"] = new JsonObject { ["identifier"] = spec.PackageId, ["version"] = spec.Version, ["architecture"] = RootlessAppPackager.Architecture, ["name"] = app.Name },
+            ["artifact"] = new JsonObject { ["filename"] = debName, ["sha256"] = f.Sha256.ToLowerInvariant(), ["size"] = f.Size },
+            ["compatibility"] = new JsonObject
+            {
+                ["minimumOS"] = f.MinimumOS, ["environment"] = "rootless", ["jailbreaks"] = new JsonArray(),
+                ["deviceFamilies"] = new JsonArray(app.DeviceFamilies.Select(d => (JsonNode?)d).ToArray()),
+            },
+            ["source"] = source,
+            ["build"] = new JsonObject
+            {
+                ["provider"] = buildHost.Provider,
+                ["toolchain"] = packagedWith.Length > 0 ? $"{buildHost.Toolchain}, {packagedWith}" : buildHost.Toolchain,
+                ["builtAt"] = buildHost.BuiltAt,
+            },
+            ["dependencies"] = new JsonArray(DependencyNames(f.Control.GetValueOrDefault("Depends")).Select(d => (JsonNode?)d).ToArray()),
+            ["maintainerScripts"] = new JsonObject
+            {
+                ["declared"] = new JsonArray(MaintainerScriptNames.Where(f.Scripts.ContainsKey).Select(n => (JsonNode?)n).ToArray()),
+            },
+            ["validation"] = new JsonObject
+            {
+                ["tool"] = provenance.PackagedBy ?? "HCG Executable Maker",
+                ["checks"] = new JsonArray(validation.Checks.Select(c => (JsonNode?)new JsonObject { ["check"] = c.Name, ["status"] = c.Status.ToString(), ["detail"] = c.Detail }).ToArray()),
+                ["deviceTested"] = false,
+            },
+            ["channel"] = "candidate",
+            ["origin"] = new JsonObject
+            {
+                ["kind"] = "executable-maker-buildhost-handoff",
+                ["buildHost"] = new JsonObject
+                {
+                    ["job"] = buildHost.JobId, ["keyFingerprint"] = buildHost.KeyFingerprint, ["deviceId"] = buildHost.DeviceId,
+                    ["approvedBy"] = buildHost.ApprovedBy, ["buildSigning"] = buildHost.SigningMethod,
+                },
+                ["installPath"] = f.AppPath,
+            },
+        };
+        // Code signing is Executable Maker's (ldid), after the unsigned Build Host build. Paths are inside the package.
+        if (signedFiles.Count > 0)
+            m["signing"] = new JsonObject
+            {
+                ["method"] = "ldid",
+                ["signedFiles"] = new JsonArray(signedFiles.Select(s => (JsonNode?)$"{(f.AppPath ?? "").Trim('/')}/{s.TrimStart('/')}".TrimStart('/')).ToArray()),
+            };
+        return m;
+    }
+
+    /// <summary>Package names in a Depends field (alternatives included, versions dropped), in order.</summary>
+    public static IReadOnlyList<string> DependencyNames(string? depends)
+    {
+        var names = new List<string>();
+        foreach (var alt in (depends ?? "").Split([',', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var name = alt.Split([' ', '(', ':', '['], 2)[0].Trim();
+            if (name.Length > 0 && !names.Contains(name)) names.Add(name);
+        }
+        return names;
     }
 
     private static string TomlEscape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
@@ -352,7 +484,7 @@ public static class CandidateHandoff
     private static string InstalledLine(HandoffContext? context) =>
         context?.InstalledCheck is { } ic ? "\n- Maker's check at export: " + ic.State + " — " + ic.Summary : "";
 
-    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context)
+    private static string Readme(RootlessAppPackageSpec spec, RootlessAppDebValidator.Facts f, IReadOnlyList<string> files, bool complete, IReadOnlyList<string> missing, HandoffContext? context, BuildHostEvidence? buildHost = null)
     {
         var sb = new StringBuilder($"# Candidate handoff: {spec.Name} {spec.Version} (Beta / Experimental)\n\n");
         sb.Append($"`{spec.PackageId}` · `iphoneos-arm64` · {f.Size:N0} bytes ({f.Size} bytes) · SHA-256 `{f.Sha256}`\n\n");
@@ -367,7 +499,10 @@ public static class CandidateHandoff
         sb.Append($"For HCG Repo Candidate (`{CandidateSource}`). Nothing has been published. Not device-tested.\n\n");
         sb.Append("Files:\n");
         foreach (var file in files.Append("README.md").Distinct()) sb.Append("- `").Append(file).Append("`\n");
-        sb.Append(complete
+        if (buildHost is not null)
+            sb.Append($"\nBuilt by HCG Server's Build Host (job `{buildHost.JobId}`, approved by {buildHost.ApprovedBy ?? "the owner"}, provenance signed by key `{buildHost.KeyFingerprint}`), unsigned; packaged and signed by HCG Executable Maker. ")
+              .Append("There is no CI run. To submit: `bin/hcgrepo release submit --handoff <this folder>` in HCG Repo; after the owner approves the SHA-256, `release prepare` writes the `local-submission` import request.\n");
+        else sb.Append(complete
             ? "\nTo submit: copy `import-request.toml` to HCG Repo `imports/`, `package.toml`, `CHANGELOG.md` and `icon.png` to `packages/" + spec.PackageId + "/`, push a branch; **Prepare packages** fetches and checks the pinned artifact.\n"
             : "\n**Not importable yet:** see `import-request.INCOMPLETE.toml`.\n");
         if (missing.Count > 0) { sb.Append("\nMissing:\n"); foreach (var m in missing) sb.Append("- ").Append(m).Append('\n'); }
