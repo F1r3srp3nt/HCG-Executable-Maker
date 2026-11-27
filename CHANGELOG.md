@@ -2,6 +2,46 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Build Provider (HCG Server Build Host in the New Build wizard)
+
+### Added
+- **Build provider** selector on the New Build wizard's Inspect step: Local Machine (default, unchanged), HCG Server
+  Build Host, and GitHub Actions (listed, not available yet). See docs/BUILD-PROVIDERS.md.
+- **HCG Server Build Host** goes Inspect → Build. The panel offers:
+  - authorized discovery on loopback, with the build-client token stored in the OS credential store and never shown again;
+  - Test connection, with distinct states (token needed, token refused, not `hcg.buildhost/1`, not loopback, not reachable);
+  - isolation, queue, toolchains, providers and the registered projects;
+  - the host's device, OS/architecture and isolation rules from verified provenance;
+  - the signing key, with **Pin this key**;
+  - the resource limits;
+  - the registered project matched to the imported one (same working copy, or same repository and folder);
+  - the commit recorded at import;
+  - target OS/architecture per provider;
+  - operations and options.
+- **Explicit authorization before submitting.** The statement names the host, key, commit, repository, source remote,
+  operations and provider, and says that Executable Maker sends no source files. It is cleared by any change and used
+  once.
+- **Running reuses `HcgServerBuildHost`**, writing the same `native-build-request.json` / `native-build-result.json`.
+  - The plan and the redacted log stream into the build view.
+  - The wizard shows that the job waits for the owner's approval on HCG Server.
+  - Cancel Build cancels the job there.
+- **Results: Build provenance and evidence.**
+  - Job and approver; each step with exit code, time, peak memory and CPU.
+  - The verified provenance, the host key check, device and OS/architecture.
+  - Source commit and tree, toolchain, validation, artifact SHA-256s, Release Passports, HCG Repo evidence and the
+    contract files.
+  - **Unsigned — not ready for public distribution**: Ship to Store is not offered for this output.
+- **Toolchain Manager.** The wizard's Build Readiness panel shows the Build Host's compatible version next to a tool
+  that is missing or too old here (Go 1.25 for the HCG Server-shaped helper).
+- `MakerFeatures.BuildHostServer` (`buildhost.local`, free, decided by HCG Server's owner). Proposed for founder review,
+  not registered: a central key for non-loopback build hosts, and OS/arch, key and limits in the Build Host's status.
+
+### Fixed
+- **Keyring not reachable.** When the OS keyring exists but cannot be reached (no D-Bus session), the Build Host token
+  is kept for this run only and the panel says so. Before, the connection test failed with an exception.
+- **Commit in the request purpose.** A Build Host request's purpose text now uses the normalized (lowercase) commit.
+- **Test on Windows.** The SigningProbe fixture test no longer depends on line endings.
+
 ## [Unreleased] — Apple Signing Assistant
 
 ### Added

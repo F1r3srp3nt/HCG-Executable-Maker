@@ -96,6 +96,8 @@ internal sealed class FakeBuildHost : HttpMessageHandler
             return Task.FromResult(Json(new { error = "unknown or revoked build-client token", code = "unauthorized" }, HttpStatusCode.Unauthorized));
         const string p = "/buildhost/v1/";
         if (path == p + "status") response = Json(new { contract = ContractHeader, isolation = "seatbelt", enforced = true, toolchains = Array.Empty<object>(), providers = Array.Empty<object>(), queued = 0 });
+        else if (path == p + "projects")
+            response = Json(new[] { new { id = "lifeos", name = "HCG LifeOS", source = new { repository = "F1r3srp3nt/HCG-LifeOS", remote = "/src/lifeos" }, provider = "swiftpm", operations = new[] { "resolve", "build", "test", "package" } } });
         else if (path == p + "jobs" && request.Method == HttpMethod.Post) response = Json(Job(), HttpStatusCode.Accepted);
         else if (path == p + $"jobs/{JobId}") { response = Json(Job()); _polls++; }
         else if (path.StartsWith(p + $"jobs/{JobId}/logs", StringComparison.Ordinal))

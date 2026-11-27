@@ -33,7 +33,17 @@ public static class MakerFeatures
     public static readonly MakerFeature StorePublish = new("store.publish", "Ship to Store (publishing)",
         "Upload builds to HCG Store as private drafts that a person reviews and approves in HCG Store.", FeatureKind.StaffOnly, null);
 
-    public static IReadOnlyList<MakerFeature> All { get; } = [LocalBuilds, SupportSubmit, SupportAttach, AiUse, StorePublish];
+    /// <summary>
+    /// HCG Server's Build Host on this computer (loopback only). HCG Server authorizes it: a build-client token its owner
+    /// issues, and the owner's approval of every job. Nothing here is decided centrally and no account is needed. A build
+    /// host on another computer or for an organisation would need a central feature key, which HCG has not registered
+    /// (proposed in docs/BUILD-PROVIDERS.md for founder review); until then only the loopback Build Host is offered.
+    /// </summary>
+    public static readonly MakerFeature BuildHostServer = new("buildhost.local", "HCG Server Build Host (this computer)",
+        "Build on HCG Server's Build Host on this computer. HCG Server's owner authorizes it with a build-client token and approves every job; Executable Maker sends no source files and the output is unsigned.",
+        FeatureKind.Free, null);
+
+    public static IReadOnlyList<MakerFeature> All { get; } = [LocalBuilds, BuildHostServer, SupportSubmit, SupportAttach, AiUse, StorePublish];
 
     public static MakerFeature ById(string id) =>
         All.FirstOrDefault(f => f.Id == id || f.CentralKey == id) ?? throw new ArgumentException($"Unknown HCG Executable Maker feature \"{id}\".", nameof(id));

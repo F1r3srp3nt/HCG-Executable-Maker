@@ -51,6 +51,12 @@ public sealed record AppSettings
     public List<ToolchainProfile>? ToolchainProfiles { get; init; }
     /// <summary>Project ID → profile ID. A project without an entry uses <see cref="ToolPaths"/> and automatic detection.</summary>
     public Dictionary<string, string>? ProjectToolchainProfiles { get; init; }
+    /// <summary>HCG Server's Build Host address (loopback only). Null = HCG_BUILDHOST_URL or http://127.0.0.1:7600/buildhost/v1/.</summary>
+    public string? BuildHostUrl { get; init; }
+    /// <summary>The HCG Server device key pinned for the Build Host (SHA-256, hex). Provenance signed by another key is refused.</summary>
+    public string? BuildHostKeyPin { get; init; }
+    /// <summary>Build Hosts seen in verified provenance: device, OS/architecture, isolation and the key that signed (never the token).</summary>
+    public List<KnownBuildHost>? KnownBuildHosts { get; init; }
 }
 
 public interface ISettingsStore

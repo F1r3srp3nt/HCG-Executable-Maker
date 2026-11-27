@@ -1,0 +1,34 @@
+{
+  "build": "8cd20b4b-cb65-435a-9b85-2880c74418a2",
+  "status": "Succeeded",
+  "job": "bj-20261127-140614-090dc731e2",
+  "jobState": "succeeded",
+  "approvedBy": "owner",
+  "keyFingerprint": "e8ff884ad1ea88c9e3f269550c772ef8c8fba363990a84c909a3262a846b15f0",
+  "keyPinned": "Pinned key verified",
+  "host": "buildhost-demo linux/amd64 hcg-agent 0.1.0",
+  "isolation": "landlock",
+  "source": "F1r3srp3nt/HCG-Executable-Maker@0dfa2dc634f9d4601765b2900da1bd4c960d545e",
+  "toolchain": "go version go1.25.4 linux/amd64",
+  "artifacts": [
+    {
+      "name": "hcg-agent",
+      "size": 2264146,
+      "sha256": "1c5ec0ba41ea1f633fea20b862997386640ad17ca29ca7e3d24cd5720ef496e8",
+      "verification": "Passed"
+    },
+    {
+      "name": "build.log",
+      "size": 1307,
+      "sha256": "6cce127255bf2b54c1e06812bdacc267d8477d1b4773f4b9c40b6119f49e491c",
+      "verification": "Passed"
+    }
+  ],
+  "passports": [
+    "<maker-data>/builds/8cd20b4bcb65435a9b852880c74418a2/buildhost-artifacts/hcg-agent.release-passport.json"
+  ],
+  "buildDirectory": "<maker-data>/builds/8cd20b4bcb65435a9b852880c74418a2",
+  "distributionReadiness": "Unsigned \u2014 not ready for public distribution. The Build Host never signs; sign the output in Executable Maker (with its own approval) before any distribution. Nothing was uploaded or published.",
+  "cancelledJob": "bj-20261127-140635-a330a0ac16",
+  "cancelledJobState": "cancelled"
+}

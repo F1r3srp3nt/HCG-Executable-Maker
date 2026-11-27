@@ -49,3 +49,23 @@ public sealed record BuildHostEvidence
 
     public string Provider => BuildProviderIds.HcgServerBuildHost;
 }
+
+/// <summary>
+/// What a Build Host's signed provenance said about it, remembered after Executable Maker verified the signature: shown
+/// with the Build Provider before the next build (operating system, architecture, isolation and the device key).
+/// hcg.buildhost/1's status does not publish these, so they are known after the first verified build.
+/// </summary>
+public sealed record KnownBuildHost
+{
+    public required string BaseUrl { get; init; }
+    public required string KeyFingerprint { get; init; }
+    public string DeviceId { get; init; } = "";
+    public string DeviceName { get; init; } = "";
+    public string AgentVersion { get; init; } = "";
+    public string OperatingSystem { get; init; } = "";
+    public string Architecture { get; init; } = "";
+    public string IsolationBackend { get; init; } = "";
+    public IReadOnlyList<string> IsolationRules { get; init; } = [];
+    public IReadOnlyList<string> IsolationGaps { get; init; } = [];
+    public DateTimeOffset LastVerifiedAt { get; init; }
+}

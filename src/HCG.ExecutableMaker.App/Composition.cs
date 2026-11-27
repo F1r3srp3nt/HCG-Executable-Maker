@@ -180,6 +180,7 @@ public static class Composition
         services.AddSingleton<UnleashifyViewModel>();
         services.AddSingleton<ImpactorViewModel>();
         services.AddTransient<BuildReadinessPanelViewModel>();
+        services.AddTransient<BuildHostPanelViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();
