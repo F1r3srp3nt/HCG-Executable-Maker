@@ -270,6 +270,8 @@ public static class MobileReadiness
     public const string DotNetIosArchiveNeedsSigning =
         ".NET for iOS creates an Xcode archive (and an IPA) only with code signing: the iOS SDK stops with \"Code signing must be enabled to create an Xcode archive\". An unsigned device archive is not possible for this project type.";
 
+    private static bool IsWildcard(IosProvisioningProfile p) => p.BundleIdPattern is { } pattern && (pattern == "*" || pattern.EndsWith(".*", StringComparison.Ordinal));
+
     private static void AddIosSigning(List<ReadinessItem> items, MobileAnalysis m, MobileOutput output, MobileBuildOptions? o, MobileSigningMode signing, ToolchainReport r)
     {
         // Which certificate type the destination needs: development for debugging, distribution for everything else.
@@ -309,7 +311,9 @@ public static class MobileReadiness
         var bundleIds = m.Ios?.AppTargets.Select(t => t.BundleIdentifier).OfType<string>().ToList()
                         ?? (m.DotNetIos?.ApplicationId is { } dotnetId ? [dotnetId] : []);
         var now = DateTimeOffset.UtcNow;
-        var candidates = r.IosProfiles.Where(p => !p.IsExpired(now) && p.Kind == wantedKind && (bundleIds.Count == 0 || bundleIds.Any(p.Matches))).ToList();
+        // App Store distribution needs the App ID itself: a wildcard profile never qualifies there (it does for development).
+        bool Covers(IosProvisioningProfile p) => bundleIds.Count == 0 || bundleIds.All(id => p.Matches(id) && (wantedKind != IosProfileKind.AppStore || !IsWildcard(p)));
+        var candidates = r.IosProfiles.Where(p => !p.IsExpired(now) && p.Kind == wantedKind && Covers(p)).ToList();
         switch (signing)
         {
             case MobileSigningMode.AppleManual:
@@ -322,7 +326,13 @@ public static class MobileReadiness
                         ? new("Provisioning profile", ReadinessState.SetupRequired, true, $"\"{named}\" expired on {match.Expiration:yyyy-MM-dd}.", "Regenerate it at developer.apple.com › Profiles and download it again.", SetupUrl: ProfileUrl)
                         : match.Kind != wantedKind
                             ? new("Provisioning profile", ReadinessState.IncompatibleVersion, true, $"\"{named}\" is a {match.Kind} profile; this destination needs a {wantedKind} profile.", "Choose or create a profile of the right type.", SetupUrl: ProfileUrl)
-                            : new("Provisioning profile", ReadinessState.Ready, true, $"\"{named}\" ({match.Kind}, {match.ApplicationIdentifier}, expires {match.Expiration:yyyy-MM-dd})."));
+                            : !Covers(match)
+                                ? new("Provisioning profile", ReadinessState.IncompatibleVersion, true,
+                                    wantedKind == IosProfileKind.AppStore && IsWildcard(match) && bundleIds.All(match.Matches)
+                                        ? $"\"{named}\" is a wildcard App Store profile ({match.ApplicationIdentifier}); App Store distribution needs a profile for exactly {string.Join(", ", bundleIds)}."
+                                        : $"\"{named}\" is for {match.ApplicationIdentifier}, which does not cover {string.Join(", ", bundleIds)}. Being from the same team is not enough.",
+                                    "Choose the profile made for this App ID, or create it at developer.apple.com › Profiles.", SetupUrl: ProfileUrl)
+                                : new("Provisioning profile", ReadinessState.Ready, true, $"\"{named}\" ({match.Kind}{(IsWildcard(match) ? ", wildcard" : "")}, {match.ApplicationIdentifier}, expires {match.Expiration:yyyy-MM-dd})."));
                 break;
             case MobileSigningMode.AppleAutomatic:
                 items.Add(candidates.Count > 0

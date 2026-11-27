@@ -2,6 +2,38 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — .NET for iOS: genuine XCArchive and IPA (HCG Mail), device route, signing by route
+
+### Fixed
+- **"dotnet publish succeeded but created no .xcarchive"** (HCG Mail, Xcode 27.2, workload 27.2.10000). The .NET iOS
+  SDK's Archive task uses `ArchiveDir` verbatim as the archive's root. Maker passed a parent folder and then searched it
+  for `*.xcarchive`, so it never found the archive. `ArchiveDir` now names the `.xcarchive` itself, in a per-build folder.
+- **The IPA is the .NET iOS SDK's own** (`BuildIpa=true`, `IpaPackagePath` per build), with the archive alongside.
+  Maker no longer passes `BuildIpa=false` and no longer runs `xcodebuild -exportArchive` for .NET projects.
+- **Entitlement variables** (`$(AppIdentifierPrefix)`, `$(TeamIdentifierPrefix)`, `$(CFBundleIdentifier)`,
+  `$(PRODUCT_BUNDLE_IDENTIFIER)`) are resolved for each profile's team before entitlements are compared with the profile.
+- **A manually named profile must cover the bundle ID.** A profile for another App ID of the same team is refused with
+  the reason. App Store distribution never accepts a wildcard profile.
+- The .NET archive was judged as "unsigned" for availability and always showed unavailable. It is now judged with this Mac's certificates and profiles.
+
+### Added
+- **Signed device-app route for .NET for iOS** (`dotnet build -r ios-arm64`, Debug or Release; no archive, no IPA).
+  Debug/Release choices for every .NET iOS route. A distribution IPA is Release only.
+- **Effective MSBuild properties** are read with the build's own settings before compiling (`dotnet msbuild -getProperty`),
+  logged and checked: Exe, ArchiveOnBuild, ArchiveDir, BuildIpa, code signing.
+- **Signing Vault validation for .NET for iOS**: the app's ApplicationId and CodesignEntitlements file are validated
+  against the chosen identity and profile, by route.
+- **When packaging fails after signing**, the signed `.app` is kept and named in the failure.
+- **Artifact actions in Mobile Build Studio**: Launch in Simulator, Open in Xcode Organizer, Open in HCG Impactor, and
+  Inspect signature and entitlements. Install on device now also covers the .NET device app and development IPA.
+- CI job `hcg-mail-ios-signed` (`xcode-27`) builds the real HCG Mail (`6ddd667`, Xcode 27.2, workload 27.2.10000)
+  through Mobile Build Studio's UI:
+  - a Simulator launch;
+  - a signed device app, an XCArchive and the SDK's IPA, signed with a synthetic identity and wildcard development profile;
+  - independent codesign, plutil, `security cms` and unzip checks.
+
+  See [docs/DOTNET-IOS.md](docs/DOTNET-IOS.md).
+
 ## [Unreleased] — HCG Store Manager compatibility (Swift apps with a command-line tool)
 
 ### Added

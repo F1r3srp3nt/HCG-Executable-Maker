@@ -45,6 +45,11 @@ public sealed class ArtifactItem(ArtifactRecord artifact, BuildRecord? build = n
     public string Path => Artifact.Path;
     public string Kind => Artifact.Kind == ArtifactKind.Directory ? "Folder" : "File";
     public string FormatName => Artifact.Format.DisplayName();
+    // Which artifact actions apply (Mobile Build Studio): launch, Organizer, Impactor, signature inspection.
+    public bool IsSimulatorApp => Artifact.Format == PackagingFormat.IosSimulatorApp && OperatingSystem.IsMacOS();
+    public bool IsArchive => Artifact.Format == PackagingFormat.IosArchive && OperatingSystem.IsMacOS();
+    public bool IsIpa => Artifact.Format == PackagingFormat.IosIpa;
+    public bool CanInspectSignature => Artifact.Format is PackagingFormat.IosDeviceApp or PackagingFormat.IosArchive or PackagingFormat.IosSimulatorApp && OperatingSystem.IsMacOS();
     public string Size => Format.Bytes(Artifact.SizeBytes);
     public string Sha256 => Artifact.Sha256;
     public string ShortSha => Artifact.Sha256.Length > 16 ? Artifact.Sha256[..16] + "…" : Artifact.Sha256;

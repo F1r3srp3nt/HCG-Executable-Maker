@@ -2013,6 +2013,60 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  hcg-mail-ios-signed:
+    name: HCG Mail iOS (main 6ddd667, Xcode 27.2, workload 27.2.10000) — Simulator launch, signed device app, XCArchive and the SDK's own IPA through Mobile Build Studio (synthetic identity)
+    needs: test
+    runs-on: xcode-27
+    timeout-minutes: 180
+    env:
+      OUT: ${{ github.workspace }}/mail-ios-out
+      # HCG Mail main (merge of PR #27, 1.0.0-beta.2): toolchain.props pins Xcode 27.2 and iOS workload 27.2.10000.
+      MAIL_COMMIT: 6ddd667d9dc189e24f5d31a313a9ae96299d2dfa
+      XCODE_VERSION: "27.2"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.1xx"
+      - name: HCG Mail at the pinned commit (whole repository, path with spaces)
+        run: |
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-Mail.git "$OUT/src/HCG Mail"
+          git -C "$OUT/src/HCG Mail" checkout --quiet "$MAIL_COMMIT"
+          echo "MAIL=$OUT/src/HCG Mail" >> "$GITHUB_ENV"
+      - name: Runner setup — Xcode ${{ env.XCODE_VERSION }} and the pinned iOS workload via HCG Mail's own script (CI setup; HCG never installs workloads unasked)
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          xcodebuild -version
+          cd "$MAIL/HCG Mail Project/iOS"
+          bash scripts/install-workload.sh
+      - name: Build HCG and the UI driver
+        run: dotnet build tools/ui-driver -c Release
+      - name: HCG Mail iOS end to end (see the script's header)
+        run: tools/ci/hcg-mail-ios-e2e.sh
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/mail-*.png "$OUT"/sim/artifacts/*/*-simulator.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+      - name: Upload logs and reports (the synthetic-signed apps are not uploaded)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hcg-mail-ios-signed-outputs
+          path: |
+            ${{ env.OUT }}/*/mail-*-build.log
+            ${{ env.OUT }}/*/mail-*-mobile.json
+            ${{ env.OUT }}/*/mail-*-ui-driver-report.txt
+            ${{ env.OUT }}/embedded-*.plist
+            ${{ env.OUT }}/screens
+          retention-days: 14
+
   hcg-mail-ios:
     name: HCG Mail iOS — Build Doctor (folder import → repository import → MSBuild evaluation) and Simulator build; known-good .NET iOS sample
     needs: test

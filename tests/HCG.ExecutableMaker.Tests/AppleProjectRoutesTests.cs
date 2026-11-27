@@ -183,16 +183,29 @@ public class AppleProjectRoutesTests : IDisposable
             Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosIpa, Signing = MobileSigningMode.AppleManual,
             SigningIdentity = "Apple Distribution: Hakmi Capital Group (ABCDE12345)", ProvisioningProfile = "HCG Mail App Store", DevelopmentTeam = "ABCDE12345", ExportMethod = IosExportMethod.AppStoreConnect,
         }));
-        var sargs = signed.Steps[0].Process.Arguments;
+        var sargs = Assert.Single(signed.Steps).Process.Arguments;   // one SDK invocation; no xcodebuild -exportArchive for .NET
         Assert.Contains("-p:CodesignKey=Apple Distribution: Hakmi Capital Group (ABCDE12345)", sargs);
         Assert.Contains("-p:CodesignProvision=HCG Mail App Store", sargs);
-        Assert.Empty(signed.Outputs);                // an IPA only comes from the separate export stage, never from the archive step
+        // The IPA is the .NET iOS SDK's own (BuildIpa), at an exact per-build path, with the archive alongside.
+        var signedInput = Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosIpa, Signing = MobileSigningMode.AppleManual, SigningIdentity = "x", ProvisioningProfile = "y" });
+        Assert.Contains("-p:BuildIpa=true", sargs);
+        Assert.Contains("-p:IpaPackagePath=" + DotNetIosPlanner.IpaPath(signedInput), sargs);
+        Assert.Equal([PackagingFormat.IosIpa, PackagingFormat.IosArchive], signed.Outputs.Select(o => o.Format));
+        Assert.EndsWith(".ipa", DotNetIosPlanner.IpaPath(signedInput));
 
         var archiveOptions = new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.AppleManual, SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "HCG Mail Dev" };
         var archive = DotNetIosPlanner.Plan(Input(m, archiveOptions));
         var args = Assert.Single(archive.Steps).Process.Arguments;
-        Assert.Equal(["publish", project, "-c", "Release", "-r", "ios-arm64", "-p:ArchiveOnBuild=true"], args.Take(7));
-        Assert.Contains("-p:ArchiveDir=" + DotNetIosPlanner.ArchiveDirectory(Input(m, archiveOptions)), args);
+        Assert.Equal(["publish", project, "-c", "Release", "-r", "ios-arm64"], args.Take(6));
+        Assert.Contains("-p:ArchiveOnBuild=true", args);
+        Assert.Contains("-p:BuildIpa=false", args);
+        // Regression (HCG Mail on Xcode 27.2): the SDK's Archive task writes the archive INTO ArchiveDir, so ArchiveDir must be
+        // the .xcarchive itself; a parent folder produced an archive no search for "*.xcarchive" could find.
+        var archiveDir = args.Single(a => a.StartsWith("-p:ArchiveDir=", StringComparison.Ordinal))["-p:ArchiveDir=".Length..];
+        Assert.EndsWith(".xcarchive", archiveDir);
+        Assert.Equal(DotNetIosPlanner.ArchivePath(Input(m, archiveOptions)), archiveDir);
+        Assert.Equal(PackagingFormat.IosArchive, Assert.Single(archive.Outputs).Format);
+        Assert.Contains(args, a => a.StartsWith("-p:OutputPath=", StringComparison.Ordinal) && a.Contains(DotNetIosPlanner.DeviceDirectory(Input(m, archiveOptions)), StringComparison.Ordinal));
         Assert.DoesNotContain("-p:EnableCodeSigning=false", args);
         Assert.Equal(Path.Combine(MailRepo(), "iOS App Store Submission", "src", "HCG.Mail.iOS"), archive.Steps[0].Process.WorkingDirectory);   // inside the whole repository
 
@@ -202,6 +215,128 @@ public class AppleProjectRoutesTests : IDisposable
         })));
         Assert.Throws<BuildValidationException>(() => DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosSimulatorApp }, MacReport(mac: false))));
         Assert.Throws<BuildValidationException>(() => DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosSimulatorApp }, MacReport(iosWorkload: null))));
+    }
+
+    // ------------------------------------------------------------------ .NET for iOS: routes, effective properties, signing
+
+    private static MobileBuildOptions Manual(MobileOutput output, string? variant = null, IosExportMethod? method = null) => new()
+    {
+        Framework = MobileFramework.DotNetIos, Output = output, Variant = variant, ExportMethod = method, Signing = MobileSigningMode.AppleManual,
+        SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "Wildcard Development",
+    };
+
+    [Fact]
+    public async Task Each_dotnet_ios_output_is_its_own_route_with_its_own_folder()
+    {
+        var m = await MailMobile();
+        // Simulator Release (Debug is the default).
+        var simRelease = DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosSimulatorApp, Variant = "Release" }));
+        Assert.Equal(["-c", "Release", "-r", "iossimulator-arm64"], simRelease.Steps[0].Process.Arguments.Skip(2).Take(4));
+
+        // Signed device app, Debug by default, Release on request: dotnet build -r ios-arm64, no archive, no IPA.
+        foreach (var (variant, expected) in new[] { ((string?)null, "Debug"), ("Release", "Release") })
+        {
+            var input = Input(m, Manual(MobileOutput.IosDeviceApp, variant));
+            var device = DotNetIosPlanner.Plan(input);
+            var args = Assert.Single(device.Steps).Process.Arguments;
+            Assert.Equal(["build", "-c", expected, "-r", "ios-arm64", "-o", DotNetIosPlanner.DeviceDirectory(input)], new[] { args[0] }.Concat(args.Skip(2).Take(6)));
+            Assert.Contains("-p:CodesignKey=Apple Development: Jane (ABCDE12345)", args);
+            Assert.DoesNotContain(args, a => a.StartsWith("-p:ArchiveOnBuild", StringComparison.Ordinal) || a.StartsWith("-p:BuildIpa", StringComparison.Ordinal));
+            Assert.Equal(PackagingFormat.IosDeviceApp, Assert.Single(device.Outputs).Format);
+        }
+        Assert.Throws<BuildValidationException>(() => DotNetIosPlanner.Plan(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosDeviceApp, Signing = MobileSigningMode.Unsigned })));
+
+        // A distribution IPA is Release only; a development IPA may be Debug.
+        Assert.Contains("must be a Release build", Assert.Throws<BuildValidationException>(() => DotNetIosPlanner.Plan(Input(m, Manual(MobileOutput.IosIpa, "Debug", IosExportMethod.AppStoreConnect)))).Message);
+        Assert.Contains("-p:BuildIpa=true", DotNetIosPlanner.Plan(Input(m, Manual(MobileOutput.IosIpa, "Debug", IosExportMethod.Debugging))).Steps[0].Process.Arguments);
+        Assert.Contains("wildcard", DotNetIosPlanner.Explain(MobileOutput.IosDeviceApp, null));
+        Assert.Contains("not a wildcard", DotNetIosPlanner.Explain(MobileOutput.IosIpa, IosExportMethod.AppStoreConnect));
+    }
+
+    [Fact]
+    public async Task The_effective_msbuild_properties_are_read_with_the_builds_own_settings_and_checked_before_compiling()
+    {
+        var m = await MailMobile();
+        var input = Input(m, Manual(MobileOutput.IosIpa));
+        var plan = DotNetIosPlanner.Plan(input);
+        var probe = DotNetIosPlanner.PropertyProbe(input, plan)!;
+        var a = probe.Process.Arguments;
+        Assert.Equal("msbuild", a[0]);
+        Assert.Contains("-p:Configuration=Release", a);
+        Assert.Contains("-p:RuntimeIdentifier=ios-arm64", a);
+        Assert.Contains("-p:ArchiveDir=" + DotNetIosPlanner.ArchivePath(input), a);       // the same global properties as the build
+        Assert.Contains("-p:CodesignProvision=Wildcard Development", a);
+        Assert.Contains("-getProperty:ArchiveDir", a);
+        Assert.Contains("-getProperty:BuildIpa", a);
+        Assert.DoesNotContain(a, x => x is "publish" or "build");                          // evaluation only
+        Assert.Null(DotNetIosPlanner.PropertyProbe(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosSimulatorApp }), plan));
+
+        var json = $$"""
+            {
+              "Properties": {
+                "OutputType": "Exe", "ApplicationId": "com.hakmicapitalgroup.hcgmail", "ArchiveOnBuild": "true",
+                "ArchiveDir": "{{DotNetIosPlanner.ArchivePath(input).Replace("\\", "\\\\")}}", "BuildIpa": "true",
+                "CodesignKey": "Apple Development: Jane (ABCDE12345)", "CodesignProvision": "Wildcard Development", "RuntimeIdentifiers": ""
+              }
+            }
+            """;
+        var props = DotNetIosPlanner.ParseProperties("Some MSBuild banner\n" + json);
+        Assert.Equal("true", props["BuildIpa"]);
+        Assert.DoesNotContain(DotNetIosPlanner.CheckProperties(props, input.Options, m.DotNetIos!), f => f.Severity == DiagnosticSeverity.Error);
+
+        // What the old adapter did, and what a library or a project overriding the properties would do: refused before compiling.
+        var bad = new Dictionary<string, string>(props) { ["ArchiveDir"] = "/w/archives", ["BuildIpa"] = "false", ["OutputType"] = "Library" };
+        var errors = DotNetIosPlanner.CheckProperties(bad, input.Options, m.DotNetIos!).Where(f => f.Severity == DiagnosticSeverity.Error).Select(f => f.Text).ToList();
+        Assert.Contains(errors, e => e.Contains("must be the .xcarchive", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("would make no IPA", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("not Exe", StringComparison.Ordinal));
+        Assert.Contains(DotNetIosPlanner.CheckProperties(new Dictionary<string, string>(), input.Options, m.DotNetIos!), f => f.Severity == DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public async Task Profiles_are_chosen_by_route_and_bundle_id_never_by_team_alone()
+    {
+        var m = await MailMobile();
+        var exp = DateTimeOffset.UtcNow.AddMonths(6);
+        IosProvisioningProfile P(string name, string appId, IosProfileKind kind) => new("/p/" + name, name, Guid.NewGuid().ToString(), "ABCDE12345", "ABCDE12345." + appId, kind, exp);
+        var dev = new SigningIdentity("1111111111111111111111111111111111111111", "Apple Development: Jane (ABCDE12345)", AppleCertificateKind.Development, "ABCDE12345");
+        var dist = new SigningIdentity("2222222222222222222222222222222222222222", "Apple Distribution: HCG (ABCDE12345)", AppleCertificateKind.AppleDistribution, "ABCDE12345");
+        var report = MacReport(identities: [dev, dist]) with
+        {
+            IosProfiles = [P("Wildcard Development", "*", IosProfileKind.Development), P("Other App", "com.hakmicapitalgroup.hcgnews", IosProfileKind.Development),
+                           P("Wildcard Store", "com.hakmicapitalgroup.*", IosProfileKind.AppStore), P("HCG Mail App Store", "com.hakmicapitalgroup.hcgmail", IosProfileKind.AppStore)],
+        };
+        ReadinessItem Profile(MobileBuildOptions o) => MobileReadiness.Evaluate(m, o.Output, o, report).Items.Single(i => i.Tool == "Provisioning profile");
+
+        // Development: a compatible wildcard profile is fine.
+        Assert.Equal(ReadinessState.Ready, Profile(Manual(MobileOutput.IosDeviceApp)).State);
+        // Same team, another App ID: refused, and the reason says why.
+        var other = Profile(Manual(MobileOutput.IosDeviceApp) with { ProvisioningProfile = "Other App" });
+        Assert.Equal(ReadinessState.IncompatibleVersion, other.State);
+        Assert.Contains("same team is not enough", other.Detail);
+        // App Store: never a wildcard, only the profile for this exact App ID, with a distribution certificate.
+        var store = Manual(MobileOutput.IosIpa, "Release", IosExportMethod.AppStoreConnect) with { SigningIdentity = dist.Name };
+        Assert.Contains("wildcard App Store profile", Profile(store with { ProvisioningProfile = "Wildcard Store" }).Detail);
+        Assert.Equal(ReadinessState.Ready, Profile(store with { ProvisioningProfile = "HCG Mail App Store" }).State);
+        Assert.Equal(ReadinessState.IncompatibleVersion, Profile(store with { ProvisioningProfile = "Wildcard Development" }).State);   // wrong type
+
+        // The device app, archive and IPA are offered for .NET for iOS, judged with this Mac's signing assets (not as unsigned).
+        var outputs = MobileCapabilities.Evaluate(m, report);
+        Assert.Contains(outputs, o => o.Output == MobileOutput.IosDeviceApp && o.IsAvailable);
+        Assert.Contains(outputs, o => o.Output == MobileOutput.IosArchive && o.IsAvailable);
+        Assert.DoesNotContain(outputs, o => o.Reason?.Contains("only with code signing", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void Entitlement_variables_are_resolved_per_profile_before_they_are_compared()
+    {
+        // HCG Mail's Entitlements.plist: keychain-access-groups with $(AppIdentifierPrefix)…, against a wildcard development profile.
+        var requested = "$(AppIdentifierPrefix)$(CFBundleIdentifier), $(AppIdentifierPrefix)com.microsoft.adalcache";
+        var expanded = HCG.ExecutableMaker.Packaging.Signing.SigningValidator.Expand(requested, "ABCDE12345", "com.hakmicapitalgroup.hcgmail");
+        Assert.Equal("ABCDE12345.com.hakmicapitalgroup.hcgmail, ABCDE12345.com.microsoft.adalcache", expanded);
+        Assert.True(HCG.ExecutableMaker.Packaging.Signing.SigningValidator.ValueAllowed(expanded, "ABCDE12345.*"));
+        Assert.False(HCG.ExecutableMaker.Packaging.Signing.SigningValidator.ValueAllowed(requested, "ABCDE12345.*"));   // what the unexpanded value did
+        Assert.False(HCG.ExecutableMaker.Packaging.Signing.SigningValidator.ValueAllowed(expanded, "OTHERTEAM1.*"));
     }
 
     // ------------------------------------------------------------------ Sentinel: deployment target preflight

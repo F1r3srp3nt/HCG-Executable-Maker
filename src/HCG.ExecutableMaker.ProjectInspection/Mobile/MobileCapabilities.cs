@@ -51,6 +51,15 @@ public static class MobileCapabilities
             Add(MobileOutput.IosSimulatorApp, "Builds for the iOS Simulator. Simulator builds are NOT distributable and cannot run on devices.");
             if (mobile.Framework == MobileFramework.NativeIos)
                 Add(MobileOutput.IosDeviceApp, "Builds for a physical iPhone or iPad (Debug by default, so development-only features stay available), signed with your Apple Development identity. Not for distribution.");
+            if (mobile.Framework == MobileFramework.DotNetIos)
+            {
+                // .NET for iOS: each output is its own route (DotNetIosPlanner). Device outputs are always signed, so they are judged
+                // with the keychain's certificates and profiles (never as "unsigned", which the SDK refuses).
+                Add(MobileOutput.IosDeviceApp, "Signed ios-arm64 app for registered iPhones and iPads (dotnet build; Debug or Release), with your Apple Development certificate and a development profile. No archive or IPA; not for distribution.");
+                Add(MobileOutput.IosArchive, "Signed device archive (.xcarchive) made by the .NET iOS SDK (ArchiveOnBuild). Opens in Xcode's Organizer.");
+                Add(MobileOutput.IosIpa, "Signed .ipa made by the .NET iOS SDK itself (BuildIpa), with the archive. Development, ad hoc or App Store, decided by the certificate and profile.");
+                return list;
+            }
             Add(MobileOutput.IosArchive, "Device archive (.xcarchive). Signed with your team, or unsigned for inspection only.", MobileSigningMode.Unsigned,
                 mobile.Framework == MobileFramework.DotNetMaui ? [".NET MAUI publishes an .ipa directly; a separate archive output is not offered."] : []);
             Add(MobileOutput.IosIpa, "Archives and exports a signed .ipa (App Store Connect, release testing, enterprise or development).");

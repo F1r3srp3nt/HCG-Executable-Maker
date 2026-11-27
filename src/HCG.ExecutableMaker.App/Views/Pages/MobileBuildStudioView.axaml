@@ -596,6 +596,7 @@
                   ToolTip.Tip="Package this device build with Unleashify: a rootless jailbreak app for HCG Repo Candidate, validated and handed off. Nothing is installed or published.">
             <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Unleashify this build…" /></StackPanel>
           </Button>
+          <TextBlock Classes="muted" Text="{Binding ArtifactActionMessage}" TextWrapping="Wrap" IsVisible="{Binding ArtifactActionMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           <ItemsControl ItemsSource="{Binding BuiltArtifacts}" IsVisible="{Binding HasBuiltArtifacts}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:ArtifactItem">
@@ -618,6 +619,16 @@
                       </StackPanel>
                     </Grid>
                     <TextBlock Classes="muted mono" FontSize="11" Text="{Binding Sha256}" />
+                    <WrapPanel>
+                      <Button Classes="small" Margin="0,0,6,6" Content="Launch in Simulator" IsVisible="{Binding IsSimulatorApp}"
+                              Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).LaunchInSimulatorCommand}" CommandParameter="{Binding}" />
+                      <Button Classes="small" Margin="0,0,6,6" Content="Open in Xcode Organizer" IsVisible="{Binding IsArchive}"
+                              Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).OpenInOrganizerCommand}" CommandParameter="{Binding}" />
+                      <Button Classes="small" Margin="0,0,6,6" Content="Open in HCG Impactor" IsVisible="{Binding IsIpa}"
+                              Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).OpenInImpactorCommand}" CommandParameter="{Binding}" />
+                      <Button Classes="small" Margin="0,0,6,6" Content="Inspect signature and entitlements" IsVisible="{Binding CanInspectSignature}"
+                              Command="{Binding $parent[UserControl].((vm:MobileBuildStudioViewModel)DataContext).InspectSignatureCommand}" CommandParameter="{Binding}" />
+                    </WrapPanel>
                     <ItemsControl ItemsSource="{Binding Checks}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:CheckItem">

@@ -23,8 +23,12 @@ public sealed class SigningPrebuildCheck(AppleSigningAssetService assets, IProje
         string sourceDirectory, ToolchainReport toolchains, CancellationToken ct)
     {
         if (options.Signing is not (MobileSigningMode.AppleAutomatic or MobileSigningMode.AppleManual)) return null;
-        if (options.Output is not (MobileOutput.IosArchive or MobileOutput.IosIpa)) return null;
-        if (analysis?.Ios is not { } ios) return null;
+        if (options.Output is not (MobileOutput.IosArchive or MobileOutput.IosIpa or MobileOutput.IosDeviceApp)) return null;
+        // An Xcode project's targets, or the .NET for iOS app itself (its ApplicationId and CodesignEntitlements file).
+        IReadOnlyList<SigningTargetFacts> targets;
+        if (analysis?.Ios is { } ios) { if (options.Output == MobileOutput.IosDeviceApp) return null; targets = Targets(ios, sourceDirectory); }
+        else if (analysis?.DotNetIos is { } dn) targets = [DotNetTarget(dn, sourceDirectory)];
+        else return null;
 
         var saved = await store.LoadAsync(project.Id.ToString(), ct).ConfigureAwait(false);
         var inventory = await assets.ReadAsync(null, null, ct).ConfigureAwait(false);
@@ -40,6 +44,10 @@ public sealed class SigningPrebuildCheck(AppleSigningAssetService assets, IProje
             ? inventory.Profiles.FirstOrDefault(p => string.Equals(p.Uuid, named, StringComparison.OrdinalIgnoreCase) || p.Name == named)
             : null;
         var identity = saved?.IdentitySha1;
+        // A named certificate (CodesignKey) is that identity, whichever profile is chosen.
+        if (options.SigningIdentity is { Length: > 0 } certName &&
+            inventory.Certificates.FirstOrDefault(c => c.CommonName == certName || string.Equals(c.Sha1, certName, StringComparison.OrdinalIgnoreCase)) is { } named0)
+            identity = named0.Sha1;
         var extra = new List<SigningCheck>();
         if (options.Signing == MobileSigningMode.AppleManual && identity is null && profile is not null)
         {
@@ -56,7 +64,6 @@ public sealed class SigningPrebuildCheck(AppleSigningAssetService assets, IProje
                 $"\"{options.ProvisioningProfile}\" is not installed on this Mac (or could not be verified).",
                 "Download it in Xcode › Settings › Accounts › Download Manual Profiles, or import it on the Signing & Security page."));
 
-        var targets = Targets(ios, sourceDirectory);
         var config = new ProjectSigningConfiguration
         {
             ProjectId = project.Id.ToString(),
@@ -83,6 +90,24 @@ public sealed class SigningPrebuildCheck(AppleSigningAssetService assets, IProje
             Now = now,
         });
         return extra.Count == 0 ? report : report with { Checks = [.. extra, .. report.Checks] };
+    }
+
+    /// <summary>A .NET for iOS app as a signing target: its assembly, ApplicationId and the CodesignEntitlements file the project names.</summary>
+    public static SigningTargetFacts DotNetTarget(DotNetIosProjectInfo dn, string sourceDirectory)
+    {
+        var name = dn.AssemblyName ?? Path.GetFileNameWithoutExtension(dn.ProjectPath);
+        var entitlements = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (dn.Entitlements is { Length: > 0 } rel)
+        {
+            var file = Path.GetFullPath(Path.Combine(sourceDirectory, Path.GetDirectoryName(dn.ProjectPath) ?? "", rel.Replace('\\', '/')));
+            if (file.StartsWith(Path.GetFullPath(sourceDirectory), StringComparison.Ordinal) && File.Exists(file))
+                try
+                {
+                    foreach (var kv in PlistReader.ParseDictionary(File.ReadAllBytes(file))) entitlements[kv.Key] = AppleCertificates.RenderValue(kv.Value);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or System.Xml.XmlException) { }
+        }
+        return new SigningTargetFacts(name, dn.ApplicationId, false, entitlements);
     }
 
     /// <summary>The app targets and their embedded targets, with entitlements read from each target's .entitlements file.</summary>

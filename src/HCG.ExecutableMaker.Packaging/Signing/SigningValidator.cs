@@ -393,7 +393,8 @@ public static class SigningValidator
             }
             if (!SigningRouteCatalog.IsRestricted(key, route.Platform)) continue;
             if (!p.Entitlements.TryGetValue(key, out var granted)) { problems.Add($"{key} is not in the profile"); continue; }
-            if (!ValueAllowed(value, granted)) problems.Add($"{key} = {value} is not allowed (the profile allows {granted})");
+            var expanded = Expand(value, p.TeamIds.FirstOrDefault(), target.BundleIdentifier);
+            if (!ValueAllowed(expanded, granted)) problems.Add($"{key} = {expanded} is not allowed (the profile allows {granted})");
         }
         if (problems.Count > 0)
             add("Entitlements", SigningCheckCategory.Entitlements, SigningCheckOutcome.Failed, string.Join("; ", problems) + ".",
@@ -404,6 +405,17 @@ public static class SigningValidator
     }
 
     /// <summary>Every requested item must be granted exactly, by "*", or by a granted prefix ending in "*" (e.g. "ABCDE12345.*").</summary>
+    /// <summary>
+    /// Build-setting variables in an entitlements file, as the build resolves them for a profile's team: $(AppIdentifierPrefix)
+    /// and $(TeamIdentifierPrefix) become "TEAMID.", $(CFBundleIdentifier) and $(PRODUCT_BUNDLE_IDENTIFIER) the bundle ID.
+    /// </summary>
+    public static string Expand(string value, string? teamId, string? bundleId)
+    {
+        if (teamId is { Length: > 0 }) value = value.Replace("$(AppIdentifierPrefix)", teamId + ".", StringComparison.Ordinal).Replace("$(TeamIdentifierPrefix)", teamId + ".", StringComparison.Ordinal);
+        if (bundleId is { Length: > 0 }) value = value.Replace("$(CFBundleIdentifier)", bundleId, StringComparison.Ordinal).Replace("$(PRODUCT_BUNDLE_IDENTIFIER)", bundleId, StringComparison.Ordinal);
+        return value;
+    }
+
     public static bool ValueAllowed(string requested, string granted)
     {
         var grantedItems = granted.Split(", ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

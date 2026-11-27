@@ -431,6 +431,14 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             ShowVariants = Variants.Count > 1;
             SelectedVariant = Variants.FirstOrDefault();
         }
+        if (!android && m.Framework == MobileFramework.DotNetIos && m.ArtifactPath is null)
+        {
+            // .NET for iOS: Simulator and device apps are Debug by default, archives and IPAs Release; both are offered.
+            Variants.Add("Debug");
+            Variants.Add("Release");
+            ShowVariants = true;
+            SelectedVariant = debugConfiguration ? "Debug" : "Release";
+        }
         if (!android && m.Ios is { } ios && m.ArtifactPath is null)
         {
             foreach (var s in ios.Schemes.Select(s => s.Name).DefaultIfEmpty(ios.AppTargets.FirstOrDefault()?.Name).OfType<string>()) Schemes.Add(s);
@@ -668,8 +676,13 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         Summary.Add(new("Adapter", o.Framework switch
         {
             MobileFramework.NativeIos => o.Output == MobileOutput.IosSimulatorApp ? "xcodebuild build (Simulator SDK)" : o.Output == MobileOutput.IosIpa ? "xcodebuild archive → signature check → xcodebuild -exportArchive (separate stages)" : "xcodebuild archive",
-            MobileFramework.DotNetIos => o.Output == MobileOutput.IosSimulatorApp ? ".NET iOS workload: dotnet build (Simulator)" : o.Output == MobileOutput.IosIpa
-                ? ".NET iOS workload: dotnet publish (ArchiveOnBuild) → signature check → xcodebuild -exportArchive (separate stages)" : ".NET iOS workload: dotnet publish (ArchiveOnBuild)",
+            MobileFramework.DotNetIos => o.Output switch
+            {
+                MobileOutput.IosSimulatorApp => ".NET iOS workload: dotnet build (Simulator)",
+                MobileOutput.IosDeviceApp => ".NET iOS workload: dotnet build -r ios-arm64 (signed device app, no archive)",
+                MobileOutput.IosIpa => ".NET iOS workload: dotnet publish → the SDK's own IPA (BuildIpa) and archive (ArchiveOnBuild); no xcodebuild export",
+                _ => ".NET iOS workload: dotnet publish → the SDK's archive (ArchiveOnBuild, ArchiveDir = the .xcarchive)",
+            } + " · " + HCG.ExecutableMaker.BuildEngine.Mobile.DotNetIosPlanner.Explain(o.Output, o.ExportMethod),
             MobileFramework.DotNetMaui => ".NET MAUI workload: dotnet build/publish",
             MobileFramework.Flutter => "flutter build",
             _ => "Gradle (project wrapper)",

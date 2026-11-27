@@ -165,6 +165,27 @@ public sealed partial class MobileBuildService(
             }
         }
 
+        // .NET for iOS: the effective MSBuild properties, read with the build's own settings before anything compiles.
+        async Task CheckDotNetIosPropertiesAsync(MobilePlanInput planInput, MobilePlan plan)
+        {
+            if (DotNetIosPlanner.PropertyProbe(planInput, plan) is not { } probe) return;
+            observer.OnStage(probe.Stage, probe.Title);
+            Log(BuildLogKind.Command, probe.DisplayCommand);
+            var output = new StringBuilder();
+            var result = await worker.RunAsync(probe.Process, (stream, text) => { if (stream == OutputStream.StdOut) lock (output) output.AppendLine(text); }, overall.Token).ConfigureAwait(false);
+            var props = result.ExitCode == 0 ? DotNetIosPlanner.ParseProperties(output.ToString()) : new Dictionary<string, string>();
+            foreach (var name in DotNetIosPlanner.ProbedProperties)
+                if (props.TryGetValue(name, out var v)) { Log(BuildLogKind.Info, $"  {name} = {(v.Length == 0 ? "(empty)" : v)}"); build.ToolchainVersions["msbuild:" + name] = v; }
+            var findings = DotNetIosPlanner.CheckProperties(props, planInput.Options, planInput.Analysis.DotNetIos!);
+            foreach (var (severity, text) in findings)
+            {
+                Log(severity switch { DiagnosticSeverity.Error => BuildLogKind.Error, DiagnosticSeverity.Warning => BuildLogKind.Warning, _ => BuildLogKind.Info }, text);
+                if (severity != DiagnosticSeverity.Info) AddMessage(new BuildMessage(severity, text, "HCG-DOTNET-IOS"));
+            }
+            if (findings.Where(f => f.Severity == DiagnosticSeverity.Error).ToList() is { Count: > 0 } errors)
+                throw new BuildValidationException("Not built: " + string.Join(" ", errors.Select(e => e.Text)));
+        }
+
         try
         {
             observer.OnStage(BuildStage.Preparing, "Validating configuration and toolchains");
@@ -278,16 +299,36 @@ public sealed partial class MobileBuildService(
                     MobileFramework.DotNetIos => DotNetIosPlanner.Plan(input),
                     _ => MauiPlanner.Plan(input),
                 };
-                await RunStepsAsync(plan).ConfigureAwait(false);
-
-                if (options.Framework is MobileFramework.NativeIos or MobileFramework.DotNetIos && options.Output == MobileOutput.IosIpa)
+                if (options.Framework == MobileFramework.DotNetIos)
+                    await CheckDotNetIosPropertiesAsync(input, plan).ConfigureAwait(false);
+                try { await RunStepsAsync(plan).ConfigureAwait(false); }
+                catch (StepFailedException ex) when (options.Framework == MobileFramework.DotNetIos && options.Output is MobileOutput.IosArchive or MobileOutput.IosIpa
+                                                     && Directory.Exists(DotNetIosPlanner.DeviceDirectory(input))
+                                                     && Directory.EnumerateDirectories(DotNetIosPlanner.DeviceDirectory(input), "*.app").FirstOrDefault(d => Directory.GetLastWriteTimeUtc(d) >= startedUtc) is { } compiled)
                 {
-                    var archive = options.Framework == MobileFramework.NativeIos
-                        ? XcodePlanner.ArchivePath(input, XcodePlanner.ResolveContainer(input).Scheme)
-                        : Directory.Exists(DotNetIosPlanner.ArchiveDirectory(input))
-                            ? Directory.EnumerateDirectories(DotNetIosPlanner.ArchiveDirectory(input), "*.xcarchive", SearchOption.AllDirectories).FirstOrDefault()
-                              ?? throw new StepFailedException("dotnet publish succeeded but created no .xcarchive, so there is nothing to export.")
-                            : throw new StepFailedException("dotnet publish succeeded but created no archive folder, so there is nothing to export.");
+                    // Compilation and signing finished; packaging did not. The app is kept where the SDK made it, and named.
+                    Log(BuildLogKind.Warning, $"The signed app was built before packaging failed and is kept: {compiled}");
+                    throw new StepFailedException(ex.Message + $"\nThe app itself compiled and was signed: {compiled} (kept). Only the {(options.Output == MobileOutput.IosIpa ? "IPA/archive" : "archive")} step failed; the first error above names why.");
+                }
+
+                if (options.Framework == MobileFramework.DotNetIos && options.Output is MobileOutput.IosArchive or MobileOutput.IosIpa)
+                {
+                    // The .NET iOS SDK made the archive (and, for an IPA, the IPA itself) at the exact paths HCG passed.
+                    var archive = DotNetIosPlanner.ArchivePath(input);
+                    if (!Directory.Exists(archive))
+                        throw new StepFailedException($"dotnet publish succeeded but {archive} does not exist: the SDK did not run its Archive target. " +
+                            "Check above that ArchiveOnBuild is true and the build is for ios-arm64 with code signing (the SDK archives only signed device builds).");
+                    if (!File.Exists(Path.Combine(archive, "Info.plist")) || !Directory.Exists(Path.Combine(archive, "Products", "Applications")) ||
+                        !Directory.EnumerateDirectories(Path.Combine(archive, "Products", "Applications"), "*.app").Any())
+                        throw new StepFailedException($"{archive} is not a complete archive (Info.plist and Products/Applications/*.app are required).");
+                    if (options.Output == MobileOutput.IosIpa && !File.Exists(DotNetIosPlanner.IpaPath(input)))
+                        throw new StepFailedException($"dotnet publish succeeded and archived, but made no IPA at {DotNetIosPlanner.IpaPath(input)}: the SDK's CreateIpa target did not run (BuildIpa).");
+                    Log(BuildLogKind.Success, $"Archive: {archive}" + (options.Output == MobileOutput.IosIpa ? $" · IPA: {DotNetIosPlanner.IpaPath(input)} (made by the .NET iOS SDK; no xcodebuild export)" : ""));
+                    products.AddRange(Locate(plan.Outputs, startedUtc));
+                }
+                else if (options.Framework is MobileFramework.NativeIos && options.Output == MobileOutput.IosIpa)
+                {
+                    var archive = XcodePlanner.ArchivePath(input, XcodePlanner.ResolveContainer(input).Scheme);
                     Log(BuildLogKind.Info, $"Archive: {archive}");
                     observer.OnStage(BuildStage.VerifyingOutput, "Inspecting the archive's signature");
                     var archiveReport = MobileArtifactInspector.Inspect(archive);

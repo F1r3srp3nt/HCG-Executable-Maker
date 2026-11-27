@@ -54,6 +54,9 @@ public sealed record IosProvisioningProfile(string Path, string? Name, string? U
 {
     public bool IsExpired(DateTimeOffset now) => Expiration is { } e && e <= now;
 
+    /// <summary>The App ID part after the team prefix ("com.example.app", "com.example.*" or "*"), or null.</summary>
+    public string? BundleIdPattern => ApplicationIdentifier is { } appId && TeamId is not null && appId.StartsWith(TeamId + ".", StringComparison.Ordinal) ? appId[(TeamId.Length + 1)..] : null;
+
     public bool Matches(string bundleId)
     {
         if (ApplicationIdentifier is not { } appId || TeamId is null || !appId.StartsWith(TeamId + ".", StringComparison.Ordinal)) return false;

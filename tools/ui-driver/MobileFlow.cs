@@ -39,7 +39,7 @@ internal static partial class Program
         foreach (var d in studio.Diagnostics) Log($"  {d.Severity}: {d.Message}");
         studio.SelectedPlatform = studio.Platforms.First(p => p.Platform == TargetPlatform.IOS);
         foreach (var o in studio.Outputs) Log($"Output {o.Name}: {(o.IsEnabled ? "available" : "unavailable — " + o.Reason)}");
-        var wanted = Arg("mobile-output", "sim") switch { "archive" => MobileOutput.IosArchive, "ipa" => MobileOutput.IosIpa, _ => MobileOutput.IosSimulatorApp };
+        var wanted = Arg("mobile-output", "sim") switch { "archive" => MobileOutput.IosArchive, "ipa" => MobileOutput.IosIpa, "device" => MobileOutput.IosDeviceApp, _ => MobileOutput.IosSimulatorApp };
         var item = studio.Outputs.FirstOrDefault(o => o.Option.Output == wanted);
         Check(item is not null, $"Output {wanted} offered");
         if (item is null) return 1;
@@ -48,7 +48,9 @@ internal static partial class Program
             // .NET for iOS archives only with code signing: the archive is listed but unavailable, with that reason,
             // and cannot be selected or started; no unsigned signing mode exists for it.
             Check(!item.IsEnabled, $"Output {wanted} is unavailable without code signing");
-            Check(item.Reason?.Contains("only with code signing", StringComparison.Ordinal) == true, $"Reason names the SDK requirement: {item.Reason}");
+            // Judged with this Mac's signing assets: without any certificate the reason names the missing signing identity.
+            Check(item.Reason?.Contains("only with code signing", StringComparison.Ordinal) == true || item.Reason?.Contains("code-signing identities", StringComparison.Ordinal) == true,
+                $"Reason names the signing requirement: {item.Reason}");
             studio.SelectOutputCommand.Execute(item);
             Check(studio.SelectedOutput?.Option.Output != wanted, "The unavailable archive cannot be selected");
             return Failures.Count == 0 ? 0 : 1;
@@ -59,13 +61,21 @@ internal static partial class Program
             Check(studio.Schemes.Contains(scheme), $"Scheme {scheme} offered ({string.Join(", ", studio.Schemes)})");
             studio.SelectedScheme = scheme;
         }
+        if (Arg("variant") is { } variant)
+        {
+            Check(studio.Variants.Contains(variant), $"Configuration {variant} offered ({string.Join(", ", studio.Variants)})");
+            studio.SelectedVariant = variant;
+        }
         if (Arg("signing") is { } signing)
         {
-            var mode = signing == "unsigned" ? MobileSigningMode.Unsigned : MobileSigningMode.ProjectDefault;
+            var mode = signing switch { "unsigned" => MobileSigningMode.Unsigned, "manual" => MobileSigningMode.AppleManual, _ => MobileSigningMode.ProjectDefault };
             var choice = studio.SigningModes.FirstOrDefault(m => m.Value == mode);
             Check(choice is not null, $"Signing {mode} offered");
             if (choice is null) return 1;
             studio.SelectedSigning = choice;
+            // A named certificate and installed profile (CodesignKey / CodesignProvision), as typed in the Signing section.
+            if (Arg("identity") is { } identity) studio.SigningIdentity = identity;
+            if (Arg("profile") is { } profile) studio.ProvisioningProfile = profile;
         }
         studio.OutputDirectory = Path.Combine(output, "artifacts");
         foreach (var r in studio.ReadinessRequired) Log($"Readiness [{r.Status.Text}] {r.Tool}: {r.Detail}{(r.HasFix ? " → " + r.Fix : "")}");
@@ -102,6 +112,16 @@ internal static partial class Program
             foreach (var c in a.Artifact.Checks) Log($"    [{c.Status}] {c.Name}: {c.Detail}");
         }
         Shot("mobile-result");
+        if (_args.ContainsKey("launch-simulator") && studio.BuiltArtifacts.FirstOrDefault(x => x.IsSimulatorApp) is { } simApp)
+        {
+            // The result card's own "Launch in Simulator" button: boot, install, launch, screenshot.
+            await studio.LaunchInSimulatorCommand.ExecuteAsync(simApp);
+            Log("Simulator launch: " + studio.ArtifactActionMessage);
+            Check(studio.ArtifactActionMessage.StartsWith("Passed", StringComparison.Ordinal), "The Simulator app launched from the result card: " + studio.ArtifactActionMessage);
+        }
+        if (Arg("expect-artifacts") is { } expectedFormats)
+            foreach (var f in expectedFormats.Split(','))
+                Check(studio.BuiltArtifacts.Any(x => x.Artifact.Format.ToString() == f), $"Artifact {f} produced ({string.Join(", ", studio.BuiltArtifacts.Select(x => x.Artifact.Format))})");
         var succeeded = studio.BuildStateTag.Text == "Artifact verified";
         File.WriteAllText(Path.Combine(output, $"{_prefix}-mobile.json"), JsonSerializer.Serialize(new
         {
