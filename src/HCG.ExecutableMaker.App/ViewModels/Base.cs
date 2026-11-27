@@ -110,7 +110,7 @@ public static class Format
     public static string Label(ProjectSourceKind k) => k switch
     {
         ProjectSourceKind.ZipArchive => "ZIP archive",
-        ProjectSourceKind.Artifact => "Mobile artifact",
+        ProjectSourceKind.Artifact => "Built app or artifact",
         _ => "Folder",
     };
 

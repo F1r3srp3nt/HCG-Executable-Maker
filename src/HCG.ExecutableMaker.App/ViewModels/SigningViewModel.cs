@@ -17,7 +17,7 @@ public sealed class SigningCapabilityItem(SigningCapability c)
     public StatusTag ToolStatus => !c.HostSupported ? new StatusTag("Other host", "neutral") : c.ToolsAvailable ? new StatusTag("Tools found", "success") : new StatusTag("Tools missing", "warning");
 }
 
-public sealed class SigningViewModel(IToolchainService toolchains, IBuildWorker worker, AppleSigningViewModel apple) : PageViewModel
+public sealed partial class SigningViewModel(IToolchainService toolchains, IBuildWorker worker, AppleSigningViewModel apple, HCG.ExecutableMaker.App.Services.NavigationService navigation) : PageViewModel
 {
     public override string Title => "Signing & Security";
     public override string Subtitle => "Apple signing identities and profiles, project signing, trust boundaries and secret handling.";
@@ -36,6 +36,9 @@ public sealed class SigningViewModel(IToolchainService toolchains, IBuildWorker 
         "Builds are signed only with identities that are in this Mac's keychain, for the route you choose. Signing, notarization, uploading and publishing " +
         "are separate steps; HCG never notarizes, uploads or publishes on its own. HCG never invents certificates, never stores private keys or passwords " +
         "outside the keychain, and never revokes certificates.";
+
+    /// <summary>Developer ID distribution of an app built elsewhere, with these identities.</summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand] private void OpenMacDistribution() => navigation.Navigate("mac-distribute");
 
     public override async Task OnNavigatedToAsync(object? parameter)
     {

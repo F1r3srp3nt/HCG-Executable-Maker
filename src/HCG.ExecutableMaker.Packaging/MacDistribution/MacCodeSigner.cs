@@ -28,6 +28,82 @@ public sealed class MacCodeSigner(IProcessRunner runner, string codesign = "/usr
     public Task SignDeveloperIdAsync(string path, string identitySha1, IReadOnlyList<string> entitlements, IPackagingLog log, CancellationToken ct) =>
         SignAsync(path, identitySha1, Entitlements.ToPlist(entitlements), runtime: true, log, ct);
 
+    /// <summary>
+    /// Developer ID for a whole bundle, inside out: every nested piece of code (<see cref="NestedCode"/>, deepest first)
+    /// is signed on its own with the hardened runtime and a secure timestamp and without entitlements, then the bundle
+    /// itself with the confirmed entitlements. Signing only the outer bundle leaves nested libraries with whatever
+    /// signature they had (often the linker's ad-hoc one), which Apple's notary service rejects.
+    /// </summary>
+    public async Task SignBundleInsideOutAsync(string bundle, string identitySha1, IReadOnlyList<string> entitlements, IPackagingLog log, CancellationToken ct)
+    {
+        var nested = NestedCode(bundle);
+        log.Info(nested.Count == 0 ? "No nested code: signing the bundle." : $"Signing {nested.Count} nested code item(s) inside out, then the bundle.");
+        foreach (var item in nested)
+        {
+            ct.ThrowIfCancellationRequested();
+            List<string> args = ["--force", "--timestamp", "--options", "runtime", "--sign", identitySha1, item];
+            log.Info("codesign " + string.Join(' ', args.Take(args.Count - 1)) + " " + Path.GetRelativePath(bundle, item));
+            var r = await runner.RunAsync(new ProcessSpec { Executable = codesign, Arguments = args, Timeout = SignTimeout }, (_, l) => log.Info(l), ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (!r.Succeeded)
+                throw new InvalidOperationException($"codesign could not sign {Path.GetRelativePath(bundle, item)} (exit code {r.ExitCode}). Common causes: the certificate's private key is not in the login keychain, the keychain is locked, or Apple's timestamp server could not be reached.");
+        }
+        await SignDeveloperIdAsync(bundle, identitySha1, entitlements, log, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The code inside a bundle that must be signed before the bundle itself, deepest first: loose Mach-O files
+    /// (libraries, helper executables) anywhere under Contents except the bundle's own main executable, and nested
+    /// bundles (.framework, .app, .xpc, .appex, .bundle, .plugin, .systemextension). Symbolic links are skipped (a
+    /// framework's Versions/Current links point at code that is signed once, at its real path).
+    /// </summary>
+    public static IReadOnlyList<string> NestedCode(string bundle)
+    {
+        var contents = Path.Combine(bundle, "Contents");
+        if (!Directory.Exists(contents)) return [];
+        var main = MainExecutable(bundle);
+        var bundles = new List<string>();
+        var files = new List<string>();
+        var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true };
+        foreach (var dir in Directory.EnumerateDirectories(contents, "*", options))
+            if (NestedBundleExtensions.Contains(Path.GetExtension(dir))) bundles.Add(dir);
+        foreach (var file in Directory.EnumerateFiles(contents, "*", options))
+        {
+            if (main is not null && string.Equals(Path.GetFullPath(file), Path.GetFullPath(main), StringComparison.Ordinal)) continue;
+            // A nested bundle's main executable is signed by signing that bundle.
+            if (bundles.Any(b => MainExecutable(b) is { } m && string.Equals(Path.GetFullPath(m), Path.GetFullPath(file), StringComparison.Ordinal))) continue;
+            if (IsMachOFile(file)) files.Add(file);
+        }
+        static int Depth(string p) => p.Count(c => c == Path.DirectorySeparatorChar);
+        // Deepest first; at equal depth files before the bundles that contain them never happens, so order by path for stability.
+        return files.Concat(bundles).OrderByDescending(Depth).ThenBy(p => bundles.Contains(p) ? 1 : 0).ThenBy(p => p, StringComparer.Ordinal).ToList();
+    }
+
+    private static readonly HashSet<string> NestedBundleExtensions = new(StringComparer.Ordinal) { ".framework", ".app", ".xpc", ".appex", ".bundle", ".plugin", ".systemextension" };
+
+    private static string? MainExecutable(string bundle)
+    {
+        var plist = Path.Combine(bundle, "Contents", "Info.plist");
+        var resources = Path.Combine(bundle, "Resources", "Info.plist"); // a framework's Info.plist
+        foreach (var candidate in new[] { plist, resources })
+            if (File.Exists(candidate) && HCG.ExecutableMaker.Packaging.Packagers.InfoPlist.Read(candidate).GetValueOrDefault("CFBundleExecutable") is { Length: > 0 } exe)
+                return Path.Combine(candidate == plist ? Path.Combine(bundle, "Contents", "MacOS") : bundle, exe);
+        return null;
+    }
+
+    public static bool IsMachOFile(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            if (fs.Length < 4) return false;
+            var head = new byte[4];
+            fs.ReadExactly(head);
+            return HCG.ExecutableMaker.Packaging.Verification.AppleMachO.IsMachO(head);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
     /// <summary>Mac App Store: Apple Distribution identity, sandbox entitlements including the application identifier.</summary>
     public Task SignAppStoreAsync(string path, string identitySha1, string entitlementsPlist, IPackagingLog log, CancellationToken ct) =>
         SignAsync(path, identitySha1, entitlementsPlist, runtime: false, log, ct);

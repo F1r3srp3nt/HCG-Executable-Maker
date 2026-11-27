@@ -311,6 +311,7 @@
             </ComboBox>
             <Button Classes="small" Content="Add artifact" Command="{Binding AddSelectedVaultCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,8,8" />
             <Button Classes="small" Content="Choose files…" Command="{Binding AddFilesCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,8,8" />
+            <Button Classes="small" Content="Sign &amp; notarize a macOS app built elsewhere…" Command="{Binding OpenMacDistributionCommand}" IsEnabled="{Binding !IsShipping}" Margin="0,0,8,8" />
           </WrapPanel>
           <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Windows .exe .msi .msix .zip · macOS .zip (app) .dmg .pkg · iOS/iPadOS .ipa (device builds) · Linux .deb .rpm .AppImage · jailbroken iOS .deb. Platform, architecture, format, size, SHA-256, signing, notarization and the Release Passport are read from each file on this computer; HCG Store checks the hash, the format and the kind again. Build provenance is reported only from a Release Passport of the exact bytes." />
           <Border Classes="inset" Padding="10" IsVisible="{Binding HasBuildOrigin}">
