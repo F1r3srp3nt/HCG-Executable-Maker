@@ -9,7 +9,7 @@ together with the existing pool, pinned to the request's package, version, archi
 Nothing is written to the HCG Repo checkout, nothing is fetched, and nothing is published: the dry run stops
 before the pool, the lock file and the provenance file. Publication stays a manual step in HCG Repo.
 
-Usage: PYTHONPATH=<hcg-repo>/tools python3 hcgrepo-dry-run.py --repo <hcg-repo> --handoff <folder>
+Usage: python3 -I hcgrepo-dry-run.py --repo <hcg-repo> --handoff <folder>
        [--deb <the .deb to import, default the handoff's>] [--product-key hcg-sentinel] [--hypothetical-approval] [--report out.json]
 
 HCG Repo Candidate serves only public builds, and an HCG package is public only by the owner's recorded approval of that
@@ -47,10 +47,12 @@ def main() -> int:
                     help="require the owner's recorded approval in the handoff's package.toml (no placeholder), and an importable result")
     ap.add_argument("--report", type=Path, help="write the result as JSON")
     a = ap.parse_args()
+    # HCG Repo's own importer, from the checkout given (also works under python3 -I, which ignores PYTHONPATH).
+    sys.path.insert(0, str(a.repo.resolve() / "tools"))
 
     handoff = a.handoff.resolve()
     if (handoff / "import-request.INCOMPLETE.toml").exists() and not (handoff / "import-request.toml").exists():
-        print("REFUSED: the handoff's import request is incomplete (see its README): it has no CI run, artifact or commit to pin.")
+        print("REFUSED: the handoff's import request is incomplete (see its README): its source is not pinned (CI run and artifact, or a local build's repository and commit).")
         return 2
     debs = sorted(handoff.glob("*.deb"))
     if len(debs) != 1:
@@ -63,7 +65,12 @@ def main() -> int:
     actual = sha256(deb)
     sums = (handoff / "SHA256SUMS").read_text(encoding="utf-8").split()
     print(f"package      {req['package']} {req['version']} {req['architecture']} (channel {req.get('channel', 'stable')})")
-    print(f"source       {src['kind']} {src['repository']} run {src.get('run_id')} artifact {src.get('artifact')} commit {src['commit']}")
+    local = src.get("kind") == "local-file"
+    if local:
+        print(f"source       local-file {src.get('path')} · {src.get('repository')} commit {src.get('commit')} ({src.get('source_visibility', '?')} source)")
+        print(f"built        {src.get('built_by')} · {src.get('toolchain')} · {src.get('built_at')} · {src.get('host')}")
+    else:
+        print(f"source       {src['kind']} {src['repository']} run {src.get('run_id')} artifact {src.get('artifact')} commit {src['commit']}")
     print(f"deb          {deb} ({deb.stat().st_size} bytes)")
     print(f"sha256       {actual}")
     problems = []
@@ -73,6 +80,12 @@ def main() -> int:
         problems.append(f"the .deb's SHA-256 differs from the handoff's SHA256SUMS ({sums[0]})")
     if deb != debs[0].resolve() and sha256(debs[0]) != actual:
         problems.append("the .deb given differs from the handoff's .deb")
+    if local:
+        staged = handoff / "hcg-repo" / src.get("path", "")
+        if not staged.is_file():
+            problems.append(f"the handoff has no hcg-repo/{src.get('path')} (the file to commit to HCG Repo)")
+        elif sha256(staged) != actual:
+            problems.append(f"hcg-repo/{src.get('path')} differs from the validated .deb")
 
     approval = None
     if a.require_genuine_approval:
@@ -87,6 +100,8 @@ def main() -> int:
             problems.append("package.toml's [access] exception is a placeholder, not the owner's approval")
         if req["version"] not in access.get("exception_versions", []):
             problems.append(f"package.toml's exception_versions does not list {req['version']}")
+        if local and approval and actual not in approval:
+            problems.append(f"the approval does not name this package's SHA-256 {actual}: a local build is approved by its exact checksum")
         if set(access.get("exception_versions", [])) - {req["version"]}:
             problems.append(f"package.toml's exception_versions lists other versions: {access.get('exception_versions')}")
         print(f"approval     {approval}")
@@ -121,6 +136,13 @@ def main() -> int:
                 (pkg_dir / "package.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
                 added.append(f"packages/{req['package']}/package.toml: [access] exception (HYPOTHETICAL, this dry run only)")
             (root / "imports").mkdir(exist_ok=True)
+            if local:
+                rel = src.get("path", "")
+                if not rel.startswith("imports/local/") or ".." in rel.split("/"):
+                    raise SystemExit(f"REFUSED: local-file path {rel!r} is not under imports/local/")
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(deb, root / rel)
+                added.append(rel)
             req_name = f"{req['package']}-{req['version'].replace('~', '-').replace(':', '-')}.toml"
             (root / "imports" / req_name).write_text(request_text, encoding="utf-8")
             added.append(f"imports/{req_name}")
@@ -142,10 +164,16 @@ def main() -> int:
             access = load_package_meta(cfg, req["package"]).access_for(req["version"])
             lock_before = json.dumps(load_lock(cfg), sort_keys=True)
             expect = {"package": req["package"], "version": req["version"], "architecture": req["architecture"], "sha256": src["sha256"]}
-            provenance = {"source": "maker-candidate-handoff (dry run)", "repository": src["repository"], "commit": src["commit"],
-                          "run_id": src.get("run_id"), "artifact_name": src.get("artifact"), "request": loaded["id"]}
-            status, rep = importer.import_deb(cfg, deb, provenance, dry_run=True, expect=expect, channel=req.get("channel", "stable"))
-            written = json.dumps(load_lock(cfg), sort_keys=True) != lock_before or any(root.rglob(deb.name))
+            if local:
+                # The exact path Prepare packages takes for this request: run_request → local-file → import_deb (dry run).
+                with tempfile.TemporaryDirectory(prefix="hcgrepo-dry-run-work-") as work:
+                    status, rep = importer.run_request(cfg, loaded, importer.GitHub(token=""), Path(work), None, {}, dry_run=True)
+            else:
+                provenance = {"source": "maker-candidate-handoff (dry run)", "repository": src["repository"], "commit": src["commit"],
+                              "run_id": src.get("run_id"), "artifact_name": src.get("artifact"), "request": loaded["id"]}
+                status, rep = importer.import_deb(cfg, deb, provenance, dry_run=True, expect=expect, channel=req.get("channel", "stable"))
+            written = json.dumps(load_lock(cfg), sort_keys=True) != lock_before or any(
+                sha256(p) == actual for p in (root / "pool").rglob("*.deb"))
             channel = req.get("channel", "stable")
             servable = access == "public" or channel == "stable"
             return {"hypothetical_approval": hypothetical_approval, "status": status, "access": access, "channel": channel,

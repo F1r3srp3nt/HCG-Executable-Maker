@@ -300,6 +300,80 @@
                   <Border Classes="callout success" IsVisible="{Binding DesktopWorkspaceNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                     <SelectableTextBlock FontSize="12.5" Text="{Binding DesktopWorkspaceNotice}" TextWrapping="Wrap" />
                   </Border>
+                  <!-- Native macOS app — Xcode: scheme, configuration, architecture, preflight and the settings HCG passes to xcodebuild -->
+                  <StackPanel Spacing="12" IsVisible="{Binding ShowXcodePanel}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="h3" Text="Native macOS app — Xcode" VerticalAlignment="Center" />
+                      <c:StatusChip Grid.Column="1" Status="{Binding XcodeTag}" />
+                    </Grid>
+                    <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding XcodeFacts}" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="*,12,*,12,*">
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="formlabel" Text="SCHEME" Margin="0" />
+                        <ComboBox ItemsSource="{Binding XcodeSchemes}" SelectedItem="{Binding SelectedXcodeScheme}" HorizontalAlignment="Stretch" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Spacing="4">
+                        <TextBlock Classes="formlabel" Text="CONFIGURATION" Margin="0" />
+                        <ComboBox ItemsSource="{Binding XcodeConfigurations}" SelectedItem="{Binding SelectedXcodeConfiguration}" HorizontalAlignment="Stretch" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="4" Spacing="4">
+                        <TextBlock Classes="formlabel" Text="ARCHITECTURE" Margin="0" />
+                        <ComboBox ItemsSource="{Binding XcodeArchitectures}" SelectedItem="{Binding SelectedXcodeArchitecture}" HorizontalAlignment="Stretch" />
+                      </StackPanel>
+                    </Grid>
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding XcodeSchemeNote}" TextWrapping="Wrap"
+                               IsVisible="{Binding XcodeSchemeNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <CheckBox IsChecked="{Binding XcodeSignLocallyAdHoc}" IsVisible="{Binding XcodeOffersLocalSigning}">
+                      <TextBlock TextWrapping="Wrap" Text="Sign ad hoc to run on this Mac (the project signs with a certificate or team this Mac may not have). Not a distribution signature." />
+                    </CheckBox>
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="formlabel" Text="DEPENDENCIES" Margin="0" />
+                      <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding XcodeDependencies}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Spacing="4" IsVisible="{Binding XcodeConfigurationFacts, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBlock Classes="formlabel" Text="CONFIGURATIONS (BUNDLE ID, SIGNING, SANDBOX, HARDENED RUNTIME — AS THE PROJECT SETS THEM)" Margin="0" />
+                      <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding XcodeConfigurationFacts}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <CheckBox IsChecked="{Binding XcodeRunTests}" IsEnabled="{Binding XcodeHasTests}">
+                      <TextBlock TextWrapping="Wrap" Text="Run the scheme's tests after the build (xcodebuild test). A failing test fails the build." />
+                    </CheckBox>
+                    <TextBlock Classes="muted" FontSize="12" Margin="28,-6,0,0" Text="{Binding XcodeTestsNote}" TextWrapping="Wrap"
+                               IsVisible="{Binding XcodeTestsNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <CheckBox IsChecked="{Binding XcodeCreateArchive}">
+                      <TextBlock TextWrapping="Wrap" Text="Also create an Xcode archive (xcodebuild archive), kept with the outputs as a zipped .xcarchive with its dSYMs. Not exported or uploaded." />
+                    </CheckBox>
+                    <Border Classes="inset" Padding="16,12">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Preflight" FontWeight="SemiBold" />
+                        <ItemsControl ItemsSource="{Binding XcodePreflight}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                    <Border Classes="callout warning" IsVisible="{Binding HasXcodeFixes}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="Before building" FontWeight="SemiBold" FontSize="12.5" />
+                        <ItemsControl ItemsSource="{Binding XcodeFixes}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <SelectableTextBlock FontSize="12.5" Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button Classes="small" HorizontalAlignment="Left" Content="Open Toolchains" Command="{Binding OpenToolchainsPageCommand}" />
+                      </StackPanel>
+                    </Border>
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="formlabel" Text="SETTINGS HCG PASSES TO XCODEBUILD (EVERYTHING ELSE IS THE PROJECT'S)" Margin="0" />
+                      <SelectableTextBlock Classes="muted mono" FontSize="11.5" Text="{Binding XcodeOverridesText}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                               Text="Built in a copy of the source in HCG's build folder with xcodebuild (scripts that ship with the project are not run). Output: the app, a ZIP of it, an optional DMG with an Applications shortcut, PKG installer and Xcode archive, the project's licence files, SHA-256 checksums, a build report, a diagnostics report, Signing Doctor and a Release Passport per file. Signing stays as the project sets it; for a Developer ID build, set your Developer ID identity in the project. Notarization is a separate step, and HCG never removes quarantine." />
+                  </StackPanel>
                   <!-- C/C++: CMake targets (after a trusted configure), Makefile targets, selected sources; Theos and others explained -->
                   <StackPanel Spacing="12" IsVisible="{Binding ShowNativePanel}">
                     <Grid ColumnDefinitions="*,Auto">
@@ -1347,6 +1421,38 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- Native macOS Xcode: the diagnostics report (hcg.build-diagnostics v1) and the signing status -->
+            <Border Classes="card" IsVisible="{Binding HasXcodeDiagnostics}">
+              <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Classes="h2" Text="Xcode build diagnostics" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button Command="{Binding ViewXcodeDiagnosticsCommand}" Content="View report" />
+                    <Button Command="{Binding CopyXcodeDiagnosticsCommand}" Content="Copy report for an agent" />
+                    <Button Command="{Binding OpenXcodeDiagnosticsFolderCommand}" Content="Open folder" />
+                  </StackPanel>
+                </Grid>
+                <SelectableTextBlock FontSize="12.5" Text="{Binding XcodeDiagnosticsSummary}" TextWrapping="Wrap" />
+                <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding XcodeFailedTargets}" TextWrapping="Wrap"
+                                     IsVisible="{Binding XcodeFailedTargets, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding XcodeSigningStatus}" TextWrapping="Wrap"
+                                     IsVisible="{Binding XcodeSigningStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <ItemsControl ItemsSource="{Binding XcodeIssues}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:XcodeIssueItem">
+                      <Grid ColumnDefinitions="Auto,*" Margin="0,4">
+                        <c:StatusChip Status="{Binding Tag}" VerticalAlignment="Top" />
+                        <StackPanel Grid.Column="1" Spacing="1" Margin="10,0,0,0">
+                          <SelectableTextBlock Text="{Binding Message}" FontSize="12.5" TextWrapping="Wrap" />
+                          <SelectableTextBlock Classes="muted mono" Text="{Binding Detail}" />
+                        </StackPanel>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
 
             <Border Classes="card" IsVisible="{Binding HasResultMessages}">
               <StackPanel Spacing="10">

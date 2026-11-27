@@ -33,6 +33,8 @@ public sealed record StoreArtifactCandidate
     /// format was not examined. Presence is not validity: <see cref="Signing"/> holds the platform tool's verdict.</summary>
     public string? SignatureStructure { get; init; }
     public IosBundleFacts? Ios { get; init; }
+    /// <summary>Build provenance from a release passport of these exact bytes (or none, with the reason).</summary>
+    public StoreProvenance.Result? Provenance { get; init; }
     public bool IsSupported => Platform is not null && Format is not null && Problems.Count == 0;
     public string Label => Platform is null ? (Kind == "simulator-build" ? "iOS Simulator build — not accepted" : "Not supported") : $"{StoreArtifacts.PlatformName(Platform)} · {Format}";
     public string KindName => StoreArtifacts.KindName(Kind);
@@ -160,7 +162,15 @@ public static class StoreArtifacts
         {
             (platform, format, kind) = ("windows", "exe", "installer");
             if (!Magic("MZ")) problems.Add("Not a Windows executable (no MZ header).");
-            else { using var s = File.OpenRead(path); structure = PeSignature(s); }
+            else
+            {
+                using (var s = File.OpenRead(path)) structure = PeSignature(s);
+                // An installer's bootstrapper and the program it installs differ: Inno Setup's loader is a 32-bit x86 program
+                // on every target. Its target architecture comes from its Release Passport, never from the loader's header.
+                if (HCG.ExecutableMaker.Packaging.Packagers.InnoSetupPackager.IsInnoSetupInstaller(path))
+                    notes.Add($"Inno Setup installer: its bootstrapper is a {HCG.ExecutableMaker.Packaging.Windows.PeFile.Read(path)?.MachineName ?? "x86"} program on every architecture; the architecture it installs is taken from its Release Passport.");
+                else if (HCG.ExecutableMaker.Packaging.Windows.PeFile.Read(path) is { MachineName: "x64" or "arm64" or "x86" } pe) arch = [pe.MachineName];
+            }
         }
         else if (lower.EndsWith(".msi")) { (platform, format, kind) = ("windows", "msi", "installer"); if (!(head.Length >= 8 && Convert.ToHexStringLower(head, 0, 8) == "d0cf11e0a1b11ae1")) problems.Add("Not a Windows Installer package."); }
         else if (lower.EndsWith(".msix"))
@@ -246,8 +256,16 @@ public static class StoreArtifacts
                     if (exes.Count > 0)
                     {
                         var depth = exes.Min(e => e.FullName.Count(ch => ch == '/'));
+                        var machines = new SortedSet<string>(StringComparer.Ordinal);
                         var found = exes.Where(e => e.FullName.Count(ch => ch == '/') == depth).Take(20)
-                            .Select(e => { using var es = e.Open(); using var ms = new MemoryStream(); es.CopyTo(ms); ms.Position = 0; return PeSignature(ms); }).ToList();
+                            .Select(e =>
+                            {
+                                using var es = e.Open(); using var ms = new MemoryStream(); es.CopyTo(ms); ms.Position = 0;
+                                if (HCG.ExecutableMaker.Packaging.Windows.PeFile.Read(ms, e.FullName) is { MachineName: "x64" or "arm64" or "x86" } pe) machines.Add(pe.MachineName);
+                                ms.Position = 0;
+                                return PeSignature(ms);
+                            }).ToList();
+                        arch = machines.ToList();
                         structure = found.Contains("absent") ? "absent" : found.All(f => f == "present") ? "present" : null;
                     }
                 }
@@ -267,7 +285,10 @@ public static class StoreArtifacts
         }
         else problems.Add(UnsupportedExplanation(lower));
         if (kind == "simulator-build") (platform, format) = (null, null);
-        return c with { Platform = platform, Format = format, Architectures = arch, MinimumOs = minOs, Package = package, Problems = problems, Notes = notes, Kind = kind, SignatureStructure = structure, Ios = ios };
+        var provenance = c.Sha256.Length == 64 ? StoreProvenance.ForFile(path, c.Sha256, c.SizeBytes) : null;
+        if (platform == "windows" && format == "exe" && arch.Count == 0 && provenance?.Architecture is { Length: > 0 } stated) arch = [stated];
+        return c with { Platform = platform, Format = format, Architectures = arch, MinimumOs = minOs, Package = package, Problems = problems, Notes = notes, Kind = kind, SignatureStructure = structure, Ios = ios,
+            Provenance = provenance };
     }
 
     /// <summary>What HCG Store accepts, and what to do instead, for a file type it does not.</summary>
@@ -468,6 +489,18 @@ public static class StoreArtifacts
                 return new(notarized ? "notarized" : "signed", string.Join("\n", lines), "codesign/spctl/stapler");
             }
             finally { if (temp is not null) try { Directory.Delete(temp, true); } catch (IOException) { } }
+        }
+        // Windows programs (an installer .exe, or every .exe of a portable ZIP): Authenticode read from the file on any
+        // OS, with Windows' own verdict added on Windows.
+        if (c.Platform == "windows" && c.Format is "exe" or "zip")
+        {
+            var doctor = await HCG.ExecutableMaker.Packaging.Windows.WindowsSigningDoctor.InspectAsync(c.Path, OperatingSystem.IsWindows() ? runner : null, ct).ConfigureAwait(false);
+            if (doctor.Files.Count > 0)
+            {
+                var text = HCG.ExecutableMaker.Packaging.Windows.WindowsSigningDoctor.ToText(doctor);
+                return new(doctor.StoreStatus, text.Length > 3900 ? text[..3900] + "…" : text,
+                    "HCG Executable Maker Authenticode verifier" + (OperatingSystem.IsWindows() ? " + Get-AuthenticodeSignature" : ""));
+            }
         }
         if (OperatingSystem.IsWindows() && c.Format is "exe" or "msi" or "msix")
         {

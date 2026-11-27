@@ -2,18 +2,365 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — HCG Server Build Host provider
+## [Unreleased] — HCG Server Build Host
 
 ### Added
-- **HCG Server's Build Host as a build provider** (`hcg.buildhost/1`), next to this computer's worker and GitHub
-  Actions (`IBuildProvider`, `BuildProviderCatalog`). Executable Maker submits a job for a pinned commit, shows
-  "Waiting for approval on HCG Server (hcg-agent build approve <job> --confirm <job>)" and never approves, follows the
-  job and its log, downloads artifacts (checked against the job record, `X-HCG-SHA256` and the bytes received; deleted
-  on mismatch), verifies the ES256-signed provenance (optionally pinned to HCG Server's key) and maps everything into a
-  `BuildRecord`. Loopback only, no proxy, no redirects; the client token is kept in the OS credential store.
-- Unleashify handoffs of Build Host builds write a native HCG Repo `submission.json` whose `source`/`build` come from
-  the signed provenance (`provider = "hcg-server-build-host"`, no run ID, artifact name or run repository).
+- **HCG Server's Build Host** (`hcg.buildhost/1`, HCG-Server 417a9cd) is an `IBuildHost` (`HcgServerBuildHost`,
+  kind `HcgServerHost`) next to this computer. GitHub Actions stays an option.
+  - Executable Maker submits a job for a pinned commit and shows "Waiting for approval on HCG Server
+    (hcg-agent build approve <job> --confirm <job>)". It never approves.
+  - It follows the job and its log.
+  - It downloads artifacts and checks each one against the job record, `X-HCG-SHA256` and the bytes received. A
+    mismatch deletes the download.
+  - It verifies the ES256-signed provenance: the key fingerprint in the envelope and in the payload, and an optional
+    pin.
+  - Loopback only, no proxy, no redirects. The client token is kept in the OS credential store.
+- **The Build Host writes the shared native build-provider files**: `native-build-request.json` and
+  `native-build-result.json` (provider kind `hcg-server-build-host`, the owner's approval from the signed provenance,
+  scope build/test/package, isolation as limits). It also writes the signed provenance, the validation report and
+  Release Passport build halves for distributable outputs. The native-build-request schema was widened (more project
+  kinds, `unsigned`, optional `timeoutMinutes`, `limits.isolation`).
+- **Unleashify handoffs of Build Host builds** (`PackageProvenance.FromBuildHost`): `submission.json` and the passport
+  say `provider = "hcg-server-build-host"`, with no run ID, artifact name or run repository. They go through Ship to
+  Repo like local builds.
 - `HCGExecutableMaker --build-host status|jobs|token|run`. See docs/HCG-SERVER-BUILD-HOST.md.
+
+## [Unreleased] — Distribution Studio final qualification
+
+### Security
+- **The stored HCG session is bound to its issuer.**
+  - A session from another issuer is never refreshed: its refresh token is never sent, and the session is deleted.
+  - Sessions stored before this change restore as before and gain their issuer at the next refresh.
+  - Production (`session`), development (`session-development`) and TEST (`session-local-test`) sessions were
+    already separate entries.
+- **A sign-in goes only to a Store of the same kind** (`StoreSessionPolicy`): a production sign-in is never sent to
+  a Store on this computer, and a TEST sign-in never to a real Store. Diagnostics, the CLI and the upload button
+  explain the refusal.
+
+### Added
+- **Maker's own build provenance is embedded at packaging time** (`build-source.txt` → assembly metadata):
+  - it records the full commit, whether the tree had uncommitted changes, and the GitHub repository;
+  - `--version` prints `Source: <commit>`;
+  - `--release-passport --self` uses it, needs no git, and is valid only for the running app's own bundle;
+  - a checkout given with it must agree, or no passport is written.
+- **Projects Maker packages keep their own git provenance.** Without git or a commit, the source is unknown; nothing
+  is guessed.
+- `--release-passport` covers `.pkg` and `.dmg` archives as well as `.zip`.
+- **Acceptance test 16b:** a revoked central `store.publish` refuses the next upload, even with a stored session.
+- **CI (Package macos):**
+  - the packaged app's passport must name the build commit;
+  - the same with git removed from PATH;
+  - a project without git is recorded as source unknown;
+  - `--self` is refused for another bundle.
+- **Docs:**
+  - `PRODUCTION-COMPATIBILITY.md`: the live Store and what Maker does against it;
+  - `HCG-MAIL-MACOS.md`: implemented, partial and unsupported steps for HCG Mail on Apple Silicon;
+  - the M4 Max acceptance checklist.
+
+### Fixed
+- `--release-passport` resolves git to an absolute path; it no longer aborts.
+- The macOS acceptance run clears only the TEST Keychain entry between accounts and Stores.
+
+## [Unreleased] — Distribution Studio delivery
+
+### Added
+- **Store contract discovery**: Distribution Studio works with three contracts, chosen from HCG Store's own
+  capabilities and never assumed.
+  - **Deployed contract (drafts and uploads only).** Availability changes are explained; Ship to Store is never
+    disabled.
+  - **HCG Store main's release lifecycle** (`capabilities.operations`):
+    - **Disable** and **Enable** go through HCG Store's endpoints from Maker, with a reason, the typed version, a
+      confirmation and the release revision as `If-Match`;
+    - **Supersede** and **Restore previous version** are publication decisions made in HCG Store's browser review,
+      so Maker opens the release there;
+    - "Make current / supersede" is sent as `supersedePreviousOnPublish` with the draft;
+    - per-target current releases are read and shown.
+  - **The proposed `claude/distribution-studio-api`** contract: recorded requests.
+- **Release management in the diagnostics**: one line saying how this Store lets apps manage releases.
+- `--release-passport --app X.app --file X.app.zip`: the Release Passport build half for an existing macOS app archive.
+  It records the measured SHA-256, size, bundle identity and architectures, the code signing as the Signing Doctor
+  reads it, and the Git source.
+- **CI evidence:**
+  - the macOS package job opens the packaged app on Distribution Studio and captures the window;
+  - it issues the app archive's own Release Passport;
+  - the Distribution Studio job runs on Ubuntu and macOS ARM64, and also against HCG Store main's TEST server (checks
+    M1–M5).
+- **UI acceptance screenshots** for upload progress (mid-upload, with transfer speed) and Add to Listed Product (open
+  draft, and a new revision for a locked release).
+
+### Changed
+- `--store-request` follows the discovered contract. An action the Store offers only in the browser, or not at all,
+  is explained (exit 7) and nothing is changed. A direct change needs `--confirm <version>`.
+- `docs/DISTRIBUTION-STUDIO-PRODUCTION-TEST.md` is now the 10-step MacBook Pro procedure.
+
+## [Unreleased] — Distribution Studio (Ship to Store)
+
+### Added
+- **Distribution Studio**: the Ship to Store page (the sidebar entry keeps its name), with the HCG logo:
+  - connection;
+  - the products you may manage;
+  - an operation selector: **Add New Update**, **Add New Product**, **Add to Listed Product**, **Manage Existing
+    Versions**;
+  - release history and version comparison;
+  - release configuration;
+  - artifacts;
+  - upload to private staging;
+  - the **Synchronization Center**.
+
+  Opening it uploads nothing and changes no release.
+- **Catalogue from HCG Store**:
+  - shows official name, icon, identifier, category, status, platforms, editions and current release;
+  - search, status and platform filters, and **Refresh**;
+  - with the Store's `productMetadata` capability the metadata comes from the product list; otherwise the summary,
+    status and platforms come from the Store's public release resolution;
+  - icons are loaded only from the Store's own origin, and nothing is kept as a local copy.
+- **Version comparison** (`DistributionStudio.Compare`):
+  - shows the current published release (the one the Store names current, else the newest published), the latest
+    private draft, the latest local build, the proposed version, and the published platforms and architectures;
+  - refuses duplicates and names the draft a retry continues;
+  - flags revisions, downgrades, identical bytes already in the Store, and platform overlaps;
+  - a newer local build never disables anything.
+- **Metadata discrepancies**: a typed version, build or architecture that differs from the Release Passport or the
+  package is shown and recorded in the draft's compatibility notes. Verified facts are never overwritten.
+- **Artifact sources**: latest build, Build History, Artifact Vault, files from disk, several per draft, no rebuild.
+  Each file is labelled **Maker build** or **Selected manually**, and provenance comes only from a passport of the
+  exact bytes.
+- **Publication request**: "Make this the current release after approval and publication" and "Supersede previous
+  compatible release". Sent only to a Store with the `publicationRequests` capability, and applied by HCG Store only
+  when a person publishes.
+- **Availability requests**: disable, restore, supersede and make current, with the version typed to confirm. HCG Store
+  records them for the people who approve and publish; they change nothing.
+- **Add to Listed Product**: an open draft takes the files. A published release is never changed; a new revision is
+  prepared instead (same version, next build).
+- **Add New Product**: a private product draft (descriptive fields only to a Store that takes them), plus a central
+  **registration request** for HCG (name, description, category, platforms, edition, initial version, icon and banner
+  with SHA-256). It is not uploaded.
+- **Upload transfer speed**, plus **Open in Store Release Manager** and the website's Release Manager page.
+- **Command line**: `--store-catalogue`, `--store-history`, `--store-compare` (exit 6 when the Store would refuse),
+  `--store-request`, `--make-current`, `--supersede-compatible`, `--add-to-release`, `--compat-note`, and
+  `--description`, `--category`, `--platform` and `--registration-out` for `--draft-product`.
+- **HCG UEM readiness**: the diagnostics show this device's description marked "reported, not attested". Maker is not a
+  device trust authority.
+- `tools/ci/distribution-studio-e2e.sh` and the CI job `distribution-studio`: acceptance tests 1–18 against the TEST
+  HCG Store with the real catalogue (HCG Mail), genuine Windows x64 and ARM64 executables, and screenshots of the page.
+- `docs/DISTRIBUTION-STUDIO-PRODUCTION-TEST.md`: the controlled production test on the MacBook Pro (one private
+  draft, nothing published).
+
+### Changed
+- **Connection diagnostics follow the live HCG Store contract**. Production has no `/publishing/status`; it answers
+  `401` there. There are now ten checks:
+  - server availability;
+  - live API version;
+  - publishing mode (`disabled` · `uploads` · `enabled`);
+  - private upload availability;
+  - HCG Connect authentication;
+  - Executable Maker client authorization (the issued client `fb9b6edf-…`, never replaced; a Store refusal names
+    `HCG_STORE_PUBLISHING_CLIENT_IDS`);
+  - central publisher permission;
+  - authorized catalogue;
+  - Release Manager connectivity;
+  - public publication.
+
+  They are read from `health`, `whoami`, `capabilities`, `products` and `manager`, and capability flags are never
+  assumed. When everything is OK the diagnostics fold away.
+
+### Removed
+- `tools/ci/ship-to-store-private-e2e.sh` and the CI job `ship-to-store-private`. They targeted the deleted HCG Store
+  branch `claude/private-submissions`; production uses `uploads` mode instead.
+
+## [Unreleased] — Ship to Store connection repair
+
+### Added
+- **Connection diagnostics** on the Ship to Store page and `--ship-to-store --store-status`: eleven separate checks
+  instead of one status (Store connectivity, API version, HCG Connect sign-in, Maker's own client registration, token
+  validity, publishing permission, authorised products, private draft creation, artifact upload, release submission,
+  public publication). Each one shows HCG Store's actual answer to the request, what to do, and who does it.
+  **Copy diagnostics** copies them; the text contains no token, cookie or credential. The checks are read-only and
+  nothing is created.
+- **Products from HCG Store with Refresh**: the actual list of products and editions HCG lets the account submit to.
+  The selection is kept on refresh. A draft product is only for products that are not in the catalogue.
+- **Release Passport attachment**: after HCG Store verifies a file, the passport next to it is attached. HCG Store
+  matches it to the stored bytes (SHA-256 and SHA-512). A missing or refused passport never fails the upload.
+- **Release Manager read-back**: after an upload or a submission, the page and the command line show what HCG Store's
+  Release Manager lists for the release (stage, files, audit trail).
+- `tools/ci/ship-to-store-private-e2e.sh` and CI job `ship-to-store-private`: a genuine executable through the whole
+  private flow against the TEST HCG Store, with public publication off.
+
+### Changed
+- The authentication checks verify that the token was issued to Maker's own client (`hcg-executable-maker-desktop-*`).
+  A token issued to HCG Store Manager or to HCG Store's web sign-in is refused.
+- Signed out, opening Ship to Store contacts no Store; **Check connection** runs the diagnostics.
+
+## [Unreleased] — Windows packaging, Authenticode and the deployed HCG Store
+
+Reusable parts from HCG Mail for Windows 0.1.0-beta.1 (docs/WINDOWS-PACKAGING.md).
+
+### Added
+- **Generic headless packaging:** `--package-windows`, with the product's own identity (`--identity app.json` or flags).
+  Nothing of Executable Maker's name or icon goes into the product, and the installer's upgrade identity is unchanged.
+- **Packaging of already-built folders** (`--app-dir --arch`), without building. The program's PE machine type must
+  match the target, and the folder is never changed.
+- **PE facts:** machine type, PE32/PE32+, subsystem, certificate table and version resource (`PeFile`).
+- **Bootstrapper and installed program are told apart:**
+  - the Inno Setup checks report the x86 loader separately from the installed program, whose architecture and
+    version must match the target;
+  - the Store takes a Setup.exe's architecture from its passport, never from the loader;
+  - portable ZIPs report their programs' architectures.
+- **Signing Doctor for Windows** (`--windows-signing-doctor`), the same on every OS. It checks the PE image digest
+  (a changed file fails), the signer's signature, an RFC 3161 timestamp or countersignature, and the chain for code
+  signing (trust reported apart from integrity). On Windows, Windows' own verdict is added. Store detection uses it
+  for `.exe` and Windows ZIPs.
+- **Authenticode signing** (`--authenticode-sign`, `--package-windows --approve-signing`): signtool with SHA-256 and an
+  RFC 3161 timestamp, with the person's own certificate by thumbprint. It runs only with an approval tied to the
+  file's SHA-256, and is verified afterwards.
+- **Windows Release Passport** for each installer and ZIP, from `--package-windows` and from every Windows .NET build.
+  It records the installed program, the bootstrapper, Authenticode for the file and each program, source, provider
+  and toolchain.
+- **Store submission manifest** (`store-submission.json`, `hcg.store-submission` v1). It holds the exact release and
+  artifact bodies of the deployed HCG Store's API, for a private draft only, with provenance kept apart.
+  `--ship-to-store --manifest` re-checks every file first. `--ship-to-store --store-status` reads the server's health
+  and publishing answer.
+- **Deployed HCG Store (835ac1a):**
+  - its strict artifact schema refuses build provenance; on exactly that answer, Maker declares again without it and
+    says so;
+  - `publishing_disabled` is reported as such.
+- CI job `windows-packaging` on a real Windows runner:
+  - an already-built fixture is packaged for x64 (signed after approval, with a throwaway certificate and a real
+    timestamp) and for ARM64 (unsigned);
+  - Maker's Authenticode verdicts are compared with `Get-AuthenticodeSignature` on Microsoft-signed `dotnet.exe`, on
+    the self-signed Setup.exe and on a tampered copy;
+  - the job checks bootstrapper vs installed machine types, passports, the manifest and checksums, and runs the
+    install, launch and uninstall test.
+- Regression tests: synthetic PE images with version resources, and signtool-shaped Authenticode signatures
+  (tampering, forgery, countersignature). They also cover already-built folders, passports, Store detection, the
+  manifest, and a fake of the deployed Store's strict schema.
+
+### Fixed
+
+- **`--version` no longer swallows a command.** `--package-windows … --version 0.1.0-beta.1` printed Executable Maker's own
+  version, exited 0 and packaged nothing; HCG Mail's prerelease run showed this. Commands are now matched first, and
+  `--version` means Maker's version only when no command is named. The same applied to `--ship-to-store` and
+  `--xcode-mac`. Regression tests check this, and the Windows CI job passes `--version` explicitly.
+- **Cancelling a process tree on Linux kills what it starts at the last moment.** On Linux the root is paused while its
+  tree is collected, then killed with SIGKILL sent directly to its process ID, with SIGCONT as a backstop. It is never
+  left stopped. On macOS, pausing hung CI test runs, so macOS keeps its previous behaviour: collect the tree, then kill
+  every member. On macOS a query that a cancelled `xcodebuild` started just before it died can still outlive it
+  briefly. The DeskLoop cancellation check now allows 10 s before it fails.
+- **The Store summary for a Windows file says "Windows PE".** It used to call the binaries "Mach-O".
+- The Inno Setup "Code signature" check verifies the signature instead of only noting that a signature block is
+  present.
+
+## [Unreleased] — HCG Impactor
+
+### Added
+- **Ship to Repo** (Unleashify › Build output, `--ship-to-repo submit|status|show`), under HCG Repo's Executable Maker
+  submission contract (`docs/EXECUTABLE_MAKER_SUBMISSION.md` in HCG Repo).
+  - **Submit:** `release submit --handoff … --result-json …`; HCG Repo validates the exact .deb into its private
+    incoming store. **Status:** `release status <id>`.
+  - Maker shows the state, the SHA-256, HCG Repo's **six evidence levels separately** (the script-free lifecycle is
+    never presented as device evidence), the findings and the owner's next commands.
+  - **Approval of the exact SHA-256, Candidate preparation and publication are the owner's**, run in HCG Repo. Maker
+    has no approve or prepare operation (`--ship-to-repo approve|prepare` is refused with an explanation).
+  - `HCG_REPO_INCOMING` is passed to HCG Repo, so Maker's submissions are in the same store as the owner's commands.
+- **HCG Release Passport v1** (`docs/RELEASE-PASSPORT.md`): schema pinned byte for byte from HCG Repo 3bf53c7.
+  - **Build half:** every Unleashify handoff carries `release-passport.json`. It holds the artifact, SHA-256, source,
+    provider, toolchain, Maker's validation evidence and `code_signing` (each Mach-O's signer, verified pages,
+    identifier, cdhash and entitlements). It states no repository signing, approvals, publication or device results.
+  - **Ship to Repo:** once the owner has prepared a release, Maker reads HCG Repo's own passport and reconciles it with
+    the build half. It shows `repository_signing` exactly as HCG Repo states it, apart from `code_signing`.
+  - **Ship to Store:** HCG Store v2's source commit, build provider, toolchain and validation report are filled from a
+    passport of the file's exact bytes (or `--passport`), and left empty otherwise.
+  - **Checks:** version compatibility (newer versions refused with a reason; extra fields accepted), and a schema
+    evaluator cross-checked against Python `jsonschema`.
+- **CI:** HCG Repo's Release Manager review runs on Linux. HCG Repo 3bf53c7's script-free lifecycle upgrades from the
+  version in `pool/`, and macOS refuses dpkg's backup hard links inside an installed `.app`.
+- **Signature integrity** check in rootless package validation: every Mach-O signature's page hashes and special
+  slots are recomputed against the files (`MachOSignatureAudit`). It fails a binary changed after signing, an
+  inconsistent signature, or a main executable with library validation or hardened runtime loading an ad hoc or
+  differently signed framework. VALIDATION.txt lists each binary's signer, verified pages, identifier and cdhash.
+- **DEVICE-TEST.md:** "If the app closes at launch": how to collect the crash report and read its termination
+  namespace (CODESIGNING, DYLD, EXC_CRASH, FRONTBOARD) before changing anything.
+- Regression tests for a .NET/Avalonia iOS bundle shaped like HCG Mail Unleashed (unsigned main executable,
+  SkiaSharp/HarfBuzzSharp frameworks with their own ad hoc signatures, AOT data, managed assemblies) and an opt-in
+  check of the published HCG Mail Unleashed 0.1.0~beta1 package (`HCG_MAIL_UNLEASHED_DEB`, read only).
+- **HCG Repo Distribution v2 submission manifest** (`submission.json`, `hcg.repo.artifact-submission` v1) in every
+  handoff with a pinned, clean source; validated by Maker and by HCG Repo's own `validate_manifest` in CI. It carries
+  the `signing` claim (method `ldid`, the files Maker signed, each binary's exact entitlements), and the `package.toml`
+  draft records the same entitlements under `[review.entitlements]`. A local handoff's draft has no `[access]
+  exception`: the owner approves a free demo in HCG Repo.
+
+### Fixed
+- **icon.png** was Apple's CgBI PNG, copied from the Xcode build, which browsers and Sileo cannot decode. It is now
+  converted to a standard RGBA PNG and verified with a standard decoder (square, at least 60 pixels). Approved
+  source artwork is the fallback (`--icon-artwork`, or Package › Icon artwork with a suggestion from the project's
+  AppIcon set).
+- **DEVICE-TEST.md** searched for "sentinel" and wrote `sentinel-test-*` snapshots for every product. All
+  instructions now use the actual product name, bundle ID, package ID, version and install path. The installed-build
+  check matches the product's own family.
+- **control.txt** wrote multi-line descriptions without Debian continuation lines, so HCG Repo's handoff reader saw
+  no dependencies.
+- **provenance.json** now records the app's toolchain (from `DTXcode`) for local builds, which HCG Repo requires.
+
+- **Unleashify on your Mac, without GitHub Actions** (`docs/UNLEASHIFY-LOCAL.md`). This uses the same packager,
+  validator and handoff as CI.
+  - **Pinned commit:** a clean checkout of one exact commit of your local repository (read only), imported and
+    recorded.
+  - **Lifecycle simulation:** install → configure → upgrade → remove in a throwaway folder; Maker's scripts run with a
+    recording `uicache`.
+  - **Local provenance:** built by, toolchain read from the app's `DTXcode`, time, host label without computer or user
+    names, source visibility, validation. No CI run or artifact is recorded.
+  - **HCG Repo handoff** through Ship to Repo (HCG Repo's Release Manager; `--via local-file` stages the .deb for
+    Prepare packages). Maker writes no import request of its own for a local build.
+  - **Owner approval bound to the exact SHA-256**, given in HCG Repo (`release approve`), not in Maker.
+  - **HCG Repo import preview:** HCG Repo's own importer, dry run, on a throwaway copy of your checkout.
+  - The same in the CLI: `--rootless-deb … --local --source-visibility … [--approved-sha256 …] [--hcg-repo …]`.
+- `IBuildHost` / `LocalBuildHost`: the seam for a future owner-authorized HCG Server build host (proposal in
+  `docs/BUILD-HOSTS.md`).
+
+### Changed
+- Creating a profile with the Xcode account registers a device only when you tick **Register the connected device**
+  (command line `--register-device`). The approval dialog names the App ID and device registration.
+- Impactor labels the team when a signature records none (codesign records a team only for Apple-issued
+  certificates).
+- Windows installer test: a `taskkill` child that had already exited no longer fails the test.
+
+- **HCG Impactor** (sidebar › HCG Impactor; `--impactor` on the command line): inspect, sign, install and diagnose iOS
+  and iPadOS apps on your own devices. Flow: Drop IPA → Inspect → Sign → Select device → Install. See `docs/IMPACTOR.md`.
+  - **IPA Inspector** (all platforms): identity, version and build, minimum iOS, device families, architectures,
+    Simulator/Mac/32-bit/App Store-encrypted binaries, every extension, framework and dylib, embedded signatures
+    (identifier, team, signer, chain, signing time, entitlements), embedded profiles (verified), sealed-resource
+    integrity and safe extraction. The original IPA is never changed; `.deb` files go to the jailbreak workflow.
+  - **Signing Studio** (macOS):
+    - Automatic or chosen identity and profiles per bundle; Development, Ad Hoc, Enterprise and App Store export.
+    - Every entitlement must be granted by the profile, and every removal is reported.
+    - Bundles are signed innermost first with `codesign` and your Keychain identity.
+    - `codesign --verify --deep --strict`, then a new IPA, inspected again.
+    - Warnings for bundle ID and team changes.
+  - **Device Manager / Deployment Queue** (macOS, Xcode `devicectl`):
+    - Device details: model, iOS, connection, pairing, Developer Mode, capabilities, registration in installed
+      profiles; guidance for Trust, pairing and Developer Mode.
+    - Pre-installation validation; installation with progress, cancellation, optional launch and batch mode; never
+      removes apps.
+  - **Certificates, Provisioning, Signing Monitor** (expiry reminders, manual re-sign and reinstall), **Installation
+    History** and **Diagnostics**: 15 failure types explained, original output redacted, and an export in
+    `hcg.diagnostic-report/1` plus Markdown.
+  - **Signing Doctor** (Impactor, Mobile Build Studio › Signing Doctor…, `--impactor doctor`): for one bundle ID,
+    every installed profile is checked for bundle ID, team, certificate, certificate and profile expiry, registered
+    device, development vs distribution, entitlements, platform and signature, with the exact reason and next steps.
+  - **Create profile with Xcode** (`--impactor provision`): with approval, a throwaway stub project is built once with
+    `xcodebuild -allowProvisioningUpdates` using the Apple Account signed in to Xcode. Xcode registers the App ID
+    (and the connected device) and downloads a Development profile. No manual temporary project; nothing is revoked
+    or installed.
+  - Shared device record **`hcg.apple-device/1`** (`docs/contracts/`) proposed to HCG System Tester. "Open in System
+    Tester" uses its existing `hcgsystemtester://open/connected-systems` route.
+  - `src/HCG.Impactor` is a self-contained module (no UI), ready to become a standalone app.
+- CI job **`impactor`** (macOS), using real Apple tools with a synthetic identity and profile; no physical device on CI:
+  - a real Xcode-built device app is inspected and signed;
+  - Apple's `codesign` verifies the result, and a tampered copy is caught;
+  - real `devicectl` output is translated;
+  - the workspace signs through Signing Studio.
+
+  Physical-device installation is to be validated on the owner's Mac (`docs/IMPACTOR.md`).
 
 ## [Unreleased] — Xcode projects that only wrap another build (HCG Mail)
 
@@ -91,6 +438,58 @@ Highlights:
 
 #### Fixed
 - Validation resolves `@rpath` in embedded libraries through the main executable's run paths, as dyld does (an embedded Swift runtime library linking `@rpath/libswiftCore.dylib` was reported unresolved).
+
+## [Unreleased] — Native macOS apps built with Xcode
+
+### Added
+- **Native macOS app — Xcode**: import a source ZIP (a GitHub-style enclosing folder is handled) or folder with a
+  macOS Xcode project, choose project/target, scheme, configuration and architecture, and build it with `xcodebuild`
+  into the project's own `.app`, a ZIP, an optional DMG with an Applications shortcut and the project's licence files,
+  SHA-256 checksums and a build report. Release and this Mac's architecture by default (Apple silicon); Universal when
+  the SDK builds both. Preflight names exactly what is missing (a Mac, full Xcode, xcodebuild, a macOS SDK at least as
+  new as `MACOSX_DEPLOYMENT_TARGET`). Built in a copy of the source; only the listed overrides are passed; helper
+  scripts (e.g. `INSTALL.command`) are never run. The app keeps its identity and signature; ad hoc, development and
+  Developer ID signatures are reported as such; quarantine and Gatekeeper are never changed. See docs/MACOS-XCODE.md.
+- CI job `xcode-macos`: MotionWallpaper 1.0.5 (pinned commit, checked against the uploaded ZIP) through the wizard —
+  build verification with Apple's tools, Universal build, cancellation, and runtime checks (launch, MP4 import, desktop
+  playback) on the runner's disposable session.
+- **Native build provider for Xcode 16 projects** (docs/MACOS-XCODE.md › Native build provider):
+  - **Inspection:** synchronized folders (objectVersion 77); local and remote Swift packages with `Package.resolved`
+    pins; workspaces that reference the project from another folder; per-configuration facts (bundle ID, signing,
+    team, entitlements, App Sandbox, hardened runtime, compilation conditions, generated Info.plist); asset catalogs,
+    icon images and entitlement files; each scheme's Test action.
+  - **Steps:** `xcodebuild -list -json` checks the scheme and configuration; packages are resolved
+    (`-resolvePackageDependencies`, remote packages only); the build follows; then the optional `test` (on this Mac's
+    architecture) and `archive`.
+  - **Tests:** a local Swift package's test targets run with that package's `swift test`, from the same Xcode.
+    `xcodebuild test` on the project finds no test bundle for them (seen on Xcode 26.6, with and without HCG). The
+    project's own test targets run with `xcodebuild test -only-testing:`.
+  - **Outputs:** PKG installer (unsigned) and Xcode archive (zipped `.xcarchive` with dSYMs), alongside .app, ZIP and
+    DMG.
+  - **Signing Doctor** for macOS apps (`--mac-signing-doctor`, read only). It tells unsigned, ad hoc, development,
+    Developer ID, notarized and App Store signatures apart, for the app and each embedded framework, helper and
+    extension. It reports team, entitlements, sandbox, hardened runtime, Gatekeeper and the stapled ticket.
+  - **Build diagnostics** (`hcg.build-diagnostics` v1): compiler errors and warnings with file, line, column and
+    target, source excerpts, failed targets and commands, dependency, signing, linker and test failures, and duration.
+    Written for every build and redacted. Results › *Xcode build diagnostics* views it, copies it for an agent, or
+    opens its folder.
+  - **Native build-provider contract** (`hcg.native-build-request` / `-result` v1, docs/contracts/): the approval,
+    source provenance, isolated workspace and limits, then every step's exit code and the artifacts. It runs locally
+    without GitHub Actions and is proposed for an HCG Server build host.
+  - **Release Passport** build half for each ZIP, DMG, PKG and Xcode archive. Ship to Store reads it for the exact file
+    and creates private drafts only.
+  - **Wizard:** dependencies, configuration facts, *Run the scheme's tests* and *Also create an Xcode archive*.
+  - **CLI:** `--xcode-mac <folder|zip> [--inspect-only] [--test] [--archive] [--formats …] --trust`.
+- Regression tests: a synthetic project shaped like an Xcode 16 SwiftUI app with a local package, plus an opt-in check
+  of the real HCG Offensive Frontier checkout (`HCG_OFFENSIVE_FRONTIER_CHECKOUT`). Diagnostics are parsed from real
+  xcodebuild output shapes. Schemas are validated for diagnostics, request and result.
+
+### Fixed
+- Inspection no longer skips folders named `Packages`. Only a NuGet `packages/` folder (repositories.config or
+  `.nupkg` files) is skipped, so an Xcode app's local Swift package is seen and the project is no longer shown as
+  unsupported.
+- A Swift package that belongs to an Xcode app (referenced by its project) is no longer offered as a separate Swift
+  package build.
 
 ## [0.3.1] — 2026-11-18 — Production HCG Connect built into the packaged app; real HCG integration
 

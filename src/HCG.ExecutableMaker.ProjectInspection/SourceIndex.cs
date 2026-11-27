@@ -11,8 +11,26 @@ public sealed class SourceIndex
 
     private static readonly HashSet<string> Skipped = new(StringComparer.OrdinalIgnoreCase)
     {
-        "bin", "obj", ".git", ".hg", ".svn", ".vs", ".idea", "node_modules", "TestResults", "packages", "__MACOSX",
+        "bin", "obj", ".git", ".hg", ".svn", ".vs", ".idea", "node_modules", "TestResults", "__MACOSX",
     };
+
+    /// <summary>
+    /// NuGet's legacy restore folder (packages/ with *.nupkg files or repositories.config) is skipped. A folder merely
+    /// named Packages is not: Swift projects keep their local packages there (Packages/Core/Package.swift).
+    /// </summary>
+    internal static bool IsNuGetPackagesFolder(DirectoryInfo dir)
+    {
+        if (!dir.Name.Equals("packages", StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "repositories.config"))) return true;
+            if (dir.EnumerateFiles("*.nupkg", SearchOption.TopDirectoryOnly).Any()) return true;
+            foreach (var sub in dir.EnumerateDirectories().Take(50))
+                if (sub.EnumerateFiles("*.nupkg", SearchOption.TopDirectoryOnly).Any()) return true;
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
 
     private SourceIndex(string root, IReadOnlyList<string> files, bool truncated)
     {
@@ -45,7 +63,7 @@ public sealed class SourceIndex
                 if (e.LinkTarget is not null || e.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
                 if (e is DirectoryInfo)
                 {
-                    if (depth < MaxDepth && !Skipped.Contains(e.Name)) stack.Push((e.FullName, depth + 1));
+                    if (depth < MaxDepth && !Skipped.Contains(e.Name) && !IsNuGetPackagesFolder((DirectoryInfo)e)) stack.Push((e.FullName, depth + 1));
                 }
                 else
                 {

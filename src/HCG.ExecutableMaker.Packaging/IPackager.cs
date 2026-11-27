@@ -19,6 +19,8 @@ public sealed record PackagingRequest
     public GeneratedIcons? Icons { get; init; }
     public required HostEnvironment Host { get; init; }
     public required ToolchainReport Toolchains { get; init; }
+    /// <summary>Files that ship next to the app inside a disk image (licence and attribution notices), copied unchanged.</summary>
+    public IReadOnlyList<string> DistributionExtras { get; init; } = [];
 }
 
 public sealed record PackagedOutput(PackagingFormat Format, ArtifactKind Kind, string Path, IReadOnlyList<VerificationCheck> Checks);
@@ -64,4 +66,6 @@ public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Hos
     public bool IsNativeMacBundle { get; init; }
     /// <summary>A Theos project: the only output is its Debian package for jailbroken devices.</summary>
     public bool IsTheos { get; init; }
+    /// <summary>A native macOS app built from an Xcode project with xcodebuild (the project's own .app).</summary>
+    public bool IsMacXcode { get; init; }
 }

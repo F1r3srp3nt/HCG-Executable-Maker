@@ -99,7 +99,7 @@ bundletool) → copied to `<output>/<Name>-<version>-<kind>/` → verified → S
 | A mobile framework | an analyzer + `MobileFramework` value, a planner in `BuildEngine/Mobile`, a branch in `MobileBuildService`, rules in `MobileCapabilities` | `Composition.cs` |
 | A packaging format (MSI, PKG, AppImage…) | `IPackager`; flip its `PackagingCatalog` entry to `Available` when the tool is detected | `Composition.cs` |
 | Isolated builds (container/VM/remote) | `IBuildWorker` with `IsolationLevel.Isolated` | `Composition.cs` |
-| Another build provider (where a whole build runs) | `IBuildProvider` with HCG Repo's provider id (see [HCG-SERVER-BUILD-HOST.md](HCG-SERVER-BUILD-HOST.md)) | `Composition.cs` |
+| Another build host (where a whole build runs) | `IBuildHost` (`LocalBuildHost`, `HcgServerBuildHost`) writing the native build-provider files (see [HCG-SERVER-BUILD-HOST.md](HCG-SERVER-BUILD-HOST.md)) | `Composition.cs` |
 | A toolchain probe | `ToolchainDetector` + an id in `ToolchainIds` | — |
 | A schema change | append a `Migration` to `Persistence/Migrations.cs` (never edit released ones) | — |
 | A theme | a `Themes/Tokens.<Name>.axaml` with the same keys + entry in `ThemeService.Themes` | — |

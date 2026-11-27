@@ -35,6 +35,19 @@ internal static partial class Program
         var page = (UnleashifyViewModel)main.CurrentPage!;
         await WaitUntil(() => page.Modes.Count == 3, TimeSpan.FromSeconds(30), "modes");
 
+        // Pinned commit (local build): clone the local repository, check out exactly this commit, import it, select it.
+        if (Arg("unleashify-pin-repo") is { } pinRepo)
+        {
+            page.PinRepository = pinRepo;
+            page.PinCommit = Arg("unleashify-pin-commit", "HEAD");
+            Check(page.ImportPinnedCommitCommand.CanExecute(null), "Check out and import is offered");
+            await page.ImportPinnedCommitCommand.ExecuteAsync(null);
+            Log("Pinned source: " + page.PinStatus);
+            Check(page.PinStatus.StartsWith("Imported commit ", StringComparison.Ordinal), "The pinned commit was checked out (clean) and imported");
+            if (Arg("unleashify-commit") is { } pinned) Check(page.Commit == pinned, $"Provenance commit is the pinned commit {pinned}");
+            ShotAt("SOURCE", "unleashify-pinned-source");
+        }
+
         // Source revision.
         Log($"Source revision: [{page.RevisionTag.Text}] {page.RevisionText}");
         Check(page.RevisionTag.Text is "Current" or "From archive", $"Source revision recorded at import ({page.RevisionTag.Text})");
@@ -89,6 +102,13 @@ internal static partial class Program
         page.CiArtifact = Arg("unleashify-ci-artifact", "");
         page.CiRepository = Arg("unleashify-ci-repository", "");
         page.CiCommit = Arg("unleashify-ci-commit", "");
+        page.IsLocalBuild = _args.ContainsKey("unleashify-local");
+        if (page.IsLocalBuild)
+        {
+            page.SourceVisibility = Arg("unleashify-visibility", "private");
+            page.HostLabel = Arg("unleashify-host", page.HostLabel);
+            page.ApprovedSha256 = Arg("unleashify-approved-sha256", "");
+        }
         page.ProductionAccess = Arg("unleashify-access", page.ProductionAccess);
         page.Changes = Arg("unleashify-change", "");
         page.KnownIssues = Arg("unleashify-known-issue", "");
@@ -136,6 +156,13 @@ internal static partial class Program
         ShotAt("BUILD OUTPUT", "unleashify-handoff");
         ShotScrolledToEnd("unleashify-log");
         Check(page.HandoffFolder is not null && Directory.Exists(page.HandoffFolder), "Candidate handoff exported");
+        Log("Icon: " + page.IconStatus);
+        var iconFile = Path.Combine(page.HandoffFolder!, "icon.png");
+        Check(File.Exists(iconFile) && HCG.ExecutableMaker.Packaging.Jailbreak.PngIcon.ValidateStandard(File.ReadAllBytes(iconFile)) is null,
+            "icon.png is a standard PNG a browser or Sileo can decode (not Apple CgBI)");
+        Check(File.Exists(Path.Combine(page.HandoffFolder!, "submission.json")) || page.Missing.Any(m => m.StartsWith("submission.json", StringComparison.Ordinal)),
+            "The HCG Repo Distribution v2 manifest is written, or the reason it is not is listed");
+        Log($"Ship to Repo: [{page.ShipTag.Text}]");
         if (_args.ContainsKey("unleashify-owner-approval-file"))
         {
             Check(!page.Missing.Any(m => m.StartsWith("owner approval", StringComparison.Ordinal)), "The handoff no longer lists the owner approval as missing");
@@ -143,6 +170,29 @@ internal static partial class Program
             Check(toml.Contains("\nexception = \"", StringComparison.Ordinal) && toml.Contains($"\nexception_versions = [\"{page.PackageVersion}\"]", StringComparison.Ordinal),
                 "package.toml records the approval as [access] exception for this version only");
             Check(!toml.Contains("HYPOTHETICAL", StringComparison.Ordinal) && !toml.Contains("<owner>", StringComparison.Ordinal), "No placeholder approval in package.toml");
+        }
+        if (page.IsLocalBuild)
+        {
+            var manifest = Path.Combine(page.HandoffFolder!, "submission.json");
+            Check(File.Exists(manifest), "A local build exports HCG Repo's Distribution v2 submission.json");
+            var m = File.Exists(manifest) ? File.ReadAllText(manifest) : "";
+            Log("submission.json:\n" + m);
+            Check(m.Contains("\"provider\": \"executable-maker-local\"", StringComparison.Ordinal), "The provider is executable-maker-local");
+            Check(!m.Contains("\"runId\"", StringComparison.Ordinal) && !m.Contains("\"artifactName\"", StringComparison.Ordinal), "No CI run or artifact is claimed for a local build");
+            Check(!File.Exists(Path.Combine(page.HandoffFolder!, "import-request.toml")), "No hand-written import request: HCG Repo's Release Manager writes it (Ship to Repo)");
+            Check(page.HandoffTag.Tone == "success", $"The local build is ready for Ship to Repo ({page.HandoffTag.Text})");
+            Log("Toolchain: " + page.ToolchainText);
+        }
+        if (Arg("unleashify-hcg-repo") is { } hcgRepo)
+        {
+            page.HcgRepoCheckout = hcgRepo;
+            Check(page.PreviewImportCommand.CanExecute(null), "Preview import is offered after the export");
+            await page.PreviewImportCommand.ExecuteAsync(null);
+            Log($"Import preview: [{page.PreviewTag.Text}]\n{page.PreviewText}");
+            ShotAt("HCG REPO IMPORT PREVIEW", "unleashify-import-preview");
+            var want = Arg("expect-preview", "blocked-by-approval");
+            Check(want == "importable" ? page.PreviewTag.Tone == "success" : page.PreviewTag.Text == "Blocked only by the owner's approval",
+                $"HCG Repo's importer (dry run): {page.PreviewTag.Text} (expected {want})");
         }
         if (Arg("expect-readiness") is { } readiness)
             Check(readiness == "ready" ? page.ReadinessTag.Tone == "success" : page.ReadinessTag.Tone != "success", $"Device-testing readiness: {page.ReadinessTag.Text} (expected {readiness})");

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hakmicapitalgroup.com/schemas/hcg/native-build-result-v1.schema.json",
+  "title": "HCG native build result, format version 1",
+  "description": "What a native build provider did for one request: every step with its exit code and duration, the diagnostics counts and every artifact with its SHA-256 and passport. A failed build is a failed result.",
+  "type": "object",
+  "required": ["format", "formatVersion", "build", "request", "status", "startedAt", "steps", "artifacts"],
+  "properties": {
+    "format": { "const": "hcg.native-build-result" },
+    "formatVersion": { "const": 1 },
+    "build": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "request": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the request file's exact text" },
+    "status": { "enum": ["succeeded", "failed", "cancelled", "timed-out"] },
+    "failureReason": { "type": ["string", "null"] },
+    "startedAt": { "type": "string" },
+    "endedAt": { "type": ["string", "null"] },
+    "durationSeconds": { "type": ["number", "null"] },
+    "toolchain": { "type": "object" },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "command", "exitCode", "durationSeconds"],
+        "properties": {
+          "title": { "type": "string" },
+          "command": { "type": "string" },
+          "exitCode": { "type": ["integer", "null"] },
+          "durationSeconds": { "type": "number" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": ["object", "null"],
+      "properties": {
+        "file": { "type": "string" },
+        "errors": { "type": "integer" },
+        "warnings": { "type": "integer" },
+        "testFailures": { "type": "integer" },
+        "failedTargets": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "sha256", "size", "kind", "passport"],
+        "properties": {
+          "file": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "size": { "type": "integer" },
+          "kind": { "type": "string" },
+          "passport": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

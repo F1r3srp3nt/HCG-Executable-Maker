@@ -4,6 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="HCG.ExecutableMaker.Tests" />
+    <InternalsVisibleTo Include="HCG.Impactor" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\HCG.ExecutableMaker.BuildEngine\HCG.ExecutableMaker.BuildEngine.csproj" />

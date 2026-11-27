@@ -24,6 +24,140 @@ internal static partial class Program
         Check(page.Files.All(f => f.Candidate.IsSupported), "Every sample file is detected as a supported platform artifact");
         Check(page.Connection == "Sign in required", "Without an HCG Connect session the page asks for sign-in and contacts no Store");
         Shot("ship-to-store");
+        if (_args.ContainsKey("ship-store"))
+        {
+            // With a TEST HCG Store: sign in, then Check connection shows the ten diagnostics on the page, the catalogue,
+            // the version history and comparison, a private upload and the Synchronization Center.
+            using var info = JsonDocument.Parse(File.ReadAllText(_args["ship-store"]));
+            await main.NavigateAsync("account", null);
+            var account = (AccountViewModel)main.CurrentPage!;
+            await Task.Delay(300);
+            account.SignInCommand.Execute(null);
+            await WaitUntil(() => account.IsSignedIn, TimeSpan.FromSeconds(60), "HCG Connect sign-in");
+            await main.NavigateAsync("ship", files);
+            page = (ShipToStoreViewModel)main.CurrentPage!;
+            Check(page.Title == "Distribution Studio", "The Ship to Store navigation entry opens Distribution Studio");
+            page.StoreUrl = info.RootElement.GetProperty("storeOrigin").GetString()!;
+            await page.ConnectCommand.ExecuteAsync(null);
+            Log($"Connection: [{page.Connection}] {page.ConnectionDetail}");
+            Log(page.CapabilitiesText);
+            foreach (var c in page.Diagnostics) Log($"  [{c.Check.StateLabel}] {c.Check.Title}: {c.Check.Summary}");
+            Check(page.Diagnostics.Count == 10, "Ten separate connection checks are shown");
+            var expectReady = !_args.TryGetValue("ship-expect", out var expect) || expect != "off";
+            Check(expectReady ? page.Report?.CanUpload == true && page.Products.Count > 0 : page.Report?.CanUpload == false,
+                expectReady ? "Ready to upload private drafts; the products HCG allows are listed" : "Not ready: the checks name what is switched off");
+            Check(page.Files.All(f => f.State == "Ready to upload" && f.Progress == 0), "Opening the page and checking the connection uploaded nothing");
+            await page.CopyDiagnosticsCommand.ExecuteAsync(null);
+            page.DiagnosticsExpanded = true;
+            ShotAt("1 · CONNECTION", "ship-diagnostics");
+            page.DiagnosticsExpanded = false;
+            if (!expectReady) return Failures.Count == 0 ? 0 : 1;
+
+            // Catalogue: official metadata, search and filters, manual refresh.
+            await page.RefreshProductsCommand.ExecuteAsync(null);
+            foreach (var c in page.Catalogue) Log($"Catalogue: {c.Title} [{c.Identifier}] {c.Status.Text} · {c.Category} · {c.Platforms} · {c.Editions} · {c.Current} · icon {(c.HasIcon ? "loaded" : "not available")}");
+            var productId = Arg("ship-product", "hcg-mail");
+            page.Search = productId == "hcg-mail" ? "mail" : productId;
+            Check(page.Catalogue.Any(c => c.Product.Id == productId), $"Search finds {productId}");
+            page.SelectedItem = page.Catalogue.First(c => c.Product.Id == productId);
+            page.SelectedEdition = page.Editions.FirstOrDefault(e => e.Id == Arg("ship-edition", "windows-desktop")) ?? page.SelectedEdition;
+            page.Search = "";
+            await page.LoadHistoryCommand.ExecuteAsync(null);
+            Log("History: " + page.HistoryNote);
+            foreach (var h in page.History) Log($"  {h.Title} [{h.Status.Text}] {h.Detail}");
+            ShotAt("2 · PRODUCTS YOU MAY MANAGE", "studio-catalogue");
+
+            // New update: version comparison and discrepancies; a private upload; the Synchronization Center.
+            page.IsNewUpdate = true;
+            page.Version = Arg("ship-version", "3.0.0");
+            page.Build = Arg("ship-build-number", "30");
+            page.ReleaseNotes = "Distribution Studio UI acceptance upload (TEST Store).";
+            page.Channel = page.Channels.First(c => c.Value == "stable");
+            page.Eligibility = page.Eligibilities.First(e => e.Value == "private");
+            page.Distribution = page.Distributions.First(d => d.Value == "free");
+            page.MakeCurrent = page.CanRequestPublication;
+            page.SupersedeCompatible = page.CanRequestPublication;
+            Log("Comparison: " + page.ComparisonSummary);
+            foreach (var f in page.Findings) Log($"  [{f.Chip.Text}] {f.Message}");
+            foreach (var d in page.Discrepancies) Log($"  [{d.Chip.Text}] {d.Message}");
+            Check(page.Comparison is { Blocked: false }, "The proposed version is not a duplicate");
+            ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-compare");
+            ShotAt("5 · RELEASE CONFIGURATION", "studio-release-configuration");
+            ShotAt("6 · ARTIFACTS (SEVERAL FILES PER DRAFT; NO REBUILD)", "studio-artifacts");
+            var shipping = page.ShipCommand.ExecuteAsync(null);
+            // Upload progress, caught while the bytes are moving (the TEST Store is slowed down for this).
+            var caught = false;
+            for (var i = 0; i < 600 && !shipping.IsCompleted; i++)
+            {
+                if (page.Files.Any(f => f.Progress is > 0 and < 100))
+                {
+                    await Task.Delay(400);
+                    foreach (var f in page.Files) Log($"In progress {f.FileName}: {f.Progress:0}% · {f.State} · {f.Speed}");
+                    ShotAt("7 · UPLOAD TO PRIVATE STAGING", "studio-upload-progress");
+                    caught = true;
+                    break;
+                }
+                await Task.Delay(50);
+            }
+            await shipping;
+            Check(caught, "Upload progress and transfer speed were shown while uploading");
+            foreach (var f in page.Files) Log($"Upload {f.FileName}: {f.State} · {f.Detail}");
+            Log($"Release: {page.ReleaseStatus} · {page.ReviewUrl}");
+            Log(page.ReleaseManagerStage ?? "");
+            Check(page.ReleaseId is not null && page.Files.All(f => f.State is "Verified by HCG Store" or "Already uploaded"), "Uploaded to private staging and verified by HCG Store (SHA-256)");
+            Check(page.ReleaseManagerStage?.Contains(page.Version, StringComparison.Ordinal) == true, "Release Manager lists the same release");
+            Check(!page.CanRequestPublication || page.ReleaseStatus.Contains("request recorded", StringComparison.Ordinal), "The make-current / supersede request is recorded with the draft (applied only at publication)");
+            ShotAt("7 · UPLOAD TO PRIVATE STAGING", "studio-uploaded");
+            await page.RefreshSyncCommand.ExecuteAsync(null);
+            Log("Sync: " + page.SyncNote);
+            foreach (var g in page.Sync) Log($"  {g.Title}: {g.Group.Count}");
+            Check(page.Sync.First(g => g.Group.Key == "drafts").Group.Count >= 1 && page.Sync.First(g => g.Group.Key == "uploaded").Group.Count == page.Files.Count, "Synchronization Center: from HCG Store's answers (drafts listed, uploaded files verified)");
+            ShotAt("8 · SYNCHRONIZATION CENTER", "studio-sync");
+
+            // Add to Listed Product: the uploaded draft takes another platform's files; a submitted or published release
+            // would get a new revision instead.
+            page.IsAddToListed = true;
+            await page.LoadHistoryCommand.ExecuteAsync(null);
+            page.SelectedRelease = page.History.FirstOrDefault(h => h.Release.Id == page.ReleaseId) ?? page.History.FirstOrDefault();
+            Log("Add to listed product: " + page.AdditionPlan);
+            Check(page.AdditionPlan?.Length > 0, "Add to Listed Product explains how the platform is added");
+            ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-add-to-listed");
+            if (page.History.FirstOrDefault(h => !h.IsOpen || h.Release.Status != "draft") is { } locked)
+            {
+                page.SelectedRelease = locked;
+                Log("Add to listed product (locked release): " + page.AdditionPlan);
+                Check(page.AdditionPlan?.Contains("cannot change", StringComparison.Ordinal) == true, "A submitted or published release is never changed: a new revision is prepared");
+                ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-add-to-listed-revision");
+            }
+
+            // Manage versions: the history with availability changes as this Store offers them (typed confirmation).
+            page.IsManageVersions = true;
+            await page.LoadHistoryCommand.ExecuteAsync(null);
+            page.SelectedRelease = page.History.FirstOrDefault(h => h.HasActions) ?? page.History.FirstOrDefault();
+            if (page.SelectedRelease is { HasActions: true } target)
+            {
+                page.AvailabilityAction = page.AvailabilityActions.First();
+                page.RequestReason = "UI acceptance: request recorded for the publisher (TEST).";
+                page.RequestConfirm = "wrong";
+                await page.SendAvailabilityRequestCommand.ExecuteAsync(null);
+                Check(page.RequestResult?.StartsWith("Type the version", StringComparison.Ordinal) == true, "An availability request needs the version typed to confirm");
+                page.RequestConfirm = target.Release.Version;
+                await page.SendAvailabilityRequestCommand.ExecuteAsync(null);
+                Log("Request: " + page.RequestResult);
+                Check(page.RequestResult?.Contains("Nothing changed", StringComparison.Ordinal) == true || page.RequestResult?.Contains("nothing was changed", StringComparison.OrdinalIgnoreCase) == true || page.RequestResult?.Contains("HCG Store now lists", StringComparison.Ordinal) == true,
+                    "The availability change goes through HCG Store as it offers it (request, browser decision or its own endpoint)");
+            }
+            ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-versions");
+
+            // New product: the draft form (not submitted here).
+            page.IsNewProduct = true;
+            page.NewProductTitle = "HCG Notes (TEST)";
+            page.NewProductId = "hcg-notes-test";
+            page.NewProductDescription = "A private product draft from the UI acceptance run.";
+            page.NewProductCategory = "productivity";
+            page.NewProductPlatforms.First(p => p.Value == "macos").IsSelected = true;
+            ShotAt("3 · OPERATION", "studio-new-product");
+        }
         return Failures.Count == 0 ? 0 : 1;
     }
 
@@ -107,7 +241,8 @@ internal static partial class Program
         page.StoreUrl = store;
         await page.ConnectCommand.ExecuteAsync(null);
         Log($"Connection: [{page.Connection}] {page.ConnectionDetail}");
-        Check(page.Connection == "Connected", "HCG Store accepted the HCG Connect session and listed the products HCG allows this account to publish");
+        foreach (var c in page.Diagnostics) Log($"  [{c.Check.StateLabel}] {c.Check.Title}: {c.Check.Summary}");
+        Check(page.Report?.CanUpload == true && page.Products.Count > 0, "Connection diagnostics: HCG Store accepted the HCG Connect session (Maker's own client), HCG's permission, and listed the products HCG allows this account to publish");
         page.SelectedProduct = page.Products.FirstOrDefault(p => p.Id == Arg("ship-product", "fixture-quasar-shell"));
         page.SelectedEdition = page.Editions.FirstOrDefault(e => e.Id == Arg("ship-edition", "standard"));
         page.Build = Arg("ship-build-number", "1");
@@ -122,13 +257,13 @@ internal static partial class Program
         Check(page.Files.All(f => f.State == "Verified by HCG Store"), "The build's file was uploaded and verified by HCG Store (SHA-256)");
         Check(page.ReviewUrl?.StartsWith(store, StringComparison.Ordinal) == true, "A link to review the draft in HCG Store is shown");
         await Task.Delay(TimeSpan.FromSeconds(Arg("settle-seconds") is { } st ? double.Parse(st, System.Globalization.CultureInfo.InvariantCulture) : 5));
-        Check(page.Connection == "Connected", $"The page still shows the Store it shipped to (a late answer from an earlier Connect does not overwrite it): [{page.Connection}] {page.ConnectionDetail}");
+        Check(page.Report?.CanUpload == true && page.Report.Origin.ToString().StartsWith(store, StringComparison.Ordinal), $"The page still shows the Store it shipped to (a late answer from an earlier Connect does not overwrite it): [{page.Connection}] {page.ConnectionDetail}");
         File.WriteAllText(Path.Combine(output, "ship-build.json"), JsonSerializer.Serialize(new { releaseId = page.ReleaseId, reviewUrl = page.ReviewUrl, file = zip.Path, sha256 = zip.Sha256 }));
         Shot("ship-build-uploaded");
 
         // 4. Shipping again (a retry) continues the same draft: no second release.
         await page.ShipCommand.ExecuteAsync(null);
-        Check(page.Summary?.StartsWith("Continued your existing draft", StringComparison.Ordinal) == true || page.Files.All(f => f.State == "Already uploaded"),
+        Check(page.Summary?.StartsWith("Continued the existing draft", StringComparison.Ordinal) == true || page.Files.All(f => f.State == "Already uploaded"),
             "Shipping again continues the same draft and skips the verified file: " + page.Summary);
         return Failures.Count == 0 ? 0 : 1;
     }

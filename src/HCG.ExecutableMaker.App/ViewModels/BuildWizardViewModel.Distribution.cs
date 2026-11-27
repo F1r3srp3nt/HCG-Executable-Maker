@@ -22,7 +22,8 @@ public sealed partial class BuildWizardViewModel
 
     /// <summary>The Distribution section applies to macOS targets.</summary>
     // Electron apps are signed by electron-builder as their configuration says (mac.identity); HCG does not re-sign them.
-    public bool ShowDistribution => !IsElectronBuild && (SelectedPlatform?.Value ?? TargetPlatform.Windows) == TargetPlatform.MacOS;
+    /// <summary>macOS signing/installer choices. Not for Electron (electron-builder signs) or Xcode apps (the project signs).</summary>
+    public bool ShowDistribution => !IsElectronBuild && !IsMacXcodeBuild && (SelectedPlatform?.Value ?? TargetPlatform.Windows) == TargetPlatform.MacOS;
 
     // ---------- Signing mode ----------
     public IReadOnlyList<Choice<MacSigningMode>> SigningModeOptions { get; } =

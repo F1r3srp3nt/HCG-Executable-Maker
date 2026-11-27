@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json.Nodes;
+using HCG.ExecutableMaker.BuildEngine.MacXcode;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
 using HCG.ExecutableMaker.Security;
@@ -44,22 +46,42 @@ public interface IBuildHostObserver : IBuildObserver
 }
 
 /// <summary>
-/// HCG Server's Build Host as a build provider (<c>hcg-server-build-host</c>). Submits the job, shows that it waits
-/// for the owner's approval on HCG Server, follows it and its log, then downloads the artifacts (each checked against
-/// the job record, the server's checksum header and the bytes received), verifies the ES256-signed provenance and
-/// reads the validation report. The result is an ordinary <see cref="BuildRecord"/> with <see cref="ArtifactRecord"/>s,
-/// plus the evidence for HCG Repo. The Build Host builds unsigned; signing stays in Executable Maker.
+/// HCG Server's Build Host (<c>hcg.buildhost/1</c>) as an <see cref="IBuildHost"/> of kind
+/// <see cref="BuildHostKind.HcgServerHost"/>, the second provider of the native build-provider contract
+/// (docs/contracts/NATIVE-BUILD-PROVIDER.md, provider kind <c>hcg-server-build-host</c>). Submits the job, shows that it
+/// waits for the owner's approval on HCG Server, follows it and its log, then downloads the artifacts (each checked
+/// against the job record, the server's checksum header and the bytes received), verifies the ES256-signed provenance
+/// and reads the validation report. It writes the same <c>native-build-request.json</c> / <c>native-build-result.json</c>
+/// as the local provider (approval, source, limits and isolation from the signed provenance), keeps the signed
+/// provenance and validation report next to them, and returns an ordinary <see cref="BuildRecord"/> with
+/// <see cref="ArtifactRecord"/>s plus the evidence for HCG Repo. The Build Host builds unsigned; signing stays in
+/// Executable Maker.
 /// </summary>
-public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths paths, TimeProvider time, IBuildRepository? builds = null) : IBuildProvider
+public sealed class HcgServerBuildHost(HcgBuildHostClient client, IAppPaths paths, TimeProvider time, IBuildRepository? builds = null) : IBuildHost
 {
-    public string Id => BuildProviderIds.HcgServerBuildHost;
+    public const string ProviderKind = BuildProviderIds.HcgServerBuildHost;
+    public const string ProvenanceFileName = "buildhost-provenance.json", ValidationFileName = "buildhost-validation.json";
     public string DisplayName => "HCG Server Build Host";
     public IsolationLevel Isolation => IsolationLevel.Isolated;
-    public string Description =>
-        "HCG Server builds the pinned commit on your computer, each step a predefined operation inside its isolation sandbox " +
-        "(Seatbelt on macOS, Landlock on Linux): no network except approved dependency downloads, no access to your home folder, keychains or SSH keys. Builds are unsigned.";
-    public string Approval => "The owner, on HCG Server: hcg-agent build approve <job> --confirm <job>. Executable Maker cannot approve.";
     public HcgBuildHostClient Client => client;
+
+    private BuildHostStatus? _status;
+    private BuildProvenanceHost? _host;
+
+    /// <summary>Reads the Build Host's status (toolchains, providers, isolation) for <see cref="Describe"/> and <see cref="CannotBuild"/>.</summary>
+    public async Task<BuildHostStatus> RefreshAsync(CancellationToken ct = default) => _status = await client.GetStatusAsync(ct).ConfigureAwait(false);
+
+    public BuildHostInfo Describe() => new(ProviderKind, BuildHostKind.HcgServerHost, $"{DisplayName} ({client.BaseUrl})",
+        _host is null ? "unknown until a job has run" : _host.Os, _host is null ? "unknown until a job has run" : _host.Architecture,
+        (_status?.Toolchains ?? []).GroupBy(t => t.Tool).ToDictionary(g => g.Key, g => g.First().Version));
+
+    public string? CannotBuild(TargetPlatform platform)
+    {
+        if (_status is null) return "HCG Server's Build Host has not been contacted yet (status unknown).";
+        if (!_status.Enforced) return $"HCG Server's isolation ({_status.Isolation}) is not enforced on that computer.";
+        return platform is TargetPlatform.IOS or TargetPlatform.MacOS && _status.Providers.FirstOrDefault(p => p.Id == "xcode") is not { Available: true }
+            ? "HCG Server's Build Host has no Xcode: iOS and macOS builds need its xcode provider." : null;
+    }
 
     public async Task<BuildHostOutcome> RunAsync(BuildHostBuildRequest request, IBuildObserver observer, CancellationToken cancellationToken)
     {
@@ -70,11 +92,13 @@ public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths pa
             Status = BuildStatus.Running, StartedAt = time.GetUtcNow(),
         };
         var buildDir = Path.Combine(paths.BuildsDirectory, build.Id.ToString("N"));
+        JsonObject? nativeRequest = null;
+        var passports = new Dictionary<string, string>();
         var artifactDir = Path.Combine(buildDir, "buildhost-artifacts");
         Directory.CreateDirectory(buildDir);
         build.LogPath = Path.Combine(buildDir, "build.log");
         build.ToolchainVersions["hcg-executable-maker"] = HostInfo.ProductVersion;
-        build.ToolchainVersions["build-provider"] = Id;
+        build.ToolchainVersions["build-provider"] = ProviderKind;
 
         await using var logWriter = new StreamWriter(build.LogPath, append: false, new UTF8Encoding(false)) { AutoFlush = true };
         var gate = new object();
@@ -114,7 +138,7 @@ public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths pa
         {
             observer.OnStage(BuildStage.Preparing, "Submitting to HCG Server's Build Host");
             Log(BuildLogKind.Info, $"HCG Executable Maker {HostInfo.ProductVersion} — build {build.Id} on {DisplayName} ({client.BaseUrl})");
-            var status = await client.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+            var status = await RefreshAsync(cancellationToken).ConfigureAwait(false);
             build.ToolchainVersions["buildhost-isolation"] = $"{status.Isolation}{(status.Enforced ? " (enforced)" : " (NOT enforced)")}";
             Log(status.Enforced ? BuildLogKind.Info : BuildLogKind.Warning, $"Isolation: {status.Isolation}{(status.Enforced ? ", enforced" : ", NOT enforced on this computer")}");
 
@@ -175,6 +199,9 @@ public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths pa
             {
                 provenance = await client.GetProvenanceAsync(job.Id, cancellationToken).ConfigureAwait(false);
                 var p = provenance.Document;
+                _host = p.BuildHost;
+                await File.WriteAllTextAsync(Path.Combine(buildDir, ProvenanceFileName),
+                    System.Text.Json.JsonSerializer.Serialize(provenance.Envelope, BuildHostContract.Json) + "\n", CancellationToken.None).ConfigureAwait(false);
                 Log(BuildLogKind.Success, $"Provenance verified: ES256 signature by HCG Server key {provenance.KeyFingerprint} ({p.BuildHost.Name}, {p.BuildHost.DeviceId}).");
                 build.ToolchainVersions["buildhost-key"] = provenance.KeyFingerprint;
                 build.ToolchainVersions["buildhost-device"] = $"{p.BuildHost.Name} ({p.BuildHost.DeviceId}, {p.BuildHost.Os}/{p.BuildHost.Architecture}, hcg-agent {p.BuildHost.AgentVersion})";
@@ -196,6 +223,8 @@ public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths pa
             try
             {
                 validation = await client.GetValidationAsync(job.Id, cancellationToken).ConfigureAwait(false);
+                await File.WriteAllTextAsync(Path.Combine(buildDir, ValidationFileName),
+                    System.Text.Json.JsonSerializer.Serialize(validation, BuildHostContract.Json) + "\n", CancellationToken.None).ConfigureAwait(false);
                 foreach (var c in validation.Checks)
                     AddMessage(new BuildMessage(c.Status switch { "passed" or "not-applicable" => DiagnosticSeverity.Info, "failed" => DiagnosticSeverity.Error, _ => DiagnosticSeverity.Warning },
                         $"Build Host check {c.Name}: {c.Status} — {c.Detail}", Code: "buildhost"));
@@ -234,6 +263,20 @@ public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths pa
                 {
                     evidence = BuildHostSubmission.FromProvenance(provenance, request.Commit);
                     Log(BuildLogKind.Info, $"HCG Repo evidence: provider {evidence.Provider}, {evidence.Repository}@{evidence.Commit}, toolchain {evidence.Toolchain}, built {evidence.BuiltAt} (no CI run).");
+                    // Release Passport build half for each distributable output (not logs or test reports), next to the file,
+                    // so Ship to Store reads provider, commit and toolchain from it like any other build.
+                    foreach (var record in build.Artifacts)
+                    {
+                        var a = job.Artifacts.First(x => x.Name == record.FileName);
+                        if (a.Kind is "log" or "test-report") continue;
+                        var passport = Passport(request, provenance, evidence, a, record);
+                        if (Packaging.Distribution.ReleasePassport.ValidateBuildHalf(passport) is { Count: > 0 } problems)
+                        { Log(BuildLogKind.Warning, $"No Release Passport for {a.Name}: " + string.Join("; ", problems)); continue; }
+                        var file = record.Path + ".release-passport.json";
+                        await File.WriteAllTextAsync(file, NativeBuildContract.Serialize(passport), CancellationToken.None).ConfigureAwait(false);
+                        passports[a.Name] = Path.GetFileName(file);
+                        Log(BuildLogKind.Info, $"Release Passport: {Path.GetFileName(file)} (provider {evidence.Provider}, source {evidence.Commit[..12]})");
+                    }
                 }
                 catch (HcgBuildHostException ex) { evidenceProblem = ex.Message; Log(BuildLogKind.Warning, ex.Message); }
             }
@@ -257,6 +300,16 @@ public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths pa
             observer.OnStage(BuildStage.Completed, build.Status.ToString());
             Log(build.Status == BuildStatus.Succeeded ? BuildLogKind.Success : BuildLogKind.Error,
                 $"Build {build.Status}{(build.FailureReason is null ? "" : ": " + build.FailureReason)}");
+            // The shared native build-provider contract. The request records what the owner approved, so it is written
+            // only from verified, signed provenance: a job that was rejected, or whose provenance did not verify, has none.
+            if (job is not null && provenance is not null)
+            {
+                nativeRequest = NativeRequest(build, request, job, provenance, client.BaseUrl);
+                var result = NativeResult(build, nativeRequest, job, provenance, validation, passports);
+                await File.WriteAllTextAsync(Path.Combine(buildDir, NativeBuildContract.RequestFileName), NativeBuildContract.Serialize(nativeRequest), CancellationToken.None).ConfigureAwait(false);
+                await File.WriteAllTextAsync(Path.Combine(buildDir, NativeBuildContract.ResultFileName), NativeBuildContract.Serialize(result), CancellationToken.None).ConfigureAwait(false);
+            }
+            else Log(BuildLogKind.Warning, "No native-build-request/result files: there is no verified, signed provenance recording the owner's approval for this job.");
             if (builds is not null) await builds.UpdateAsync(build, CancellationToken.None).ConfigureAwait(false);
             return new BuildHostOutcome(build, job, provenance, validation, evidence, evidenceProblem);
         }
@@ -311,6 +364,139 @@ public sealed class HcgBuildHostProvider(HcgBuildHostClient client, IAppPaths pa
             await Task.Delay(client.Settings.PollInterval, ct).ConfigureAwait(false);
             job = await client.GetJobAsync(job.Id, ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Build Host provider → the request's <c>project.kind</c>.</summary>
+    public static string ProjectKind(BuildProject project, BuildHostOptions options) => project.Provider switch
+    {
+        "xcode" => (options.Project ?? "").EndsWith(".xcworkspace", StringComparison.OrdinalIgnoreCase) ? "xcode-workspace" : "xcode-project",
+        "swiftpm" => "swift-package",
+        "dotnet" => "dotnet-project",
+        "go" => "go-module",
+        "node" => "node-package",
+        "python" => "python-project",
+        var other => other,
+    };
+
+    private static string Utc(DateTimeOffset? t) => t?.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") ?? "";
+
+    /// <summary>
+    /// <c>native-build-request.json</c> for a Build Host job: provider <c>hcg-server-build-host</c>, the owner's approval
+    /// and the source exactly as the signed provenance records them, the predefined operations, unsigned, and the
+    /// Build Host's isolation as the limits.
+    /// </summary>
+    public static JsonObject NativeRequest(BuildRecord build, BuildHostBuildRequest r, BuildJob job, VerifiedProvenance verified, Uri baseUrl)
+    {
+        var p = verified.Document;
+        var ops = p.Job.Operations.Count > 0 ? p.Job.Operations : r.Operations;
+        var permissions = p.Job.Permissions;
+        var targets = (r.Options.Products ?? []).Concat(r.Options.Targets ?? []).ToList();
+        return new JsonObject
+        {
+            ["format"] = NativeBuildContract.RequestFormat,
+            ["formatVersion"] = NativeBuildContract.FormatVersion,
+            ["build"] = build.Id.ToString("N"),
+            ["provider"] = new JsonObject
+            {
+                ["kind"] = ProviderKind,
+                ["host"] = $"{p.BuildHost.Name} ({p.BuildHost.DeviceId}, {p.BuildHost.Os}/{p.BuildHost.Architecture}, hcg-agent {p.BuildHost.AgentVersion})",
+                ["dependsOnGitHubActions"] = false,
+                ["contract"] = BuildHostContract.Contract,
+                ["endpoint"] = baseUrl.ToString(),
+                ["job"] = p.Job.Id,
+                ["keyFingerprint"] = verified.KeyFingerprint,
+            },
+            ["approval"] = new JsonObject
+            {
+                ["approvedBy"] = $"{p.Job.ApprovedBy} (the owner, on HCG Server: hcg-agent build approve {p.Job.Id} --confirm {p.Job.Id})",
+                ["approvedAt"] = Utc(p.Job.ApprovedAt),
+                ["trustAcknowledged"] = true,
+                ["scope"] = $"build, test and package this source with the predefined operations {string.Join(", ", ops)} inside HCG Server's sandbox; no signing, no notarization, no upload, no publication",
+                ["basis"] = $"provenance signed by HCG Server key {verified.KeyFingerprint}",
+            },
+            ["source"] = new JsonObject
+            {
+                ["repository"] = p.Source.Repository, ["commit"] = p.Source.Commit, ["branch"] = null, ["dirty"] = p.Source.Dirty,
+                ["basis"] = $"HCG Server Build Host signed provenance: pinned commit fetched from the owner-approved remote, checked-out HEAD verified (tree {p.Source.Tree})",
+            },
+            ["project"] = new JsonObject
+            {
+                ["kind"] = ProjectKind(p.Project, r.Options),
+                ["container"] = string.IsNullOrEmpty(p.Project.Path) ? "." : p.Project.Path,
+                ["scheme"] = r.Options.Scheme ?? "",
+                ["configuration"] = r.Options.Configuration ?? "",
+                ["architecture"] = p.BuildHost.Architecture switch { "amd64" => "x86_64", var a => a },
+                ["appTarget"] = string.Join(" ", targets),
+                ["buildHostProject"] = p.Project.Id,
+                ["buildHostProvider"] = p.Project.Provider,
+            },
+            ["actions"] = new JsonArray(ops.Select(o => (JsonNode?)(o == BuildOperations.Resolve ? "resolve-packages" : o)).ToArray()),
+            ["signing"] = new JsonObject { ["mode"] = "unsigned", ["note"] = "the Build Host never signs (signing is refused); Executable Maker signs afterwards with its own approval" },
+            ["outputs"] = new JsonArray((JsonNode?)nameof(PackagingFormat.BuildHostOutput)),
+            ["limits"] = new JsonObject
+            {
+                ["isolatedWorkspace"] = true,
+                ["workspace"] = "HCG Server's per-job workspace; writes are allowed only there",
+                ["network"] = permissions.Contains(BuildPermissions.Network) ? "dependency resolution only (network.dependencies approved by the owner)" : "none",
+                ["cpu"] = "a timeout per command, enforced by HCG Server",
+                ["memory"] = "limited for the whole process tree by HCG Server",
+                ["projectScriptsRun"] = true,
+                ["isolation"] = new JsonObject
+                {
+                    ["backend"] = p.Isolation.Backend,
+                    ["rules"] = new JsonArray(p.Isolation.Rules.Select(x => (JsonNode?)x).ToArray()),
+                    ["gaps"] = new JsonArray((p.Isolation.Gaps ?? []).Select(x => (JsonNode?)x).ToArray()),
+                },
+            },
+        };
+    }
+
+    /// <summary><c>native-build-result.json</c> for a Build Host job: its steps, toolchains and the verified artifacts.</summary>
+    public static JsonObject NativeResult(BuildRecord build, JsonObject request, BuildJob job, VerifiedProvenance verified, BuildValidation? validation,
+        IReadOnlyDictionary<string, string>? passports = null)
+    {
+        var p = verified.Document;
+        var steps = p.Steps.Select(st => new NativeBuildContract.StepRecord(st.Operation, string.Join(' ', st.Argv), st.ExitCode, st.DurationMs / 1000.0)).ToList();
+        var artifacts = build.Artifacts.Select(a => (a.FileName, a.Sha256, a.SizeBytes, job.Artifacts.FirstOrDefault(x => x.Name == a.FileName)?.Kind ?? "file", passports?.GetValueOrDefault(a.FileName))).ToList();
+        var toolchain = p.Toolchains.GroupBy(t => t.Tool).ToDictionary(g => g.Key, g => g.First().Version);
+        var result = NativeBuildContract.Result(build, request, steps, null, artifacts, toolchain);
+        result["buildHost"] = new JsonObject
+        {
+            ["job"] = p.Job.Id, ["state"] = p.Job.State, ["keyFingerprint"] = verified.KeyFingerprint,
+            ["provenance"] = ProvenanceFileName, ["validation"] = validation is null ? null : ValidationFileName, ["validationOverall"] = validation?.Overall,
+            ["tests"] = p.Tests is { } t ? new JsonObject { ["source"] = t.Source, ["passed"] = t.Passed, ["failed"] = t.Failed, ["skipped"] = t.Skipped } : null,
+        };
+        return result;
+    }
+
+    /// <summary>The Release Passport build half of one Build Host output: provider hcg-server-build-host, no run ID, unsigned.</summary>
+    public static JsonObject Passport(BuildHostBuildRequest r, VerifiedProvenance verified, BuildHostEvidence evidence, BuildArtifact a, ArtifactRecord record)
+    {
+        var p = verified.Document;
+        return Packaging.Distribution.ReleasePassport.ForArtifact(new Packaging.Distribution.ReleasePassport.ArtifactFacts(
+            Platform: p.BuildHost.Os is "darwin" ? "macos" : p.BuildHost.Os,
+            Architecture: p.BuildHost.Architecture switch { "amd64" => "x86_64", var x => x },
+            Package: p.Project.ProductId ?? p.Project.Id,
+            Version: r.Settings.Identity.Version,
+            BuildNumber: null,
+            ProductName: p.Project.Name,
+            FileName: a.Name, Sha256: record.Sha256, Size: record.SizeBytes, ArtifactKind: a.Kind,
+            Source: new Packaging.Distribution.SourceProvenance(evidence.Repository, evidence.Commit, null, evidence.Dirty,
+                $"HCG Server Build Host signed provenance (job {evidence.JobId}, key {evidence.KeyFingerprint})"),
+            Provider: evidence.Provider,
+            Toolchain: $"{evidence.Toolchain}, HCG Executable Maker {HostInfo.ProductVersion}",
+            BuiltAt: DateTimeOffset.Parse(evidence.BuiltAt, System.Globalization.CultureInfo.InvariantCulture),
+            StaticInspectionState: record.Verification == VerificationStatus.Failed ? "failed" : "passed",
+            StaticInspectionNote: "checksum against the job record, X-HCG-SHA256 and the signed provenance; the Build Host's validation report",
+            Checks: record.Checks.Select(c => (c.Name, c.Status.ToString(), c.Detail)).ToList(),
+            Tests: p.Tests is { } t ? new JsonObject { ["run"] = true, ["passed"] = t.Passed, ["failed"] = t.Failed, ["skipped"] = t.Skipped, ["by"] = t.Source } : null,
+            CodeSigning: new JsonObject
+            {
+                ["scope"] = "code signatures of the built output; not repository signing",
+                ["method_claimed"] = "unsigned", ["binaries"] = 0, ["all_signed"] = null,
+                ["note"] = "the Build Host never signs; Executable Maker signs afterwards with its own approval",
+            },
+            IssuedBy: "HCG Executable Maker " + HostInfo.ProductVersion));
     }
 
     private static bool SameArtifacts(IReadOnlyList<BuildArtifact> a, IReadOnlyList<BuildArtifact> b) =>

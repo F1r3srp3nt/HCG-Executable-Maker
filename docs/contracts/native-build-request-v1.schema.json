@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hakmicapitalgroup.com/schemas/hcg/native-build-request-v1.schema.json",
+  "title": "HCG native build request, format version 1",
+  "description": "What a native build provider (HCG Executable Maker locally, or an HCG Server build host) was authorized to do. Written before the build starts.",
+  "type": "object",
+  "required": ["format", "formatVersion", "build", "provider", "approval", "source", "project", "actions", "signing", "outputs", "limits"],
+  "properties": {
+    "format": { "const": "hcg.native-build-request" },
+    "formatVersion": { "const": 1 },
+    "build": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "provider": {
+      "type": "object",
+      "required": ["kind", "host", "dependsOnGitHubActions"],
+      "properties": {
+        "kind": { "enum": ["executable-maker-local", "hcg-server-build-host"] },
+        "host": { "type": "string" },
+        "dependsOnGitHubActions": { "const": false }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": ["approvedBy", "approvedAt", "trustAcknowledged", "scope"],
+      "properties": {
+        "approvedBy": { "type": "string" },
+        "approvedAt": { "type": "string" },
+        "trustAcknowledged": { "const": true },
+        "scope": { "type": "string" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["repository", "commit", "branch", "dirty", "basis"],
+      "properties": {
+        "repository": { "type": ["string", "null"] },
+        "commit": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "branch": { "type": ["string", "null"] },
+        "dirty": { "type": ["boolean", "null"] },
+        "basis": { "type": "string" }
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["kind", "container", "scheme", "configuration", "architecture", "appTarget"],
+      "properties": {
+        "kind": { "enum": ["xcode-project", "xcode-workspace", "swift-package", "dotnet-project", "go-module", "node-package", "python-project"] },
+        "container": { "type": "string" },
+        "scheme": { "type": "string" },
+        "configuration": { "type": "string" },
+        "architecture": { "enum": ["arm64", "x86_64", "arm64 x86_64"] },
+        "appTarget": { "type": "string" }
+      }
+    },
+    "actions": { "type": "array", "items": { "enum": ["discover", "resolve-packages", "build", "test", "archive", "package"] }, "minItems": 1 },
+    "signing": {
+      "type": "object",
+      "required": ["mode", "note"],
+      "properties": { "mode": { "enum": ["project", "ad-hoc-local", "unsigned"] }, "note": { "type": "string" } }
+    },
+    "outputs": { "type": "array", "items": { "type": "string" } },
+    "limits": {
+      "type": "object",
+      "required": ["isolatedWorkspace", "network", "projectScriptsRun"],
+      "properties": {
+        "timeoutMinutes": { "type": "integer", "minimum": 1 },
+        "isolatedWorkspace": { "const": true },
+        "workspace": { "type": "string" },
+        "network": { "type": "string" },
+        "cpu": { "type": "string" },
+        "memory": { "type": "string" },
+        "projectScriptsRun": { "type": "boolean" },
+        "isolation": {
+          "type": "object",
+          "description": "hcg-server-build-host: the sandbox as the signed provenance states it",
+          "properties": {
+            "backend": { "type": "string" },
+            "rules": { "type": "array", "items": { "type": "string" } },
+            "gaps": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    }
+  }
+}

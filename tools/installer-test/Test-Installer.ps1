@@ -79,7 +79,11 @@ if (Test-Path $exe) {
     if (-not $running) { Write-Host "         exit code: $($app.ExitCode)" }
     # End the whole tree: the app starts tool probes (e.g. dotnet workload list) that inherit the install folder as their
     # working directory, and a surviving child keeps Windows from deleting that folder after uninstall (CI run 75).
-    if ($running) { & taskkill.exe /PID $app.Id /T /F | Out-Null; $app.WaitForExit() }
+    if ($running) {
+        # taskkill can report a child it could not end (one that already exited); that is not a test result.
+        & taskkill.exe /PID $app.Id /T /F 2>&1 | Out-Null; $global:LASTEXITCODE = 0
+        $app.WaitForExit()
+    }
 }
 
 # 4. Uninstall
@@ -106,3 +110,4 @@ Check ($null -eq (Find-UninstallEntry)) 'Uninstall registration removed'
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 if ($failures -gt 0) { Write-Host "$failures check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host 'Installer verified: install, shortcuts, registration, launch, uninstall and cleanup.' -ForegroundColor Green
+exit 0

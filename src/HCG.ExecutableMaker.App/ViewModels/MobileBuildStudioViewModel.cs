@@ -100,7 +100,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public ObservableCollection<ProjectItem> MobileProjects { get; } = [];
     public ObservableCollection<SummaryRow> ProjectRows { get; } = [];
     public ObservableCollection<DiagnosticItem> Diagnostics { get; } = [];
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProject), nameof(IsArtifactProject), nameof(CanUnleashify))] private ProjectItem? _selectedProject;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProject), nameof(IsArtifactProject), nameof(CanUnleashify), nameof(IosBundleId), nameof(CanOpenSigningDoctor))] private ProjectItem? _selectedProject;
     [ObservableProperty] private bool _isImporting;
     [ObservableProperty] private string? _importError;
     [ObservableProperty] private StatusTag _supportTag = new("—", "neutral");
@@ -807,6 +807,24 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public ObservableCollection<ArtifactItem> BuiltArtifacts { get; } = [];
     public bool HasBuiltArtifacts => BuiltArtifacts.Count > 0;
     private readonly NavigationService? _navigation;
+
+    /// <summary>The iOS app's bundle identifier (.NET for iOS ApplicationId or the Xcode app target), when known.</summary>
+    public string? IosBundleId => Mobile?.DotNetIos?.ApplicationId ?? Mobile?.Ios?.AppTargets.FirstOrDefault()?.BundleIdentifier;
+    public bool CanOpenSigningDoctor => IosBundleId is not null;
+
+    /// <summary>Opens HCG Impactor's Signing Doctor for this app: why each installed profile can or cannot sign it.</summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void OpenSigningDoctor()
+    {
+        if (IosBundleId is not { } id) return;
+        string? entitlements = null;
+        if (Mobile?.DotNetIos is { Entitlements: { } e, ProjectPath: { } proj } && SelectedProject is { } p)
+        {
+            var path = Path.GetFullPath(Path.Combine(p.Project.SourceDirectory, Path.GetDirectoryName(proj) ?? "", e));
+            if (File.Exists(path)) entitlements = path;
+        }
+        _navigation?.Navigate("impactor", new ImpactorDoctorRequest(id, entitlements));
+    }
     /// <summary>The last build succeeded with at least one verified file (an IPA, an APK…): "Ship to Store" is offered.
     /// A Simulator .app is a folder and is never offered (it cannot be installed on a device).</summary>
     public bool CanShipToStore => _lastResult is { } r && ShipFromBuild.From(r) is { Files.Count: > 0 };

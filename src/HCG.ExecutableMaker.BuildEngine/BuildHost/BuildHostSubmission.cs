@@ -1,16 +1,15 @@
 using System.Globalization;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using HCG.ExecutableMaker.Domain;
 
 namespace HCG.ExecutableMaker.BuildEngine.BuildHost;
 
 /// <summary>
-/// Turns verified Build Host provenance into HCG Repo artifact-submission evidence
-/// (<c>docs/schemas/artifact-submission-v1.schema.json</c>): <c>source</c> {repository, commit, dirty=false} and
-/// <c>build</c> {provider="hcg-server-build-host", toolchain, builtAt}. A Build Host build has no CI run, so the
-/// result never has <c>runId</c>, <c>runUrl</c>, <c>artifactName</c> or <c>runRepository</c> — HCG Repo refuses those
-/// for every non-GitHub provider.
+/// Turns verified Build Host provenance (its signed <c>submission</c> block) into <see cref="BuildHostEvidence"/>. With
+/// <see cref="Packaging.Jailbreak.PackageProvenance.FromBuildHost"/>, Unleashify's <see cref="Packaging.Jailbreak.SubmissionManifest"/>
+/// then writes HCG Repo's <c>source</c> {repository, commit, dirty=false} and <c>build</c> {provider="hcg-server-build-host",
+/// toolchain, builtAt}. A Build Host build has no CI run, so the submission never has <c>runId</c>, <c>runUrl</c>,
+/// <c>artifactName</c> or <c>runRepository</c> — HCG Repo refuses those for every non-GitHub provider.
 /// </summary>
 public static partial class BuildHostSubmission
 {
@@ -43,32 +42,6 @@ public static partial class BuildHostSubmission
             ApprovedBy = p.Job.ApprovedBy, SigningMethod = s.Signing.Method,
         };
     }
-
-    /// <summary>The submission's <c>source</c> object.</summary>
-    public static JsonObject Source(BuildHostEvidence e, string? branch = null)
-    {
-        var o = new JsonObject { ["repository"] = e.Repository, ["commit"] = e.Commit, ["dirty"] = false };
-        if (branch is not null) o["branch"] = branch;
-        return o;
-    }
-
-    /// <summary>
-    /// The submission's <c>build</c> object. <paramref name="packagedWith"/> names what Executable Maker added after the
-    /// Build Host (e.g. "HCG Executable Maker 0.4.0, ldid 2.1.5"); it is appended to the Build Host's toolchain.
-    /// </summary>
-    public static JsonObject Build(BuildHostEvidence e, string? packagedWith = null) => new()
-    {
-        ["provider"] = e.Provider,
-        ["toolchain"] = packagedWith is { Length: > 0 } extra ? $"{e.Toolchain}, {extra}" : e.Toolchain,
-        ["builtAt"] = e.BuiltAt,
-    };
-
-    /// <summary>Both fields, as they go into submission.json.</summary>
-    public static JsonObject Fields(BuildHostEvidence e, string? branch = null, string? packagedWith = null) => new()
-    {
-        ["source"] = Source(e, branch),
-        ["build"] = Build(e, packagedWith),
-    };
 
     [GeneratedRegex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")] private static partial Regex RepositoryName();
     [GeneratedRegex("^[0-9a-f]{40}$")] private static partial Regex Commit40();

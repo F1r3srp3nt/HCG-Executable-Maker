@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using HCG.ExecutableMaker.BuildEngine.Electron;
+using HCG.ExecutableMaker.BuildEngine.MacXcode;
 using HCG.ExecutableMaker.BuildEngine.Swift;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -50,6 +51,8 @@ public sealed class BuildService(
 {
     private readonly IExecutableLocator _executables = executables ?? new ExecutableLocator();
     public const string OutputMarkerFile = ".hcg-build.json";
+    /// <summary>The build message that states how a native macOS Xcode app came out signed (from the Signing Doctor).</summary>
+    public const string SigningStatusCode = "HCG-SIGNING";
     private readonly ILogger _logger = logger ?? NullLogger<BuildService>.Instance;
 
     public IBuildWorker Worker => worker;
@@ -107,6 +110,13 @@ public sealed class BuildService(
         observer.OnStarted(build);
 
         string? createdOutputRoot = null;
+        MacXcodeBuildPlanner.Layout? xcodeLayoutForReport = null;
+        string? xcodeOutputRootForReport = null;
+        // The native build-provider contract (request, step records, artifacts) for Xcode builds.
+        var xcodeSteps = new List<NativeBuildContract.StepRecord>();
+        var xcodeArtifacts = new List<(string File, string Sha256, long Size, string Kind, string? Passport)>();
+        System.Text.Json.Nodes.JsonObject? xcodeRequest = null;
+        var xcodeSource = HCG.ExecutableMaker.Packaging.Distribution.SourceProvenance.Unknown;
         using var overall = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         overall.CancelAfter(settings.Timeout);
         var stopwatch = Stopwatch.StartNew();
@@ -116,7 +126,9 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.Preparing, "Validating configuration and toolchains");
             Log(BuildLogKind.Info, $"HCG Executable Maker {HostInfo.ProductVersion} — build {build.Id}");
             Log(BuildLogKind.Info, $"Project: {request.Project.Name} ({settings.ProjectRelativePath})");
-            Log(BuildLogKind.Info, settings.Electron is { } el
+            Log(BuildLogKind.Info, settings.MacXcode is { } mxTarget
+                ? $"Target: macOS {mxTarget.Architecture.Label()} · native macOS app — Xcode · {(mxTarget.WorkspacePath ?? mxTarget.ProjectPath)} · scheme {mxTarget.Scheme} · {mxTarget.Configuration}"
+                : settings.Electron is { } el
                 ? $"Target: {settings.Platform.DisplayName()} {settings.Architecture.DisplayName()} · Electron app {(el.ProjectDirectory.Length == 0 ? "(root)" : el.ProjectDirectory)} · electron-builder --{el.Platform} {string.Join(' ', el.Targets)}{(el.PackagingScript is null ? "" : $" (following script \"{el.PackagingScript}\")")}"
                 : settings.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } ts } theosOpts
                 ? $"Target: jailbroken iOS · Theos package {(theosOpts.ProjectDirectory.Length == 0 ? "(root)" : theosOpts.ProjectDirectory)} · {ts.Label} · iOS {ts.DeploymentTarget ?? "(Theos default)"}+ · SDK {ts.SdkVersion ?? "latest"} · {string.Join(" ", ts.Architectures)} · output .deb (not an IPA)"
@@ -145,6 +157,9 @@ public sealed class BuildService(
             var isElectron = settings.Electron is not null;
             var isTheos = settings.Native?.Kind == NativeProjectKind.Theos;
             var isNative = settings.Native is not null && !isTheos;
+            var isMacXcode = settings.MacXcode is not null;
+            string? xcodebuild = null;
+            MacXcodeTargetInfo? xcodeTarget = null;
             Native.NativeBuildPlanner.Tools? nativeTools = null;
             Native.TheosBuildPlanner.Tools? theosTools = null;
             NativeProjectInfo? theosProject = null;
@@ -223,6 +238,55 @@ public sealed class BuildService(
                     ? $"make: {nativeTools.Make}. The project is copied into HCG's build folder and built there; the imported source is not written to."
                     : $"CMake: {nativeTools.CMake}; generator: {(nat.Preset is { } pr ? $"from preset {pr}" : Native.NativeBuildPlanner.ChooseGenerator(nativeTools, null) ?? "CMake's default")}. Build folder: HCG's own (outside the imported source)." +
                       (nat.AllowDownloads ? " Downloads by FetchContent are ALLOWED for this project." : " FetchContent downloads are blocked (FETCHCONTENT_FULLY_DISCONNECTED=ON)."));
+            }
+            else if (isMacXcode)
+            {
+                var mx = settings.MacXcode!;
+                MacXcodeBuildPlanner.Validate(settings, host, PathGuard.GetRealPath(request.Project.SourceDirectory));
+                var xproject = request.Project.Analysis?.MacXcode?.Projects.FirstOrDefault(p => p.ProjectPath == mx.ProjectPath);
+                xcodeTarget = xproject?.Targets.FirstOrDefault(t => t.Name == mx.AppTarget)
+                              ?? throw new BuildValidationException($"The app target {mx.AppTarget} is not in the inspection of {mx.ProjectPath}. Re-inspect the project.");
+                var assessment = HCG.ExecutableMaker.ProjectInspection.MacXcode.MacXcodeCapabilities.Evaluate(xcodeTarget, report);
+                foreach (var req in assessment.Requirements) Log(req.IsSatisfied ? BuildLogKind.Info : BuildLogKind.Error, $"{(req.IsSatisfied ? "✓" : "✗")} {req.DisplayName}: {req.Detail}");
+                if (assessment.Support != SupportLevel.Supported || assessment.Xcodebuild is null)
+                {
+                    Fail(BuildStatus.Failed, assessment.Summary + " " + string.Join(" ", assessment.Remediation));
+                    return build;
+                }
+                if (!assessment.Architectures.Contains(mx.Architecture))
+                {
+                    Fail(BuildStatus.Failed, $"{mx.Architecture.Label()} is not offered by the selected macOS SDK (it builds: {string.Join(", ", assessment.Architectures.Select(a => a.Label()))}).");
+                    return build;
+                }
+                if (assessment.Note is { } note) Log(BuildLogKind.Warning, note);
+                xcodebuild = assessment.Xcodebuild;
+                if (report.Xcode is { VerifiedVersion: { } xv } xs) build.ToolchainVersions["xcode"] = $"{xv}{(xs.VerifiedBuild is { } xb ? $" ({xb})" : "")} — {xs.ActiveDeveloperDirectory}";
+                if (report.Find(ToolchainIds.MacOSSdk) is { IsAvailable: true, Version: { } sdkVersion }) build.ToolchainVersions["macos-sdk"] = sdkVersion;
+                if (report.Find(ToolchainIds.MacOSVersion) is { IsAvailable: true, Version: { } macVersion }) build.ToolchainVersions["macos"] = macVersion;
+                build.ToolchainVersions["xcodebuild"] = xcodebuild;
+                Log(BuildLogKind.Info, $"Project settings kept: bundle ID {xcodeTarget.BundleIdentifier ?? "(from the project)"}, version {xcodeTarget.MarketingVersion ?? "?"} ({xcodeTarget.BuildVersion ?? "?"}), " +
+                                       $"macOS {xcodeTarget.DeploymentTarget ?? "(Xcode default)"}+, signing {xcodeTarget.SigningDescription}.");
+                foreach (var o in MacXcodeBuildPlanner.Overrides(mx, xcodeTarget.Architectures))
+                    Log(BuildLogKind.Info, $"Override: {o.Setting}={(o.Value.Length == 0 ? "\"\"" : o.Value)} — {o.Reason}");
+                if (xproject!.HelperScripts.Count > 0)
+                    Log(BuildLogKind.Info, $"Not run: {string.Join(", ", xproject.HelperScripts.Select(Path.GetFileName))} (HCG calls xcodebuild directly; the project's scripts may build Debug or open the app).");
+                foreach (var cf in xcodeTarget.ConfigurationFacts.Where(c => c.Name == mx.Configuration))
+                    Log(BuildLogKind.Info, "Configuration " + HCG.ExecutableMaker.ProjectInspection.MacXcode.MacXcodeProjectInspector.Describe(cf));
+                // Source provenance, read-only: the commit Git reports for the imported folder (or a GitHub archive's comment).
+                xcodeSource = Directory.Exists(request.Project.SourceLocation)
+                    ? await HCG.ExecutableMaker.Packaging.Distribution.SourceProvenance.ReadAsync(new WorkerRunner(worker, worker.CreateEnvironment().Environment), report.Find(ToolchainIds.Git)?.ExecutablePath, request.Project.SourceLocation, overall.Token).ConfigureAwait(false)
+                    : HCG.ExecutableMaker.Packaging.Distribution.SourceProvenance.FromArchiveComment(MacXcodeBuildReport.ArchiveComment(request.Project));
+                Log(BuildLogKind.Info, xcodeSource.Commit is { } sc
+                    ? $"Source: {xcodeSource.Repository ?? "(no GitHub remote)"} @ {sc}{(xcodeSource.Branch is { } br ? $" ({br})" : "")}{(xcodeSource.Dirty == true ? " — WITH UNCOMMITTED CHANGES: the commit does not describe these bytes exactly" : "")} — from {xcodeSource.Basis}."
+                    : $"Source: {xcodeSource.Basis}; the build records no commit.");
+                var actions = new List<string> { "discover" };
+                if (xproject.PackageReferences.Count > 0) actions.Add("resolve-packages");
+                actions.Add("build");
+                if (mx.RunTests) actions.Add("test");
+                if (mx.CreateArchive || settings.PackagingFormats.Contains(PackagingFormat.MacXcodeArchive)) actions.Add("archive");
+                actions.Add("package");
+                xcodeRequest = NativeBuildContract.Request(build, settings, xcodeSource, $"{host.DisplayName} ({host.Architecture})", actions, xproject.PackageReferences.Any(r => !r.IsLocal));
+                await File.WriteAllTextAsync(Path.Combine(buildDir, NativeBuildContract.RequestFileName), NativeBuildContract.Serialize(xcodeRequest), overall.Token).ConfigureAwait(false);
             }
             else if (isSwift)
             {
@@ -339,7 +403,13 @@ public sealed class BuildService(
                 Directory.CreateDirectory(helpersDir);
                 prebuild.AddRange(SwiftContractPlanner.PlanPrebuild(contract, sourceDir, helpersDir, tools, scrub.Environment, _executables));
             }
-            var steps = isTheos
+            MacXcodeBuildPlanner.Layout? xcodeLayout = isMacXcode ? MacXcodeBuildPlanner.PrepareLayout(settings, PathGuard.GetRealPath(buildDir), sourceDir) : null;
+            xcodeLayoutForReport = xcodeLayout;
+            var steps = isMacXcode
+                ? MacXcodeBuildPlanner.Plan(settings, xcodeLayout!, sourceDir, xcodebuild!, xcodeTarget!.Architectures, scrub.Environment,
+                    resolvePackages: request.Project.Analysis?.MacXcode?.Projects.FirstOrDefault(p => p.ProjectPath == settings.MacXcode!.ProjectPath)?.PackageReferences.Count > 0,
+                    hostArch: host.Architecture == TargetArchitecture.X64 ? "x86_64" : "arm64")
+                : isTheos
                 ? [Native.TheosBuildPlanner.Plan(settings, theosPrepared!, theosTools!, scrub.Environment)]
                 : isNative
                 ? Native.NativeBuildPlanner.Plan(nativeInput!, nativePrepared!)
@@ -353,8 +423,9 @@ public sealed class BuildService(
             if (prebuild.Count > 0) steps = [.. prebuild, .. steps];
 
             // Shared across steps: MSBuild repeats diagnostics in build and publish; swift build prints them per step.
-            IBuildOutputParser parser = isNative || isTheos ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
+            IBuildOutputParser parser = isMacXcode ? new XcodeBuildOutputParser() : isNative || isTheos ? new Native.NativeOutputParser() : isElectron ? new ElectronOutputParser() : isSwift ? new SwiftOutputParser() : new MsBuildOutputParser();
             var captured = new List<string>();
+            var capturedByKey = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             foreach (var step in steps)
             {
                 overall.Token.ThrowIfCancellationRequested();
@@ -375,7 +446,12 @@ public sealed class BuildService(
                     Log(BuildLogKind.Command, step.Process.DisplayCommand);
                     result = await worker.RunAsync(step.Process, (stream, text) =>
                     {
-                        if (step.CaptureStdout && stream == OutputStream.StdOut) lock (captured) captured.Add(text);
+                        if (step.CaptureStdout && stream == OutputStream.StdOut)
+                            lock (captured)
+                            {
+                                if (step.CaptureKey is { } key) (capturedByKey.TryGetValue(key, out var list) ? list : capturedByKey[key] = []).Add(text);
+                                else captured.Add(text);
+                            }
                         if (IsTransientFileLock(text)) transientLock = true;
                         var message = attemptParser.Parse(text);
                         Log(message?.Severity switch
@@ -404,11 +480,19 @@ public sealed class BuildService(
                 }
 
                 build.ExitCode = result.ExitCode;
+                if (isMacXcode) xcodeSteps.Add(new(step.Title, step.Process.DisplayCommand, result.ExitCode, result.Duration.TotalSeconds));
                 if (result.Cancelled || result.TimedOut || overall.IsCancellationRequested)
                     overall.Token.ThrowIfCancellationRequested();
                 if (result.ExitCode != 0)
                 {
-                    Fail(BuildStatus.Failed, $"{step.Title} failed with exit code {result.ExitCode}.");
+                    var first = isMacXcode ? FirstActionableError(build, parser) : null;
+                    Fail(BuildStatus.Failed, $"{step.Title} failed with exit code {result.ExitCode}." + (first is null ? "" : $" First error: {first}") +
+                         (isMacXcode && xcodeLayout is not null && Directory.Exists(xcodeLayout.ResultBundle) ? $" Result bundle (open in Xcode): {xcodeLayout.ResultBundle}" : ""));
+                    return build;
+                }
+                if (step.Check is { } check && check(step.CaptureKey is { } ck && capturedByKey.TryGetValue(ck, out var mine) ? mine : captured) is { } checkProblem)
+                {
+                    Fail(BuildStatus.Failed, $"{step.Title}: {checkProblem}");
                     return build;
                 }
                 Log(BuildLogKind.Success, $"{step.Title} completed in {result.Duration.TotalSeconds:F1}s");
@@ -417,7 +501,52 @@ public sealed class BuildService(
             observer.OnStage(BuildStage.VerifyingOutput, isElectron ? "Verify: locate the app electron-builder produced" : "Verifying publish output");
             string? exeName;
             var packagingInput = publishDir;
-            if (isTheos)
+            MacXcodeBuildPlanner.Resolved? xcodeApp = null;
+            if (isMacXcode)
+            {
+                string? problem;
+                (xcodeApp, problem) = MacXcodeBuildPlanner.Resolve(capturedByKey.GetValueOrDefault(MacXcodeBuildPlanner.SettingsKey) ?? captured, settings.MacXcode!);
+                problem ??= xcodeApp is null ? "xcodebuild did not report the app." : MacXcodeBuildPlanner.CheckFresh(xcodeApp, build.StartedAt);
+                if (problem is not null)
+                {
+                    Fail(BuildStatus.Failed, problem);
+                    return build;
+                }
+                Log(BuildLogKind.Info, $"xcodebuild product: {xcodeApp!.AppPath} (target {xcodeApp.Target}, bundle ID {xcodeApp.BundleIdentifier}, version {xcodeApp.MarketingVersion} ({xcodeApp.BuildVersion}), " +
+                                       $"macOS {xcodeApp.DeploymentTarget}+, ARCHS {xcodeApp.Archs}, SDK {xcodeApp.SdkVersion}, Xcode build {xcodeApp.XcodeBuild})");
+                if (xcodeTarget?.BundleIdentifier is { } expectedId && !expectedId.Contains("$(", StringComparison.Ordinal) && xcodeApp.BundleIdentifier != expectedId)
+                    AddMessage(new BuildMessage(DiagnosticSeverity.Warning, $"xcodebuild resolved the bundle ID to {xcodeApp.BundleIdentifier}; the project file says {expectedId}.", "HCG-XCODE"));
+                Directory.CreateDirectory(publishDir);
+                var staged = Path.Combine(publishDir, xcodeApp.FullProductName);
+                if (Directory.Exists(staged)) Directory.Delete(staged, recursive: true);
+                var copy = await new WorkerRunner(worker, scrub.Environment).RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = [xcodeApp.AppPath, staged], Timeout = TimeSpan.FromMinutes(10) },
+                    (_, l) => Log(BuildLogKind.Output, l), overall.Token).ConfigureAwait(false);
+                overall.Token.ThrowIfCancellationRequested();
+                if (!copy.Succeeded)
+                {
+                    Fail(BuildStatus.Failed, $"ditto could not copy {xcodeApp.FullProductName} out of DerivedData (exit code {copy.ExitCode}).");
+                    return build;
+                }
+                // The .xcarchive (when archived) is staged next to the app for its packager.
+                if (xcodeLayout is not null && Directory.Exists(xcodeLayout.ArchivePath))
+                {
+                    var stagedArchive = Path.Combine(publishDir, Path.GetFileName(xcodeLayout.ArchivePath));
+                    if (Directory.Exists(stagedArchive)) Directory.Delete(stagedArchive, recursive: true);
+                    var arc = await new WorkerRunner(worker, scrub.Environment).RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = [xcodeLayout.ArchivePath, stagedArchive], Timeout = TimeSpan.FromMinutes(10) },
+                        (_, l) => Log(BuildLogKind.Output, l), overall.Token).ConfigureAwait(false);
+                    if (!arc.Succeeded) Log(BuildLogKind.Warning, $"ditto could not copy the .xcarchive (exit code {arc.ExitCode}).");
+                }
+                // Licence and attribution files travel with the app (next to it and inside the DMG), unchanged.
+                var extras = Path.Combine(publishDir, MacXcodeExtrasFolder);
+                Directory.CreateDirectory(extras);
+                foreach (var rel in settings.MacXcode!.LicenseFiles)
+                {
+                    var file = Mobile.MobileArgs.Inside(sourceDir, rel);
+                    if (File.Exists(file)) File.Copy(file, Path.Combine(extras, Path.GetFileName(file)), overwrite: true);
+                }
+                exeName = xcodeApp.ExecutablePath;
+            }
+            else if (isTheos)
             {
                 var deb = Native.TheosBuildPlanner.Locate(theosPrepared!);
                 Directory.CreateDirectory(publishDir);
@@ -500,6 +629,7 @@ public sealed class BuildService(
                 : isTheos ? "Verify the Debian package (metadata, install prefix, payload, binaries) and copy it to the output folder" : "Packaging artifacts");
             var baseName = ArtifactBaseName(settings);
             var outputRoot = PrepareOutputRoot(settings.OutputDirectory, baseName, request.AllowOverwriteOutput);
+            if (settings.MacXcode is not null) xcodeOutputRootForReport = outputRoot;
             createdOutputRoot = outputRoot;
             // Claim the folder immediately so an interrupted build can be cleaned up or replaced later.
             await File.WriteAllTextAsync(Path.Combine(outputRoot, OutputMarkerFile), HcgJson.Serialize(new { buildId = build.Id, complete = false }), overall.Token).ConfigureAwait(false);
@@ -515,6 +645,8 @@ public sealed class BuildService(
                 Icons = icons,
                 Host = host,
                 Toolchains = report,
+                DistributionExtras = isMacXcode && Directory.Exists(Path.Combine(publishDir, MacXcodeExtrasFolder))
+                    ? Directory.GetFiles(Path.Combine(publishDir, MacXcodeExtrasFolder)).Order(StringComparer.Ordinal).ToList() : [],
             };
             var packagingLog = new PackagingLog(Log);
             var outputs = new List<PackagedOutput>();
@@ -581,6 +713,69 @@ public sealed class BuildService(
             }
             if (sums.Length > 0)
                 await File.WriteAllTextAsync(Path.Combine(outputRoot, "SHA256SUMS.txt"), sums.ToString(), overall.Token).ConfigureAwait(false);
+            if (isMacXcode && build.Artifacts.All(a => a.Verification != VerificationStatus.Failed))
+            {
+                // Licence and attribution files next to the app (also inside the DMG), and a build report.
+                foreach (var extra in packagingRequest.DistributionExtras)
+                    File.Copy(extra, Path.Combine(outputRoot, Path.GetFileName(extra)), overwrite: true);
+                var reportFiles = await MacXcodeBuildReport.WriteAsync(new MacXcodeBuildReport.Input(build, settings, request.Project, xcodeApp!, xcodeTarget!, outputRoot,
+                    MacXcodeBuildPlanner.Overrides(settings.MacXcode!, xcodeTarget!.Architectures), steps.Select(st => st.Process.DisplayCommand).ToList(), report),
+                    new WorkerRunner(worker, scrub.Environment), overall.Token).ConfigureAwait(false);
+                foreach (var f in reportFiles) Log(BuildLogKind.Info, $"Wrote {Path.GetFileName(f)}");
+                // Signing Doctor (read-only) and the Release Passport of each distributable artifact.
+                var bundlePath = Path.Combine(outputRoot, xcodeApp!.FullProductName);
+                var codesignTool = report.Find(ToolchainIds.Codesign)?.ExecutablePath ?? "/usr/bin/codesign";
+                var signing = await new HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningDoctor(new WorkerRunner(worker, scrub.Environment), codesignTool).InspectAsync(bundlePath, overall.Token).ConfigureAwait(false);
+                await File.WriteAllTextAsync(Path.Combine(outputRoot, "SIGNING-DOCTOR.txt"), HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningDoctor.ToText(signing), overall.Token).ConfigureAwait(false);
+                Log(BuildLogKind.Info, $"Signing Doctor: {signing.Status} — {HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningDoctor.Describe(signing.SignatureKind)}; Gatekeeper {signing.Gatekeeper}; {signing.Notarization}.");
+                foreach (var f in signing.Findings) Log(BuildLogKind.Warning, "Signing Doctor: " + f);
+                AddMessage(new BuildMessage(DiagnosticSeverity.Info, $"Code signing: {signing.Status} — {HCG.ExecutableMaker.Packaging.MacDistribution.MacSigningDoctor.Describe(signing.SignatureKind)}"
+                    + $"{(signing.TeamId is { } team ? $", team {team}" : "")}; Gatekeeper {signing.Gatekeeper}; {signing.Notarization}.", SigningStatusCode));
+                var appFacts = HCG.ExecutableMaker.Packaging.MacDistribution.MacAppFacts.Read(bundlePath);
+                var testsDiag = settings.MacXcode!.RunTests
+                    ? XcodeDiagnostics.Analyze(ReadShared(build.LogPath!), "Succeeded", null, xcodeLayout is { } tl ? [tl.SourceCopy] : null) : null;
+                foreach (var a in build.Artifacts)
+                {
+                    string? passportFile = null;
+                    if (a.Format is PackagingFormat.PortableZip or PackagingFormat.MacDmg or PackagingFormat.MacPkg or PackagingFormat.MacXcodeArchive && a.Kind == ArtifactKind.File)
+                    {
+                        var passport = MacXcodePassport.ForArtifact(a, appFacts, signing, xcodeSource, report.Xcode?.VerifiedVersion is { } xv2 ? $"{xv2}{(report.Xcode.VerifiedBuild is { } xb2 ? $" ({xb2})" : "")}" : null,
+                            report.Find(ToolchainIds.MacOSSdk)?.Version, build.StartedAt, testsDiag, settings.MacXcode.RunTests);
+                        if (HCG.ExecutableMaker.Packaging.Distribution.ReleasePassport.ValidateBuildHalf(passport) is { Count: > 0 } passportProblems)
+                            Log(BuildLogKind.Warning, $"Release Passport for {a.FileName} not written: {string.Join("; ", passportProblems.Take(3))}");
+                        else
+                        {
+                            passportFile = a.FileName + ".release-passport.json";
+                            await File.WriteAllTextAsync(Path.Combine(outputRoot, passportFile), NativeBuildContract.Serialize(passport), overall.Token).ConfigureAwait(false);
+                            Log(BuildLogKind.Info, $"Release Passport: {passportFile} (code signing {signing.Status}, source {xcodeSource.Commit?[..12] ?? "no commit"})");
+                        }
+                    }
+                    xcodeArtifacts.Add((a.FileName, a.Sha256, a.SizeBytes, a.Format.DisplayName(), passportFile));
+                }
+                // The build folder keeps only the result bundle (for Xcode); the source copy and derived data are not needed.
+                foreach (var dir in new[] { xcodeLayout!.SourceCopy, xcodeLayout.DerivedData, xcodeLayout.SourcePackages, xcodeLayout.SwiftPMScratch })
+                {
+                    try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log(BuildLogKind.Warning, $"Could not remove {dir}: {ex.Message}"); }
+                }
+            }
+            // A Windows desktop build: a Release Passport (build half) next to each installer and ZIP, with the installed
+            // program's PE facts and Authenticode read from the bytes, and the source commit as Git states it.
+            if (settings.Platform == TargetPlatform.Windows && !isSwift && !isElectron && settings.Native is null && settings.MacXcode is null
+                && settings.Architecture is TargetArchitecture.X64 or TargetArchitecture.Arm64
+                && HCG.ExecutableMaker.Packaging.Windows.PeFile.Read(Path.Combine(packagingInput, exeName)) is not null)
+            {
+                var winSource = Directory.Exists(request.Project.SourceLocation)
+                    ? await HCG.ExecutableMaker.Packaging.Distribution.SourceProvenance.ReadAsync(new WorkerRunner(worker, worker.CreateEnvironment().Environment), report.Find(ToolchainIds.Git)?.ExecutablePath, request.Project.SourceLocation, overall.Token).ConfigureAwait(false)
+                    : HCG.ExecutableMaker.Packaging.Distribution.SourceProvenance.Unknown;
+                var sdkVersion = report.Find(ToolchainIds.DotNetSdk)?.Version;
+                Windows.WindowsPackagingService.WritePassports(new Windows.WindowsPackagingService.Request
+                {
+                    AppDirectory = packagingInput, ExecutableFileName = exeName, Identity = settings.Identity, Architecture = settings.Architecture,
+                    Formats = settings.PackagingFormats, OutputDirectory = settings.OutputDirectory, Toolchains = report, Source = winSource,
+                    BuiltWith = sdkVersion is null ? null : $".NET SDK {sdkVersion}",
+                }, packagingInput, build.Artifacts, build.StartedAt, m => Log(BuildLogKind.Info, m));
+            }
             await File.WriteAllTextAsync(Path.Combine(outputRoot, OutputMarkerFile), HcgJson.Serialize(new
             {
                 buildId = build.Id,
@@ -590,7 +785,8 @@ public sealed class BuildService(
                 runtimeIdentifier = settings.RuntimeIdentifier,
                 createdAt = time.GetUtcNow(),
                 complete = true,
-                signing = settings.Platform == TargetPlatform.MacOS ? settings.MacDistribution.SigningMode.ToString() : "none",
+                signing = isMacXcode && settings.MacDistribution.SigningMode != MacSigningMode.DeveloperId ? "project (as Xcode signed it)"
+                    : settings.Platform == TargetPlatform.MacOS ? settings.MacDistribution.SigningMode.ToString() : "none",
                 notarized = false,
             }), overall.Token).ConfigureAwait(false);
 
@@ -636,10 +832,49 @@ public sealed class BuildService(
             if (build.Status != BuildStatus.Succeeded && build.Artifacts.Count == 0 && createdOutputRoot is not null)
                 RemoveIncompleteOutput(createdOutputRoot, Log);
             build.EndedAt = time.GetUtcNow();
+            if (settings.MacXcode is { } mxReport)
+            {
+                // The diagnostics report: next to build.log for every build, and with the artifacts of a successful one.
+                try
+                {
+                    var lines = ReadShared(build.LogPath!);
+                    var roots = xcodeLayoutForReport is { } lay ? new[] { lay.SourceCopy, PathGuard.GetRealPath(lay.SourceCopy) }.Distinct().ToList() : [];
+                    var report = XcodeDiagnostics.Analyze(lines, build.Status.ToString(), stopwatch.Elapsed, roots);
+                    var context = new XcodeDiagnostics.Context(mxReport.WorkspacePath ?? mxReport.ProjectPath, mxReport.Scheme, mxReport.Configuration, mxReport.Architecture.Label(),
+                        build.ToolchainVersions.TryGetValue("xcode", out var xv) ? xv : null, build.StartedAt, build.EndedAt, build.LogPath!,
+                        xcodeLayoutForReport is { } l2 ? new[] { l2.ResultBundle, l2.TestResultBundle }.Where(Directory.Exists).ToList() : [], build.FailureReason);
+                    var files = XcodeDiagnostics.Write(Path.GetDirectoryName(build.LogPath!)!, report, context, xcodeLayoutForReport?.SourceCopy);
+                    var allFiles = files.ToList();
+                    if (xcodeRequest is not null)
+                    {
+                        var resultFile = Path.Combine(Path.GetDirectoryName(build.LogPath!)!, NativeBuildContract.ResultFileName);
+                        File.WriteAllText(resultFile, NativeBuildContract.Serialize(NativeBuildContract.Result(build, xcodeRequest, xcodeSteps, report, xcodeArtifacts)));
+                        allFiles.Add(resultFile);
+                        allFiles.Add(Path.Combine(Path.GetDirectoryName(build.LogPath!)!, NativeBuildContract.RequestFileName));
+                    }
+                    if (build.Status == BuildStatus.Succeeded && xcodeOutputRootForReport is { } outRoot && Directory.Exists(outRoot))
+                        foreach (var f in allFiles.Where(File.Exists)) File.Copy(f, Path.Combine(outRoot, Path.GetFileName(f)), overwrite: true);
+                    Log(BuildLogKind.Info, $"Diagnostics: {report.Errors} error(s), {report.Warnings} warning(s), {report.TestFailures.Count} test failure(s) — {files[1]}");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+                {
+                    Log(BuildLogKind.Warning, "The diagnostics report could not be written: " + ex.Message);
+                }
+            }
             Log(BuildLogKind.Info, $"Finished with status {build.Status} in {stopwatch.Elapsed:hh\\:mm\\:ss}.");
             await builds.UpdateAsync(build, CancellationToken.None).ConfigureAwait(false);
             observer.OnStage(BuildStage.Completed, build.Status.ToString());
         }
+    }
+
+    /// <summary>Reads a log the build is still writing (shared read).</summary>
+    private static List<string> ReadShared(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(fs);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } l) lines.Add(l);
+        return lines;
     }
 
     /// <summary>Retries for a build step that failed only because an output file was transiently locked.</summary>
@@ -655,6 +890,20 @@ public sealed class BuildService(
         (line.Contains("error MSB4018", StringComparison.Ordinal) || line.Contains("IOException", StringComparison.Ordinal));
 
     /// <summary>Base name shared by the per-build output folder and its artifacts, e.g. <c>MyApp-1.2.0-osx-arm64</c>.</summary>
+    /// <summary>Folder in the publish output holding the project's licence files for an Xcode build.</summary>
+    internal const string MacXcodeExtrasFolder = "_licence";
+
+    /// <summary>The first error worth showing: a compiler/project diagnostic, not xcodebuild's closing "** BUILD FAILED **".</summary>
+    private static string? FirstActionableError(BuildRecord build, IBuildOutputParser parser)
+    {
+        BuildMessage? first;
+        lock (build.Messages)
+            first = build.Messages.FirstOrDefault(m => m.Severity == DiagnosticSeverity.Error && !m.Text.Contains("** BUILD FAILED **", StringComparison.Ordinal));
+        if (first is null) return null;
+        var text = parser is XcodeBuildOutputParser x ? x.Describe(first) : first.Text;
+        return first.File is { } f ? $"{Path.GetFileName(f)}{(first.Line is { } l ? ":" + l : "")}: {text}" : text;
+    }
+
     public static string ArtifactBaseName(BuildSettings s) => s.Native is { Kind: NativeProjectKind.Theos, TheosScheme: { } theos }
         ? $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-ios-{PathGuard.SanitizeFileName(theos.PackageScheme, "theos")}"
         : $"{PathGuard.SanitizeFileName(s.Identity.ApplicationName, "App")}-{PathGuard.SanitizeFileName(s.Identity.Version, "0")}-{s.RuntimeIdentifier ?? (s.Platform == TargetPlatform.MacOS ? "osx" : s.Platform.ToString().ToLowerInvariant()) + "-" + s.Architecture.ToString().ToLowerInvariant()}";

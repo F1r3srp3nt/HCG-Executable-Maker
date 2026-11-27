@@ -6,6 +6,10 @@ reuses Mobile Build Studio's archive engine (`MobileBuildService`) and the rootl
 (`RootlessAppWorkflow`, see [ROOTLESS-PACKAGING.md](ROOTLESS-PACKAGING.md)). It installs nothing, uploads nothing and
 publishes nothing; publication to HCG Repo stays a manual step there.
 
+Building on your own Mac without CI (private sources, Xcode 27.2): see [UNLEASHIFY-LOCAL.md](UNLEASHIFY-LOCAL.md).
+
+Launch failures after a successful install: see the [HCG Mail Unleashed 0.1.0~beta1 audit](investigations/hcg-mail-unleashed-0.1.0-beta1-launch.md) for how a package is checked (signature integrity, dependencies, rootless paths) and what device evidence decides the cause.
+
 ## Where to click (HCG Sentinel)
 
 1. **New Build › Import folder** (or Import ZIP) → choose the HCG-Sentinel checkout. Maker records the source revision

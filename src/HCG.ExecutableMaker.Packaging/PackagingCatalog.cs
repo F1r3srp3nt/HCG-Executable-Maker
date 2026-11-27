@@ -29,6 +29,11 @@ public static class PackagingCatalog
             Add(PackagingFormat.IosArchive, "Xcode archive.", PackagingAvailability.NotApplicable, "Theos projects are built by Theos' makefiles, not archived with Xcode.");
             return list;
         }
+        if (ctx.IsMacXcode)
+        {
+            EvaluateMacXcode(ctx, Add);
+            return list;
+        }
         if (ctx.IsNative)
         {
             EvaluateNative(ctx, Add);
@@ -133,6 +138,32 @@ public static class PackagingCatalog
         }
         foreach (var f in new[] { PackagingFormat.MacDmg, PackagingFormat.MacPkg, PackagingFormat.WindowsInstallerExe, PackagingFormat.LinuxAppImage, PackagingFormat.LinuxDeb })
             add(f, f.DisplayName() + ".", PackagingAvailability.NotImplemented, notNative, null);
+    }
+
+    /// <summary>
+    /// A native macOS app built with Xcode: the project's own .app, the .app as ZIP, and a DMG with an Applications
+    /// shortcut. Only on a Mac (xcodebuild, codesign and hdiutil exist only there); never offered as built elsewhere.
+    /// </summary>
+    private static void EvaluateMacXcode(PackagingContext ctx, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
+    {
+        const string mac = "Native macOS apps are built with Xcode on a Mac; nothing is built or packaged on this computer.";
+        var offMac = ctx.Host.Platform != TargetPlatform.MacOS;
+        add(PackagingFormat.MacAppBundle, "The .app xcodebuild builds, kept as the project defines it (name, bundle ID, icon, resources, signature) and verified.",
+            offMac ? PackagingAvailability.RequiresDifferentHost : PackagingAvailability.Available, offMac ? mac : null, null);
+        add(PackagingFormat.PortableZip, "The .app in a ZIP made with ditto (keeps the bundle, permissions and signature), checked by expanding it again.",
+            offMac ? PackagingAvailability.RequiresDifferentHost : PackagingAvailability.Available, offMac ? mac : null, null);
+        if (offMac)
+            add(PackagingFormat.MacDmg, "Disk image.", PackagingAvailability.RequiresDifferentHost, mac, null);
+        else if (ctx.Toolchains?.IsAvailable(ToolchainIds.Hdiutil) != true)
+            add(PackagingFormat.MacDmg, "Disk image.", PackagingAvailability.MissingTool, "hdiutil was not detected on this Mac.", null);
+        else
+            add(PackagingFormat.MacDmg, "Compressed disk image with the .app, an Applications shortcut and the project's licence files.", PackagingAvailability.Available, null, null);
+        add(PackagingFormat.PortableFolder, "Loose executable.", PackagingAvailability.NotApplicable, "A macOS app runs from inside its .app bundle.", null);
+        var (pkgAvailability, pkgReason) = MacDistribution.MacDistributionCatalog.Pkg(ctx with { IsGuiApplication = true }, dotNet: false);
+        add(PackagingFormat.MacPkg, MacDistribution.MacDistributionCatalog.PkgDescription, pkgAvailability, pkgReason, null);
+        add(PackagingFormat.MacXcodeArchive, "Xcode archive (.xcarchive, made by xcodebuild archive with the same scheme and configuration), as a ZIP. It keeps the app and its debug symbols (dSYM) for later export or crash symbolication.",
+            offMac ? PackagingAvailability.RequiresDifferentHost : PackagingAvailability.Available, offMac ? mac : null, null);
+        add(PackagingFormat.MacAppStore, "Mac App Store.", PackagingAvailability.NotImplemented, "Mac App Store preparation is not offered for Xcode-built apps in this version.", null);
     }
 
     private static void EvaluateSwift(PackagingContext ctx, SwiftAppKind kind, Action<PackagingFormat, string, PackagingAvailability, string?, string?> add)
@@ -240,7 +271,8 @@ public static class PackagingCatalog
         var swiftGui = settings?.Swift?.Kind == SwiftAppKind.GuiApp;
         var needsBundle = set.Contains(PackagingFormat.MacDmg) || set.Contains(PackagingFormat.MacPkg) || set.Contains(PackagingFormat.MacAppStore)
                           || (swiftGui && set.Contains(PackagingFormat.PortableZip))
-                          || (settings?.Native is { IsMacBundle: true } && set.Contains(PackagingFormat.PortableZip));
+                          || (settings?.Native is { IsMacBundle: true } && set.Contains(PackagingFormat.PortableZip))
+                          || (settings?.MacXcode is not null && set.Contains(PackagingFormat.PortableZip));
         if (needsBundle && !set.Contains(PackagingFormat.MacAppBundle))
             set.Insert(0, PackagingFormat.MacAppBundle);
         // Bundles must exist before the DMG / ZIP that wraps them.

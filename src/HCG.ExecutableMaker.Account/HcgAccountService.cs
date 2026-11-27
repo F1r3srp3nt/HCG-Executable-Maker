@@ -117,9 +117,11 @@ public sealed class HcgAccountService : IDisposable
                 "You can still sign in; the session then lasts for this run only unless the keyring becomes available.", null);
             return;
         }
-        if (stored is null || stored.Version != 1 || stored.ClientId != Configuration.ClientId)
+        if (stored is null || stored.Version != 1 || stored.ClientId != Configuration.ClientId
+            || (stored.Issuer is { } iss && iss != IssuerKey(Configuration.Issuer)))
         {
-            if (stored is not null) await SafeDeleteAsync().ConfigureAwait(false); // another client's or an old format: never reused
+            // Another client's, another issuer's or an old format: never reused, and its refresh token is never sent anywhere.
+            if (stored is not null) await SafeDeleteAsync().ConfigureAwait(false);
             return;
         }
         var identity = new HcgIdentity(stored.Subject, stored.Email, stored.DisplayName);
@@ -360,6 +362,7 @@ public sealed class HcgAccountService : IDisposable
             {
                 Version = 1, ClientId = session.ClientId, RefreshToken = session.RefreshToken, Subject = session.Identity.Subject,
                 Email = session.Identity.Email, DisplayName = session.Identity.DisplayName, OrganisationId = session.OrganisationId,
+                Issuer = IssuerKey(Configuration.Issuer),
             }), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -417,6 +420,12 @@ public sealed class HcgAccountService : IDisposable
         var json = await _store.ReadAsync(Configuration.SessionStoreAccount, ct).ConfigureAwait(false);
         if (json is null) { Set(HcgAccountStatus.SignedOut, "Not signed in.", null); return; }
         var stored = JsonSerializer.Deserialize<StoredSession>(json)!;
+        if (stored.ClientId != Configuration.ClientId || (stored.Issuer is { } iss && iss != IssuerKey(Configuration.Issuer)))
+        {
+            await SafeDeleteAsync().ConfigureAwait(false);
+            Set(HcgAccountStatus.SignedOut, "Not signed in.", null);
+            return;
+        }
         await RefreshCoreAsync(new HcgSession
         {
             AccessToken = "", RefreshToken = stored.RefreshToken, ExpiresAt = DateTimeOffset.MinValue,
@@ -474,5 +483,11 @@ public sealed class HcgAccountService : IDisposable
         public string? Email { get; set; }
         public string? DisplayName { get; set; }
         public string? OrganisationId { get; set; }
+        /// <summary>The HCG Connect issuer that issued the refresh token. A stored session is never sent to another
+        /// issuer (null: stored before issuers were recorded; it gains one at its next refresh).</summary>
+        public string? Issuer { get; set; }
     }
+
+    /// <summary>The issuer a stored session belongs to, compared without a trailing slash.</summary>
+    private static string IssuerKey(Uri issuer) => issuer.AbsoluteUri.TrimEnd('/');
 }

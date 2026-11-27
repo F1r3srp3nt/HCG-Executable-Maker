@@ -96,6 +96,10 @@
                       ToolTip.Tip="Unleashify: build this iOS app (unchanged) as a rootless jailbreak app, validate the .deb and export the HCG Repo Candidate handoff. Nothing is installed or published.">
                 <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Unleashify…" /></StackPanel>
               </Button>
+              <Button HorizontalAlignment="Left" Margin="0,6,0,0" Command="{Binding OpenSigningDoctorCommand}" IsVisible="{Binding CanOpenSigningDoctor}"
+                      ToolTip.Tip="HCG Impactor's Signing Doctor: exactly why each provisioning profile on this Mac can or cannot sign this app, and how to create one with your Xcode account.">
+                <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Security}" /><TextBlock Text="Signing Doctor…" /></StackPanel>
+              </Button>
             </StackPanel>
             <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="4" IsVisible="{Binding HasProject}">
               <ItemsControl ItemsSource="{Binding ProjectRows}">

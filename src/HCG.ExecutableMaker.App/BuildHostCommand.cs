@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using HCG.ExecutableMaker.Account;
 using HCG.ExecutableMaker.BuildEngine;
 using HCG.ExecutableMaker.BuildEngine.BuildHost;
+using HCG.ExecutableMaker.BuildEngine.MacXcode;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
 using Microsoft.Extensions.DependencyInjection;
@@ -142,7 +143,7 @@ internal static class BuildHostCommand
         ProjectRecord? makerProject = null;
         if (arg("--maker-project") is { } mp && Guid.TryParse(mp, out var mpId))
             makerProject = services.GetRequiredService<IProjectRepository>().GetAsync(mpId).GetAwaiter().GetResult();
-        var provider = new HcgBuildHostProvider(client, paths, TimeProvider.System, makerProject is null ? null : builds);
+        var provider = new HcgServerBuildHost(client, paths, TimeProvider.System, makerProject is null ? null : builds);
         var name = makerProject?.Name ?? projectId;
         var request = new BuildHostBuildRequest
         {
@@ -171,8 +172,17 @@ internal static class BuildHostCommand
             Console.WriteLine($"  artifact {a.FileName}: {a.SizeBytes:N0} bytes · SHA-256 {a.Sha256} · {a.Verification}");
             foreach (var c in a.Checks) Console.WriteLine($"    {c.Name}: {c.Status} — {c.Detail}");
         }
-        var fields = outcome.Evidence is { } ev ? BuildHostSubmission.Fields(ev, packagedWith: $"HCG Executable Maker {HostInfo.ProductVersion}") : null;
-        Console.WriteLine(fields is null ? $"HCG Repo evidence: none ({outcome.EvidenceProblem})" : "HCG Repo submission fields:\n" + fields.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        // The evidence Unleashify's submission.json takes (PackageProvenance.FromBuildHost): provider, source, toolchain, builtAt; no CI run.
+        var evidence = outcome.Evidence is { } ev ? new JsonObject
+        {
+            ["provider"] = ev.Provider, ["repository"] = ev.Repository, ["commit"] = ev.Commit, ["dirty"] = ev.Dirty,
+            ["toolchain"] = ev.Toolchain, ["builtAt"] = ev.BuiltAt, ["job"] = ev.JobId, ["keyFingerprint"] = ev.KeyFingerprint, ["approvedBy"] = ev.ApprovedBy,
+        } : null;
+        Console.WriteLine(evidence is null ? $"HCG Repo evidence: none ({outcome.EvidenceProblem})" : "HCG Repo evidence (no CI run):\n" + evidence.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        var buildDir = Path.GetDirectoryName(b.LogPath!)!;
+        var nativeFiles = new[] { NativeBuildContract.RequestFileName, NativeBuildContract.ResultFileName, HcgServerBuildHost.ProvenanceFileName, HcgServerBuildHost.ValidationFileName }
+            .Select(f => Path.Combine(buildDir, f)).Where(File.Exists).ToList();
+        foreach (var f in nativeFiles) Console.WriteLine("  wrote " + f);
 
         if (arg("--out") is { } outFile)
         {
@@ -192,7 +202,8 @@ internal static class BuildHostCommand
                 ["job"] = outcome.Job?.Id, ["jobState"] = outcome.Job?.State,
                 ["provenance"] = outcome.Provenance is { } pv ? new JsonObject { ["verified"] = true, ["keyFingerprint"] = pv.KeyFingerprint, ["issuedAt"] = pv.Document.IssuedAt.ToString("O") } : null,
                 ["validation"] = outcome.Validation?.Overall,
-                ["submission"] = fields,
+                ["evidence"] = evidence,
+                ["files"] = new JsonArray(nativeFiles.Select(f => (JsonNode?)f).ToArray()),
                 ["evidenceProblem"] = outcome.EvidenceProblem,
             };
             File.WriteAllText(outFile, report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");

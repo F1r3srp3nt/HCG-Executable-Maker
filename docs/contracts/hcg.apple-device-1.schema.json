@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hcg.apple-device/1",
+  "title": "HCG Apple device record (shared by HCG Impactor and HCG System Tester)",
+  "description": "One or more iPhones/iPads as discovered on one Mac. Values a tool did not report are omitted, never guessed. UDIDs are redacted (first 4 … last 4) unless the user explicitly includes them.",
+  "type": "object",
+  "required": ["schema", "generatedAt", "producer", "devices"],
+  "properties": {
+    "schema": { "const": "hcg.apple-device/1" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "producer": { "type": "string", "description": "e.g. \"HCG Executable Maker › HCG Impactor\" or \"HCG System Tester\"" },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["identifier", "name"],
+        "properties": {
+          "identifier": { "type": "string", "description": "CoreDevice identifier (UUID) — stable for the device on this Mac; used for devicectl." },
+          "udid": { "type": "string", "description": "Hardware UDID (what provisioning profiles list). Redacted by default." },
+          "name": { "type": "string" },
+          "productType": { "type": "string", "examples": ["iPhone17,1"] },
+          "marketingName": { "type": "string", "examples": ["iPhone 16 Pro"] },
+          "deviceClass": { "type": "string", "examples": ["iPhone", "iPad"] },
+          "platform": { "type": "string", "examples": ["iOS"] },
+          "osVersion": { "type": "string" },
+          "osBuild": { "type": "string" },
+          "cpuArchitecture": { "type": "string", "examples": ["arm64e"] },
+          "connection": { "enum": ["usb", "network", "unavailable"] },
+          "transport": { "type": "string", "description": "Raw transport the tool reported (devicectl: wired, localNetwork)." },
+          "pairing": { "enum": ["paired", "unpaired", "unknown"] },
+          "developerMode": { "enum": ["enabled", "disabled", "unknown"] },
+          "developerServicesAvailable": { "type": "boolean" },
+          "tunnelState": { "type": "string" },
+          "bootState": { "type": "string" },
+          "isPhysical": { "type": "boolean" },
+          "capabilities": { "type": "array", "items": { "type": "string" }, "description": "CoreDevice feature identifiers, e.g. com.apple.coredevice.feature.installapp" },
+          "source": { "type": "string", "description": "Which tool produced the record (devicectl <version>, IOKit, synthetic)." }
+        }
+      }
+    }
+  }
+}

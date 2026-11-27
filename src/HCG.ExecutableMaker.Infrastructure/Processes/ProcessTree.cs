@@ -25,18 +25,62 @@ public static class ProcessTree
             try { process.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             return;
         }
-        var killed = new HashSet<int>();
-        for (var pass = 0; pass < 3; pass++)
+        if (!OperatingSystem.IsLinux())
         {
-            var tree = Descendants(root, killed);
-            if (pass > 0 && tree.All(killed.Contains)) break;
-            foreach (var pid in tree)
+            // macOS: never pause anything. Pausing the root (below) hung the macOS test runs (CI runs 45763414237 and
+            // 45770183303: builds and probes that should finish waited until the 5-minute inactivity limit). So this
+            // keeps the behaviour those runs had before: collect, SIGKILL every member, up to three passes.
+            var done = new HashSet<int>();
+            for (var pass = 0; pass < 3; pass++)
             {
-                if (!killed.Add(pid)) continue;
-                try { using var p = Process.GetProcessById(pid); p.Kill(); }   // SIGKILL; a stopped process dies too
-                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                var tree = Descendants(root, done);
+                if (pass > 0 && tree.All(done.Contains)) break;
+                foreach (var pid in tree)
+                    if (done.Add(pid)) KillOne(pid);
+            }
+            return;
+        }
+        // Linux: the root alone is paused while the tree is collected, so it cannot start a child between the listing and
+        // its own death (that child would be re-parented to init and escape: CI run 45741987759, an `xcodebuild -sdk …
+        // -version PlatformPath` that `xcodebuild -list` started as it was cancelled). The root is always killed at the
+        // end, so it is never left stopped.
+        Signal(root, 19);   // SIGSTOP (Linux)
+        var killed = new HashSet<int>();
+        try
+        {
+            for (var pass = 0; pass < 3; pass++)
+            {
+                var tree = Descendants(root, killed);
+                if (pass > 0 && tree.All(p => p == root || killed.Contains(p))) break;
+                // Deepest first: a parent dies only after its children, so none is re-parented while still alive.
+                foreach (var pid in tree.Reverse())
+                {
+                    if (pid == root || !killed.Add(pid)) continue;
+                    KillOne(pid);
+                }
             }
         }
+        finally
+        {
+            // SIGKILL straight to the pid, then SIGCONT, so the root is never left stopped whatever happened above.
+            if (Signal(root, 9) != 0) KillOne(root);
+            Signal(root, 18);   // SIGCONT (Linux)
+        }
+    }
+
+    private static void KillOne(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); p.Kill(); }   // SIGKILL; a stopped process dies too
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "kill", SetLastError = true)]
+    private static extern int SysKill(int pid, int signal);
+
+    /// <summary>kill(2); 0 when the signal was sent, -1 otherwise (including when libc's kill cannot be called).</summary>
+    private static int Signal(int pid, int signal)
+    {
+        try { return SysKill(pid, signal); } catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { return -1; }
     }
 
     /// <summary>The root and every process whose parent chain leads to it (or to an already-killed member), from ps.</summary>

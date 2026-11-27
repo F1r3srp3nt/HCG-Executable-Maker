@@ -306,9 +306,11 @@ public sealed partial class HcgBuildHostClient
         try { document = JsonSerializer.Deserialize<BuildProvenance>(envelope.Payload, BuildHostContract.Json) ?? throw new JsonException("empty"); }
         catch (JsonException ex) { throw Bad("the signed payload is not provenance JSON (" + ex.Message + ")"); }
         if (document.Format != BuildHostContract.ProvenanceFormat) throw Bad($"format {document.Format}, expected {BuildHostContract.ProvenanceFormat}");
-        // The payload's own copy of the key fingerprint, when HCG Server fills it in, must name the same key.
-        if (document.BuildHost.KeyFingerprint is { Length: > 0 } inner && NormalizeFingerprint(inner) != fingerprint)
-            throw Bad($"the payload names key {inner}, the signature is by {fingerprint}");
+        // The payload's own copy of the key fingerprint (signed, HCG Server 417a9cd and later) must name the same key.
+        if (NormalizeFingerprint(document.BuildHost.KeyFingerprint) != fingerprint)
+            throw Bad(document.BuildHost.KeyFingerprint.Length == 0
+                ? "the signed payload does not name its key (buildHost.keyFingerprint is empty; HCG Server before 417a9cd)"
+                : $"the payload names key {document.BuildHost.KeyFingerprint}, the signature is by {fingerprint}");
         return new VerifiedProvenance(envelope, document, fingerprint);
     }
 

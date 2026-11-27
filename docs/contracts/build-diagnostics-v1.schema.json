@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hakmicapitalgroup.com/schemas/hcg/build-diagnostics-v1.schema.json",
+  "title": "HCG build diagnostics, format version 1",
+  "description": "Structured diagnostics of one build for people and development agents. The status is the build's own; a failed build is never reported as successful.",
+  "type": "object",
+  "required": ["format", "formatVersion", "tool", "status", "counts", "issues", "failedTargets", "failedCommands", "testFailures", "logFile"],
+  "properties": {
+    "format": { "const": "hcg.build-diagnostics" },
+    "formatVersion": { "const": 1 },
+    "tool": { "type": "string" },
+    "status": { "enum": ["Succeeded", "Failed", "Cancelled", "TimedOut", "Pending", "Running"] },
+    "counts": {
+      "type": "object",
+      "required": ["errors", "warnings", "testFailures"],
+      "properties": { "errors": { "type": "integer" }, "warnings": { "type": "integer" }, "testFailures": { "type": "integer" } }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "category", "message"],
+        "properties": {
+          "severity": { "enum": ["error", "warning"] },
+          "category": { "enum": ["compiler", "linker", "dependency", "signing", "project", "test", "other"] },
+          "message": { "type": "string" },
+          "file": { "type": ["string", "null"] },
+          "line": { "type": ["integer", "null"] },
+          "column": { "type": ["integer", "null"] },
+          "target": { "type": ["string", "null"] },
+          "project": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "failedTargets": { "type": "array", "items": { "type": "string" } },
+    "failedCommands": { "type": "array" },
+    "testFailures": { "type": "array" },
+    "logFile": { "type": "string" }
+  }
+}

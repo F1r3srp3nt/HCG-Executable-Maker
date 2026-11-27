@@ -4,8 +4,9 @@ using HCG.ExecutableMaker.ProjectInspection.Mobile;
 namespace HCG.ExecutableMaker.ProjectInspection.Swift;
 
 /// <summary>
-/// Swift Package Manager desktop projects (and macOS-only Xcode projects, which are recognized but not built in this
-/// increment). Purely static: Package.swift is read as text, never executed.
+/// Swift Package Manager desktop projects. macOS Xcode app projects are built by the "Native macOS app — Xcode" flow
+/// (MacXcodeProjectInspector); a macOS Xcode project without an application target ends up here and is explained.
+/// Purely static: Package.swift is read as text, never executed.
 /// </summary>
 public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
 {
@@ -18,9 +19,12 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
     /// </summary>
     public int Match(SourceIndex index)
     {
+        var local = MacXcode.MacXcodeProjectAnalyzer.LocalPackageManifests(index);
         var manifests = SwiftPackageScanner.FindManifests(index)
-            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m)).ToList();
-        var macProjects = XcodeProjectAnalyzer.FindProjects(index).Where(p => XcodeProjectAnalyzer.IsMacOnlyProject(index, p)).ToList();
+            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m) && !local.Contains(m)).ToList();
+        // macOS Xcode projects with an app target belong to "Native macOS app — Xcode"; only the others are explained here.
+        var macProjects = XcodeProjectAnalyzer.FindProjects(index).Where(p => XcodeProjectAnalyzer.IsMacOnlyProject(index, p))
+            .Where(p => manifests.Count > 0 || MacXcode.MacXcodeProjectAnalyzer.Analyze(index, p).AppTargets.Count == 0).ToList();
         if (manifests.Count == 0 && macProjects.Count == 0) return 0;
         var swiftDepth = manifests.Concat(macProjects).Min(SourceIndex.Depth);
         var dotnetDepth = index.WithExtension(".csproj", ".fsproj", ".vbproj", ".sln", ".slnx").Select(SourceIndex.Depth).DefaultIfEmpty(int.MaxValue).Min();
@@ -33,8 +37,10 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
 
     public ProjectAnalysis Inspect(SourceIndex index, ToolchainReport? toolchains)
     {
+        // A local package of a macOS Xcode app is that app's dependency: building it with swift build would not build the app.
+        var local = MacXcode.MacXcodeProjectAnalyzer.LocalPackageManifests(index);
         var packages = SwiftPackageScanner.FindManifests(index)
-            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m))
+            .Where(m => !XcodeProjectAnalyzer.IsIosAppPackage(index, m) && !local.Contains(m))
             .Select(m => SwiftPackageScanner.Scan(index, m)).ToList();
         var macProjects = XcodeProjectAnalyzer.FindProjects(index).Where(p => XcodeProjectAnalyzer.IsMacOnlyProject(index, p)).ToList();
         var diagnostics = new List<AnalysisDiagnostic>();
@@ -42,8 +48,9 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
 
         foreach (var mac in macProjects)
             diagnostics.Add(new(DiagnosticSeverity.Warning,
-                "macOS Xcode project found. Building Xcode macOS projects/workspaces is not implemented in this version; HCG builds Swift Package Manager packages. " +
-                "If the app also has a Package.swift, select that package instead.", mac));
+                packages.Count > 0
+                    ? "macOS Xcode project found next to a Swift package. HCG builds the Swift package here; to build the Xcode app instead, import the folder that contains the Xcode project (it is then built as a native macOS app with xcodebuild)."
+                    : "macOS Xcode project without an application target (frameworks, command-line tools or tests only): there is no .app to build and package.", mac));
 
         if (packages.Count == 0)
         {
@@ -55,7 +62,7 @@ public sealed class SwiftProjectInspector(TimeProvider time) : IProjectInspector
                 Framework = "Xcode (macOS)",
                 ApplicationType = "macOS Xcode project",
                 Support = SupportLevel.Unsupported,
-                SupportSummary = "macOS Xcode projects and workspaces are not built in this version. Swift Package Manager packages (Package.swift) are supported on a Mac. iOS Xcode projects are handled in Mobile Build Studio.",
+                SupportSummary = "This macOS Xcode project has no application target, so there is no .app to build. macOS Xcode projects with an app target are built as \"Native macOS app — Xcode\"; Swift packages (Package.swift) are built on a Mac; iOS Xcode projects are handled in Mobile Build Studio.",
                 Diagnostics = diagnostics,
                 Swift = swift,
                 AnalyzedAt = time.GetUtcNow(),

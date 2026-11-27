@@ -25,7 +25,27 @@
       <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' != '0'">unknown</HcgCommit>
       <HcgCommit Condition="'$(HCG_SOURCE_REVISION)' == '' and '$(HcgGitExit)' == '0' and '$(HcgGitStatus)' != ''">$(HcgCommit)+uncommitted</HcgCommit>
     </PropertyGroup>
+    <!-- Full source provenance for Maker's own Release Passport: build-source.txt (written by tools/self-package into
+         the imported copy, which has no .git), else git in this checkout. Nothing is guessed: without either it is empty. -->
+    <PropertyGroup>
+      <HcgSourceFile>$(MSBuildThisFileDirectory)build-source.txt</HcgSourceFile>
+      <HcgSourceText Condition="Exists('$(HcgSourceFile)')">$([System.IO.File]::ReadAllText('$(HcgSourceFile)'))</HcgSourceText>
+      <HcgSourceCommit Condition="'$(HcgSourceText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(HcgSourceText)', 'commit=([0-9a-f]{40})').Groups[1].Value)</HcgSourceCommit>
+      <HcgSourceDirty Condition="'$(HcgSourceText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(HcgSourceText)', 'dirty=(true|false)').Groups[1].Value)</HcgSourceDirty>
+      <HcgSourceRepository Condition="'$(HcgSourceText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(HcgSourceText)', 'repository=([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)').Groups[1].Value)</HcgSourceRepository>
+    </PropertyGroup>
+    <Exec Command="git rev-parse --verify HEAD" ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low"
+          WorkingDirectory="$(MSBuildThisFileDirectory)" Condition="'$(HcgSourceText)' == '' and '$(HcgGitExit)' == '0'">
+      <Output TaskParameter="ConsoleOutput" PropertyName="HcgSourceCommit" />
+    </Exec>
+    <PropertyGroup Condition="'$(HcgSourceText)' == '' and '$(HcgGitExit)' == '0'">
+      <HcgSourceDirty Condition="'$(HcgGitStatus)' != ''">true</HcgSourceDirty>
+      <HcgSourceDirty Condition="'$(HcgGitStatus)' == ''">false</HcgSourceDirty>
+    </PropertyGroup>
     <ItemGroup>
+      <AssemblyMetadata Include="HcgSourceCommit" Value="$(HcgSourceCommit)" />
+      <AssemblyMetadata Include="HcgSourceDirty" Value="$(HcgSourceDirty)" />
+      <AssemblyMetadata Include="HcgSourceRepository" Value="$(HcgSourceRepository)" />
       <AssemblyMetadata Include="HcgCommit" Value="$(HcgCommit)" />
       <AssemblyMetadata Include="HcgBuildDate" Value="$([System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))" />
     </ItemGroup>

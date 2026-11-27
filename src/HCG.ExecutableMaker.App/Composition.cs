@@ -47,6 +47,7 @@ public static class Composition
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Mobile.MobileArtifactProjectInspector>();
         services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.Swift.SwiftProjectInspector>();
+        services.AddSingleton<IProjectInspector, HCG.ExecutableMaker.ProjectInspection.MacXcode.MacXcodeProjectInspector>();
         foreach (var inspector in EcosystemSignatureInspector.CreateDefaults(TimeProvider.System))
             services.AddSingleton(inspector);
         services.AddSingleton<IProjectInspectionService, ProjectInspectionService>();
@@ -63,6 +64,10 @@ public static class Composition
         // C/C++ app bundles (a project's own .app) before the generic packagers.
         services.AddSingleton<IPackager, NativeAppBundlePackager>();
         services.AddSingleton<IPackager, NativeAppZipPackager>();
+        // Native macOS apps built with Xcode (the project's own .app) before the generic packagers.
+        services.AddSingleton<IPackager, XcodeAppBundlePackager>();
+        services.AddSingleton<IPackager, XcodeAppZipPackager>();
+        services.AddSingleton<IPackager, XcodeArchivePackager>();
         services.AddSingleton<IPackager, PortableFolderPackager>();
         services.AddSingleton<IPackager, PortableZipPackager>();
         services.AddSingleton<IPackager, MacAppBundlePackager>();
@@ -78,6 +83,14 @@ public static class Composition
         services.AddSingleton<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>();
         services.AddSingleton<IProjectSigningStore, HCG.ExecutableMaker.Infrastructure.Persistence.SqliteProjectSigningStore>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck>();
+        // HCG Impactor: IPA inspection, signing (codesign with Keychain identities), devices (devicectl), installation, history.
+        services.AddSingleton(sp => new HCG.Impactor.Storage.ImpactorStore(sp.GetRequiredService<IAppPaths>().Root));
+        services.AddSingleton<HCG.Impactor.ISigningInventorySource>(sp => new HCG.Impactor.Signing.SigningInventorySource(sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>()));
+        services.AddSingleton<HCG.Impactor.IAppSigner>(sp => new HCG.Impactor.MacOS.MacAppSigner(sp.GetRequiredService<IProcessRunner>()));
+        services.AddSingleton<HCG.Impactor.IDeviceService>(sp => new HCG.Impactor.MacOS.MacDeviceService(sp.GetRequiredService<IProcessRunner>()));
+        services.AddSingleton<HCG.Impactor.ImpactorService>();
+        services.AddSingleton(sp => new HCG.Impactor.MacOS.XcodeProvisioningAssistant(sp.GetRequiredService<IProcessRunner>(),
+            Path.Combine(sp.GetRequiredService<IAppPaths>().Root, "impactor"), sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.ProvisioningProfileStore>()));
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService>();
@@ -109,19 +122,17 @@ public static class Composition
         var uploadHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         services.AddSingleton(hcgConfig);
         services.AddSingleton(credentialStore);
-        // Build providers: this computer (the existing worker), GitHub Actions (run recorded by the user) and HCG Server's
-        // Build Host (hcg.buildhost/1, loopback only; its client token lives in the OS credential store, never in a file).
+        // Build hosts: this computer, and HCG Server's Build Host (hcg.buildhost/1, loopback only; its client token lives in
+        // the OS credential store, never in a file). GitHub Actions stays a remote option recorded in the package provenance.
         services.AddSingleton(_ => new HCG.ExecutableMaker.BuildEngine.BuildHost.BuildHostCredentials(credentialStore));
         services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostClient(
             HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostClient.CreateHttpClient(),
             sp.GetRequiredService<HCG.ExecutableMaker.BuildEngine.BuildHost.BuildHostCredentials>(), BuildHostCommand.SettingsFromEnvironment()));
-        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostProvider(
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.BuildHost.HcgServerBuildHost(
             sp.GetRequiredService<HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostClient>(), sp.GetRequiredService<IAppPaths>(), TimeProvider.System,
             sp.GetRequiredService<IBuildRepository>()));
-        services.AddSingleton<IBuildProvider>(sp => new LocalBuildProvider(sp.GetRequiredService<IBuildWorker>()));
-        services.AddSingleton<IBuildProvider>(_ => new GitHubActionsBuildProvider());
-        services.AddSingleton<IBuildProvider>(sp => sp.GetRequiredService<HCG.ExecutableMaker.BuildEngine.BuildHost.HcgBuildHostProvider>());
-        services.AddSingleton<BuildProviderCatalog>();
+        services.AddSingleton<IBuildHost, LocalBuildHost>();
+        services.AddSingleton<IBuildHost>(sp => sp.GetRequiredService<HCG.ExecutableMaker.BuildEngine.BuildHost.HcgServerBuildHost>());
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAuthClient(hcgHttp, hcgConfig, TimeProvider.System));
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.HcgAccountService(hcgConfig, sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgAuthClient>(),
             credentialStore, TimeProvider.System, hcgConfigProblem, storeProblem, sp.GetService<Microsoft.Extensions.Logging.ILogger<HCG.ExecutableMaker.Account.HcgAccountService>>(),
@@ -160,6 +171,7 @@ public static class Composition
         services.AddSingleton<StorePublishingAuthority>();
         services.AddSingleton<ShipToStoreViewModel>();
         services.AddSingleton<UnleashifyViewModel>();
+        services.AddSingleton<ImpactorViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();

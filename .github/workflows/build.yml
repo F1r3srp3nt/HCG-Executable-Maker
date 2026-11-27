@@ -27,6 +27,9 @@
 #                 wizard and Mobile Build Studio: Nexus' Theos .deb (rootless, rootful, preview app) checked by HCG and by
 #                 Nexus' own script; Mail's .NET for iOS head (Simulator build, unsigned device archive); Sentinel archived
 #                 with every installed Xcode, with the deployment-range preflight, full logs and .xcresult bundles kept.
+#   impactor    — HCG Impactor on macOS: a real unsigned iOS device app (HelloIOS) is inspected, signed with a SYNTHETIC
+#                 identity/profile through codesign, verified by Apple's codesign, tampered and re-checked; devicectl's
+#                 real output is translated; the workspace UI signs through Signing Studio. No physical device on CI.
 # Pushing a tag like v0.1.0:
 #   3. release  — creates a GitHub *pre-release* with those files and SHA256SUMS.txt.
 #                 Nothing is published unless a v* tag is pushed. Artifacts are unsigned (signing: M0.4).
@@ -265,6 +268,41 @@ jobs:
           kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
           j="$X/screens/release-app-window.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-window.png" --out "$j" >/dev/null
           echo "=====BEGIN-IMG release-app-window.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
+          # The same packaged app opened on Ship to Store (Distribution Studio), signed out: it contacts no Store and uploads nothing.
+          HCG_EXECUTABLE_MAKER_HOME="$X/home-ship" "$EXE" --page ship > "$X/app-ship.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 60); do
+            if "$X/window-of-pid" $PID > "$X/windows-ship.txt" 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$X/app-ship.log"; exit 1; fi
+            sleep 2
+          done
+          check "Distribution Studio window on screen: $(head -1 "$X/windows-ship.txt" 2>/dev/null)" 'test -s "$X/windows-ship.txt"'
+          sleep 8
+          screencapture -x -o -l "$(head -1 "$X/windows-ship.txt" | cut -d' ' -f1)" "$X/screens/release-app-distribution-studio.png"
+          check "still running on Distribution Studio" 'kill -0 $PID'
+          kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
+          j="$X/screens/release-app-distribution-studio.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-distribution-studio.png" --out "$j" >/dev/null
+          echo "=====BEGIN-IMG release-app-distribution-studio.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
+          # The packaged app issues the Release Passport (build half) of its own archive: measured facts only. Its source is
+          # Maker's OWN build provenance, embedded at packaging time (--self), so it needs no git; the checkout is a cross-check.
+          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --self --app "$APP" --file "$ZIP" --source-repo "$GITHUB_WORKSPACE" \
+            --provider github-actions --toolchain ".NET SDK $(dotnet --version); HCG Executable Maker $VERSION"
+          pj() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2], {}, {'d': d}))" "$@"; }
+          check "Release Passport of $(basename "$ZIP") names its exact SHA-256" '[ "$(pj "$ZIP.release-passport.json" "d[\"artifact\"][\"sha256\"]")" = "$(shasum -a 256 "$ZIP" | cut -c1-64)" ]'
+          check "Release Passport source commit is this build's commit ($GITHUB_SHA)" '[ "$(pj "$ZIP.release-passport.json" "d[\"source\"][\"commit\"]")" = "$GITHUB_SHA" ]'
+          check "the app reports its full source commit" '"$EXE" --version | grep -q "Source: $GITHUB_SHA"'
+          # Without git on PATH (as on a customer's Mac without developer tools): Maker still names its own build commit,
+          # and a project without readable provenance is recorded as source unknown (never a guessed commit).
+          NOGIT="$X/no-git-bin"; mkdir -p "$NOGIT"; for t in python3 shasum; do ln -sf "$(command -v $t)" "$NOGIT/$t"; done
+          PATH="$NOGIT" HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --self --app "$APP" --file "$ZIP" --out "$X/nogit-self.json" > "$X/nogit-self.log" 2>&1
+          check "without git, --self still names this build's commit" '[ "$(pj "$X/nogit-self.json" "d[\"source\"][\"commit\"]")" = "$GITHUB_SHA" ]'
+          cp "$ZIP" "$X/copy-of-app.zip"; cp -R "$APP" "$X/Copy.app"
+          PATH="$NOGIT" HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --app "$X/Copy.app" --file "$X/copy-of-app.zip" --source-repo "$GITHUB_WORKSPACE" --out "$X/nogit-project.json" > "$X/nogit-project.log" 2>&1
+          check "without git, a project's source is recorded as unknown (no crash, no invented commit)" '[ "$(pj "$X/nogit-project.json" "d[\"source\"][\"commit\"]")" = "None" ]'
+          rcs=0; HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --self --app "$X/Copy.app" --file "$X/copy-of-app.zip" --out "$X/not-self.json" > "$X/not-self.log" 2>&1 || rcs=$?
+          check "--self is refused for a bundle that is not the running app (exit $rcs)" '[ $rcs = 2 ] && [ ! -e "$X/not-self.json" ]'
+          rm -rf "$RUNNER_TEMP/screens-macos"; cp -R "$X/screens" "$RUNNER_TEMP/screens-macos"   # not in dist: dist holds only release files
+          echo "=====BEGIN-PASSPORT====="; cat "$ZIP.release-passport.json"; echo "=====END-PASSPORT====="
 
       - name: Build manifest, checksums and installation instructions
         shell: bash
@@ -284,6 +322,218 @@ jobs:
           path: ${{ runner.temp }}/dist/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload native launch screenshots
+        if: matrix.name == 'macos'
+        uses: actions/upload-artifact@v7
+        with:
+          name: hcg-executable-maker-macos-screenshots
+          path: ${{ runner.temp }}/screens-macos/*
+          if-no-files-found: error
+          retention-days: 14
+
+  distribution-studio:
+    name: Distribution Studio acceptance 1–18 + HCG Store main contract (${{ matrix.os }}; TEST HCG Store, real catalogue, genuine executables)
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    env:
+      # Acceptance 1–18 run against the proposal branch (its recorded-request contract); HCG Store main, which integrated
+      # it with its release lifecycle (#27, #28; not deployed), is checked as the second Store (M1–M5).
+      STORE_REF: claude/distribution-studio-api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: F1r3srp3nt/store
+          ref: ${{ env.STORE_REF }}
+          path: hcg-store
+      - uses: actions/checkout@v7
+        with:
+          repository: F1r3srp3nt/store
+          ref: main
+          path: hcg-store-main
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: HCG Store (TEST) dependencies
+        run: |
+          cd hcg-store/web-hcg-store && npm ci --no-audit --no-fund
+          cd "$GITHUB_WORKSPACE/hcg-store-main/web-hcg-store" && npm ci --no-audit --no-fund
+      - name: Build HCG Executable Maker and the headless UI driver
+        run: dotnet build src/HCG.ExecutableMaker.App -c Release && dotnet build tools/ui-driver -c Release
+      - name: Acceptance 1–18 against the TEST HCG Store (Maker never publishes; a person's browser approval is simulated by the TEST server)
+        run: tools/ci/distribution-studio-e2e.sh hcg-store/web-hcg-store "$RUNNER_TEMP/studio" src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll hcg-store-main/web-hcg-store
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: distribution-studio-evidence-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/studio/*.txt
+            ${{ runner.temp }}/studio/*.log
+            ${{ runner.temp }}/studio/*.json
+            ${{ runner.temp }}/studio/registration
+            ${{ runner.temp }}/studio/shots
+          retention-days: 14
+
+  windows-packaging:
+    name: Windows packaging of an already-built app (own identity, Authenticode against Get-AuthenticodeSignature, bootstrapper vs installed arch, passports, Store manifest)
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}\winpack
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          (Get-Item "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe").VersionInfo.ProductVersion
+
+      - name: Build HCG Executable Maker; publish the fixture app for x64 and ARM64 (the already-built folders)
+        shell: pwsh
+        run: |
+          dotnet build src/HCG.ExecutableMaker.App -c Release
+          foreach ($rid in 'win-x64', 'win-arm64') {
+            dotnet publish tests/Fixtures/HelloAvalonia/HelloAvalonia.csproj -c Release -r $rid --self-contained -o "$env:OUT\publish-$rid"
+            if ($LASTEXITCODE -ne 0) { throw "publish $rid failed" }
+          }
+          @{ name = 'Example Product'; publisher = 'Example AB'; applicationId = 'org.example.product'; version = '1.2.0-beta.1'; executable = 'HelloAvalonia.exe'
+             buildNumber = '7'; productKey = 'example-product'; edition = 'windows-desktop'; distName = 'ExampleProduct-{version}-{rid}'
+             store = @{ productId = 'example-product'; editionId = 'windows-desktop'; distribution = 'free'; releaseNotes = @('CI packaging check.') } } |
+            ConvertTo-Json -Depth 4 | Set-Content "$env:OUT\app.json" -Encoding utf8
+
+      - name: A throwaway self-signed code-signing certificate (current user; not trusted, deleted at the end)
+        shell: pwsh
+        run: |
+          $c = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=HCG CI Throwaway Signing (not trusted)' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(2)
+          "THUMB=$($c.Thumbprint)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Refusals — signing without approval, wrong architecture
+        shell: pwsh
+        run: |
+          $maker = 'src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll'
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-x64" --arch x64 --formats zip --out "$env:OUT\refused" --authenticode-thumbprint $env:THUMB --timestamp-url http://timestamp.digicert.com
+          if ($LASTEXITCODE -ne 2) { throw "signing without --approve-signing must be refused (exit 2), got $LASTEXITCODE" }
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-x64" --arch arm64 --formats zip --out "$env:OUT\refused"
+          if ($LASTEXITCODE -ne 6) { throw "an x64 folder packaged as arm64 must fail (exit 6), got $LASTEXITCODE" }
+          if (Test-Path "$env:OUT\refused") { if (Get-ChildItem "$env:OUT\refused" -Recurse -File) { throw "a refused run wrote files" } }
+          exit 0
+
+      - name: Package — x64 signed (approved) and ARM64 unsigned, installer + ZIP, distribution names, passports, Store manifest
+        shell: pwsh
+        run: |
+          $maker = 'src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll'
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --app-dir "$env:OUT\publish-win-x64" --arch x64 --formats installer,zip --out "$env:OUT\out" --dist "$env:OUT\dist-x64" `
+            --authenticode-thumbprint $env:THUMB --timestamp-url http://timestamp.digicert.com --approve-signing --built-with ".NET SDK $(dotnet --version)"
+          if ($LASTEXITCODE -ne 0) { throw "x64 packaging failed ($LASTEXITCODE)" }
+          # The product's --version given explicitly (HCG Mail does this): it must package, not print Maker's own version.
+          dotnet $maker --package-windows --identity "$env:OUT\app.json" --version 1.2.0-beta.1 --app-dir "$env:OUT\publish-win-arm64" --arch arm64 --formats installer,zip --out "$env:OUT\out" --dist "$env:OUT\dist-arm64"
+          if ($LASTEXITCODE -ne 0) { throw "arm64 packaging failed ($LASTEXITCODE)" }
+          if (-not (Test-Path "$env:OUT\dist-arm64\SHA256SUMS.txt")) { throw "--package-windows --version … wrote nothing" }
+          Get-ChildItem "$env:OUT\dist-x64", "$env:OUT\dist-arm64" | Format-Table Name, Length
+
+      - name: Authenticode — Maker's verdict against Windows' own (Get-AuthenticodeSignature / WinVerifyTrust)
+        shell: pwsh
+        run: |
+          $maker = 'src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll'
+          function Doctor($file) { (dotnet $maker --windows-signing-doctor $file) -join "`n" }
+          # 1. A Microsoft-signed program: both say valid; Maker sees the timestamp.
+          $dotnet = (Get-Command dotnet).Source
+          $win = Get-AuthenticodeSignature $dotnet; $d = Doctor $dotnet; $d
+          if ($win.Status -ne 'Valid') { throw "dotnet.exe: Windows says $($win.Status)" }
+          if ($d -notmatch 'Overall: signed \(HCG Store: signed\)') { throw "dotnet.exe: Maker did not call a valid Microsoft signature signed" }
+          # 2. The Setup.exe signed with the throwaway certificate: intact, timestamped, NOT trusted — Windows: UnknownError (untrusted root).
+          $setup = (Get-ChildItem "$env:OUT\dist-x64" -Filter '*-Setup.exe').FullName
+          $w2 = Get-AuthenticodeSignature $setup; $d2 = Doctor $setup; $d2
+          "Windows: $($w2.Status) — $($w2.StatusMessage); timestamper: $($w2.TimeStamperCertificate.Subject)"
+          if ($w2.SignerCertificate.Thumbprint -ne $env:THUMB) { throw "Windows does not see our certificate on the Setup.exe" }
+          if ($w2.Status -eq 'Valid' -or $w2.Status -eq 'HashMismatch' -or $w2.Status -eq 'NotSigned') { throw "expected an untrusted-root verdict from Windows, got $($w2.Status)" }
+          if ($d2 -notmatch 'Overall: signed-untrusted \(HCG Store: invalid\)') { throw "Maker should call it intact but untrusted" }
+          if ($d2 -notmatch 'timestamp \(rfc3161\): .* — verified') { throw "Maker did not verify the RFC 3161 timestamp" }
+          if (-not $w2.TimeStamperCertificate) { throw "Windows sees no timestamp" }
+          # 3. One changed byte after signing: Windows HashMismatch, Maker invalid.
+          $bad = "$env:OUT\tampered-Setup.exe"; Copy-Item $setup $bad
+          $b = [IO.File]::ReadAllBytes($bad); $b[4096] = $b[4096] -bxor 0xFF; [IO.File]::WriteAllBytes($bad, $b)
+          $w3 = Get-AuthenticodeSignature $bad; $d3 = Doctor $bad; $d3
+          if ($w3.Status -ne 'HashMismatch') { throw "Windows: expected HashMismatch, got $($w3.Status)" }
+          if ($d3 -notmatch 'changed after signing') { throw "Maker did not detect the change" }
+          # 4. The signed program inside the x64 ZIP, and the unsigned ARM64 files.
+          $zip = (Get-ChildItem "$env:OUT\dist-x64" -Filter '*.zip').FullName; $dz = Doctor $zip; $dz
+          if ($dz -notmatch 'HelloAvalonia.exe \[x64\]: Authenticode signed, NOT trusted') { throw "the program in the ZIP should carry the approved signature" }
+          $arm = (Get-ChildItem "$env:OUT\dist-arm64" -Filter '*-Setup.exe').FullName
+          if ((Get-AuthenticodeSignature $arm).Status -ne 'NotSigned' -or (Doctor $arm) -notmatch 'Overall: unsigned') { throw "the ARM64 setup should be unsigned for both" }
+          exit 0
+
+      - name: Architecture — the installer's x86 bootstrapper vs the program it installs; passports and Store manifest
+        shell: pwsh
+        run: |
+          function Machine($p) { $b = [IO.File]::ReadAllBytes($p); '0x{0:X4}' -f [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 4) }
+          foreach ($a in @(@{ arch = 'x64'; m = '0x8664' }, @{ arch = 'arm64'; m = '0xAA64' })) {
+            $dist = "$env:OUT\dist-$($a.arch)"
+            $setup = (Get-ChildItem $dist -Filter '*-Setup.exe').FullName
+            if ((Machine $setup) -ne '0x014C') { throw "$setup bootstrapper is $(Machine $setup), expected x86 0x014C" }
+            $x = "$env:OUT\unzip-$($a.arch)"; Expand-Archive (Get-ChildItem $dist -Filter '*.zip').FullName $x -Force
+            $exe = (Get-ChildItem $x -Recurse -Filter HelloAvalonia.exe | Select-Object -First 1).FullName
+            if ((Machine $exe) -ne $a.m) { throw "$exe is $(Machine $exe), expected $($a.m)" }
+            foreach ($p in Get-ChildItem $dist -Filter '*.release-passport.json') {
+              $j = Get-Content $p.FullName -Raw | ConvertFrom-Json
+              "$($p.Name): architecture $($j.architecture); installed $($j.windows.installed_program.machine); bootstrapper $($j.windows.bootstrapper.machine); code signing $($j.code_signing.status); file $($j.artifact.filename)"
+              if ($j.architecture -ne $a.arch -or $j.windows.installed_program.machine -ne $a.arch) { throw "$($p.Name): wrong architecture" }
+              if ($p.Name -like '*-Setup.exe.*' -and $j.windows.bootstrapper.machine -ne 'x86') { throw "$($p.Name): bootstrapper not recorded as x86" }
+              if ($j.artifact.filename -ne $p.Name.Replace('.release-passport.json', '')) { throw "$($p.Name) names another file" }
+              if ($j.product.name -ne 'Example Product' -or $j.package -ne 'org.example.product') { throw "$($p.Name): not the product's identity" }
+            }
+            $m = Get-Content "$dist\store-submission.json" -Raw | ConvertFrom-Json
+            if ($m.release.eligibility -ne 'private' -or $m.publishes -ne $false) { throw "the manifest must ask for a private draft only" }
+            foreach ($art in $m.artifacts) {
+              "$($art.file): $($art.declare.kind) $($art.declare.architectures -join ',') signing $($art.declare.signing.status)"
+              if (($art.declare.architectures -join ',') -ne $a.arch) { throw "$($art.file): Store architectures $($art.declare.architectures) (expected $($a.arch), never the bootstrapper's x86)" }
+              if ($art.declare.PSObject.Properties.Name -contains 'sourceCommit') { throw "declare must hold only the deployed Store's fields" }
+            }
+            Push-Location $dist; Get-Content SHA256SUMS.txt | ForEach-Object { $h, $n = $_ -split '  '; if ((Get-FileHash $n -Algorithm SHA256).Hash.ToLowerInvariant() -ne $h) { throw "checksum $n" } }; Pop-Location
+            # Nothing of Executable Maker's own identity is in the product's installer metadata.
+            $vi = (Get-Item $setup).VersionInfo
+            "Setup version info: $($vi.ProductName) / $($vi.CompanyName) / $($vi.ProductVersion)"
+            if ("$($vi.ProductName)$($vi.CompanyName)" -match 'Executable Maker') { throw "the installer is branded with Executable Maker" }
+          }
+          exit 0
+
+      - name: Install, launch and uninstall the signed x64 installer (Executable Maker's installer test)
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem "$env:OUT\dist-x64" -Filter '*-Setup.exe').FullName
+          ./tools/installer-test/Test-Installer.ps1 -Setup $setup -AppName 'Example Product' -ExeName 'HelloAvalonia.exe' -Version '1.2.0-beta.1' -LaunchSeconds 8
+
+      - name: Remove the throwaway certificate
+        if: always()
+        shell: pwsh
+        run: if ($env:THUMB) { Remove-Item "Cert:\CurrentUser\My\$env:THUMB" -ErrorAction SilentlyContinue }; exit 0
+
+      - name: Upload the packages and evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-packaging
+          path: |
+            ${{ env.OUT }}\dist-x64
+            ${{ env.OUT }}\dist-arm64
+          if-no-files-found: warn
+          retention-days: 7
 
   windows-installer:
     name: Windows installer (build, install, launch, uninstall)
@@ -843,6 +1093,260 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  xcode-native-provider:
+    name: Native macOS Xcode provider (Xcode 16 project with a local package — genuine compile error, then .app/ZIP/DMG/PKG/XCArchive with tests)
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}/native-out
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Mac and Xcode on this runner (the newest Xcode is used through DEVELOPER_DIR; the system setting is unchanged)
+        run: |
+          sw_vers; uname -m
+          x="$(ls -d /Applications/Xcode_26*.app /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)"
+          echo "DEVELOPER_DIR=${x:-/Applications/Xcode.app}/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="${x:-/Applications/Xcode.app}/Contents/Developer" xcodebuild -version
+
+      - name: Build HCG Executable Maker
+        run: dotnet build src/HCG.ExecutableMaker.App -c Release
+
+      - name: Inspect — scheme, test action, local package, configurations (static; nothing is run)
+        run: |
+          mkdir -p "$OUT"
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac tests/Fixtures/MacXcode/FieldKit --inspect-only | tee "$OUT/inspect.txt"
+          grep -q "(xcode-macos) — Supported" "$OUT/inspect.txt"
+          grep -q "Schemes: FieldKit (shared) \[tests: FieldKitCoreTests\]" "$OUT/inspect.txt"
+          grep -q "Swift packages: Packages/FieldKitCore (local)" "$OUT/inspect.txt"
+          grep -q "Release: org.example.fieldkit, App Sandbox on" "$OUT/inspect.txt"
+
+      - name: Evidence outside HCG — plain xcodebuild and swift test on the fixture (how Xcode itself sees the scheme's tests)
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p "$OUT/plain" && cp -R tests/Fixtures/MacXcode/FieldKit "$OUT/plain/FieldKit" && cd "$OUT/plain/FieldKit"
+          xcodebuild -project FieldKit.xcodeproj -scheme FieldKit -showTestPlans 2>&1 | tail -20 || true
+          echo "== xcodebuild test -project (no HCG)"
+          xcodebuild -project FieldKit.xcodeproj -scheme FieldKit -destination "platform=macOS" -derivedDataPath "$OUT/plain/dd" test > "$OUT/plain-xcodebuild-test.txt" 2>&1; echo "exit $?"
+          grep -E "error:|Test Suite|Executed|TEST (SUCCEEDED|FAILED)|no test bundles" "$OUT/plain-xcodebuild-test.txt" | head -20
+          echo "== xcodebuild test -project, Debug, testables built for testing (no HCG)"
+          xcodebuild -project FieldKit.xcodeproj -scheme FieldKit -configuration Debug -destination "platform=macOS" -derivedDataPath "$OUT/plain/dd2" build-for-testing > "$OUT/plain-build-for-testing.txt" 2>&1; echo "exit $?"
+          grep -E "error:|warning: .*test|BUILD (SUCCEEDED|FAILED)|\.xctest" "$OUT/plain-build-for-testing.txt" | head -20
+          find "$OUT/plain/dd2" -name "*.xctest" -maxdepth 6 | head
+          echo "== swift test --package-path Packages/FieldKitCore (no HCG)"
+          swift test --package-path Packages/FieldKitCore > "$OUT/plain-swift-test.txt" 2>&1; echo "exit $?"
+          tail -8 "$OUT/plain-swift-test.txt"
+
+      - name: Genuine compile error — the failure is reported as failed, with the Swift compiler's own error, file and line
+        run: |
+          mkdir -p "$OUT/broken" && cp -R tests/Fixtures/MacXcode/FieldKit "$OUT/broken/FieldKit"
+          # A real defect: a member the package does not have (line 5 of ContentView.swift).
+          sed -i '' 's/private let summary = FieldSummary(readings: \[12.5, 13.0, 11.75\])/private let summary = FieldSummary(readings: [12.5, 13.0, 11.75]).missingMedian/' "$OUT/broken/FieldKit/FieldKit/ContentView.swift"
+          set +e
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac "$OUT/broken/FieldKit" --trust --formats app,zip --out "$OUT/broken-out" > "$OUT/broken.txt" 2>&1
+          code=$?
+          set -e
+          tail -80 "$OUT/broken.txt"
+          [ "$code" = 6 ] || { echo "expected exit code 6 (build failed), got $code"; exit 1; }
+          grep -q "^Result: FAILED" "$OUT/broken.txt"
+          json="$(sed -n 's/^Diagnostics: .* (JSON: \(.*\))$/\1/p' "$OUT/broken.txt" | head -1)"
+          cp "$json" "$OUT/broken-diagnostics.json"; cp "$(dirname "$json")/XCODE-DIAGNOSTICS.md" "$OUT/BROKEN-XCODE-DIAGNOSTICS.md"
+          python3 - "$json" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          assert d["format"] == "hcg.build-diagnostics" and d["status"] == "Failed", d["status"]
+          errs = [i for i in d["issues"] if i["severity"] == "error" and i["category"] == "compiler"]
+          assert errs, d["issues"]
+          e = errs[0]
+          print("Compiler error:", e)
+          assert e["file"].endswith("FieldKit/ContentView.swift") and e["line"] == 5 and "missingMedian" in e["message"], e
+          assert "FieldKit" in d["failedTargets"], d["failedTargets"]
+          assert any("BUILD FAILED" in r for r in d["xcodebuildResults"]), d["xcodebuildResults"]
+          PY
+          ! ls "$OUT/broken-out"/*/FieldKit.app 2>/dev/null || { echo "a failed build left an app"; exit 1; }
+
+      - name: Fixed source — build, run the scheme's tests, archive, package as .app, ZIP, DMG, PKG and XCArchive
+        run: |
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --xcode-mac tests/Fixtures/MacXcode/FieldKit --trust --test \
+            --formats app,zip,dmg,pkg,xcarchive --out "$OUT/ok" 2>&1 | tee "$OUT/ok.txt"
+          grep -q "^Result: SUCCEEDED" "$OUT/ok.txt"
+          grep -q "Tests: FieldKitCoreTests (swift test in Packages/FieldKitCore)" "$OUT/ok.txt"
+          # swift test --filter names its top suite 'Selected tests' (CI run 45741987759), without a filter 'All tests'.
+          grep -qE "Test Suite '(All|Selected) tests' passed" "$OUT/ok.txt"
+          dir="$(dirname "$(sed -n 's/^Artifact: \(.*\.zip\) · .*/\1/p' "$OUT/ok.txt" | head -1)")"
+          echo "OK_DIR=$dir" >> "$GITHUB_ENV"
+          ls -la "$dir"
+
+      - name: Verify the outputs with Apple's tools (independent of HCG)
+        run: |
+          app="$OK_DIR/FieldKit.app"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Contents/Info.plist" | grep -qx org.example.fieldkit
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" | grep -qx 0.3.0
+          lipo -archs "$app/Contents/MacOS/FieldKit"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --entitlements - --xml "$app" | plutil -p - | tee "$OUT/entitlements.txt"
+          grep -q "com.apple.security.app-sandbox" "$OUT/entitlements.txt"
+          codesign -dv "$app" 2>&1 | grep -E "Signature=adhoc|flags=.*runtime"
+          ls "$OK_DIR"/*.zip "$OK_DIR"/*.dmg "$OK_DIR"/*.pkg
+          hdiutil verify "$(ls "$OK_DIR"/*.dmg | head -1)"
+          pkgutil --payload-files "$(ls "$OK_DIR"/*.pkg | head -1)" | grep -q "FieldKit.app/Contents/MacOS/FieldKit"
+          archive_zip="$(ls "$OK_DIR"/*.xcarchive.zip | head -1)"
+          mkdir -p "$OUT/xcarchive" && ditto -x -k "$archive_zip" "$OUT/xcarchive"
+          find "$OUT/xcarchive" -maxdepth 4 -name "FieldKit.app" -path "*Products/Applications*" | grep -q .
+          (cd "$OK_DIR" && shasum -a 256 -c SHA256SUMS.txt)
+          for f in "$OK_DIR"/*.release-passport.json; do
+            python3 -c "import json,sys; p=json.load(open(sys.argv[1])); print(sys.argv[1].split('/')[-1], p['architecture'], p['code_signing']['status'], p['build']['provider'], p['build']['toolchain']); assert p['code_signing']['status']=='ad-hoc' and p['validation']['tests']['result']=='passed', p['validation']" "$f"
+          done
+          test -f "$OK_DIR/SIGNING-DOCTOR.txt" && cat "$OK_DIR/SIGNING-DOCTOR.txt"
+          test -f "$OK_DIR/native-build-result.json" && python3 -c "import json; r=json.load(open('$OK_DIR/native-build-result.json')); print(r['status'], [s['title'] for s in r['steps']]); assert r['status']=='succeeded'"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcode-native-provider-reports
+          path: |
+            ${{ env.OUT }}/*.txt
+            ${{ env.OUT }}/*.json
+            ${{ env.OUT }}/*.md
+            ${{ env.OUT }}/ok/**/*.md
+            ${{ env.OUT }}/ok/**/*.json
+            ${{ env.OUT }}/ok/**/*.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  xcode-macos:
+    name: Native macOS app — Xcode (MotionWallpaper ZIP → .app/ZIP/DMG through the wizard; build and runtime checks)
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 75
+    env:
+      OUT: ${{ github.workspace }}/xcode-out
+      MW_COMMIT: ab038f7598f3542e6ba6b5a39afc46034997f007
+      MW_UPLOAD_SHA256: 58d00ecea44b69745a3f66200d4fae1ae612078a1562ceda44986a1f68eafcbc
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Mac, Xcode and macOS SDK on this runner; choose the newest Xcode 26 for HCG (MotionWallpaper needs the macOS 26 SDK)
+        run: |
+          sw_vers; uname -m
+          ls -d /Applications/Xcode*.app
+          x="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          echo "HCG_XCODE=${x:-/Applications/Xcode.app}" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="${x:-/Applications/Xcode.app}/Contents/Developer" xcodebuild -version
+          DEVELOPER_DIR="${x:-/Applications/Xcode.app}/Contents/Developer" xcrun --sdk macosx --show-sdk-version
+
+      - name: MotionWallpaper source at the pinned commit, checked file by file against the uploaded ZIP's contents
+        run: |
+          mkdir -p "$OUT/screens" "$OUT/src-check"
+          curl -fsSL -o "$OUT/MotionWallpaper-master.zip" "https://github.com/krol44/MotionWallpaper/archive/$MW_COMMIT.zip"
+          echo "Downloaded archive SHA-256: $(shasum -a 256 "$OUT/MotionWallpaper-master.zip" | cut -d' ' -f1) (uploaded ZIP: $MW_UPLOAD_SHA256)"
+          unzip -q "$OUT/MotionWallpaper-master.zip" -d "$OUT/src-check"
+          top="$(ls "$OUT/src-check")"
+          # GitHub names the folder <repo>-<commit>; the uploaded ZIP used MotionWallpaper-master. Same files either way.
+          (cd "$OUT/src-check/$top" && find . -type f | LC_ALL=C sort | sed 's|^\./||' | while read -r f; do shasum -a 256 "$f" | sed "s|  |  MotionWallpaper-master/|"; done) > "$OUT/downloaded.sha256"
+          diff <(awk '{print $1"  "$2}' tests/Fixtures/MacXcode/MotionWallpaper-ab038f7.sha256 | sort -k2) <(sort -k2 "$OUT/downloaded.sha256")
+          echo "All $(wc -l < "$OUT/downloaded.sha256" | xargs) files match the uploaded MotionWallpaper-master.zip"
+          # Re-pack with the uploaded ZIP's enclosing folder name, as a user would import it.
+          mv "$OUT/src-check/$top" "$OUT/src-check/MotionWallpaper-master"
+          (cd "$OUT/src-check" && zip -qry "$OUT/MotionWallpaper-master-import.zip" MotionWallpaper-master)
+
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Cancellation — DeskLoop fixture, cancelled while xcodebuild runs (nothing offered, processes stopped)
+        run: |
+          mkdir -p "$OUT/deskloop" && cp -R tests/Fixtures/MacXcode/DeskLoop "$OUT/deskloop/DeskLoop-main"
+          (cd "$OUT/deskloop" && zip -qry ../DeskLoop-main.zip DeskLoop-main)
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/DeskLoop-main.zip" --xcode-mac --select-xcode "$HCG_XCODE" \
+            --cancel-after-seconds 2 --output "$OUT/cancel" --screenshots "$OUT/screens" --prefix deskloop-cancel
+          # Nothing may keep running. A short query a cancelled xcodebuild had just started (`xcodebuild -sdk … -version
+          # PlatformPath`, re-parented to launchd before it could be killed) may take a moment to end on its own: allow
+          # 10 s, then fail if any xcodebuild is still there.
+          for i in $(seq 1 10); do pgrep -q xcodebuild || break; sleep 1; done
+          ! pgrep -fl xcodebuild || { echo "xcodebuild still running 10 s after cancellation"; exit 1; }
+          ! find "$OUT/cancel" -name INSTALL-COMMAND-WAS-RUN | grep . || { echo "INSTALL.command was run"; exit 1; }
+
+      - name: MotionWallpaper — ZIP import → detection → preflight → Release build (Apple silicon, default) → .app + ZIP + DMG
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/MotionWallpaper-master-import.zip" --xcode-mac --select-xcode "$HCG_XCODE" \
+            --formats app,zip,dmg --expect-bundle-id com.example.MotionWallpaper --expect-version 1.0.5 \
+            --output "$OUT/arm64" --screenshots "$OUT/screens" --prefix motionwallpaper-arm64
+          echo "OUT_ARM64=$(sed -n 4p "$OUT/arm64/motionwallpaper-arm64-artifacts.txt")" >> "$GITHUB_ENV"
+
+      - name: Build verification (Apple's tools, independent of HCG) — Apple silicon build
+        run: bash tools/mac/verify-xcode-app-build.sh "$OUT_ARM64" com.example.MotionWallpaper 1.0.5 26.0 arm64
+
+      - name: Runtime verification on this disposable runner session — launch, import an MP4 through the app, desktop playback
+        run: |
+          zip="$(sed -n 2p "$OUT/arm64/motionwallpaper-arm64-artifacts.txt")"
+          bash tools/mac/verify-motionwallpaper-runtime.sh "$zip" "$OUT/runtime"
+
+      - name: MotionWallpaper — Universal build (arm64 + x86_64), verified with lipo
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$OUT/MotionWallpaper-master-import.zip" --xcode-mac --select-xcode "$HCG_XCODE" \
+            --arch universal --formats app,zip --expect-bundle-id com.example.MotionWallpaper --expect-version 1.0.5 \
+            --output "$OUT/universal" --screenshots "$OUT/screens" --prefix motionwallpaper-universal
+          bash tools/mac/verify-xcode-app-build.sh "$(sed -n 4p "$OUT/universal/motionwallpaper-universal-artifacts.txt")" com.example.MotionWallpaper 1.0.5 26.0 universal
+
+      - name: Collect the downloadable build (ZIP, DMG, checksums, licence, build report — the .app itself travels in the ZIP)
+        if: always()
+        run: |
+          mkdir -p "$OUT/deliver"
+          for d in "${OUT_ARM64:-}" "$(sed -n 4p "$OUT/universal/motionwallpaper-universal-artifacts.txt" 2>/dev/null)"; do
+            [ -n "$d" ] && [ -d "$d" ] || continue
+            sub="$OUT/deliver/$(basename "$d")"; mkdir -p "$sub"
+            find "$d" -maxdepth 1 -type f \( -name "*.zip" -o -name "*.dmg" -o -name "SHA256SUMS.txt" -o -name "LICENSE*" -o -name "BUILD-REPORT.md" -o -name "build-report.json" \) -exec cp {} "$sub/" \;
+          done
+          [ -f "$OUT/runtime/runtime-report.md" ] && cp "$OUT/runtime/runtime-report.md" "$OUT/deliver/RUNTIME-REPORT.md"
+          ls -laR "$OUT/deliver"
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png "$OUT"/runtime/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload the MotionWallpaper build (ZIP, DMG, checksums, licence, reports)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MotionWallpaper-1.0.5-built-by-HCG-Executable-Maker
+          path: ${{ env.OUT }}/deliver
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcode-macos-logs
+          path: |
+            ${{ env.OUT }}/**/*.txt
+            ${{ env.OUT }}/**/*.json
+            ${{ env.OUT }}/**/*.md
+            ${{ env.OUT }}/**/*.log
+            ${{ env.OUT }}/screens/*.jpg
+            ${{ env.OUT }}/runtime/screens/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
   hcg-connect-macos:
     name: HCG Connect — packaged macOS app sign-in, restart persistence, sign-out (MOCK identity server) and Account page states
     needs: test
@@ -1136,6 +1640,52 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  impactor:
+    name: HCG Impactor — real IPA → inspect → sign (codesign, synthetic identity) → verify → devicectl → diagnostics → UI
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Output folder
+        run: echo "OUT=$RUNNER_TEMP/impactor-out" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build HCG Executable Maker and the UI driver
+        run: |
+          dotnet build src/HCG.ExecutableMaker.App -c Release
+          dotnet build tools/ui-driver -c Release
+      # Real Apple tools, synthetic signing assets, no physical device: see the script's header and docs/IMPACTOR.md.
+      - name: HCG Impactor end to end
+        run: tools/ci/impactor-e2e.sh
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*impactor-*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+      - name: Upload HCG Impactor outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: impactor-e2e
+          path: |
+            ${{ runner.temp }}/impactor-out/*.ipa
+            ${{ runner.temp }}/impactor-out/*.txt
+            ${{ runner.temp }}/impactor-out/*.json
+            ${{ runner.temp }}/impactor-out/*.xml
+            ${{ runner.temp }}/impactor-out/reports/**
+            ${{ runner.temp }}/impactor-out/screens/**
+            ${{ runner.temp }}/impactor-out/ui/*.txt
+          if-no-files-found: warn
+          retention-days: 7
+
   hcg-mail-ios:
     name: HCG Mail iOS — Build Doctor (folder import → repository import → MSBuild evaluation) and Simulator build; known-good .NET iOS sample
     needs: test
@@ -1422,6 +1972,63 @@ jobs:
           vtool -show-build "$bin" | grep -E "platform|minos" | tee -a "$OUT/archs.txt"
           plutil -extract CFBundleIdentifier raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx com.hcg.sentinel
           plutil -extract MinimumOSVersion raw "$x/var/jb/Applications/HCGSentinelModern.app/Info.plist" | tee -a "$OUT/archs.txt" | grep -qx 15.0
+      - name: Local build (no CI run) — the same archive through --rootless-deb --local → submission.json, lifecycle (HCG Repo's review runs on Linux, below)
+        env:
+          # HCG Repo already holds 0.1.0~beta1; the review uses a version that exists only in its throwaway copy.
+          LOCAL_VERSION: 0.1.0~beta1.local1
+        run: |
+          archive="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceBuild"])' "$OUT/ui-run/unleashify-unleashify.json")"
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
+            --package "$PKG" --package-version "$LOCAL_VERSION" --name "HCG Sentinel" --description "$DESCRIPTION" --production-access undecided \
+            --device-ios 16.5 --repository F1r3srp3nt/HCG-Sentinel --commit "$SENTINEL_COMMIT" \
+            --local --source-visibility public --host "GitHub-hosted macOS runner (CI test of the local path)" \
+            --out "$OUT/local" | tee "$OUT/local.log"
+          H="$(ls -d "$OUT/local"/*-candidate-handoff)"
+          cat "$H/submission.json"
+          # A local build: no request of Maker's own (HCG Repo's Release Manager writes it), no CI run or artifact anywhere.
+          test ! -e "$H/import-request.toml" && test ! -e "$H/hcg-repo"
+          python3 - "$H/submission.json" "$SENTINEL_COMMIT" <<'EOF'
+          import json, sys
+          m = json.load(open(sys.argv[1]))
+          b = m["build"]
+          assert b["provider"] == "executable-maker-local", b
+          assert not ({"runId", "runUrl", "artifactName", "runRepository"} & set(b)), "a local build must not claim a CI run or artifact"
+          assert b["toolchain"].startswith("Xcode "), b["toolchain"]            # read from the app's DTXcode
+          assert m["source"]["commit"] == sys.argv[2] and m["source"]["dirty"] is False
+          assert m["maintainerScripts"]["declared"] == ["postinst", "postrm"]
+          assert "lifecycle passed" in m["validation"]["lifecycle"]
+          print("submission.json:", b["provider"], b["toolchain"], m["artifact"]["sha256"])
+          EOF
+          grep -q "^Lifecycle: lifecycle passed" "$OUT/local.log"
+          # Same packager: the local path and the CI path give the same bytes for the same input and version.
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --rootless-deb "$archive" \
+            --package "$PKG" --package-version "$LOCAL_VERSION" --name "HCG Sentinel" --description "$DESCRIPTION" --no-handoff --out "$OUT/local-ci" > /dev/null
+          local="$(ls "$H"/*.deb)"
+          cmp "$local" "$(ls "$OUT/local-ci"/*.deb)" || { echo "the local path packaged different bytes"; exit 1; }
+      - name: Real Xcode icon → standard PNG; device-test text is the product's
+        run: |
+          H="$(ls -d "$OUT/local"/*-candidate-handoff)"
+          # 1. icon.png: a PNG any decoder reads (no Apple CgBI chunk, zlib image data), whatever Xcode stored in the app.
+          app_icon="$(find "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deviceBuild"])' "$OUT/ui-run/unleashify-unleashify.json")" -name 'AppIcon*.png' | head -1)"
+          python3 - "$H/icon.png" "$app_icon" "$H/provenance.json" <<'EOF'
+          import json, struct, sys, zlib
+          def chunks(path):
+              b = open(path, "rb").read(); assert b[:8] == b"\x89PNG\r\n\x1a\n", path; i, out = 8, []
+              while i < len(b):
+                  n, t = struct.unpack(">I4s", b[i:i + 8]); out.append((t.decode(), b[i + 8:i + 8 + n])); i += 12 + n
+              return out
+          icon, app = chunks(sys.argv[1]), chunks(sys.argv[2]) if sys.argv[2] else []
+          print("app bundle icon chunks:", [t for t, _ in app][:4], "(Apple CgBI)" if any(t == "CgBI" for t, _ in app) else "(standard)")
+          print("handoff icon.png chunks:", [t for t, _ in icon][:4])
+          assert icon[0][0] == "IHDR" and not any(t == "CgBI" for t, _ in icon), "icon.png is not a standard PNG"
+          w, h = struct.unpack(">II", icon[0][1][:8]); assert w == h and w >= 60, (w, h)
+          zlib.decompress(b"".join(d for t, d in icon if t == "IDAT"))     # standard zlib stream (CgBI would fail here)
+          print("icon:", json.load(open(sys.argv[3]))["icon"]["detail"])
+          EOF
+          # 2. DEVICE-TEST.md uses this product's identifiers and install path.
+          grep -q "uicache -l | grep -i -e com.hcg.sentinel -e sentinel" "$H/DEVICE-TEST.md"
+          grep -q "/var/mobile/hcgsentinel-test-before-dpkg.txt" "$H/DEVICE-TEST.md"
+          grep -q "Installs only \`/var/jb/Applications/HCGSentinelModern.app\`" "$H/DEVICE-TEST.md"
       - name: HCG Repo (cecfcf0) — bin/hcgrepo inspect, then the importer dry run on the exact exported bytes
         run: |
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo"
@@ -1457,6 +2064,7 @@ jobs:
           name: hcg-sentinel-unleashify-handoff
           path: |
             ${{ github.workspace }}/unleashify-out/ui/*-candidate-handoff
+            ${{ github.workspace }}/unleashify-out/local/*-candidate-handoff
             ${{ github.workspace }}/unleashify-out/ui/VALIDATION.txt
             ${{ github.workspace }}/unleashify-out/*.txt
             ${{ github.workspace }}/unleashify-out/*.log
@@ -1468,15 +2076,24 @@ jobs:
           retention-days: 30
 
   unleashify-artifact-roundtrip:
-    name: Unleashify — the uploaded artifact is the manifest's exact bytes; HCG Repo importer dry run on the downloaded .deb
+    name: Unleashify — the uploaded artifact is the manifest's exact bytes; HCG Repo importer dry run and Release Manager (Ship to Repo) on Linux
     needs: unleashify-sentinel
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       DEB_ARTIFACT: hcg-sentinel-unleashify-deb
       HCG_REPO_COMMIT: cecfcf0192250242613fe3095613bed9118cb32a
+      # HCG Repo main with the Executable Maker submission contract (docs/EXECUTABLE_MAKER_SUBMISSION.md) and the
+      # Release Passport v1. Its script-free lifecycle upgrades from the version in pool/, and macOS refuses dpkg's backup
+      # hard links inside an installed .app (see the dpkg sandbox below), so HCG Repo's review runs here, on Linux dpkg.
+      HCG_REPO_V2_COMMIT: 3bf53c7bb2b6e67a2f66f3a7e1490fc0c1f41481
+      PKG: com.hakmicapitalgroup.hcgsentinel
+      OUT: ${{ github.workspace }}/ship-out
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -1491,13 +2108,71 @@ jobs:
       - name: One .deb, with the manifest's SHA-256; importer dry run on the downloaded bytes
         run: |
           ls -la downloaded; [ "$(ls downloaded/*.deb | wc -l)" = 1 ]
-          H="$(find handoff-artifact -maxdepth 3 -type d -name '*-candidate-handoff' | head -1)"; echo "Handoff: $H"
+          H="$(find handoff-artifact -maxdepth 3 -type d -path '*/ui/*-candidate-handoff' | head -1)"; echo "Handoff: $H"
           sha="$(sha256sum downloaded/*.deb | cut -d' ' -f1)"; echo "downloaded sha256 $sha"
           grep -q "^sha256 = \"$sha\"$" "$H/import-request.toml"
           git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git hcg-repo && git -C hcg-repo checkout --quiet "$HCG_REPO_COMMIT"
           PYTHONPATH=hcg-repo/tools python3 tools/unleashify/hcgrepo-dry-run.py --repo hcg-repo --handoff "$H" --deb "$(ls downloaded/*.deb)" --require-genuine-approval | tee dry-run.txt
           grep -q "^RESULT       VALIDATED:" dry-run.txt
           echo "Publication stays manual: after this run succeeds, HCG Repo's maintainer runs bin/hcgrepo import-request (with --dry-run first)."
+      - name: Ship to Repo on HCG Repo main (submission contract, throwaway copy) — the macOS job's local handoff
+        run: |
+          sudo apt-get install -y -qq dpkg > /dev/null
+          dotnet build src/HCG.ExecutableMaker.App -c Release -v q
+          mkdir -p "$OUT"
+          H="$(find "$PWD/handoff-artifact" -maxdepth 3 -type d -path '*local/*-candidate-handoff' | head -1)"; echo "Local handoff: $H"; test -f "$H/submission.json"
+          # 3. submission.json and the Ship to Repo flow with HCG Repo's own Release Manager, on a throwaway copy.
+          git clone --quiet https://github.com/F1r3srp3nt/HCG-repo.git "$OUT/hcg-repo-v2" && git -C "$OUT/hcg-repo-v2" checkout --quiet "$HCG_REPO_V2_COMMIT"
+          python3 -I -c "import json,sys; sys.path.insert(0, sys.argv[1]); from hcgrepo.submission import validate_manifest; p = validate_manifest(json.load(open(sys.argv[2]))); print(p); assert not p" \
+            "$OUT/hcg-repo-v2/tools" "$H/submission.json"
+          cp -R "$OUT/hcg-repo-v2" "$OUT/hcg-repo-ship"; rm -rf "$OUT/hcg-repo-ship/.git"
+          M="dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll"
+          export HCG_REPO_INCOMING="$RUNNER_TEMP/hcg-incoming"
+          $M --ship-to-repo submit --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-submit.txt"
+          grep -q "^State        VALIDATED" "$OUT/ship-submit.txt"
+          # The six levels are shown separately; the script-free lifecycle is not presented as device evidence.
+          grep -q "^  Script-free dpkg lifecycle  *PASSED" "$OUT/ship-submit.txt"
+          grep -q "^  Application launch  *NOT-RECORDED" "$OUT/ship-submit.txt"
+          grep -q "It is not evidence that the maintainer scripts, an installation on a device or the app work" "$OUT/ship-submit.txt"
+          # Maker never approves or prepares (HCG Repo's contract): it refuses, and prints the owner's commands instead.
+          if $M --ship-to-repo approve --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" > "$OUT/ship-approve-refused.txt" 2>&1; then echo "Maker ran an approval"; exit 1; fi
+          grep -q "does not run \`release approve\`" "$OUT/ship-approve-refused.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-status.txt"
+          grep -q "Executable Maker does not run these" "$OUT/ship-status.txt"
+          sha="$(shasum -a 256 < "$(ls "$H"/*.deb)" | cut -d' ' -f1)"
+          # This CI step plays the owner, on a throwaway copy: it runs the printed commands in the checkout itself.
+          approve="$(grep -m1 '^  bin/hcgrepo release approve ' "$OUT/ship-status.txt" | sed 's/^  //')"
+          echo "$approve" | grep -q -- "--sha256 $sha"
+          approve="${approve//<owner>/CI (test, throwaway copy)}"; approve="${approve//<approval, verbatim>/CI test approval of these exact bytes; never published.}"
+          if (cd "$OUT/hcg-repo-ship" && eval "${approve//$sha/$(printf '0%.0s' {1..64})}") > "$OUT/ship-wrong.txt" 2>&1; then echo "HCG Repo approved a wrong SHA-256"; exit 1; fi
+          (cd "$OUT/hcg-repo-ship" && eval "$approve") | tee "$OUT/ship-approve.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-approved.txt"
+          grep -q "^State        APPROVED" "$OUT/ship-approved.txt"
+          prepare="$(grep -m1 '^  bin/hcgrepo release prepare ' "$OUT/ship-approved.txt" | sed 's/^  //')"; prepare="${prepare%%   (*}"
+          prepare="${prepare//"<owner's words>"/CI test only (throwaway copy); not an owner approval.}"
+          (cd "$OUT/hcg-repo-ship" && eval "$prepare") | tee "$OUT/ship-prepare.txt"
+          $M --ship-to-repo status --hcg-repo "$OUT/hcg-repo-ship" --handoff "$H" | tee "$OUT/ship-prepared.txt"
+          grep -q "^State        PREPARED" "$OUT/ship-prepared.txt"
+          # Release Passport v1: the handoff's build half is valid against HCG Repo's own schema and states no repository
+          # signing; once prepared, HCG Repo's passport supplies it, and Maker shows it apart from the code signing.
+          python3 -m pip install -q "jsonschema==4.26.0"
+          python3 -I - "$OUT/hcg-repo-v2/docs/schemas/release-passport-v1.schema.json" "$H/release-passport.json" <<'EOF'
+          import json, sys, jsonschema
+          schema, p = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+          jsonschema.Draft202012Validator(schema).validate(p)
+          assert set(p["repository_signing"]) == {"scope", "status"}, p["repository_signing"]   # no key, no "configured" from the builder
+          assert p["code_signing"]["all_signed"] is True and p["code_signing"]["method_claimed"] == "ldid", p["code_signing"]
+          assert p["approvals"] == [] and p["device_evidence"] == []
+          print("release-passport.json (build half): valid against HCG Repo's schema;", p["code_signing"]["binaries"], "Mach-O, all signed")
+          EOF
+          grep -q "^  Distribution authority:  *HCG Repo (bin/hcgrepo passport), hcg.release-passport v1" "$OUT/ship-prepared.txt"
+          grep -q "^  Repository signing (channel metadata, not the app): " "$OUT/ship-prepared.txt"
+          grep -q "^  Code signing (Mach-O code inside the package): " "$OUT/ship-prepared.txt"
+          grep -q "^  Reconciliation: the build half and HCG Repo's passport agree" "$OUT/ship-prepared.txt"
+          grep -q "^  Repository signing (channel metadata, not the app): not stated: only the distribution authority states it" "$OUT/ship-submit.txt"
+          ls "$OUT/hcg-repo-ship/imports/" | tee "$OUT/ship-imports.txt"; grep -q "^${PKG}_0.1.0-beta1.local1_iphoneos-arm64_${sha:0:12}\.toml$" "$OUT/ship-imports.txt"
+          git -C "$OUT/hcg-repo-v2" status --porcelain | tee "$OUT/hcg-repo-v2-status.txt"; [ ! -s "$OUT/hcg-repo-v2-status.txt" ]   # the real clone is untouched
+
       # On Linux: macOS (26) refuses dpkg's backup hard links inside an installed .app bundle, an artefact of the host, not of the package.
       - name: dpkg sandbox — install, reinstall, remove and purge the downloaded bytes with real dpkg (not a device test)
         run: |
