@@ -2,6 +2,38 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Distribution Studio delivery
+
+### Added
+- **Store contract discovery**: Distribution Studio works with three contracts, chosen from HCG Store's own
+  capabilities and never assumed.
+  - **Deployed contract (drafts and uploads only).** Availability changes are explained; Ship to Store is never
+    disabled.
+  - **HCG Store main's release lifecycle** (`capabilities.operations`):
+    - **Disable** and **Enable** go through HCG Store's endpoints from Maker, with a reason, the typed version, a
+      confirmation and the release revision as `If-Match`;
+    - **Supersede** and **Restore previous version** are publication decisions made in HCG Store's browser review,
+      so Maker opens the release there;
+    - "Make current / supersede" is sent as `supersedePreviousOnPublish` with the draft;
+    - per-target current releases are read and shown.
+  - **The proposed `claude/distribution-studio-api`** contract: recorded requests.
+- **Release management in the diagnostics**: one line saying how this Store lets apps manage releases.
+- `--release-passport --app X.app --file X.app.zip`: the Release Passport build half for an existing macOS app archive.
+  It records the measured SHA-256, size, bundle identity and architectures, the code signing as the Signing Doctor
+  reads it, and the Git source.
+- **CI evidence:**
+  - the macOS package job opens the packaged app on Distribution Studio and captures the window;
+  - it issues the app archive's own Release Passport;
+  - the Distribution Studio job runs on Ubuntu and macOS ARM64, and also against HCG Store main's TEST server (checks
+    M1–M5).
+- **UI acceptance screenshots** for upload progress (mid-upload, with transfer speed) and Add to Listed Product (open
+  draft, and a new revision for a locked release).
+
+### Changed
+- `--store-request` follows the discovered contract. An action the Store offers only in the browser, or not at all,
+  is explained (exit 7) and nothing is changed. A direct change needs `--confirm <version>`.
+- `docs/DISTRIBUTION-STUDIO-PRODUCTION-TEST.md` is now the 10-step MacBook Pro procedure.
+
 ## [Unreleased] — Distribution Studio (Ship to Store)
 
 ### Added

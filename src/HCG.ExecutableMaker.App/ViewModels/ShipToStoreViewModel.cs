@@ -92,10 +92,11 @@ public sealed partial class CatalogueItem(StoreProduct product) : ObservableObje
 }
 
 /// <summary>A release of the selected product (history), with the availability actions HCG Store accepts for it.</summary>
-public sealed record ReleaseItem(StoreRelease Release, bool IsCurrent)
+public sealed record ReleaseItem(StoreRelease Release, bool IsCurrent, StoreContract Contract)
 {
     public string Title => $"{Release.Version} (build {Release.Build})";
-    public StatusTag Status => new(IsCurrent ? "current" : Release.Stage ?? Release.Status, Release.Status switch
+    public StatusTag Status => new(IsCurrent ? "current" : Release.Availability is { } av && av != "available" ? av : Release.Stage ?? Release.Status,
+        Release.Availability is "disabled" or "revoked" ? "error" : Release.Availability == "archived" ? "neutral" : Release.Status switch
     {
         "published" => "success",
         "submitted" or "approved" => "warning",
@@ -107,10 +108,13 @@ public sealed record ReleaseItem(StoreRelease Release, bool IsCurrent)
         $"{Release.Channel ?? "?"} channel{(Release.EditionId is { } e ? " · edition " + e : "")} · {Release.Artifacts.Count(a => a.Status != "removed")} file(s)" +
         (Release.Artifacts.Where(a => a.Status == "verified").Select(a => $"{StoreArtifacts.PlatformName(a.Platform)} {(a.Architectures.Count > 0 ? string.Join("/", a.Architectures) : "")} {a.Format}".Replace("  ", " ")).Distinct().ToList() is { Count: > 0 } ps ? " · " + string.Join(", ", ps) : "") +
         (Release.SupersededBy is { } s ? $" · superseded by {s}" : "") + (Release.WithdrawnReason is { } w ? $" · withdrawn: {w}" : "") +
+        (Release.AvailabilityReason is { } ar ? $" · {Release.Availability}: {ar}" : "") +
+        (Release.Targets.Where(t => t.Current).Select(t => $"{StoreArtifacts.PlatformName(t.Platform)} {t.Arch} {t.Channel}").ToList() is { Count: > 0 } ct ? " · current on " + string.Join(", ", ct) : "") +
+        (Release.SupersedePreviousOnPublish == true ? " · chosen: replace the current release of its targets when published" : "") +
         (Release.PublicationRequest is { } pr ? $" · asks: {(pr.MakeCurrent ? "make current" : "")}{(pr.MakeCurrent && pr.SupersedePrevious != "none" ? ", " : "")}{(pr.SupersedePrevious != "none" ? "supersede " + pr.SupersedePrevious : "")}" : "");
     public string Requests => Release.Requests.Count == 0 ? "" : "Requests: " + string.Join("; ", Release.Requests.Select(r => $"{DistributionStudio.ActionName(r.Action ?? "?")} — {r.Reason} ({DateTimeOffset.FromUnixTimeMilliseconds(r.At).ToLocalTime():yyyy-MM-dd HH:mm})"));
     public bool HasRequests => Release.Requests.Count > 0;
-    public IReadOnlyList<string> Actions => DistributionStudio.AvailabilityActions(Release.Status);
+    public IReadOnlyList<AvailabilityOption> Actions => DistributionStudio.AvailabilityOptions(Release, Contract);
     public bool HasActions => Actions.Count > 0;
     public bool IsOpen => DistributionStudio.OpenStatuses.Contains(Release.Status);
 }
@@ -167,7 +171,7 @@ public sealed partial class ShipToStoreViewModel(
     public StatusTag ConnectionTag => new(Connection, ConnectionTone);
     [ObservableProperty] private string? _connectionDetail;
     public ObservableCollection<ShipCheckItem> Diagnostics { get; } = [];
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasDiagnostics), nameof(CapabilitiesText), nameof(CanRequestPublication), nameof(PublicationRequestNote))] private StoreDiagnosticsReport? _report;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasDiagnostics), nameof(CapabilitiesText), nameof(CanRequestPublication), nameof(PublicationRequestNote), nameof(Contract), nameof(AvailabilityHelp))] private StoreDiagnosticsReport? _report;
     public bool HasDiagnostics => Report is not null;
     /// <summary>The checks stay open when something needs attention; when everything is ready they fold away (one click shows them).</summary>
     [ObservableProperty] private bool _diagnosticsExpanded = true;
@@ -200,8 +204,18 @@ public sealed partial class ShipToStoreViewModel(
     [ObservableProperty] private string? _historyNote;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasTargetRelease), nameof(AvailabilityActions))] private ReleaseItem? _selectedRelease;
     public bool HasTargetRelease => SelectedRelease is not null;
-    public IReadOnlyList<Choice> AvailabilityActions => SelectedRelease?.Actions.Select(a => new Choice(a, DistributionStudio.ActionName(a))).ToList() ?? [];
-    [ObservableProperty] private Choice? _availabilityAction;
+    public IReadOnlyList<AvailabilityOption> AvailabilityActions => SelectedRelease?.Actions ?? [];
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(AvailabilityHelp), nameof(AvailabilityButton))] private AvailabilityOption? _availabilityAction;
+    /// <summary>The HCG Store contract, from its own capability discovery (release lifecycle · requests · drafts and uploads only).</summary>
+    public StoreContract Contract => new(Report?.Flags, Report?.Capabilities?.Operations);
+    public string AvailabilityHelp => AvailabilityAction is { } o ? $"{o.Name}: {o.Explanation}" : Contract.Explanation;
+    public string AvailabilityButton => AvailabilityAction?.Route switch
+    {
+        AvailabilityRoute.Direct => "Apply in HCG Store…",
+        AvailabilityRoute.Browser => "Open in HCG Store to decide",
+        AvailabilityRoute.Request => "Send request",
+        _ => "Explain",
+    };
     [ObservableProperty] private string _requestReason = "";
     [ObservableProperty] private string _requestConfirm = "";
     [ObservableProperty] private string? _requestResult;
@@ -250,8 +264,10 @@ public sealed partial class ShipToStoreViewModel(
     [ObservableProperty] private bool _alsoHcgRepo;
     [ObservableProperty] private bool _makeCurrent;
     [ObservableProperty] private bool _supersedeCompatible;
-    public bool CanRequestPublication => Report?.Flags?.PublicationRequests == true;
-    public string PublicationRequestNote => CanRequestPublication
+    public bool CanRequestPublication => Contract.PublicationChoice;
+    public string PublicationRequestNote => Contract.Lifecycle
+        ? "Prepared with the draft and applied by HCG Store only when a person publishes this release: it then replaces the current release of each platform, architecture and channel it serves. Other targets are untouched, and until publication succeeds the previous release stays current."
+        : CanRequestPublication
         ? "Sent with the draft as a request. HCG Store applies it only when a person publishes this release; the previous release is never disabled before the replacement is published, and other platforms, architectures and channels are kept."
         : "This HCG Store does not take publication requests yet. Ask the person who publishes in HCG Store; nothing changes from here.";
 
@@ -463,7 +479,7 @@ public sealed partial class ShipToStoreViewModel(
             var keep = SelectedRelease?.Release.Id;
             History.Clear();
             var (current, _) = DistributionStudio.CurrentPublished(p, list, SelectedEdition?.Id, null);
-            foreach (var r in list) History.Add(new ReleaseItem(r, r.Id == current?.Id || r.Id == p.CurrentReleaseId));
+            foreach (var r in list) History.Add(new ReleaseItem(r, r.IsCurrentSomewhere || r.Id == current?.Id || r.Id == p.CurrentReleaseId, Contract));
             SelectedRelease = History.FirstOrDefault(h => h.Release.Id == keep);
             HistoryNote = list.Count == 0 ? "HCG Store holds no release of this product yet." : $"{list.Count} release(s) in HCG Store, read {DateTime.Now:HH:mm}.";
         }
@@ -662,6 +678,7 @@ public sealed partial class ShipToStoreViewModel(
         Eligibility = Eligibility?.Value ?? "private",
         Destinations = AlsoHcgRepo && CanUseHcgRepo ? ["hcg-store", "hcg-repo"] : ["hcg-store"],
         PublicationRequest = DistributionStudio.PublicationRequest(MakeCurrent, SupersedeCompatible, Report?.Flags),
+        SupersedePreviousOnPublish = DistributionStudio.SupersedeOnPublish(MakeCurrent, SupersedeCompatible, Contract),
     };
 
     // ───────────── Upload ─────────────
@@ -765,6 +782,7 @@ public sealed partial class ShipToStoreViewModel(
         ReleaseId = r.Id;
         ReviewUrl = r.ReviewUrl;
         ReleaseStatus = $"{r.ProductTitle ?? r.ProductId} {r.Version} (build {r.Build}) · {r.Status}{(r.ApprovedEligibility is { } e ? $" · approved for {e}" : "")}" +
+                        (r.SupersedePreviousOnPublish == true ? " · choice recorded: replace the current release of its targets when published" : "") +
                         (r.PublicationRequest is { } pr ? $" · request recorded: {(pr.MakeCurrent ? "make current" : "")}{(pr.MakeCurrent && pr.SupersedePrevious != "none" ? ", " : "")}{(pr.SupersedePrevious != "none" ? "supersede " + pr.SupersedePrevious + " releases" : "")}" : "");
         CanSubmit = r.Status == "draft" && r.Artifacts.Any(a => a.Status == "verified") && !r.Artifacts.Any(a => a.Status is "awaiting-upload" or "uploading");
     }
@@ -815,24 +833,42 @@ public sealed partial class ShipToStoreViewModel(
     // ───────────── Manage versions ─────────────
 
     /// <summary>
-    /// Sends an availability request (disable, restore, supersede, make current) for the selected release. HCG Store
-    /// records it for the people who approve and publish; it changes nothing itself. The version must be typed to confirm.
+    /// Disable, enable, supersede or restore the selected release, the way this HCG Store offers it: through its own
+    /// availability endpoint (disable, enable), in HCG Store's browser review (supersede, restore: publication decisions),
+    /// as a recorded request (proposed contract), or not at all (explained). Every change needs a reason and the version
+    /// typed to confirm, and HCG Store checks HCG's permission for it.
     /// </summary>
     [RelayCommand]
     private async Task SendAvailabilityRequestAsync()
     {
-        if (SelectedRelease is not { } r || AvailabilityAction is not { } action || Client() is not { } client) { RequestResult = "Choose a release and an action."; return; }
-        if (Report?.Flags?.AvailabilityRequests != true) { RequestResult = "This HCG Store does not take availability requests yet. Ask the person who publishes in HCG Store; nothing was changed."; return; }
-        if (RequestReason.Trim().Length == 0) { RequestResult = "Give a reason; it is shown to the people who decide."; return; }
+        if (SelectedRelease is not { } r || AvailabilityAction is not { } option || Client() is not { } client) { RequestResult = "Choose a release and an action."; return; }
+        if (option.Route == AvailabilityRoute.Unavailable) { RequestResult = option.Explanation + " Nothing was changed."; return; }
+        if (option.Route == AvailabilityRoute.Browser)
+        {
+            RequestResult = option.Explanation + " The release is opened in HCG Store; nothing was changed from Maker.";
+            if (r.Release.ReviewUrl is { } u && !await shell.OpenUrlAsync(u)) await shell.CopyAsync(u);
+            return;
+        }
+        if (RequestReason.Trim().Length == 0) { RequestResult = "Give a reason; it is recorded in HCG Store's audit trail."; return; }
         if (RequestConfirm.Trim() != r.Release.Version) { RequestResult = $"Type the version ({r.Release.Version}) to confirm."; return; }
         try
         {
-            var recorded = await client.RequestAsync(r.Release.Id, action.Value, RequestReason.Trim(), RequestConfirm.Trim());
-            RequestResult = $"{action.Name} requested for {r.Title}. {recorded.Note}";
+            if (option.Route == AvailabilityRoute.Direct)
+            {
+                if (!await dialogs.ConfirmAsync($"{option.Name} {r.Title}?", option.Explanation + $"\n\nReason: {RequestReason.Trim()}", option.Name, destructive: option.Action == "disable")) { RequestResult = "Cancelled; nothing was changed."; return; }
+                var changed = await client.ChangeAvailabilityAsync(r.Release.Id, option.Action, RequestReason.Trim(), RequestConfirm.Trim(), r.Release.Revision);
+                RequestResult = $"{option.Name}: HCG Store now lists {changed.Version} (build {changed.Build}) as {changed.Availability ?? changed.Status}.";
+            }
+            else
+            {
+                var recorded = await client.RequestAsync(r.Release.Id, option.Action, RequestReason.Trim(), RequestConfirm.Trim());
+                RequestResult = $"{option.Name} requested for {r.Title}. {recorded.Note}";
+            }
             RequestReason = ""; RequestConfirm = "";
             await LoadHistoryAsync();
+            await RefreshSyncAsync();
         }
-        catch (HcgStoreException ex) { RequestResult = $"Not recorded: {ex.Message}"; }
+        catch (HcgStoreException ex) { RequestResult = $"Not changed: {ex.Message}"; }
     }
 
     // ───────────── Synchronization Center ─────────────

@@ -3,6 +3,7 @@
              xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
              xmlns:c="using:HCG.ExecutableMaker.App.Controls"
              xmlns:st="using:HCG.ExecutableMaker.Account.Store"
+             xmlns:dist="using:HCG.ExecutableMaker.BuildEngine.Distribution"
              x:Class="HCG.ExecutableMaker.App.Views.Pages.ShipToStoreView"
              x:DataType="vm:ShipToStoreViewModel">
   <UserControl.Styles>
@@ -229,19 +230,20 @@
           <!-- Add to listed product -->
           <Border Classes="callout" IsVisible="{Binding IsAddToListed}"><TextBlock FontSize="12.5" Text="{Binding AdditionPlan}" TextWrapping="Wrap" /></Border>
 
-          <!-- Manage versions: recorded availability requests (explicit confirmation) -->
+          <!-- Manage versions: disable, enable, supersede, restore — as this HCG Store offers them (explicit confirmation) -->
           <StackPanel Spacing="8" IsVisible="{Binding IsManageVersions}">
-            <TextBlock Classes="formlabel" Text="AVAILABILITY REQUEST FOR THE SELECTED RELEASE" />
-            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="Disable, restore, supersede or make current are recorded in HCG Store for the people who approve and publish. Nothing changes until they act. Other platforms, architectures and channels are not touched, and no file is deleted." />
-            <Grid ColumnDefinitions="200,12,*,12,160">
+            <TextBlock Classes="formlabel" Text="MANAGE THE SELECTED VERSION" />
+            <Border Classes="callout"><TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding AvailabilityHelp}" /></Border>
+            <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="A working public release is never disabled before its replacement is published. Other platforms, architectures and channels are not touched, and no file is deleted. HCG Store checks HCG's permission for every change." />
+            <Grid ColumnDefinitions="260,12,*,12,160">
               <ComboBox ItemsSource="{Binding AvailabilityActions}" SelectedItem="{Binding AvailabilityAction}" HorizontalAlignment="Stretch" PlaceholderText="Action" IsEnabled="{Binding HasTargetRelease}">
-                <ComboBox.ItemTemplate><DataTemplate x:DataType="vm:Choice"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
+                <ComboBox.ItemTemplate><DataTemplate x:DataType="dist:AvailabilityOption"><TextBlock Text="{Binding Name}" /></DataTemplate></ComboBox.ItemTemplate>
               </ComboBox>
-              <TextBox Grid.Column="2" Text="{Binding RequestReason}" Watermark="Reason (shown to the people who decide)" />
+              <TextBox Grid.Column="2" Text="{Binding RequestReason}" Watermark="Reason (recorded in HCG Store's audit trail)" />
               <TextBox Grid.Column="4" Text="{Binding RequestConfirm}" Watermark="Type the version" />
             </Grid>
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="Send request" Command="{Binding SendAvailabilityRequestCommand}" IsEnabled="{Binding HasTargetRelease}" />
+              <Button Content="{Binding AvailabilityButton}" Command="{Binding SendAvailabilityRequestCommand}" IsEnabled="{Binding HasTargetRelease}" />
               <Button Classes="ghost" Content="Open release in HCG Store" Command="{Binding OpenReviewCommand}" IsEnabled="{Binding HasTargetRelease}" />
             </StackPanel>
             <TextBlock FontSize="12.5" Text="{Binding RequestResult}" TextWrapping="Wrap" />

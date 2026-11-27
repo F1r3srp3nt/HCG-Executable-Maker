@@ -84,7 +84,23 @@ internal static partial class Program
             ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-compare");
             ShotAt("5 · RELEASE CONFIGURATION", "studio-release-configuration");
             ShotAt("6 · ARTIFACTS (SEVERAL FILES PER DRAFT; NO REBUILD)", "studio-artifacts");
-            await page.ShipCommand.ExecuteAsync(null);
+            var shipping = page.ShipCommand.ExecuteAsync(null);
+            // Upload progress, caught while the bytes are moving (the TEST Store is slowed down for this).
+            var caught = false;
+            for (var i = 0; i < 600 && !shipping.IsCompleted; i++)
+            {
+                if (page.Files.Any(f => f.Progress is > 0 and < 100))
+                {
+                    await Task.Delay(400);
+                    foreach (var f in page.Files) Log($"In progress {f.FileName}: {f.Progress:0}% · {f.State} · {f.Speed}");
+                    ShotAt("7 · UPLOAD TO PRIVATE STAGING", "studio-upload-progress");
+                    caught = true;
+                    break;
+                }
+                await Task.Delay(50);
+            }
+            await shipping;
+            Check(caught, "Upload progress and transfer speed were shown while uploading");
             foreach (var f in page.Files) Log($"Upload {f.FileName}: {f.State} · {f.Detail}");
             Log($"Release: {page.ReleaseStatus} · {page.ReviewUrl}");
             Log(page.ReleaseManagerStage ?? "");
@@ -98,7 +114,23 @@ internal static partial class Program
             Check(page.Sync.First(g => g.Group.Key == "drafts").Group.Count >= 1 && page.Sync.First(g => g.Group.Key == "uploaded").Group.Count == page.Files.Count, "Synchronization Center: from HCG Store's answers (drafts listed, uploaded files verified)");
             ShotAt("8 · SYNCHRONIZATION CENTER", "studio-sync");
 
-            // Manage versions: the history with availability requests (typed confirmation).
+            // Add to Listed Product: the uploaded draft takes another platform's files; a submitted or published release
+            // would get a new revision instead.
+            page.IsAddToListed = true;
+            await page.LoadHistoryCommand.ExecuteAsync(null);
+            page.SelectedRelease = page.History.FirstOrDefault(h => h.Release.Id == page.ReleaseId) ?? page.History.FirstOrDefault();
+            Log("Add to listed product: " + page.AdditionPlan);
+            Check(page.AdditionPlan?.Length > 0, "Add to Listed Product explains how the platform is added");
+            ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-add-to-listed");
+            if (page.History.FirstOrDefault(h => !h.IsOpen || h.Release.Status != "draft") is { } locked)
+            {
+                page.SelectedRelease = locked;
+                Log("Add to listed product (locked release): " + page.AdditionPlan);
+                Check(page.AdditionPlan?.Contains("cannot change", StringComparison.Ordinal) == true, "A submitted or published release is never changed: a new revision is prepared");
+                ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-add-to-listed-revision");
+            }
+
+            // Manage versions: the history with availability changes as this Store offers them (typed confirmation).
             page.IsManageVersions = true;
             await page.LoadHistoryCommand.ExecuteAsync(null);
             page.SelectedRelease = page.History.FirstOrDefault(h => h.HasActions) ?? page.History.FirstOrDefault();
@@ -112,7 +144,8 @@ internal static partial class Program
                 page.RequestConfirm = target.Release.Version;
                 await page.SendAvailabilityRequestCommand.ExecuteAsync(null);
                 Log("Request: " + page.RequestResult);
-                Check(page.RequestResult?.Contains("Nothing changed", StringComparison.Ordinal) == true, "The request is recorded in HCG Store and changes nothing");
+                Check(page.RequestResult?.Contains("Nothing changed", StringComparison.Ordinal) == true || page.RequestResult?.Contains("nothing was changed", StringComparison.OrdinalIgnoreCase) == true || page.RequestResult?.Contains("HCG Store now lists", StringComparison.Ordinal) == true,
+                    "The availability change goes through HCG Store as it offers it (request, browser decision or its own endpoint)");
             }
             ShotAt("4 · RELEASE HISTORY AND VERSIONS", "studio-versions");
 

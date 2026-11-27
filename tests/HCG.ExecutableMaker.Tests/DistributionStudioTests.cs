@@ -235,3 +235,88 @@ public sealed class DistributionStudioClientTests
         Assert.Contains("\"confirm\":\"1.0.0\"", h.Sent);
     }
 }
+
+/// <summary>Version management follows the HCG Store contract it discovers: Store main's release lifecycle, the proposed
+/// recorded requests, or the deployed contract (explained, never a disabled Ship to Store).</summary>
+public sealed class StoreContractTests
+{
+    private static readonly StoreOperations MainOps = new()
+    {
+        Prepare = ["products.list", "releases.create"],
+        Review = ["releases.approve (browser)", "releases.publish (browser)", "releases.supersede (browser)", "releases.restore (browser)", "releases.revoke (browser)"],
+        Availability = ["releases.disable", "releases.enable", "releases.archive", "releases.withdraw"],
+        Sync = ["manager", "changes"],
+    };
+
+    private static StoreRelease R(string status, string? availability = "available", long? published = 1) =>
+        new() { Id = "rel-1", ProductId = "p", Version = "1.0.0", Build = "1", Status = status, Availability = availability, PublishedAt = published };
+
+    [Fact]
+    public void Store_main_disables_and_enables_from_Maker_and_supersedes_or_restores_in_the_browser()
+    {
+        var c = new StoreContract(new StoreCapabilityFlags(), MainOps);
+        Assert.True(c.Lifecycle);
+        Assert.True(c.PublicationChoice);
+        var published = DistributionStudio.AvailabilityOptions(R("published"), c);
+        Assert.Equal(AvailabilityRoute.Direct, published.Single(o => o.Action == "disable").Route);
+        Assert.Equal(AvailabilityRoute.Browser, published.Single(o => o.Action == "supersede").Route);
+        Assert.Equal(AvailabilityRoute.Browser, published.Single(o => o.Action == "restore").Route);
+        var superseded = DistributionStudio.AvailabilityOptions(R("superseded"), c);
+        Assert.Equal(AvailabilityRoute.Browser, superseded.Single(o => o.Action == "restore").Route);
+        Assert.DoesNotContain(superseded, o => o.Action == "supersede");
+        var disabledDraft = DistributionStudio.AvailabilityOptions(R("draft", "disabled", null), c);
+        Assert.Equal(AvailabilityRoute.Direct, disabledDraft.Single(o => o.Action == "enable").Route);
+        Assert.DoesNotContain(DistributionStudio.AvailabilityOptions(R("published", "revoked"), c), o => o.Action is "restore" or "enable");
+        Assert.True(DistributionStudio.SupersedeOnPublish(true, false, c));
+        Assert.Null(DistributionStudio.SupersedeOnPublish(false, false, c));
+    }
+
+    [Fact]
+    public void The_proposed_contract_records_requests_and_the_deployed_contract_explains_without_changing_anything()
+    {
+        var requests = new StoreContract(new StoreCapabilityFlags { AvailabilityRequests = true, PublicationRequests = true }, null);
+        Assert.True(requests.Requests);
+        Assert.All(DistributionStudio.AvailabilityOptions(R("published"), requests), o => Assert.Equal(AvailabilityRoute.Request, o.Route));
+        Assert.Null(DistributionStudio.SupersedeOnPublish(true, true, requests));
+
+        var deployed = new StoreContract(new StoreCapabilityFlags { Uploads = true }, null);
+        Assert.False(deployed.Lifecycle || deployed.Requests || deployed.PublicationChoice);
+        var options = DistributionStudio.AvailabilityOptions(R("published"), deployed);
+        Assert.Equal(["disable", "supersede", "restore"], options.Select(o => o.Action));
+        Assert.All(options, o => Assert.Equal(AvailabilityRoute.Unavailable, o.Route));
+        Assert.Contains("private drafts and uploads work", deployed.Explanation);
+    }
+
+    [Fact]
+    public void The_current_release_is_the_one_HCG_Store_marks_current_on_a_target_and_disabled_releases_are_not_current()
+    {
+        StoreRelease P(string id, string v, long at, bool current, string availability = "available") => new()
+        {
+            Id = id, ProductId = "p", Version = v, Build = id, Status = "published", Channel = "stable", PublishedAt = at, Availability = availability,
+            Targets = [new StoreReleaseTarget("windows", "x64", "stable") { Current = current }],
+        };
+        var (cur, basis) = DistributionStudio.CurrentPublished(null, [P("b", "2.0.0", 20, false), P("a", "1.0.0", 10, true)], null, "stable");
+        Assert.Equal(("a", "current-target"), (cur?.Id, basis));
+        var (none, _) = DistributionStudio.CurrentPublished(null, [P("c", "3.0.0", 30, false, "disabled")], null, "stable");
+        Assert.Null(none);
+    }
+
+    [Fact]
+    public async Task An_availability_change_sends_the_revision_as_If_Match()
+    {
+        string? ifMatch = null, path = null;
+        var h = new Lambda(r => { ifMatch = r.Headers.TryGetValues("If-Match", out var v) ? v.Single() : null; path = r.RequestUri!.AbsolutePath;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("""{"id":"rel-1","productId":"p","version":"1.0.0","build":"1","status":"published","availability":"disabled"}""", System.Text.Encoding.UTF8, "application/json") }; });
+        var client = new HcgStoreClient(new HttpClient(h), new Uri("https://store.test/"), _ => Task.FromResult<string?>("t"));
+        var r = await client.ChangeAvailabilityAsync("rel-1", "disable", "Crash", "1.0.0", 7);
+        Assert.Equal("\"7\"", ifMatch);
+        Assert.Equal("/api/v1/publishing/releases/rel-1/disable", path);
+        Assert.Equal("disabled", r.Availability);
+        await Assert.ThrowsAsync<ArgumentException>(() => client.ChangeAvailabilityAsync("rel-1", "revoke", "x", "1.0.0", 1));
+    }
+
+    private sealed class Lambda(Func<HttpRequestMessage, HttpResponseMessage> f) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct) => Task.FromResult(f(r));
+    }
+}

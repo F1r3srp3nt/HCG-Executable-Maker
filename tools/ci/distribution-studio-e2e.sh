@@ -6,10 +6,13 @@
 # approval and publication are simulated only through the TEST server's control endpoint (standing in for HCG Store's
 # website). Nothing is deployed, no real HCG system is contacted, and Maker publishes nothing.
 #
-# Usage: tools/ci/distribution-studio-e2e.sh <HCG Store web-hcg-store dir> <out dir> [HCGExecutableMaker.dll]
+# Usage: tools/ci/distribution-studio-e2e.sh <HCG Store web-hcg-store dir> <out dir> [HCGExecutableMaker.dll] [<HCG Store main web-hcg-store dir>]
+# With the fourth argument, the same Maker build is also run against HCG Store main's TEST server (its release
+# lifecycle contract: availability endpoints, browser-only supersede/restore, per-target current releases).
 set -u
 STORE_DIR="$(cd "$1" && pwd)"; OUT="$(mkdir -p "$2" && cd "$2" && pwd)"
 MAKER="${3:-src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll}"
+STORE_MAIN_DIR="${4:-}"
 RESULTS="$OUT/results.txt"; : > "$RESULTS"
 fail=0
 ok()  { echo "PASS  $1" | tee -a "$RESULTS"; }
@@ -37,14 +40,14 @@ pkg() {   # $1 rid, $2 arch, $3 version, $4 build
 }
 V1=1.0.0; V2=2.0.0; VB=1.1.0-beta.1
 Z1=$(pkg win-x64 x64 $V1 1); Z1A=$(pkg win-arm64 arm64 $V1 2); Z2=$(pkg win-x64 x64 $V2 3); ZB=$(pkg win-x64 x64 $VB 4)
-sha() { sha256sum "$1" | cut -c1-64; }
+sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-64; }
 check "0 Genuine executables built and packaged by Executable Maker with Release Passports: $(for z in "$Z1" "$Z1A" "$Z2" "$ZB"; do printf '%s ' "$(basename "$z")"; done)" \
   'for z in "$Z1" "$Z1A" "$Z2" "$ZB"; do [ -s "$z" ] && [ -s "$z.release-passport.json" ] && unzip -p "$z" "*MailProbe.exe" | head -c 2 | grep -q MZ && [ "$(jq -r .artifact.sha256 "$z.release-passport.json")" = "$(sha "$z")" ] || exit 1; done'
 
 # ── TEST Store helpers ──
-start_store() {   # $1 = publishing mode, $2 = info file
+start_store() {   # $1 = publishing mode, $2 = info file [, $3 = Store dir]
   rm -f "$2"
-  (cd "$STORE_DIR" && SHIP_E2E_CATALOGUE=real SHIP_E2E_PUBLISHING="$1" DROP_CHUNK="${DROP_CHUNK:-0}" SLOW_UPLOAD_MS="${SLOW_UPLOAD_MS:-0}" npx tsx server/test/ship-e2e-server.ts "$2" > "$OUT/server-$1.log" 2>&1) &
+  (cd "${3:-$STORE_DIR}" && SHIP_E2E_CATALOGUE=real SHIP_E2E_PUBLISHING="$1" DROP_CHUNK="${DROP_CHUNK:-0}" SLOW_UPLOAD_MS="${SLOW_UPLOAD_MS:-0}" npx tsx server/test/ship-e2e-server.ts "$2" > "$OUT/server-$1.log" 2>&1) &
   for _ in $(seq 1 120); do [ -s "$2" ] && break; sleep 0.5; done
   STORE=$(jq -r .storeOrigin "$2"); ISS=$(jq -r .issuer "$2"); CTL=$(jq -r .control "$2"); CLIENT=$(jq -r .makerClientId "$2")
 }
@@ -177,7 +180,7 @@ check "16 Unauthorised: an account without store.publish is refused (exit $rc; d
 pkill -f "ship-e2e-server.ts $INFO" 2>/dev/null; sleep 1; WHO=e2e-alice
 
 # ════════ 17 · TEST Store in "uploads" mode (as production): publication off, authorised private uploads work ════════
-UP="$OUT/store-uploads.json"; start_store uploads "$UP"
+UP="$OUT/store-uploads.json"; SLOW_UPLOAD_MS=400 start_store uploads "$UP"
 SHIP=(--ship-to-store --sign-in --store "$STORE" --product hcg-mail --edition windows-desktop --distribution free)
 maker_home "$UP" alice
 ctl grant '{"sub":"e2e-alice","central":"store.publish"}' >/dev/null
@@ -207,6 +210,51 @@ OFF="$OUT/store-off.json"; start_store disabled "$OFF"
 maker_home "$OFF" alice; ctl grant '{"sub":"e2e-alice","central":"store.publish"}' >/dev/null; sign_in_as e2e-alice
 M --ship-to-store --store-status --sign-in --store "$STORE" > "$OUT/diag-off.txt" 2>&1; rc=$?
 check "Publishing disabled on the server: named in the diagnostics with who fixes it (exit $rc)" '[ $rc = 5 ] && grep -q "\[Problem\] Publishing mode" "$OUT/diag-off.txt" && grep -q "HCG_STORE_PUBLISHING=uploads" "$OUT/diag-off.txt"'
+
+# ════════ HCG Store main (the authoritative release lifecycle contract), when given ════════
+if [ -n "$STORE_MAIN_DIR" ]; then
+  pkill -f "ship-e2e-server.ts $OFF" 2>/dev/null; sleep 1
+  MI="$OUT/store-main.json"; start_store enabled "$MI" "$(cd "$STORE_MAIN_DIR" && pwd)"
+  echo "TEST Store (HCG Store main) $STORE · publishing enabled" | tee -a "$RESULTS"
+  SHIP=(--ship-to-store --sign-in --store "$STORE" --product hcg-mail --edition windows-desktop --distribution free)
+  WHO=e2e-alice; maker_home "$MI" alice
+  ctl grant '{"sub":"e2e-alice","central":"store.publish"}' >/dev/null
+  ctl grant '{"sub":"e2e-bob","central":"store.release.approve"}' >/dev/null
+  ctl grant '{"sub":"e2e-bob","central":"store.release.publish"}' >/dev/null
+  M --ship-to-store --store-status --sign-in --store "$STORE" --diagnostics-out "$OUT/main-diag.txt" > /dev/null 2>&1; rc=$?
+  M "${SHIP[@]}" --store-catalogue > "$OUT/main-catalogue.txt" 2>&1; rcc=$?
+  check "M1 Store main: diagnostics ready (exit $rc), its release lifecycle discovered from capabilities; catalogue listed with summaries from the public release resolution (exit $rcc)" \
+    '[ $rc = 0 ] && grep -q "Release management: HCG Store release lifecycle" "$OUT/main-diag.txt" && [ $rcc = 0 ] && grep -q "^- HCG Mail \[hcg-mail\]" "$OUT/main-catalogue.txt" && grep -q "public release resolution" "$OUT/main-catalogue.txt"'
+  M "${SHIP[@]}" --release-version $V1 --build-number 1 --channel stable --eligibility public --note "v1" --file "$Z1" --submit > "$OUT/main-ship-1.log" 2>&1; rc1=$?
+  M1R=$(rel_of "$OUT/main-ship-1.log")
+  ctl approve "{\"releaseId\":\"$M1R\",\"eligibility\":\"public\",\"confirm\":\"$V1\",\"approver\":\"e2e-bob\"}" >/dev/null
+  ctl publish "{\"releaseId\":\"$M1R\",\"confirm\":\"$V1\",\"publisher\":\"e2e-bob\"}" > "$OUT/main-publish-1.json"
+  M "${SHIP[@]}" --release-version $V2 --build-number 3 --channel stable --eligibility public --note "v2" --file "$Z2" --make-current --submit > "$OUT/main-ship-2.log" 2>&1; rc2=$?
+  M2R=$(rel_of "$OUT/main-ship-2.log")
+  check "M2 Store main: private upload verified (exit $rc1), $V1 published by a person; $V2 carries the draft-time choice to replace the current release of its targets (exit $rc2)" \
+    '[ $rc1 = 0 ] && grep -q ": verified · SHA-256 $(sha "$Z1")" "$OUT/main-ship-1.log" && [ "$(jq -r .result.status "$OUT/main-publish-1.json")" = published ] && [ $rc2 = 0 ] && grep -q "Publication choice recorded" "$OUT/main-ship-2.log"'
+  ctl publish "{\"releaseId\":\"$M2R\",\"confirm\":\"$V2\",\"publisher\":\"e2e-bob\"}" > "$OUT/main-publish-2-early.json"
+  M "${SHIP[@]}" --store-history > "$OUT/main-history-1.txt" 2>&1
+  check "M3 Store main: publishing $V2 before approval fails ($(jq -r .result.error.code "$OUT/main-publish-2-early.json")) and $V1 stays published and current" \
+    '[ "$(jq -r .result.error.code "$OUT/main-publish-2-early.json")" = not_approved ] && grep -q "^- $M1R $V1 build 1 · stable · published (.*· current" "$OUT/main-history-1.txt"'
+  ctl approve "{\"releaseId\":\"$M2R\",\"eligibility\":\"public\",\"confirm\":\"$V2\",\"approver\":\"e2e-bob\"}" >/dev/null
+  # The publisher confirms the replacement prepared with the draft (Store main's TEST control always sends an explicit
+  # supersede choice, as its browser review does).
+  ctl publish "{\"releaseId\":\"$M2R\",\"confirm\":\"$V2\",\"publisher\":\"e2e-bob\",\"supersede\":true}" > "$OUT/main-publish-2.json"
+  M "${SHIP[@]}" --store-history > "$OUT/main-history-2.txt" 2>&1
+  check "M4 Store main: after approval, publication by a person (confirming the replacement prepared with the draft) makes $V2 current on its target and supersedes $V1 (kept with its file)" \
+    '[ "$(jq -r .result.status "$OUT/main-publish-2.json")" = published ] && grep -q "^- $M2R $V2 build 3 · stable · published (.*· current" "$OUT/main-history-2.txt" && grep -A2 "^- $M1R " "$OUT/main-history-2.txt" | grep -q "MailProbe-$V1-win-x64.zip"'
+  M "${SHIP[@]}" --store-request restore --release "$M1R" --reason "Roll back" --confirm $V1 > "$OUT/main-restore.log" 2>&1; rcr=$?
+  M "${SHIP[@]}" --store-request disable --release "$M1R" --reason "Old build" --confirm wrong > "$OUT/main-disable-wrong.log" 2>&1; rcw=$?
+  M "${SHIP[@]}" --release-version $VB --build-number 4 --channel beta --eligibility private --note "beta draft" --file "$ZB" > "$OUT/main-ship-b.log" 2>&1
+  MBR=$(rel_of "$OUT/main-ship-b.log")
+  M "${SHIP[@]}" --store-request disable --release "$MBR" --reason "Not needed" --confirm $VB > "$OUT/main-disable.log" 2>&1; rcd=$?
+  M "${SHIP[@]}" --store-request enable --release "$MBR" --reason "Needed again" --confirm $VB > "$OUT/main-enable.log" 2>&1; rce=$?
+  M "${SHIP[@]}" --store-history > "$OUT/main-history-3.txt" 2>&1
+  check "M5 Store main version management: restore is a browser decision (explained, nothing changed, exit $rcr); a wrong typed version is refused (exit $rcw); disable (exit $rcd) and enable (exit $rce) go through HCG Store's own endpoints; $V2 stays current" \
+    '[ $rcr = 7 ] && grep -q "browser review" "$OUT/main-restore.log" && [ $rcw != 0 ] && grep -qi "confirm" "$OUT/main-disable-wrong.log" && [ $rcd = 0 ] && grep -q "as disabled" "$OUT/main-disable.log" && [ $rce = 0 ] && grep -q "as available" "$OUT/main-enable.log" && grep -q "^- $M2R $V2 build 3 · stable · published (.*· current" "$OUT/main-history-3.txt"'
+  sed 's/^/    /' "$OUT/main-history-3.txt" | grep -E "^    - " >> "$RESULTS"
+fi
 
 echo; [ $fail = 0 ] && echo "ALL PASSED" | tee -a "$RESULTS" || echo "SOME FAILED" | tee -a "$RESULTS"
 exit $fail

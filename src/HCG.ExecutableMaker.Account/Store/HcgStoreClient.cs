@@ -117,6 +117,16 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
     public Task<StoreRequestRecorded> RequestAsync(string releaseId, string action, string reason, string confirmVersion, CancellationToken ct = default) =>
         SendAsync<StoreRequestRecorded>(HttpMethod.Post, $"api/v1/publishing/releases/{Uri.EscapeDataString(releaseId)}/requests", new { action, reason, confirm = confirmVersion }, ct);
 
+    /// <summary>
+    /// Changes a release's availability through HCG Store's own endpoint (<c>disable</c> · <c>enable</c> · <c>archive</c>),
+    /// offered when the Store lists the operation. HCG Store checks HCG's permission for it; the revision the person saw
+    /// is sent as If-Match, so a release another client changed meanwhile is refused (409 revision_conflict).
+    /// </summary>
+    public Task<StoreRelease> ChangeAvailabilityAsync(string releaseId, string action, string reason, string confirmVersion, long? revision, CancellationToken ct = default) =>
+        action is "disable" or "enable" or "archive"
+            ? SendAsync<StoreRelease>(HttpMethod.Post, $"api/v1/publishing/releases/{Uri.EscapeDataString(releaseId)}/{action}", new { reason, confirm = confirmVersion }, ct, ifMatch: revision)
+            : throw new ArgumentException($"{action} is not an availability change an app may make.", nameof(action));
+
     /// <summary>The Store's public release resolution for a product (no sign-in; contains no download URLs).</summary>
     public async Task<StoreResolution?> ResolutionAsync(string productId, CancellationToken ct = default)
     {
@@ -237,7 +247,7 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
 
     // ───────────── HTTP ─────────────
 
-    private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct, bool accept422 = false)
+    private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct, bool accept422 = false, long? ifMatch = null)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -246,6 +256,7 @@ public sealed class HcgStoreClient(HttpClient http, Uri storeOrigin, Func<Cancel
             using var request = new HttpRequestMessage(method, new Uri(Origin, path));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             if (body is not null) request.Content = JsonContent.Create(body, body.GetType(), options: Json);
+            if (ifMatch is { } rev) request.Headers.TryAddWithoutValidation("If-Match", $"\"{rev}\"");
             HttpResponseMessage response;
             try { response = await http.SendAsync(request, ct).ConfigureAwait(false); }
             catch (HttpRequestException ex)
@@ -406,6 +417,20 @@ public sealed record StoreCapabilities
     public string? PublishingMode { get; init; }
     public StoreCapabilityFlags? Capabilities { get; init; }
     public bool OffersEnabled { get; init; }
+    /// <summary>The release operations this Store's API offers (HCG Store main, "Control Center"); null on older Stores.</summary>
+    public StoreOperations? Operations { get; init; }
+}
+
+/// <summary>HCG Store's own list of release operations (prepare · review · availability · sync). "(browser)" marks an
+/// operation a person performs in HCG Store's browser review, never from an app.</summary>
+public sealed record StoreOperations
+{
+    public IReadOnlyList<string> Prepare { get; init; } = [];
+    public IReadOnlyList<string> Review { get; init; } = [];
+    public IReadOnlyList<string> Availability { get; init; } = [];
+    public IReadOnlyList<string> Sync { get; init; } = [];
+    public bool Offers(string op) => Prepare.Concat(Availability).Concat(Sync).Contains(op);
+    public bool InBrowser(string op) => Review.Contains(op + " (browser)");
 }
 
 /// <summary>Independent switches HCG Store reports. A flag a Store does not send stays false: nothing is assumed.</summary>
@@ -533,6 +558,9 @@ public sealed record StoreReleaseRequest
     public IReadOnlyList<string> Destinations { get; init; } = ["hcg-store"];
     /// <summary>Sent only to Stores with the publicationRequests capability (older Stores refuse unknown fields).</summary>
     public StorePublicationRequest? PublicationRequest { get; init; }
+    /// <summary>HCG Store main's draft-time choice: once published, replace the current release of each target this release
+    /// serves. Sent only to a Store that lists its operations (older Stores refuse unknown fields).</summary>
+    public bool? SupersedePreviousOnPublish { get; init; }
 }
 
 public sealed record StoreCompatibility
@@ -606,6 +634,22 @@ public sealed record StoreRelease
     public string? SupersededBy { get; init; }
     public StorePublicationRequest? PublicationRequest { get; init; }
     public IReadOnlyList<StoreReleaseRequestEntry> Requests { get; init; } = [];
+    /// <summary>available · disabled · archived · revoked (HCG Store main; null on older Stores).</summary>
+    public string? Availability { get; init; }
+    public string? AvailabilityReason { get; init; }
+    /// <summary>The release's revision, sent back as If-Match with a change.</summary>
+    public long? Revision { get; init; }
+    public bool? SupersedePreviousOnPublish { get; init; }
+    /// <summary>The distribution targets (platform, architecture, channel) this release serves, and whether it is current there.</summary>
+    public IReadOnlyList<StoreReleaseTarget> Targets { get; init; } = [];
+    public bool IsCurrentSomewhere => Targets.Any(t => t.Current);
+}
+
+public sealed record StoreReleaseTarget(string Platform, string Arch, string? Channel)
+{
+    public string? EditionId { get; init; }
+    public bool Current { get; init; }
+    public string? CurrentRelease { get; init; }
 }
 
 public sealed record StoreArtifact
@@ -665,6 +709,8 @@ public sealed record StoreManagedRelease
     public string? SupersededBy { get; init; }
     public StorePublicationRequest? PublicationRequest { get; init; }
     public IReadOnlyList<StoreReleaseRequestEntry> Requests { get; init; } = [];
+    public string? Availability { get; init; }
+    public IReadOnlyList<StoreReleaseTarget> Targets { get; init; } = [];
 }
 internal sealed record StoreChunkResult(long Received, long Size);
 

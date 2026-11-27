@@ -84,6 +84,7 @@ public sealed record StoreDiagnosticsReport(Uri Origin, DateTimeOffset CheckedAt
         if (Health is { } h) sb.AppendLine($"Store server: status {h.Status}, mode {h.Mode}, publishing {h.Publishing ?? "not stated"}, HCG Connect {h.HcgConnect}, payments {h.Payments}, protected downloads {h.ProtectedDownloads}");
         if (Capabilities is { } c0) sb.AppendLine($"Publishing API v{c0.ApiVersion} (Maker speaks v{StoreConnectionDiagnostics.ClientApiVersion}); approval and publication: {c0.ApprovalAndPublication ?? "not stated"}");
         if (Flags is { } f0) sb.AppendLine("Capabilities: " + StoreConnectionDiagnostics.FlagsText(f0));
+        sb.AppendLine("Release management: " + StoreConnectionDiagnostics.OperationsText(Capabilities?.Operations, Flags));
         sb.AppendLine();
         foreach (var c in Checks)
         {
@@ -127,6 +128,14 @@ public static class StoreConnectionDiagnostics
         Add(f.SupersedeCompatible, "compatible supersede"); Add(f.Withdraw, "withdraw");
         return on.Count == 0 ? "none stated" : string.Join(", ", on);
     }
+
+    /// <summary>How this Store lets apps manage releases, from its own answers (never assumed).</summary>
+    public static string OperationsText(StoreOperations? ops, StoreCapabilityFlags? flags) =>
+        ops is { } o && (o.Availability.Count > 0 || o.Review.Count > 0)
+            ? $"HCG Store release lifecycle — from apps: {string.Join(", ", o.Availability)}; in HCG Store's browser review: {string.Join(", ", o.Review.Select(r => r.Replace(" (browser)", "")))}"
+            : flags?.AvailabilityRequests == true
+                ? "recorded requests (disable, restore, supersede, make current) for the people who approve and publish"
+                : "not offered to apps by this Store (drafts and uploads only); disable, supersede and restore happen in HCG Store's Release Manager";
 
     public static async Task<StoreDiagnosticsReport> RunAsync(HcgStoreClient client, StoreDiagnosticsContext ctx, Func<CancellationToken, Task<string?>> accessToken, TimeProvider? time = null, CancellationToken ct = default)
     {
@@ -193,7 +202,7 @@ public static class StoreConnectionDiagnostics
         checks.Add(!isStore ? Skipped("api", "Live API version", reachable ? "the address is not an HCG Store server" : "the server did not answer")
             : caps is { } cv
                 ? cv.ApiVersion == ClientApiVersion
-                    ? new("api", "Live API version", StoreCheckState.Passed, $"Publishing API v{cv.ApiVersion} (Maker speaks v{ClientApiVersion}). Capabilities: {(cv.Capabilities is { } cf ? FlagsText(cf) : "none stated (an older HCG Store)")}.", null, capsProbe!.Line)
+                    ? new("api", "Live API version", StoreCheckState.Passed, $"Publishing API v{cv.ApiVersion} (Maker speaks v{ClientApiVersion}). Capabilities: {(cv.Capabilities is { } cf ? FlagsText(cf) : "none stated (an older HCG Store)")}. Release management: {OperationsText(cv.Operations, cv.Capabilities)}.", null, capsProbe!.Line)
                     : new("api", "Live API version", StoreCheckState.Failed, $"HCG Store speaks publishing API v{cv.ApiVersion}; this Maker speaks v{ClientApiVersion}.",
                         cv.ApiVersion > ClientApiVersion ? "Update HCG Executable Maker." : "The HCG Store server is older than this Maker.", capsProbe!.Line, cv.ApiVersion > ClientApiVersion ? "you" : "HCG Store administrator")
                 : disabledByServer && whoProbe is not null

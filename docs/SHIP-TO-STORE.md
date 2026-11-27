@@ -171,10 +171,21 @@ no access is granted.
 draft takes the files; a submitted, approved or published release is never changed, so a new revision is prepared
 (same version, next build) and the earlier release keeps every file.
 
-**Manage Existing Versions**: disable, restore, supersede and make current are **requests** recorded in HCG Store for
-the people who approve and publish (`POST /publishing/releases/:id/requests`, typed version to confirm). They change
-nothing by themselves. Supersede happens only at publication, in the same transaction, so a failed publication
-supersedes nothing; "compatible" scope keeps other platforms, architectures and channels; files are never deleted.
+**Manage Existing Versions** (Disable, Enable, Supersede, Restore previous version) follows the contract HCG Store
+states in its capabilities. HCG Store is the authoritative backend:
+
+| HCG Store | How Maker offers it |
+|---|---|
+| **main — release lifecycle** (`capabilities.operations`) | **Disable** and **Enable** (unpublished) through `POST /publishing/releases/:id/disable` and `/enable`, with a reason, the typed version, a confirmation dialog and `If-Match: "<revision>"`; HCG Store checks HCG's permission. **Supersede**, **Restore** and re-enabling a published release are publication decisions made in HCG Store's browser review: Maker explains this and opens the release there. "Make current / supersede" on a draft is sent as `supersedePreviousOnPublish`. |
+| **proposed** `claude/distribution-studio-api` | Recorded requests (`POST …/requests`, typed version) for the people who approve and publish. |
+| **deployed today** (drafts and uploads only) | Each action is listed and explained ("done in HCG Store's Release Manager"); nothing is sent. Uploads and drafts work as usual. |
+
+In every case:
+
+- supersede happens only at publication, in the same transaction, so a failed publication supersedes nothing;
+- other platforms, architectures and channels are kept;
+- files are never deleted;
+- a working public release is never disabled before its replacement is published.
 
 **HCG UEM readiness**: the diagnostics include this device's description (OS, architecture, Maker version) marked
 "reported, not attested". Maker is not a device trust authority; uploads do not depend on HCG UEM. When HCG issues

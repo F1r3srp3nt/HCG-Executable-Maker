@@ -268,6 +268,27 @@ jobs:
           kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
           j="$X/screens/release-app-window.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-window.png" --out "$j" >/dev/null
           echo "=====BEGIN-IMG release-app-window.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
+          # The same packaged app opened on Ship to Store (Distribution Studio), signed out: it contacts no Store and uploads nothing.
+          HCG_EXECUTABLE_MAKER_HOME="$X/home-ship" "$EXE" --page ship > "$X/app-ship.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 60); do
+            if "$X/window-of-pid" $PID > "$X/windows-ship.txt" 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$X/app-ship.log"; exit 1; fi
+            sleep 2
+          done
+          check "Distribution Studio window on screen: $(head -1 "$X/windows-ship.txt" 2>/dev/null)" 'test -s "$X/windows-ship.txt"'
+          sleep 8
+          screencapture -x -o -l "$(head -1 "$X/windows-ship.txt" | cut -d' ' -f1)" "$X/screens/release-app-distribution-studio.png"
+          check "still running on Distribution Studio" 'kill -0 $PID'
+          kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
+          j="$X/screens/release-app-distribution-studio.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-distribution-studio.png" --out "$j" >/dev/null
+          echo "=====BEGIN-IMG release-app-distribution-studio.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
+          # The packaged app issues the Release Passport (build half) of its own archive: measured facts only.
+          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --app "$APP" --file "$ZIP" --source-repo "$GITHUB_WORKSPACE" \
+            --provider github-actions --toolchain ".NET SDK $(dotnet --version); HCG Executable Maker $VERSION"
+          check "Release Passport of $(basename "$ZIP") names its exact SHA-256" '[ "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"artifact\"][\"sha256\"])" "$ZIP.release-passport.json")" = "$(shasum -a 256 "$ZIP" | cut -c1-64)" ]'
+          cp -R "$X/screens" "$D/screens-macos"
+          echo "=====BEGIN-PASSPORT====="; cat "$ZIP.release-passport.json"; echo "=====END-PASSPORT====="
 
       - name: Build manifest, checksums and installation instructions
         shell: bash
@@ -289,10 +310,14 @@ jobs:
           retention-days: 14
 
   distribution-studio:
-    name: Distribution Studio acceptance 1–18 (TEST HCG Store, real catalogue, genuine executables, resumable upload, passports, supersede, uploads mode)
+    name: Distribution Studio acceptance 1–18 + HCG Store main contract (${{ matrix.os }}; TEST HCG Store, real catalogue, genuine executables)
     needs: test
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
     env:
       # HCG Store's Distribution Studio additions (store branch claude/distribution-studio-api, proposed in
       # docs/PUBLISHING.md for founder review; not merged or deployed there). Switch to main once HCG Store merges it.
@@ -304,6 +329,11 @@ jobs:
           repository: F1r3srp3nt/store
           ref: ${{ env.STORE_REF }}
           path: hcg-store
+      - uses: actions/checkout@v7
+        with:
+          repository: F1r3srp3nt/store
+          ref: main
+          path: hcg-store-main
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
@@ -311,16 +341,18 @@ jobs:
         with:
           node-version: "22"
       - name: HCG Store (TEST) dependencies
-        run: cd hcg-store/web-hcg-store && npm ci --no-audit --no-fund
+        run: |
+          cd hcg-store/web-hcg-store && npm ci --no-audit --no-fund
+          cd "$GITHUB_WORKSPACE/hcg-store-main/web-hcg-store" && npm ci --no-audit --no-fund
       - name: Build HCG Executable Maker and the headless UI driver
         run: dotnet build src/HCG.ExecutableMaker.App -c Release && dotnet build tools/ui-driver -c Release
       - name: Acceptance 1–18 against the TEST HCG Store (Maker never publishes; a person's browser approval is simulated by the TEST server)
-        run: tools/ci/distribution-studio-e2e.sh hcg-store/web-hcg-store "$RUNNER_TEMP/studio"
+        run: tools/ci/distribution-studio-e2e.sh hcg-store/web-hcg-store "$RUNNER_TEMP/studio" src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll hcg-store-main/web-hcg-store
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: distribution-studio-evidence
+          name: distribution-studio-evidence-${{ matrix.os }}
           path: |
             ${{ runner.temp }}/studio/*.txt
             ${{ runner.temp }}/studio/*.log

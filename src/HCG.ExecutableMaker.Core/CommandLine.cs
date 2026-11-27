@@ -13,7 +13,7 @@ public static class CommandLine
     /// <summary>The headless commands, in the order they are matched.</summary>
     public static readonly IReadOnlyList<string> Commands =
     [
-        "--toolchain-report", "--ship-to-store", "--ship-to-repo", "--rootless-deb", "--rootless-deb-validate", "--xcode-mac",
+        "--toolchain-report", "--ship-to-store", "--release-passport", "--ship-to-repo", "--rootless-deb", "--rootless-deb-validate", "--xcode-mac",
         "--package-windows", "--windows-signing-doctor", "--authenticode-sign", "--mac-signing-doctor", "--impactor", "--hcg-session",
     ];
 

@@ -1,100 +1,57 @@
-# Distribution Studio — controlled production test on the MacBook Pro
+# Distribution Studio — physical production test (MacBook Pro)
 
-A step-by-step physical test of Distribution Studio (the **Ship to Store** sidebar entry) against production HCG Store
-(`https://store.hakmicapitalgroup.com`) on the owner's MacBook Pro (Apple silicon). It uploads **one private draft**
-and stops there. Nothing is approved, published, made current, superseded or disabled, and no download link is
-created for anyone.
+One private draft on production HCG Store (`https://store.hakmicapitalgroup.com`). Nothing is submitted, approved,
+published, made current, superseded or disabled. Never paste a password, token or key anywhere: HCG Connect signs you
+in in the browser, and Maker's diagnostics are redacted.
 
-**Never** paste a password, token or key into a chat, a ticket or this document. Sign-in happens in the browser
-(HCG Connect, PKCE); Maker never asks for the password. The diagnostics and logs Maker produces are redacted.
+## Before you start
 
-## 0 · What production states today (checked from the cloud, signed out, 26 Nov 2026)
+- **The app.** From the CI run of the commit on `main`, job **Package (macos)**, artifact `hcg-executable-maker-macos`:
+  `HCG-Executable-Maker-<version>-osx-arm64.app.zip`, its `.release-passport.json`, and `SHA256SUMS-macos.txt`.
+  1. Check the archive with `shasum -a 256 HCG-Executable-Maker-*-osx-arm64.app.zip`; it must equal the line in
+     `SHA256SUMS-macos.txt` and `artifact.sha256` in the passport.
+  2. Unzip it, move **HCG Executable Maker.app** to Applications, and open it with right-click → Open. The app is
+     ad hoc signed, not notarized.
+  3. **Settings → About** shows the version and commit.
+- **A genuine file.** A Windows `.exe` or `.zip` you are allowed to distribute, ideally with its
+  `<file>.release-passport.json` next to it (e.g. from HCG Mail's Windows packaging run).
 
-| Fact | Live answer |
+## The 10 steps
+
+| # | Do | Expect |
+|---|---|---|
+| 1 | Click **Ship to Store** in the sidebar. | **Distribution Studio** opens with the HCG logo. "Sign in required": nothing is contacted or uploaded. |
+| 2 | **Account → Sign in with HCG**. Sign in in the browser, then return to Ship to Store and press **Check connection**. | Ten checks. On today's production all are **OK** except **Public publication: Off** (mode `uploads`). **Executable Maker client authorization** names client `fb9b6edf-2bfc-4b5e-a354-dbb1af697029`. Press **Copy diagnostics** and keep the text. |
+| 3 | Look at **Products you may manage**; press **Refresh**; search "mail". | The products HCG authorises for your account, as HCG Store lists them. Icons and categories appear only where the Store sends them (the deployed Store sends none yet; initials are shown instead). |
+| 4 | Select **HCG Mail** (or another listed product), edition **Windows**. | **Release history** shows what HCG Store holds for it. |
+| 5 | Operation **Add New Update**. | The note says the current release stays available until a replacement is published. |
+| 6 | **Artifacts → Choose files…**, then pick the `.exe` or `.zip`. | The file is listed as **Selected manually** (or **Maker build** when taken from Build History). |
+| 7 | Check the file card. Type version and build, channel **Beta**, a release note, eligibility **Private**. Leave **Make current / Supersede** unticked. | The card shows platform, architecture, size, SHA-256 (compare with `shasum -a 256 <file>`), signing and the Release Passport line. Version comparison shows no **Blocked** line. Any discrepancy with the passport is listed and goes into the draft's notes. |
+| 8 | Press **Upload private draft**. | Progress with transfer speed, then "Verified by HCG Store: SHA-256 … matches" (and "Release Passport attached" if one was next to the file). Status `draft`, with a **Release Manager** line for the same release ID. |
+| 9 | Press **Open in Store Release Manager**. | The browser opens `…/publishing/releases/<id>`: the same release, same ID, same files and checksum. |
+| 10 | **Synchronization Center → Refresh**. | **Private drafts 1**, **Uploaded and verified 1**, **Upload failures 0**. It is read from HCG Store's Release Manager, not assumed. |
+
+**Stop at step 2** if any check except Public publication is not OK, and send the copied diagnostics:
+
+| Check not OK | Who fixes it |
 |---|---|
-| `GET /api/v1/health` | `status ok`, `mode production`, `hcgConnect configured`, `entitlementAuthority hcg-ecosystem`, `payments disabled`, `protectedDownloads disabled`, **`publishing uploads`** |
-| Publishing routes signed out | `401 sign_in_required` (expected) |
-| Public release resolution for `hcg-mail` | name, summary, status `testing`, platforms; **no releases**; no download URLs |
-| Distribution Studio Store additions (metadata, publication and availability requests) | **not deployed** (HCG Store branch `claude/distribution-studio-api`). Maker detects this and does not send them |
+| Publishing mode | an HCG Store administrator |
+| client authorization | an HCG Store administrator adds Maker's client to `HCG_STORE_PUBLISHING_CLIENT_IDS`; the client ID itself never changes |
+| Central publisher permission | HCG grants `store.publish` |
 
-## 1 · Preparation
+Do **not** press **Submit for review**. To remove the test draft afterwards, withdraw it in HCG Store's Release Manager
+in the browser. The command line can do the same: `--ship-to-store --release <id> --withdraw "Production test draft"`.
 
-1. Install the Maker build to test, from the CI run of the commit on `main` (job **Package (macos)**, artifact
-   `hcg-executable-maker-macos`, file `HCG-Executable-Maker-<version>-osx-arm64.app.zip`; check it against
-   `SHA256SUMS-macos.txt`), or build it: `dotnet publish src/HCG.ExecutableMaker.App -c Release -r osx-arm64`.
-   The app is not notarized; open it with right-click → Open the first time.
-2. Confirm the build: **Settings → About** shows the version and commit. Keep the commit in your notes.
-3. Have a genuine artifact ready: e.g. the Windows x64 ZIP of HCG Mail from its Windows packaging run, or any
-   Maker-built file with its `*.release-passport.json` next to it. Do not use a file you are not allowed to distribute.
+## Version management on this Store
 
-## 2 · Sign-in and diagnostics (no upload)
+Distribution Studio reads what the Store allows from its own capabilities. It does not assume anything, and Ship to
+Store is never switched off because of it:
 
-1. **Account → Sign in with HCG**. The browser opens HCG Connect; sign in there. Back in Maker the Account page shows
-   your account. The client is Maker's own production client `fb9b6edf-2bfc-4b5e-a354-dbb1af697029`
-   (`hcg-executable-maker-desktop-production`); it is built in and is not changed.
-2. **Ship to Store** (opens Distribution Studio). Confirm that opening the page did not upload anything (every file
-   list is empty, no progress bars).
-3. **Check connection**. Expected with today's production:
+| Store | Disable / Enable | Supersede / Restore | Draft-time "replace current" |
+|---|---|---|---|
+| Deployed today (`uploads`, no lifecycle operations) | explained: done in HCG Store's Release Manager | explained: done in HCG Store's Release Manager | not offered (explained) |
+| HCG Store main (release lifecycle) | from Maker, through HCG Store's endpoint (reason + typed version + confirmation; HCG's permission checked by the Store) | in HCG Store's browser review, by a person with the publication permission (Maker opens the release there) | recorded with the draft; applied only when a person publishes |
+| Proposed `claude/distribution-studio-api` | recorded request | recorded request | recorded request |
 
-   | Check | Expected | If not |
-   |---|---|---|
-   | Server availability | OK | network, DNS or TLS — the line says which |
-   | Live API version | OK, v1 (capabilities listed) | Not checked / Warning: the permission is missing (see below) |
-   | Publishing mode | OK — `uploads` | `disabled`: an HCG Store administrator sets `HCG_STORE_PUBLISHING=uploads` |
-   | Private upload availability | OK | follows the mode and the permission |
-   | HCG Connect authentication | OK | sign in again |
-   | Executable Maker client authorization | OK | "HCG Store does not accept Maker's client": the Store administrator adds `fb9b6edf-…` to `HCG_STORE_PUBLISHING_CLIENT_IDS` (the client ID itself stays) |
-   | Central publisher permission | OK — `store.publish` | HCG grants `store.publish` on `hcg.store` to this account |
-   | Authorized catalogue | OK, with HCG Mail and the other products | follows the permission |
-   | Release Manager connectivity | OK, audit trail intact | the line shows the server's answer |
-   | Public publication | **Off** | expected in `uploads` mode |
-
-4. **Copy diagnostics** and keep the text. Check that it contains no `eyJ…`, `Bearer`, `refresh_token` or cookie.
-5. Command-line equivalent (optional, from Terminal):
-   `/Applications/HCG\ Executable\ Maker.app/Contents/MacOS/HCGExecutableMaker --ship-to-store --store-status --diagnostics-out ~/Desktop/store-diagnostics.txt`
-   (exit 0 ready, 5 not ready, 4 unreachable).
-
-**Stop here** if any check other than Public publication is not OK, and send the copied diagnostics.
-
-## 3 · Catalogue and history (read only)
-
-1. In **Products you may manage**, search "mail", try the status and platform filters, press **Refresh**.
-2. Select **HCG Mail**, edition **Windows**. Release history shows what HCG Store holds (today: no release).
-3. Note what the catalogue shows. On today's production, icons and categories may be missing: the deployed Store does
-   not send them yet. Maker shows initials instead and never invents them.
-
-## 4 · One private upload (the only change made)
-
-1. Operation **Add New Update**.
-2. Release configuration: version and build of the artifact (e.g. `0.1.0`, build `1`), channel **Beta**, a release
-   note, distribution as HCG decided, eligibility **Private**. Leave **Make current** and **Supersede** unticked. On
-   today's Store they are disabled anyway ("This HCG Store does not take publication requests yet").
-3. Artifacts: **Choose files…** (or **Latest build** / **Build History** for a Maker build). Check platform,
-   architecture, SHA-256, signing and the Release Passport line. The file is labelled **Maker build** or **Selected
-   manually**.
-4. Version comparison: no **Blocked** line. Discrepancies, if any, are listed and will be recorded in the draft.
-5. **Upload private draft**. Watch the progress and the transfer speed. Optional interruption test: switch Wi-Fi off
-   for a few seconds during a large upload, then press **Upload private draft** again: it continues the same draft
-   and resumes at the byte HCG Store confirmed.
-6. Expected: "Verified by HCG Store: SHA-256 … matches", "Release Passport attached" (when a passport is next to the
-   file), release status `draft`, and a Release Manager line for the same release.
-7. **Open in Store Release Manager**: the browser shows the same release (same ID) on HCG Store's website, signed in.
-8. **Synchronization Center → Refresh**: Private drafts 1, Uploaded and verified 1, no failures.
-
-Do **not** press **Submit for review** unless the founder asks for the next step. Submission locks the draft and
-waits for an approver. In `uploads` mode approval is off anyway.
-
-## 5 · Clean-up and evidence
-
-- Keep: the copied diagnostics, a screenshot of each section, the release ID and the review URL.
-- To remove the test draft: in HCG Store's Release Manager (browser), withdraw it with a reason. Or ask Maker's
-  command line: `--ship-to-store --release <id> --withdraw "Production test draft"`. Withdrawing a private draft
-  affects nothing public.
-- Nothing else was changed: no release published, made current, superseded or disabled, no download offered.
-
-## What this test cannot show today
-
-Approval, publication, make current, supersede and availability requests need HCG Store's `enabled` mode and the
-Distribution Studio additions (branch `claude/distribution-studio-api`). Both are the founder's decision and are not
-in production. They were verified against the TEST Store (`tools/ci/distribution-studio-e2e.sh`, acceptance tests
-1–18).
+A working public release is never disabled before its replacement is published: the replacement takes over only in
+the same step as its publication, and only on its own platform, architecture and channel.

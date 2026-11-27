@@ -81,13 +81,40 @@ internal static class ShipToStoreCommand
             Console.WriteLine($"Publishing mode {who.PublishingMode ?? "not stated"}; capabilities: {(flags is null ? "none stated" : StoreConnectionDiagnostics.FlagsText(flags))}");
             if (args.Contains("--store-catalogue")) return Catalogue(client, flags);
             if (args.Contains("--store-history")) return History(client, Arg("--product") ?? throw new ArgumentException("--store-history needs --product"));
+            StoreOperations? ops = null;
+            try { ops = client.CapabilitiesAsync().GetAwaiter().GetResult().Operations; } catch (HcgStoreException) { }
+            var contract = new StoreContract(flags, ops);
+            Console.WriteLine($"Release management: {StoreConnectionDiagnostics.OperationsText(ops, flags)}");
             if (Arg("--store-request") is { } action)
             {
-                var recorded = client.RequestAsync(Arg("--release") ?? throw new ArgumentException("--store-request needs --release"), action,
-                    Arg("--reason") ?? throw new ArgumentException("--store-request needs --reason"), Arg("--confirm") ?? throw new ArgumentException("--store-request needs --confirm <version>")).GetAwaiter().GetResult();
-                Console.WriteLine($"Request recorded: {recorded.Recorded}. {recorded.Note}");
-                foreach (var q in recorded.Requests) Console.WriteLine($"  {q.Action}: {q.Reason} (release was {q.Status}, via {q.Via})");
-                return recorded.Recorded ? 0 : 1;
+                var rid = Arg("--release") ?? throw new ArgumentException("--store-request needs --release");
+                var reason0 = Arg("--reason") ?? throw new ArgumentException("--store-request needs --reason");
+                var confirm = Arg("--confirm") ?? throw new ArgumentException("--store-request needs --confirm <version>");
+                var target = client.ReleaseAsync(rid).GetAwaiter().GetResult();
+                var option = DistributionStudio.AvailabilityOptions(target, contract).FirstOrDefault(o => o.Action == action || (action == "make-current" && o.Action == "supersede"));
+                if (option is null)
+                {
+                    Console.WriteLine($"{DistributionStudio.ActionName(action)} is not offered for {target.Version} (build {target.Build}, {target.Status}{(target.Availability is { } av ? ", " + av : "")}) on this HCG Store. {contract.Explanation} Nothing was changed.");
+                    return 7;
+                }
+                switch (option.Route)
+                {
+                    case AvailabilityRoute.Unavailable:
+                    case AvailabilityRoute.Browser:
+                        Console.WriteLine($"{option.Name}: {option.Explanation} Open {target.ReviewUrl} to decide there. Nothing was changed from Maker.");
+                        return 7;
+                    case AvailabilityRoute.Direct:
+                        // HCG Store checks the permission; Maker also requires the version typed to confirm every change.
+                        if (confirm != target.Version) { Console.Error.WriteLine($"Type the version ({target.Version}) to confirm with --confirm. Nothing was changed."); return 2; }
+                        var changed = client.ChangeAvailabilityAsync(rid, option.Action, reason0, confirm, target.Revision).GetAwaiter().GetResult();
+                        Console.WriteLine($"{option.Name}: HCG Store lists {changed.Version} (build {changed.Build}) as {changed.Availability ?? changed.Status}.");
+                        return 0;
+                    default:
+                        var recorded = client.RequestAsync(rid, option.Action, reason0, confirm).GetAwaiter().GetResult();
+                        Console.WriteLine($"Request recorded: {recorded.Recorded}. {recorded.Note}");
+                        foreach (var q in recorded.Requests) Console.WriteLine($"  {q.Action}: {q.Reason} (release was {q.Status}, via {q.Via})");
+                        return recorded.Recorded ? 0 : 1;
+                }
             }
             if (Arg("--withdraw") is { } reason)
             {
@@ -164,10 +191,11 @@ internal static class ShipToStoreCommand
                 Distribution = Arg("--distribution") ?? "paid", Eligibility = Arg("--eligibility") ?? "private",
                 Destinations = args.Contains("--hcg-repo") ? ["hcg-store", "hcg-repo"] : ["hcg-store"],
                 PublicationRequest = DistributionStudio.PublicationRequest(args.Contains("--make-current"), args.Contains("--supersede-compatible"), flags),
+                SupersedePreviousOnPublish = DistributionStudio.SupersedeOnPublish(args.Contains("--make-current"), args.Contains("--supersede-compatible"), contract),
             };
             if (manifest is null && Compare(client, product, history, request.EditionId, request.Channel, request.Version, request.Build, files) is { Blocked: true } && continueRelease is null)
                 return 6;
-            if ((args.Contains("--make-current") || args.Contains("--supersede-compatible")) && request.PublicationRequest is null)
+            if ((args.Contains("--make-current") || args.Contains("--supersede-compatible")) && request.PublicationRequest is null && request.SupersedePreviousOnPublish is null)
                 Console.WriteLine("Publication request: this HCG Store does not take publication requests; nothing was asked. Ask the publisher in HCG Store.");
             var meters = new Dictionary<string, (DateTime At, long Bytes)>();
             var result = new ShipToStoreService(client, features).ShipAsync(request, files, continueRelease,
@@ -187,6 +215,7 @@ internal static class ShipToStoreCommand
             if (result.ContinuedExistingDraft) Console.WriteLine($"Continued the existing draft {r.Id} (same version, build and details): no second release was created.");
             Console.WriteLine($"Release {r.Id}: {r.ProductTitle ?? r.ProductId} {r.Version} build {r.Build} — {r.Status}; requested {r.RequestedEligibility}; distribution {r.Distribution}");
             if (r.PublicationRequest is { } pr) Console.WriteLine($"Publication request recorded: make current {pr.MakeCurrent}, supersede {pr.SupersedePrevious} (applied only when a person publishes in HCG Store).");
+            if (r.SupersedePreviousOnPublish == true) Console.WriteLine("Publication choice recorded: when a person publishes it, it replaces the current release of each target it serves (other targets untouched).");
             foreach (var a in r.Artifacts) Console.WriteLine($"  {a.FileName}: {a.Status} · SHA-256 {a.Sha256 ?? a.DeclaredSha256}" +
                                                              (a.Kind is null ? "" : $" · {StoreArtifacts.KindName(a.Kind)}{(a.KindCheckedByStore ? " (checked by HCG Store)" : "")}") +
                                                              (a.Readiness is { } rd ? $"\n    HCG Store: {rd.Label}" : ""));
@@ -253,7 +282,7 @@ internal static class ShipToStoreCommand
         Console.WriteLine($"History of {productId}: {h.Count} release(s)");
         foreach (var r in h)
         {
-            Console.WriteLine($"- {r.Id} {r.Version} build {r.Build} · {r.Channel} · {r.Status} ({r.Stage}){(r.SupersededBy is { } s ? " · superseded by " + s : "")}{(r.WithdrawnReason is { } w ? " · withdrawn: " + w : "")}");
+            Console.WriteLine($"- {r.Id} {r.Version} build {r.Build} · {r.Channel} · {r.Status} ({r.Stage}){(r.Availability is { } av && av != "available" ? " · " + av : "")}{(r.IsCurrentSomewhere ? " · current" : "")}{(r.SupersededBy is { } s ? " · superseded by " + s : "")}{(r.WithdrawnReason is { } w ? " · withdrawn: " + w : "")}");
             foreach (var a in r.Artifacts.Where(a => a.Status != "removed")) Console.WriteLine($"    {a.FileName}: {a.Platform} {string.Join("/", a.Architectures)} {a.Format} · {a.Status} · SHA-256 {a.Sha256 ?? a.DeclaredSha256}");
             if (r.PublicationRequest is { } pr) Console.WriteLine($"    publication request: make current {pr.MakeCurrent}, supersede {pr.SupersedePrevious}");
             foreach (var q in r.Requests) Console.WriteLine($"    request: {q.Action} — {q.Reason}");

@@ -26,6 +26,9 @@ internal static class Program
         // `HCGExecutableMaker --ship-to-store …`: upload a release to HCG Store as a private draft (see ShipToStoreCommand).
         if (args.Contains("--ship-to-store"))
             return ShipToStoreCommand.Run(args);
+        // `HCGExecutableMaker --release-passport --app X.app --file X.app.zip …`: the build half for an existing macOS app archive.
+        if (args.Contains("--release-passport"))
+            return ReleasePassportCommand.Run(args);
         // `HCGExecutableMaker --ship-to-repo submit|show|approve|prepare …`: HCG Repo's Candidate Release Manager for a handoff (see RootlessDebCommand).
         if (args.Contains("--ship-to-repo"))
             return RootlessDebCommand.ShipToRepoCli(args);

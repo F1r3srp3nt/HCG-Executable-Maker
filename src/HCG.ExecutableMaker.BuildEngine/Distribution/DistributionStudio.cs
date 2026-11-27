@@ -49,6 +49,39 @@ public sealed record VersionComparison
 public sealed record AdditionPlan(bool AddsToOpenDraft, string? ReleaseId, string Version, string Build, string Explanation);
 
 /// <summary>One line of the Synchronization Center, from HCG Store's own answers (never assumed).</summary>
+/// <summary>How an availability change is made on this Store.</summary>
+public enum AvailabilityRoute
+{
+    /// <summary>Through HCG Store's own endpoint from Maker (HCG Store checks the permission and the typed version).</summary>
+    Direct,
+    /// <summary>A publication decision made by a person in HCG Store's browser review; Maker opens the release there.</summary>
+    Browser,
+    /// <summary>Recorded as a request for the people who approve and publish (proposed Store contract).</summary>
+    Request,
+    /// <summary>Not offered by this Store; explained, nothing is sent.</summary>
+    Unavailable,
+}
+
+public sealed record AvailabilityOption(string Action, string Name, AvailabilityRoute Route, string Explanation);
+
+/// <summary>
+/// Which HCG Store publishing contract answers, from its own capability discovery: the release lifecycle of HCG Store
+/// main (operations listed in capabilities), the proposed Distribution Studio requests (capability flags), or the
+/// deployed contract (drafts and uploads only). Nothing is assumed: a Store that states neither gets neither.
+/// </summary>
+public sealed record StoreContract(StoreCapabilityFlags? Flags, StoreOperations? Operations)
+{
+    public bool Lifecycle => Operations is not null && (Operations.Availability.Count > 0 || Operations.Review.Count > 0);
+    public bool Requests => !Lifecycle && Flags?.AvailabilityRequests == true;
+    public bool PublicationChoice => Lifecycle || Flags?.PublicationRequests == true;
+    public string Name => Lifecycle ? "HCG Store release lifecycle" : Requests ? "Distribution Studio requests (proposed)" : "drafts and uploads only";
+    public string Explanation => Lifecycle
+        ? "HCG Store manages availability itself: disable and enable from Maker; supersede, restore and revoke in HCG Store's browser review by a person with HCG's publication permission."
+        : Requests
+            ? "HCG Store records availability requests for the people who approve and publish; nothing changes until they act."
+            : "This HCG Store does not offer release management to apps yet: private drafts and uploads work, and disable, supersede and restore are done in HCG Store's Release Manager by a person. Maker changes no availability here.";
+}
+
 public sealed record SyncGroup(string Key, string Title, string Tone, IReadOnlyList<string> Items)
 {
     public int Count => Items.Count;
@@ -114,7 +147,10 @@ public static class DistributionStudio
     public static (StoreRelease? Release, string Basis) CurrentPublished(StoreProduct? product, IReadOnlyList<StoreRelease> history, string? editionId, string? channel)
     {
         if (product?.CurrentReleaseId is { } id && history.FirstOrDefault(r => r.Id == id) is { } named) return (named, "catalogue");
-        var published = history.Where(r => r.Status == "published" && r.EditionId == editionId && (channel is null || r.Channel == channel))
+        // HCG Store main names the current release per target (platform, architecture, channel).
+        if (history.Where(r => r.EditionId == editionId && r.Targets.Any(t => t.Current && (channel is null || t.Channel == channel)))
+                .OrderByDescending(r => r.PublishedAt ?? 0).FirstOrDefault() is { } targeted) return (targeted, "current-target");
+        var published = history.Where(r => r.Status == "published" && r.Availability is null or "available" && r.EditionId == editionId && (channel is null || r.Channel == channel))
             .OrderByDescending(r => r.PublishedAt ?? 0).FirstOrDefault();
         return published is null ? (null, "none") : (published, "newest-published");
     }
@@ -253,7 +289,7 @@ public static class DistributionStudio
         for (var i = 2; ; i++) { var c = $"{build}-r{i}"; if (!taken.Contains(c) && c.Length <= 64) return c; if (c.Length > 64) return $"r{i}"; }
     }
 
-    // ───────────── Publication request ─────────────
+    // ───────────── Publication choice prepared with the draft ─────────────
 
     /// <summary>
     /// The request sent with the draft (only to a Store with the publicationRequests capability). It asks; the person who
@@ -265,9 +301,49 @@ public static class DistributionStudio
             ? new StorePublicationRequest(makeCurrent, supersedeCompatible && flags.SupersedeCompatible ? "compatible" : "none")
             : null;
 
-    // ───────────── Availability requests ─────────────
+    /// <summary>HCG Store main's draft field: once published, the release replaces the current release of each target
+    /// (platform, architecture, channel) it serves; other targets are untouched. Sent only to a Store that lists its
+    /// operations. Until publication succeeds the previous release stays current.</summary>
+    public static bool? SupersedeOnPublish(bool makeCurrent, bool supersede, StoreContract contract) =>
+        contract.Lifecycle && (makeCurrent || supersede) ? true : null;
 
-    /// <summary>The availability actions a release offers, from its status (the Store decides; this only offers what it accepts).</summary>
+    // ───────────── Version management (capability discovery) ─────────────
+
+    public static IReadOnlyList<AvailabilityOption> AvailabilityOptions(StoreRelease r, StoreContract contract)
+    {
+        var list = new List<AvailabilityOption>();
+        var availability = r.Availability ?? (r.Status == "withdrawn" ? "withdrawn" : "available");
+        if (contract.Lifecycle)
+        {
+            var ops = contract.Operations!;
+            if (availability == "available" && ops.Offers("releases.disable") && r.Status != "withdrawn")
+                list.Add(new("disable", "Disable version", AvailabilityRoute.Direct,
+                    "Stops delivery of this release now; it stays in the history with its files and can be enabled again. Other platforms, architectures and channels are not touched. HCG Store checks your HCG permission."));
+            if (availability is "disabled" or "archived" && r.PublishedAt is null && ops.Offers("releases.enable"))
+                list.Add(new("enable", "Enable version", AvailabilityRoute.Direct, "Makes this unpublished release available again for review."));
+            if (r.Status == "published" && availability == "available" && ops.InBrowser("releases.supersede"))
+                list.Add(new("supersede", "Supersede version (make current)", AvailabilityRoute.Browser,
+                    "Making a published release current on its targets is a publication decision: a person with HCG's publication permission does it in HCG Store's browser review, typing the version."));
+            if (r.Status is "published" or "superseded" && availability != "revoked" && r.PublishedAt is not null && ops.InBrowser("releases.restore"))
+                list.Add(new("restore", "Restore previous version", AvailabilityRoute.Browser,
+                    "Restoring an earlier published release (rollback) is a publication decision made in HCG Store's browser review by a person with HCG's publication permission."));
+            if (availability is "disabled" or "archived" && r.PublishedAt is not null)
+                list.Add(new("enable", "Enable version", AvailabilityRoute.Browser, "Re-enabling a published release is a publication decision made in HCG Store's browser review."));
+            return list;
+        }
+        if (contract.Requests)
+        {
+            foreach (var a in AvailabilityActions(r.Status))
+                list.Add(new(a, a switch { "disable" => "Disable version", "restore" => "Restore previous version", "supersede" => "Supersede version", _ => "Make current" }, AvailabilityRoute.Request,
+                    "Recorded in HCG Store for the people who approve and publish; nothing changes until they act."));
+            return list;
+        }
+        foreach (var (a, n) in new[] { ("disable", "Disable version"), ("supersede", "Supersede version"), ("restore", "Restore previous version") })
+            list.Add(new(a, n, AvailabilityRoute.Unavailable, contract.Explanation));
+        return list;
+    }
+
+    /// <summary>The availability actions a release offers under the recorded-request contract.</summary>
     public static IReadOnlyList<string> AvailabilityActions(string status) => status switch
     {
         "published" => ["make-current", "supersede", "disable"],
@@ -281,6 +357,7 @@ public static class DistributionStudio
         "supersede" => "Supersede",
         "disable" => "Disable",
         "restore" => "Restore",
+        "enable" => "Enable",
         _ => action,
     };
 
