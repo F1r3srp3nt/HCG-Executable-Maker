@@ -180,6 +180,35 @@ Example (HCG Server):
 }
 ```
 
+### Which product is the app
+
+A package can have a SwiftUI app and command-line tools side by side. HCG Store Manager is an example: `HCGStoreManager`
+is the app and `hcg-store-manager` is its CLI.
+- **One executable product:** it is selected.
+- **Several products, with an `AppPackaging.json` naming one of them:** that product is preselected, with the reason
+  shown under the product list.
+- **Several products, no contract:** nothing is preselected. The Inspect step names the app product(s) and says that
+  the others are command-line tools.
+- **A command-line product chosen next to an app:** it is built as a folder or ZIP, and the wizard says so, naming the
+  app product.
+
+A contract does not need commands. HCG Store Manager's contract only brings the icon (`bundle.icon`), the Info.plist
+template and its sidebar artwork as `Contents/Resources` files. Nothing has to be confirmed, and the app is fully
+sealed because it uses `Bundle.main` rather than a SwiftPM resource bundle.
+
+**Regression case:** the `store-manager` CI job builds `tests/Fixtures/StoreShapedApp`, a public package with HCG
+Store Manager's shape, through the New Build wizard. It verifies:
+- the app product is preselected;
+- `Contents/MacOS` holds only the app;
+- `AppIcon.icns` and the artwork are in the bundle, byte for byte;
+- the Info.plist template keys are kept;
+- the full seal verifies;
+- APP, ZIP, DMG and PKG are produced, and the PKG installs and launches;
+- the launched GUI finds its artwork.
+
+The same job builds the real, private HCG Store Manager at a pinned commit, but only when this repository has a
+read-only token for it (secret `HCG_STORE_MANAGER_READ_TOKEN`). Without one, the step reports *pending*.
+
 ### Tests
 
 HCG builds the selected product only. Test targets are neither compiled nor run, and every build log says so. XCTest

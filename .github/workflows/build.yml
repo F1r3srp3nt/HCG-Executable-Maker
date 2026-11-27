@@ -1074,6 +1074,126 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  store-manager:
+    name: HCG Store Manager — Store-shaped fixture (contract product, icon, Info.plist, artwork, sealed app; APP/ZIP/DMG/PKG; GUI launch) and the real repository when read access is configured
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/store-manager-out
+      FIXTURE: tests/Fixtures/StoreShapedApp
+      # HCG Store Manager is a private repository: it is built only when this public repository has a read-only token
+      # for it (secret HCG_STORE_MANAGER_READ_TOKEN). Its build log stays in this job; its app is never uploaded.
+      STORE_MANAGER_REPOSITORY: F1r3srp3nt/HCG-Store-Manager
+      STORE_MANAGER_COMMIT: 17d3274518e9d3b7786ee8a33c032bbc2a91551b
+      HAS_STORE_MANAGER_ACCESS: ${{ secrets.HCG_STORE_MANAGER_READ_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Toolchain
+        run: |
+          sw_vers; xcode-select -p; swift --version; xcrun --sdk macosx --show-sdk-version
+          mkdir -p "$OUT/screens"
+
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Store-shaped package through the New Build wizard — the contract's app product is preselected (not the CLI); APP, ZIP, DMG, PKG; PKG installed and launched
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$FIXTURE" --package ""
+          --expect-products "ShapeManager,shape-tool" --expect-libraries ShapeKit --expect-tests ShapeKitTests
+          --expect-preselected-product ShapeManager --product ShapeManager
+          --expect-name "Store-shaped Manager" --expect-bundle-id com.hakmicapital.store-shaped --version 1.2.0 --build-number 7
+          --arch arm64 --formats app,zip,dmg,pkg --test-install launch
+          --output "$OUT/shape" --screenshots "$OUT/screens" --prefix shape
+
+      - name: The app is the GUI product with the icon, the Info.plist template, the artwork, a full seal and a launching window
+        run: |
+          app="$(find "$OUT/shape/artifacts" -maxdepth 3 -name 'Store-shaped Manager.app' -type d | head -1)"
+          echo "app: $app"; find "$app" -maxdepth 3 | sed "s#$app#.#" | sort
+          [ "$(ls "$app/Contents/MacOS")" = "ShapeManager" ] && echo "Contents/MacOS holds only the SwiftUI app (no shape-tool)"
+          cmp "$app/Contents/Resources/AppIcon.icns" "$FIXTURE/Assets/AppIcon.icns" && echo "AppIcon.icns is the contract's icon, byte for byte"
+          cmp "$app/Contents/Resources/Brand-512.png" "$FIXTURE/Assets/Branding/Brand-512.png" && echo "Sidebar artwork is in Contents/Resources, byte for byte"
+          plist="$app/Contents/Info.plist"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
+          [ "$(pb CFBundleIconFile)" = "AppIcon" ]
+          [ "$(pb CFBundleExecutable)" = "ShapeManager" ]
+          [ "$(pb CFBundleIdentifier)" = "com.hakmicapital.store-shaped" ]
+          [ "$(pb CFBundleShortVersionString)" = "1.2.0" ] && [ "$(pb CFBundleVersion)" = "7" ]
+          [ "$(pb LSMinimumSystemVersion)" = "14.0" ]
+          [ "$(pb NSHumanReadableCopyright)" = "Template key kept by HCG: store-shaped fixture" ] && echo "Template keys kept"
+          if ls -d "$app"/*.bundle 2>/dev/null; then echo "Unexpected SwiftPM resource bundle at the app root"; exit 1; fi
+          codesign --verify --strict --deep --verbose=2 "$app" && echo "Fully sealed (no unsealed root content)"
+          for ext in zip dmg pkg; do f="$(find "$OUT/shape/artifacts" -maxdepth 3 -name "*.$ext" | head -1)"; [ -n "$f" ] && ls -l "$f"; done
+          rm -f "$TMPDIR/hcg-store-shaped-probe.txt"
+          tools/ui-driver/verify-macos-app.sh "$app" "$OUT/screens/launch-store-shaped.png" arm64
+          echo "--- what the launched app reported:"; cat "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "window=ShapeManager" "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "artwork=loaded" "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "icon=AppIcon file=present" "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "bundle=com.hakmicapital.store-shaped" "$TMPDIR/hcg-store-shaped-probe.txt"
+
+      - name: Choosing the command-line product is explained (it is not the app)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$FIXTURE" --package ""
+          --expect-preselected-product ShapeManager --product shape-tool --expect-product-note "shape-tool is a command-line tool"
+          --name shape-tool --bundle-id com.hakmicapital.shape-tool
+          --version 1.2.0 --build-number 7 --arch arm64 --formats folder,zip
+          --output "$OUT/tool" --screenshots "$OUT/screens" --prefix shape-tool
+
+      - name: HCG Store Manager (private repository) — pending until read access is configured
+        if: env.HAS_STORE_MANAGER_ACCESS != 'true'
+        run: |
+          echo "::notice title=HCG Store Manager regression pending::$STORE_MANAGER_REPOSITORY is private. Add a read-only token for it as the repository secret HCG_STORE_MANAGER_READ_TOKEN to build the real app here (commit $STORE_MANAGER_COMMIT). The Store-shaped fixture above covers the same package shape."
+          echo "HCG Store Manager real-repository build: PENDING (no read access configured)" | tee "$OUT/store-manager-status.txt"
+
+      - name: HCG Store Manager at the pinned commit
+        if: env.HAS_STORE_MANAGER_ACCESS == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.STORE_MANAGER_REPOSITORY }}
+          ref: ${{ env.STORE_MANAGER_COMMIT }}
+          token: ${{ secrets.HCG_STORE_MANAGER_READ_TOKEN }}
+          path: store-manager-src
+          persist-credentials: false
+
+      - name: HCG Store Manager through the New Build wizard — HCGStoreManager preselected; APP, ZIP, DMG, PKG; launched
+        if: env.HAS_STORE_MANAGER_ACCESS == 'true'
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$GITHUB_WORKSPACE/store-manager-src" --package "" \
+            --expect-products "HCGStoreManager,hcg-store-manager" --expect-libraries StoreManagerKit \
+            --expect-preselected-product HCGStoreManager --product HCGStoreManager \
+            --expect-name "HCG Store Manager" --expect-bundle-id com.hakmicapitalgroup.hcg-store-manager --version 0.1.0 --build-number 1 \
+            --arch arm64 --formats app,zip,dmg,pkg \
+            --output "$OUT/store-manager" --screenshots "$OUT/screens" --prefix store-manager
+          app="$(find "$OUT/store-manager/artifacts" -maxdepth 3 -name 'HCG Store Manager.app' -type d | head -1)"
+          [ "$(ls "$app/Contents/MacOS")" = "HCGStoreManager" ]
+          cmp "$app/Contents/Resources/AppIcon.icns" store-manager-src/Assets/AppIcon.icns
+          cmp "$app/Contents/Resources/AppIcon-512.png" store-manager-src/Assets/Branding/AppIcon-512.png
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")" = "AppIcon" ]
+          codesign --verify --strict --deep --verbose=2 "$app"
+          tools/ui-driver/verify-macos-app.sh "$app" "$OUT/screens/launch-hcg-store-manager.png" arm64
+          echo "HCG Store Manager real-repository build: PASSED at $STORE_MANAGER_COMMIT" | tee "$OUT/store-manager-status.txt"
+          rm -rf "$OUT/store-manager/artifacts" store-manager-src   # private: never uploaded from this public repository
+
+      - name: Upload Store-shaped evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: store-manager-shape
+          path: |
+            ${{ github.workspace }}/store-manager-out/screens/shape-*
+            ${{ github.workspace }}/store-manager-out/screens/launch-store-shaped.png
+            ${{ github.workspace }}/store-manager-out/shape/*.txt
+            ${{ github.workspace }}/store-manager-out/shape/*.json
+            ${{ github.workspace }}/store-manager-out/store-manager-status.txt
+          if-no-files-found: warn
+          retention-days: 14
+
   electron-macos:
     name: Electron — Presentation Studio through the New Build wizard (arm64 .app, zip, dmg; launch; packaged-app e2e)
     needs: test

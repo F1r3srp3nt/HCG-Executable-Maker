@@ -76,7 +76,20 @@ public sealed partial class BuildWizardViewModel
     [NotifyPropertyChangedFor(nameof(IsSwiftBuild), nameof(IsDotNetBuild))]
     private SwiftProductChoice? _selectedSwiftProduct;
 
-    partial void OnSelectedSwiftProductChanged(SwiftProductChoice? value) => OnPropertyChanged(nameof(CanConfigure));
+    partial void OnSelectedSwiftProductChanged(SwiftProductChoice? value)
+    {
+        OnPropertyChanged(nameof(CanConfigure));
+        SwiftProductNote = SwiftProductGuidanceNote(SwiftExecutableProducts, value, SelectedSwiftPackage?.PackagingContract);
+    }
+
+    /// <summary>Why a product is (or should be) selected: the packaging contract's product, or a command-line tool chosen next to an app.</summary>
+    [ObservableProperty] private string? _swiftProductNote;
+
+    private static List<SwiftProductGuidance.Product> GuidanceProducts(IEnumerable<SwiftProductChoice> products) =>
+        products.Select(p => new SwiftProductGuidance.Product(p.Name, p.SuggestedKind)).ToList();
+
+    public static string? SwiftProductGuidanceNote(IEnumerable<SwiftProductChoice> products, SwiftProductChoice? selected, SwiftPackagingContract? contract) =>
+        SwiftProductGuidance.Note(GuidanceProducts(products), selected?.Name, contract);
 
     /// <summary>Configure/Package/Build steps work on a Swift package product rather than a .NET project.</summary>
     public bool IsSwiftBuild => HasSelectedSwiftPackage && SelectedSwiftProduct is not null;
@@ -159,7 +172,10 @@ public sealed partial class BuildWizardViewModel
         SwiftLibrariesText = SwiftLibraryProducts.Count > 0 ? string.Join(", ", SwiftLibraryProducts) : "None";
         SwiftTestsText = SwiftTestTargets.Count > 0 ? string.Join(", ", SwiftTestTargets) : "None";
         // One executable product is the obvious choice; several (e.g. Relay's app and its CLI) must be chosen.
-        SelectedSwiftProduct = SwiftExecutableProducts.Count == 1 ? SwiftExecutableProducts[0] : null;
+        // A packaging contract (AppPackaging.json) names the product it packages: that is the package's app.
+        var preselect = SwiftProductGuidance.Preselect(GuidanceProducts(SwiftExecutableProducts), pkg?.PackagingContract);
+        SelectedSwiftProduct = SwiftExecutableProducts.FirstOrDefault(p => p.Name == preselect);
+        SwiftProductNote = SwiftProductGuidanceNote(SwiftExecutableProducts, SelectedSwiftProduct, pkg?.PackagingContract);
         if (pkg?.Evaluated is { } m && !m.ExecutableProducts.Any())
             SwiftEvaluationError = "This package declares no executable product on this Mac (only libraries/tests), so there is nothing to build into an app.";
         OnPropertyChanged(nameof(CanConfigure));

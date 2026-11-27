@@ -1,0 +1,15 @@
+{
+  "schema": "hcg-app-packaging/1",
+  "description": "Same shape as HCG Store Manager's contract: the SwiftUI product with its icon, Info.plist template and sidebar artwork; no commands, no helpers.",
+  "product": "ShapeManager",
+  "bundle": {
+    "displayName": "Store-shaped Manager",
+    "identifier": "com.hakmicapital.store-shaped",
+    "infoPlist": "Packaging/Info.plist",
+    "icon": "Assets/AppIcon.icns",
+    "minimumMacOS": "14.0"
+  },
+  "resources": [
+    { "source": "Assets/Branding/Brand-512.png", "destination": "Contents/Resources/Brand-512.png", "required": true }
+  ]
+}

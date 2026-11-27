@@ -314,11 +314,21 @@ internal static partial class Program
         ExpectSet("expect-products", wizard.SwiftExecutableProducts.Select(p => p.Name), "Executable products");
         ExpectSet("expect-libraries", wizard.SwiftLibraryProducts, "Library products");
         ExpectSet("expect-tests", wizard.SwiftTestTargets, "Test targets");
-        if (wizard.SwiftExecutableProducts.Count > 1) Check(wizard.SelectedSwiftProduct is null, "Several executable products: none selected automatically");
+        if (wizard.SwiftExecutableProducts.Count > 1 && Arg("expect-preselected-product") is null)
+            Check(wizard.SelectedSwiftProduct is null, "Several executable products and no packaging contract: none selected automatically");
+        // --expect-preselected-product NAME: the wizard chose it by itself (the package's AppPackaging.json names it).
+        if (Arg("expect-preselected-product") is { } pre)
+        {
+            Log($"Products: {string.Join(", ", wizard.SwiftExecutableProducts.Select(p => p.Display))} · preselected: {wizard.SelectedSwiftProduct?.Name ?? "(none)"} · note: {wizard.SwiftProductNote}");
+            Check(wizard.SelectedSwiftProduct?.Name == pre, $"Product {pre} preselected by the packaging contract (not the command-line tool)");
+            Shot("product-preselected");
+        }
         var product = wizard.SwiftExecutableProducts.FirstOrDefault(p => p.Name == Arg("product"));
         Check(product is not null, $"Product {Arg("product")} available");
         if (product is null) { Shot("evaluated"); return 1; }
         wizard.SelectedSwiftProduct = product;
+        if (Arg("expect-product-note") is { } note)
+            Check(wizard.SwiftProductNote?.Contains(note, StringComparison.Ordinal) == true, $"Product guidance: {wizard.SwiftProductNote}");
         Shot("evaluated-products");
 
         // 4. Configure.

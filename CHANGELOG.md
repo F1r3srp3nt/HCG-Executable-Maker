@@ -2,6 +2,25 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG Store Manager compatibility (Swift apps with a command-line tool)
+
+### Added
+- **Product preselection.** A Swift package whose `AppPackaging.json` names a product has that product preselected
+  when it has several executables (HCG Store Manager: `HCGStoreManager`, not the `hcg-store-manager` CLI).
+- **Product guidance.** Without a contract, the Inspect step names the app product. Choosing a command-line tool next
+  to an app is explained: it is built as a folder or ZIP, not a macOS app.
+- **Regression case `store-manager`.** `tests/Fixtures/StoreShapedApp` has HCG Store Manager's shape: library, CLI and
+  SwiftUI app, a Linux-only dependency, and a contract with an icon, an Info.plist template and artwork. CI builds it
+  through the wizard and checks:
+  - the preselected product, and only the app in `Contents/MacOS`;
+  - `AppIcon.icns` and the artwork in the bundle, and the template keys kept;
+  - a full seal;
+  - APP, ZIP, DMG and PKG, with the PKG installed;
+  - a GUI launch that finds its artwork.
+
+  The real HCG Store Manager (private) is built at a pinned commit when the read-only secret
+  `HCG_STORE_MANAGER_READ_TOKEN` is configured; until then it is reported as pending.
+
 ## [Unreleased] — Build Provider (HCG Server Build Host in the New Build wizard)
 
 ### Added

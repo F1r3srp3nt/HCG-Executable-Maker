@@ -293,6 +293,9 @@
                           </DataTemplate>
                         </ComboBox.ItemTemplate>
                       </ComboBox>
+                      <Border Classes="callout" Padding="10" IsVisible="{Binding SwiftProductNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <SelectableTextBlock FontSize="12.5" Text="{Binding SwiftProductNote}" TextWrapping="Wrap" />
+                      </Border>
                       <Grid ColumnDefinitions="170,*" Margin="0,4,0,0">
                         <TextBlock Classes="label" Text="Library products" />
                         <SelectableTextBlock Grid.Column="1" Text="{Binding SwiftLibrariesText}" FontSize="13" TextWrapping="Wrap" />
