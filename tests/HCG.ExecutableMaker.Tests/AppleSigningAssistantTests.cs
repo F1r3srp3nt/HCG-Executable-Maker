@@ -173,6 +173,19 @@ public sealed class AppleSigningAssistantTests
     }
 
     [Fact]
+    public void An_unsigned_archive_turns_code_signing_off_so_xcode_needs_no_team()
+    {
+        // Regression (CI run 46013365053): the assistant's arguments replace the planner's, so the unsigned overrides
+        // must be among them or xcodebuild archive asks for a development team.
+        var plan = Plan(Options(MobileOutput.IosArchive, MobileSigningMode.Unsigned), "Release");
+        Assert.DoesNotContain(plan.Failures, f => f.Category is SigningCheckCategory.Team or SigningCheckCategory.Route && f.Title == "Signing mode");
+        Assert.Contains("CODE_SIGNING_ALLOWED=NO", plan.Arguments);
+        Assert.Contains("CODE_SIGNING_REQUIRED=NO", plan.Arguments);
+        Assert.Contains("CODE_SIGN_IDENTITY=", plan.Arguments);
+        Assert.DoesNotContain(plan.Arguments, a => a.StartsWith("DEVELOPMENT_TEAM=", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void A_registered_device_is_checked_against_the_development_profile()
     {
         var saved = new ProjectSigningConfiguration { ProjectId = "p", TeamId = Team, IntendedDevices = ["00008110-000A", "00008120-000B"] };

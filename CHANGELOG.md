@@ -41,6 +41,10 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   is kept for this run only and the panel says so. Before, the connection test failed with an exception.
 - **Commit in the request purpose.** A Build Host request's purpose text now uses the normalized (lowercase) commit.
 - **Test on Windows.** The SigningProbe fixture test no longer depends on line endings.
+- **Unsigned iOS archives.** Unsigned archives (Mobile Build Studio, `mobile-build --output ios-archive --signing
+  unsigned`, the Sentinel archive matrix) again pass `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+  CODE_SIGN_IDENTITY=`. The Apple Signing Assistant's arguments replace the planner's, and its unsigned branch had
+  dropped them, so Xcode asked for a development team.
 
 ## [Unreleased] — Apple Signing Assistant
 

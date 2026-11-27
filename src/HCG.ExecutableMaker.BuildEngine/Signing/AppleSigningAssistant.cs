@@ -186,7 +186,12 @@ public static partial class AppleSigningAssistant
                     "A physical iPhone or iPad only runs apps signed with an Apple Development certificate.",
                     "Choose Automatic (Xcode-managed) or Manual signing in Resolve Signing."));
             else
+            {
+                // These replace the planner's own signing arguments, so the unsigned overrides must be here: without
+                // them Xcode signs automatically and asks for a development team.
+                args.AddRange(["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGN_IDENTITY="]);
                 notes.Add("Unsigned archive: for inspection only; it cannot be installed or exported.");
+            }
             return new AppleSigningPlan { Destination = destination, Configuration = config, Checks = checks, Arguments = args, Notes = notes, BundleIdentifier = bundleId };
         }
 
