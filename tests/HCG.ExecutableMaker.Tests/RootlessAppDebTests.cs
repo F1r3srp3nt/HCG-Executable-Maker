@@ -331,6 +331,22 @@ public class RootlessAppDebTests
         // A Build Host build never carries CI run fields.
         var mixed = prov with { CiRunId = 1, CiArtifact = "x" };
         Assert.Throws<ArgumentException>(mixed.Validate);
+
+        // HCG Repo's own validator accepts it, when an HCG Repo checkout is given (as UnleashifyHandoffRegressionTests do).
+        if (Environment.GetEnvironmentVariable("HCG_REPO_MAIN_CHECKOUT") is { } repo && ShipToRepo.CheckoutProblem(repo) is null
+            && new ExecutableLocator().Find("python3") is { } python)
+        {
+            var script = $"import json,sys; sys.path.insert(0, {System.Text.Json.JsonSerializer.Serialize(Path.Combine(repo, "tools"))}); from hcgrepo.submission import validate_manifest; " +
+                         $"print(json.dumps(validate_manifest(json.load(open({System.Text.Json.JsonSerializer.Serialize(Path.Combine(h.Folder, "submission.json"))})))))";
+            var psi = new ProcessStartInfo(python) { RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "-I", "-c", script }) psi.ArgumentList.Add(a);
+            using var proc = Process.Start(psi)!;
+            var stdout = proc.StandardOutput.ReadToEnd();
+            var stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
+            Assert.True(proc.ExitCode == 0, stderr);
+            Assert.Equal("[]", stdout.Trim());
+        }
     }
 
     private RootlessAppWorkflow.Request Request(string source, string? ldid = "/usr/local/bin/ldid", string? device = "16.5", PackageProvenance? prov = null, string access = "public", string? approval = null) =>
