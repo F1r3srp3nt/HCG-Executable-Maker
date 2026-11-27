@@ -1967,6 +1967,47 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  existing-mac-app:
+    name: Sign & Notarize (macOS) — an app built elsewhere (HCG Mail shape) → checksum → inside-out Developer ID signing (synthetic identity) → page
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Output folder
+        run: echo "OUT=$RUNNER_TEMP/existing-mac-app-out" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build HCG Executable Maker and the UI driver
+        run: |
+          dotnet build src/HCG.ExecutableMaker.App -c Release
+          dotnet build tools/ui-driver -c Release
+      # Real codesign, a synthetic (non-Apple) identity, no notarization: see the script's header and docs/MACOS-EXISTING-APP.md.
+      - name: Existing-app distribution end to end
+        run: tools/ci/existing-mac-app-e2e.sh
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*existing-mac-app-*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: existing-mac-app-outputs
+          path: |
+            ${{ env.OUT }}/*.txt
+            ${{ env.OUT }}/screens
+            ${{ env.OUT }}/dist/*/distribution.log
+          retention-days: 7
+
   impactor:
     name: HCG Impactor — real IPA → inspect → sign (codesign, synthetic identity) → verify → devicectl → diagnostics → UI
     needs: test

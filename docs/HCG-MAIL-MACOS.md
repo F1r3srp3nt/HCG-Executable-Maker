@@ -1,6 +1,15 @@
 # HCG Mail for macOS (Apple Silicon) with HCG Executable Maker
 
-HCG Mail is a .NET application. The macOS Apple Silicon release goes through Maker's .NET desktop path:
+> **An app that is already built and qualified (for example 1.0.0-beta.2 build 5, HCG Mail run 46007763971, artifact
+> 15201589154): use Sign & Notarize (macOS), not a rebuild.** It signs, notarizes, packages, checks and passports the
+> CI's unsigned signing input without changing it: [MACOS-EXISTING-APP.md](MACOS-EXISTING-APP.md) has the exact steps.
+>
+> Fixed for both paths: Developer ID signing now signs nested code (HCG Mail's three native libraries in
+> Contents/MacOS) inside out before the app. Earlier, Maker's .NET Developer ID stage signed only the outer bundle,
+> leaving the libraries with their linker signature, which Apple's notary service rejects.
+
+The path below builds HCG Mail inside Maker. HCG Mail is a .NET application; its macOS Apple Silicon release goes
+through Maker's .NET desktop path:
 
 1. **New Build:** macOS, arm64, `.app` / ZIP / PKG.
 2. **Distribution:** Developer ID signing.
@@ -14,7 +23,7 @@ The table states what exists today, from the code, before anything is added.
 |---|---|---|---|
 | Application bundle inspection | Implemented | `MacAppFacts` (Info.plist: identifier, version, build, minimum macOS, architectures) | Read from the built `.app` |
 | Architecture verification | Implemented | `MacAppFacts.Architectures` (the main executable's Mach-O slices), `osx-arm64` target | Apple Silicon only: build with `osx-arm64`; a universal build needs both RIDs |
-| Developer ID Application signing | Implemented | `MacCodeSigner.SignDeveloperIdAsync` (.NET bundles in `NativeAppPackagers`) | Identity chosen by SHA-1 from the keychain; confirmed entitlements |
+| Developer ID Application signing | Implemented | `MacCodeSigner.SignBundleInsideOutAsync` (.NET bundles in `NativeAppPackagers`): nested libraries first, then the app | Identity chosen by SHA-1 from the keychain; confirmed entitlements |
 | Hardened Runtime | Implemented | `codesign --options runtime --timestamp` in Developer ID signing | A .NET app under the Hardened Runtime typically needs `com.apple.security.cs.allow-jit`. Maker does not add entitlements on its own: confirm the set in Configure › Distribution, then check the signed app with the Signing Doctor and a launch |
 | ZIP application packaging | Implemented, partly | Portable ZIP (`ditto`) during the build | The ZIP is made **before** notarization. After Notarize staples the `.app`, re-create the ZIP so it contains the stapled app: `ditto -c -k --keepParent "HCG Mail.app" HCG-Mail-<v>-osx-arm64.zip` (Maker does not rewrite build artifacts afterwards) |
 | PKG installer generation | Implemented | `MacPkgPackager` (`pkgbuild` + `productbuild`, no scripts, installs into /Applications) | Unsigned for local tests, or signed with Developer ID Installer |

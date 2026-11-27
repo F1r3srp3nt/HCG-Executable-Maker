@@ -59,7 +59,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("xcode-mac") && !_args.ContainsKey("mobile") && !_args.ContainsKey("unleashify") && !_args.ContainsKey("doctor") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing") && !_args.ContainsKey("ship-page") && !_args.ContainsKey("ship-build") && !_args.ContainsKey("impactor") && !_args.ContainsKey("build-host")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("xcode-mac") && !_args.ContainsKey("mobile") && !_args.ContainsKey("unleashify") && !_args.ContainsKey("doctor") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing") && !_args.ContainsKey("ship-page") && !_args.ContainsKey("ship-build") && !_args.ContainsKey("impactor") && !_args.ContainsKey("build-host") && !_args.ContainsKey("mac-distribute")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -253,6 +253,7 @@ internal static partial class Program
         if (_args.ContainsKey("impactor")) return await RunImpactorAsync(main);
         if (_args.ContainsKey("port")) return await PortAsync(main, output, host);
         if (_args.ContainsKey("ship-page")) return await ShipPageAsync(main);
+        if (_args.ContainsKey("mac-distribute")) return await RunMacDistributeAsync(main, output);
 
         // 1. Import through the wizard's own "Import ZIP" / "Import folder" commands (scripted picker returns --source).
         var source = _args["source"];

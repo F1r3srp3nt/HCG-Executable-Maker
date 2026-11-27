@@ -6,6 +6,13 @@
              x:DataType="vm:SigningViewModel">
   <ScrollViewer>
     <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18">
+      <Border Classes="callout">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock FontSize="12.5" TextWrapping="Wrap" VerticalAlignment="Center"
+                     Text="A macOS app that was built elsewhere (for example an unsigned CI signing input) is signed with these identities, notarized, packaged and checked on the Sign &amp; Notarize (macOS) page, without rebuilding it." />
+          <Button Grid.Column="1" Classes="small" Margin="12,0,0,0" Content="Sign &amp; Notarize (macOS)…" Command="{Binding OpenMacDistributionCommand}" />
+        </Grid>
+      </Border>
       <!-- HCG Signing Vault: Apple signing on this Mac -->
       <Border Classes="card" x:DataType="vm:SigningViewModel">
         <StackPanel Spacing="12" DataContext="{Binding Apple}" x:DataType="vm:AppleSigningViewModel">

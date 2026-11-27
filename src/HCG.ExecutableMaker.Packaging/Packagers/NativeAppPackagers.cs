@@ -47,8 +47,8 @@ public sealed class NativeAppBundlePackager(IProcessRunner runner) : IPackager
             var distribution = request.Settings.MacDistribution;
             if (distribution.SigningMode == MacSigningMode.DeveloperId && distribution.DeveloperIdApplicationSha1 is { Length: > 0 } sha1)
             {
-                log.Info("Signing stage: Developer ID Application (hardened runtime, secure timestamp)");
-                await new MacCodeSigner(runner, codesign).SignDeveloperIdAsync(dest, sha1, distribution.DeveloperIdEntitlements, log, cancellationToken).ConfigureAwait(false);
+                log.Info("Signing stage: Developer ID Application (hardened runtime, secure timestamp), nested code first");
+                await new MacCodeSigner(runner, codesign).SignBundleInsideOutAsync(dest, sha1, distribution.DeveloperIdEntitlements, log, cancellationToken).ConfigureAwait(false);
             }
             else
             {

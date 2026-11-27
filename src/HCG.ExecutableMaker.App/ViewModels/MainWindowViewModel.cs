@@ -32,6 +32,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             new("projects", "Projects", "Icon.Projects", typeof(ProjectsViewModel)),
             new("history", "Build History", "Icon.History", typeof(BuildHistoryViewModel)),
             new("artifacts", "Artifacts", "Icon.Artifacts", typeof(ArtifactsViewModel)),
+            new("mac-distribute", "Sign & Notarize (macOS)", "Icon.Security", typeof(MacDistributionViewModel)),
             new("ship", "Ship to Store", "Icon.Export", typeof(ShipToStoreViewModel)),
             new("unleashify", "Unleashify", "Icon.Mobile", typeof(UnleashifyViewModel)),
             new("toolchains", "Toolchains", "Icon.Toolchains", typeof(ToolchainsViewModel)),

@@ -51,6 +51,9 @@ internal static class Program
         // `HCGExecutableMaker --authenticode-sign <file> --thumbprint … --timestamp-url … --approve <sha256>`: sign with explicit approval.
         if (args.Contains("--authenticode-sign"))
             return WindowsPackagingCommand.Sign(args);
+        // `HCGExecutableMaker --mac-distribute …`: Developer ID signing, notarization, packaging and passports for an app built elsewhere.
+        if (args.Contains("--mac-distribute"))
+            return MacDistributeCommand.Run(args);
         // `HCGExecutableMaker --mac-signing-doctor <App.app>`: read-only signing report of a macOS app.
         if (args.Contains("--mac-signing-doctor"))
             return XcodeMacCommand.SigningDoctor(args);

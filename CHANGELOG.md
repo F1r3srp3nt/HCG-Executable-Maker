@@ -2,6 +2,39 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Sign & Notarize (macOS): Developer ID distribution of an app built elsewhere
+
+### Added
+- **Sign & Notarize (macOS)** page and `--mac-distribute` command
+  ([docs/MACOS-EXISTING-APP.md](docs/MACOS-EXISTING-APP.md)). They take an already-built `.app`, or a ZIP holding one
+  (for example HCG Mail's CI signing input), without rebuilding it and without changing the original:
+  - check it against its published SHA256SUMS;
+  - check version, build, bundle identifier and architectures against the release, and that Contents/MacOS holds code only;
+  - sign inside out with the chosen Developer ID Application identity from the login keychain (hardened runtime, secure timestamp, confirmed entitlements, or the project's `.entitlements` file);
+  - verify (strict seal, Signing Doctor, entitlements);
+  - notarize and staple the app;
+  - make the ZIP, PKG (Developer ID Installer) and DMG from the stapled app, then notarize and staple the PKG and DMG;
+  - check Gatekeeper on every file, the ZIP after extracting it;
+  - write Release Passports (with the source checkout's own commit, optionally pinned).
+
+  Each run is a build record, so Build History, Artifacts and Ship to Store (**Add build**, or **4 · Ship to Store…**)
+  offer its files. Nothing is uploaded or published automatically. Entry points: the sidebar, Signing & Security and
+  Ship to Store.
+- macOS CI job `existing-mac-app`:
+  - a compiled HCG-Mail-shaped app and a synthetic, self-signed "Developer ID Application" identity;
+  - a tampered checksum is refused;
+  - `codesign` confirms each nested library and the app carry the identity, the runtime and a timestamp, a strict seal, and exactly allow-jit;
+  - the original is unchanged;
+  - the page runs through the UI driver.
+
+### Fixed
+- **Developer ID signing of .NET apps signs nested code.** `NativeAppPackagers` signed only the outer bundle, leaving
+  native libraries in Contents/MacOS (HCG Mail: Avalonia, Skia, HarfBuzz) with their linker signature, which Apple's
+  notary service rejects. Signing is now inside out (`MacCodeSigner.SignBundleInsideOutAsync`).
+
+### Changed
+- `--release-passport` and the new page share one implementation (`MacArchivePassport`).
+
 ## [Unreleased] — HCG Store Manager compatibility (Swift apps with a command-line tool)
 
 ### Added

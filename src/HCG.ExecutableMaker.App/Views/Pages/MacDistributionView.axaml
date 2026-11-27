@@ -1,0 +1,169 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.MacDistributionView"
+             x:DataType="vm:MacDistributionViewModel">
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="16">
+      <Border Classes="callout">
+        <TextBlock FontSize="12.5" TextWrapping="Wrap"
+                   Text="For an app that was already built and qualified elsewhere (for example a CI run's unsigned signing input). Executable Maker never rebuilds it and never changes the original: it signs a copy with your Developer ID, has Apple notarize it, makes the ZIP / PKG / DMG from the stapled app, checks Gatekeeper and writes Release Passports. Ship to Store then uploads a private draft; publishing happens in HCG Store, by a person." />
+      </Border>
+      <Border Classes="callout" IsVisible="{Binding !IsMac}">
+        <TextBlock FontSize="12.5" TextWrapping="Wrap" Text="{Binding HostNote}" />
+      </Border>
+
+      <!-- 1. Input -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="1. The app as built" />
+          <TextBlock Classes="formlabel" Text="APP (.app, OR A .zip HOLDING ONE .app)" />
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBox Text="{Binding InputPath}" Watermark="HCGMail-1.0.0-beta.2-osx-arm64-unsigned-app.zip" />
+            <Button Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="Choose ZIP…" Command="{Binding BrowseZipCommand}" />
+            <Button Grid.Column="2" Classes="small" Margin="8,0,0,0" Content="Choose .app…" Command="{Binding BrowseAppCommand}" />
+          </Grid>
+          <TextBlock Classes="formlabel" Text="PUBLISHED CHECKSUMS (OPTIONAL, E.G. SHA256SUMS-signing-input.txt)" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding ChecksumsPath}" />
+            <Button Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="Choose…" Command="{Binding BrowseChecksumsCommand}" />
+          </Grid>
+          <TextBlock Classes="formlabel" Text="WHERE IT CAME FROM (RECORDED AS GIVEN)" />
+          <TextBox Text="{Binding Origin}" Watermark="HCG Mail CI run 46007763971, artifact 15201589154, commit 6ddd667" />
+          <Button Classes="primary" HorizontalAlignment="Left" Content="Inspect" Command="{Binding InspectCommand}" IsEnabled="{Binding CanAct}" />
+          <TextBlock Classes="body" Text="{Binding AppSummary}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{Binding SignatureAsReceived}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{Binding NestedCode}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding InputChecks}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MacCheckItem">
+                <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                  <c:StatusChip Status="{Binding Chip}" VerticalAlignment="Top" />
+                  <SelectableTextBlock Grid.Column="1" Margin="10,0,0,0" TextWrapping="Wrap" Text="{Binding Detail}" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- 2. Release -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="2. Release" />
+          <Grid ColumnDefinitions="*,16,*,16,*">
+            <StackPanel><TextBlock Classes="formlabel" Text="RELEASE VERSION" /><TextBox Text="{Binding ReleaseVersion}" Watermark="1.0.0-beta.2" /></StackPanel>
+            <StackPanel Grid.Column="2"><TextBlock Classes="formlabel" Text="BUILD NUMBER (MUST MATCH CFBundleVersion)" /><TextBox Text="{Binding BuildNumber}" Watermark="5" /></StackPanel>
+            <StackPanel Grid.Column="4"><TextBlock Classes="formlabel" Text="ARCHITECTURE" /><ComboBox ItemsSource="{Binding Architectures}" SelectedItem="{Binding Architecture}" HorizontalAlignment="Stretch" /></StackPanel>
+          </Grid>
+          <TextBlock Classes="formlabel" Text="BUNDLE IDENTIFIER (MUST MATCH)" />
+          <TextBox Text="{Binding BundleIdentifier}" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="Info.plist must already say this version's numeric part and this build: a different version or build would need a new signing input, and nothing is signed." />
+        </StackPanel>
+      </Border>
+
+      <!-- 3. Identities -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="3. Developer ID identities (Signing Vault, login keychain)" />
+          <TextBlock Classes="formlabel" Text="DEVELOPER ID APPLICATION (SIGNS THE APP, ITS NESTED CODE AND THE DMG)" />
+          <ComboBox ItemsSource="{Binding ApplicationIdentities}" SelectedItem="{Binding SelectedApplicationIdentity}" HorizontalAlignment="Stretch" />
+          <TextBlock Classes="formlabel" Text="DEVELOPER ID INSTALLER (SIGNS THE PKG)" />
+          <ComboBox ItemsSource="{Binding InstallerIdentities}" SelectedItem="{Binding SelectedInstallerIdentity}" HorizontalAlignment="Stretch" />
+          <TextBlock Classes="muted" Text="{Binding IdentitiesNote}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="small" Content="Refresh" Command="{Binding RefreshIdentitiesCommand}" />
+            <Button Classes="small" Content="Import .p12 in Signing &amp; Security…" Command="{Binding OpenSigningVaultCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- 4. Entitlements -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="4. Entitlements of the app's signature" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="One key per line, for the app's own signature only (nested libraries get none). A .NET app under the hardened runtime needs com.apple.security.cs.allow-jit. Load the project's .entitlements file to use exactly its keys." />
+          <TextBox Text="{Binding EntitlementsText}" AcceptsReturn="True" MinHeight="70" FontFamily="{DynamicResource Hcg.Font.Mono}" Watermark="com.apple.security.cs.allow-jit" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="small" Content="Load .entitlements…" Command="{Binding LoadEntitlementsFileCommand}" />
+          </StackPanel>
+          <TextBlock Classes="muted" Text="{Binding EntitlementsNote}" TextWrapping="Wrap" />
+          <CheckBox IsChecked="{Binding EntitlementsConfirmed}" Content="I confirm these entitlements (and only these) for the signed app" />
+        </StackPanel>
+      </Border>
+
+      <!-- 5. Files and output -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="5. Distribution files" />
+          <StackPanel Orientation="Horizontal" Spacing="18">
+            <CheckBox IsChecked="{Binding MakeZip}" Content="ZIP (the stapled app)" />
+            <CheckBox IsChecked="{Binding MakePkg}" Content="PKG (installs into /Applications)" />
+            <CheckBox IsChecked="{Binding MakeDmg}" Content="DMG" />
+          </StackPanel>
+          <TextBlock Classes="formlabel" Text="FILE NAME (WITHOUT EXTENSION)" />
+          <TextBox Text="{Binding ArtifactBaseName}" Watermark="HCG-Mail-1.0.0-beta.2-macos-arm64" />
+          <TextBlock Classes="formlabel" Text="OUTPUT FOLDER" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding OutputFolder}" />
+            <Button Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="Choose…" Command="{Binding BrowseOutputCommand}" />
+          </Grid>
+          <TextBlock Classes="formlabel" Text="NOTARIZATION KEYCHAIN PROFILE (SETTINGS › APPLE CREDENTIALS)" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding NotaryProfile}" IsReadOnly="True" Watermark="not set: xcrun notarytool store-credentials &lt;name&gt;, then enter the name in Settings" />
+            <Button Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="Settings…" Command="{Binding OpenSettingsCommand}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- 6. Actions -->
+      <Border Classes="card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="h2" Text="6. Sign, notarize, passports, Ship to Store" />
+          <WrapPanel>
+            <Button Classes="primary" Margin="0,0,8,8" Content="1 · Sign" Command="{Binding SignCommand}" IsEnabled="{Binding CanAct}" />
+            <Button Classes="primary" Margin="0,0,8,8" Content="2 · Notarize, staple and package" Command="{Binding NotarizeCommand}" IsEnabled="{Binding IsSigned}" />
+            <Button Margin="0,0,8,8" Content="3 · Write Release Passports" Command="{Binding WritePassportsCommand}" IsEnabled="{Binding IsReady}" />
+            <Button Margin="0,0,8,8" Content="4 · Ship to Store…" Command="{Binding ShipToStoreCommand}" IsEnabled="{Binding IsReady}" />
+            <Button Margin="0,0,8,8" Content="Open output folder" Command="{Binding OpenOutputCommand}" IsEnabled="{Binding HasJob}" />
+            <Button Margin="0,0,8,8" Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" />
+          </WrapPanel>
+          <TextBlock Classes="formlabel" Text="SOURCE CHECKOUT FOR THE PASSPORTS (ITS OWN GIT COMMIT IS RECORDED)" />
+          <Grid ColumnDefinitions="*,Auto,16,200">
+            <TextBox Text="{Binding SourceRepository}" />
+            <Button Grid.Column="1" Classes="small" Margin="8,0,0,0" Content="Choose…" Command="{Binding BrowseSourceCommand}" />
+            <TextBox Grid.Column="3" Text="{Binding ExpectedCommit}" Watermark="expected commit (optional)" />
+          </Grid>
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+          <TextBlock Classes="body" Text="{Binding Status}" TextWrapping="Wrap" />
+          <SelectableTextBlock Classes="mono muted" Text="{Binding JobSummary}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Results}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MacCheckItem">
+                <Grid ColumnDefinitions="Auto,*" Margin="0,3">
+                  <c:StatusChip Status="{Binding Chip}" VerticalAlignment="Top" />
+                  <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                    <TextBlock Classes="h3" Text="{Binding Name}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Expander Header="Log">
+            <ItemsControl ItemsSource="{Binding Log}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <SelectableTextBlock Classes="mono" FontSize="11.5" Text="{Binding}" TextWrapping="Wrap" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Expander>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

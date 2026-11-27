@@ -95,6 +95,8 @@ public static class Composition
         services.AddSingleton(sp => new HCG.Impactor.MacOS.XcodeProvisioningAssistant(sp.GetRequiredService<IProcessRunner>(),
             Path.Combine(sp.GetRequiredService<IAppPaths>().Root, "impactor"), sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.ProvisioningProfileStore>()));
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.NotarizationService>();
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.MacDistribution.ExistingMacAppDistribution(
+            sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<IBuildRepository>(), sp.GetRequiredService<IProjectRepository>(), sp.GetRequiredService<IAppPaths>(), TimeProvider.System));
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.PkgTestInstaller>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppleCredentialsService>();
@@ -162,6 +164,7 @@ public static class Composition
         services.AddSingleton(sp => new HCG.ExecutableMaker.Account.Signing.SigningAccountService(sp.GetRequiredService<HCG.ExecutableMaker.Account.HcgApiClient>()));
         services.AddSingleton<HCG.ExecutableMaker.Account.Ai.IHcgAiGateway, HCG.ExecutableMaker.Account.Ai.NotConnectedAiGateway>();
         services.AddSingleton<HCG.ExecutableMaker.Account.Ai.AiAssistant>();
+        services.AddSingleton<MacDistributionViewModel>();
         services.AddSingleton<AccountViewModel>();
         services.AddSingleton<SupportViewModel>();
         services.AddSingleton<MyRequestsViewModel>();

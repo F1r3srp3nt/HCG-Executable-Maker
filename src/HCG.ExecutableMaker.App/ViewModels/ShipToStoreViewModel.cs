@@ -830,6 +830,7 @@ public sealed partial class ShipToStoreViewModel(
     }
 
     [RelayCommand] private void OpenAccount() => navigation.Navigate("account");
+    [RelayCommand] private void OpenMacDistribution() => navigation.Navigate("mac-distribute");
 
     // ───────────── Manage versions ─────────────
 
