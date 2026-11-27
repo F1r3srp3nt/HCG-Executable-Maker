@@ -46,6 +46,8 @@ internal static partial class Program
     private static Dictionary<string, string> _args = new();
     private static readonly List<string> Report = [];
     private static readonly List<string> Failures = [];
+    /// <summary>Alert titles a flow expects next (each allowed once); see LoggingDialogs.AlertAsync.</summary>
+    private static readonly List<string> ExpectedAlerts = [];
     private static MainWindow? _window;
     private static string _shots = "";
     private static string _prefix = "swift";
@@ -423,7 +425,9 @@ internal static partial class Program
         // the fixes; the tool is then chosen for this project (the Choose for this project… action) and Start Build resumes.
         if (Arg("expect-readiness-blocker") is { } blocked)
         {
+            ExpectedAlerts.Add("Build Readiness"); // Start Build explains the blocker in an alert, then shows the panel
             await wizard.StartBuildCommand.ExecuteAsync(null);
+            Check(!ExpectedAlerts.Contains("Build Readiness"), "Start Build explains what is missing (Build Readiness alert)");
             var report = wizard.Readiness.Report;
             foreach (var i in report?.Items ?? []) Log($"Readiness {i.Requirement.ToolId}: {i.State} — {i.Detail} [{string.Join(" | ", i.Install.Select(o => o.Label + ": " + (o.CommandLine ?? o.Url)))}]");
             Check(!wizard.HasBuildStarted && wizard.ShowReadiness, "Start Build stops before compiling and shows Build Readiness");
@@ -641,7 +645,8 @@ internal static partial class Program
         public Task AlertAsync(string title, string message)
         {
             Log($"Dialog (alert) {title}: {message}");
-            Failures.Add($"Unexpected alert: {title}: {message}");
+            // An alert a flow announced (ExpectAlert) is the behaviour under test, once; any other alert fails the run.
+            if (!ExpectedAlerts.Remove(title)) Failures.Add($"Unexpected alert: {title}: {message}");
             return Task.CompletedTask;
         }
 

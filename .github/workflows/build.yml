@@ -690,7 +690,10 @@ jobs:
           app="$(find "$OUT/probe-sim" -name 'SigningProbe.app' -type d -path '*ios-simulator*' | head -1)"
           echo "app: $app"
           codesign -dv "$app" 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
-          strings "$app/SigningProbe" | grep -q "SIGNINGPROBE-DEVELOPMENT-RUN" && echo "Debug build contains the Development Run (positive control)."
+          # Xcode 16+ links Debug apps as a stub executable plus <App>.debug.dylib: search every file in the bundle.
+          hits="$(grep -r -a -l "SIGNINGPROBE-DEVELOPMENT-RUN" "$app" || true)"
+          echo "marker found in: ${hits:-nothing}"
+          [ -n "$hits" ] && echo "Debug build contains the Development Run (positive control)."
 
       - name: SigningProbe — a build from another commit than expected is refused before compiling
         run: >
@@ -726,7 +729,8 @@ jobs:
           exe="$(find "$OUT/probe-archive" -path '*Products/Applications/SigningProbe.app/SigningProbe' -type f | head -1)"
           echo "archived executable: $exe"
           [ -n "$exe" ]
-          if strings "$exe" | grep -q "SIGNINGPROBE-DEVELOPMENT-RUN"; then echo "Release archive contains the Development Run"; exit 1; fi
+          # Every file of the archived app, not only the main executable (a Debug-style .debug.dylib would carry the code).
+          if grep -r -a -l "SIGNINGPROBE-DEVELOPMENT-RUN" "$(dirname "$exe")"; then echo "Release archive contains the Development Run"; exit 1; fi
           echo "Release archive contains no Development Run code or text."
 
       - name: Upload iOS outputs
