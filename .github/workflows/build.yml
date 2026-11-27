@@ -1085,7 +1085,7 @@ jobs:
       # HCG Store Manager is a private repository: it is built only when this public repository has a read-only token
       # for it (secret HCG_STORE_MANAGER_READ_TOKEN). Its build log stays in this job; its app is never uploaded.
       STORE_MANAGER_REPOSITORY: F1r3srp3nt/HCG-Store-Manager
-      STORE_MANAGER_COMMIT: 0d7360200bbea8a735d2d39a524e1b3349cc3df1  # HCG-Store-Manager PR #1 head; re-pinned to its main merge commit once merged
+      STORE_MANAGER_COMMIT: 24454ed595fb09f2ee18585533eb330d50d0a9fc  # HCG-Store-Manager main (PR #1 merged)
       HAS_STORE_MANAGER_ACCESS: ${{ secrets.HCG_STORE_MANAGER_READ_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
@@ -1177,6 +1177,10 @@ jobs:
           [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")" = "AppIcon" ]
           codesign --verify --strict --deep --verbose=2 "$app"
           tools/ui-driver/verify-macos-app.sh "$app" "$OUT/screens/launch-hcg-store-manager.png" arm64
+          # Store Manager's own native self-test: static bundle checks, then a launch that visits every section and
+          # finds the icon and sidebar mark through Bundle.main (no TEST Store needed).
+          store-manager-src/scripts/smoke-test-macos-app.sh "$app" "$OUT/store-manager-smoke"
+          cat "$OUT/store-manager-smoke/self-test.json"
           echo "HCG Store Manager real-repository build: PASSED at $STORE_MANAGER_COMMIT" | tee "$OUT/store-manager-status.txt"
           rm -rf "$OUT/store-manager/artifacts" store-manager-src   # private: never uploaded from this public repository
 
