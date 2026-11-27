@@ -325,7 +325,8 @@ public sealed class AppleSigningAssistantTests
         var root = FixtureDir("SigningProbe");
         var pbx = File.ReadAllText(Path.Combine(root, "SigningProbe.xcodeproj", "project.pbxproj"));
         Assert.Equal("PROBE_BUNDLE_ID", XcodeBuildSettings.BundleIdentifierVariable(pbx));
-        var xcconfig = File.ReadAllText(Path.Combine(root, "Config", "Base.xcconfig"));
+        // Windows checkouts may convert the fixture to CRLF; the content is what matters.
+        var xcconfig = File.ReadAllText(Path.Combine(root, "Config", "Base.xcconfig")).ReplaceLineEndings("\n");
         Assert.Contains("DEVELOPMENT_TEAM =\n", xcconfig);
         Assert.Contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=Debug]", xcconfig);
         Assert.Contains("#include? \"Local.xcconfig\"", xcconfig);
