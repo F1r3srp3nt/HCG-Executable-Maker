@@ -308,6 +308,23 @@
               <TextBlock Classes="formlabel" Text="VARIANT / CONFIGURATION" />
               <ComboBox ItemsSource="{Binding Variants}" SelectedItem="{Binding SelectedVariant}" HorizontalAlignment="Stretch" />
             </StackPanel>
+            <StackPanel IsVisible="{Binding ShowAppleOptions}" Spacing="6">
+              <TextBlock Classes="formlabel" Text="BUILD DESTINATION" />
+              <TextBlock Text="{Binding DestinationText}" TextWrapping="Wrap" FontWeight="Medium" />
+              <StackPanel IsVisible="{Binding ShowDeviceFamily}">
+                <TextBlock Classes="formlabel" Text="DEVICE" />
+                <ComboBox ItemsSource="{Binding DeviceFamilies}" SelectedItem="{Binding SelectedDeviceFamily}" HorizontalAlignment="Stretch" />
+              </StackPanel>
+              <StackPanel IsVisible="{Binding ShowStoreDestination}">
+                <TextBlock Classes="formlabel" Text="APP STORE CONNECT DESTINATION" />
+                <ComboBox ItemsSource="{Binding StoreDestinations}" SelectedItem="{Binding SelectedStoreDestination}" HorizontalAlignment="Stretch" />
+                <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="HCG exports the signed .ipa locally. It never uploads to TestFlight or the App Store." />
+              </StackPanel>
+              <TextBlock Classes="formlabel" Text="BUNDLE IDENTIFIER FOR THIS BUILD (OPTIONAL)" />
+              <TextBox Text="{Binding BundleIdentifierOverride}" PlaceholderText="Leave empty to use the project's own" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Signing settings are passed to xcodebuild for this build only. The imported project, its xcconfig files and Config/Local.xcconfig are not changed. Simulator builds need no team; physical devices need Apple Development signing; distribution builds must be Release." />
+            </StackPanel>
             <StackPanel IsVisible="{Binding ShowSigning}" Spacing="6">
               <TextBlock Classes="formlabel" Text="SIGNING" />
               <ComboBox ItemsSource="{Binding SigningModes}" SelectedItem="{Binding SelectedSigning}" HorizontalAlignment="Stretch" />
@@ -323,6 +340,18 @@
                 <TextBox Text="{Binding ProvisioningProfile}" PlaceholderText="Installed profile name" />
               </StackPanel>
             </UniformGrid>
+            <StackPanel IsVisible="{Binding HasSuggestedTeams}" Spacing="4">
+              <TextBlock Classes="muted" FontSize="12" Text="Teams with a usable signing identity on this Mac:" />
+              <ItemsControl ItemsSource="{Binding SuggestedTeams}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String">
+                    <Button Classes="small" Margin="0,0,6,4" Content="{Binding StringFormat='Use team {0}'}"
+                            Command="{Binding $parent[ItemsControl].((vm:MobileBuildStudioViewModel)DataContext).UseTeamCommand}" CommandParameter="{Binding}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
             <StackPanel IsVisible="{Binding ShowSigningIdentity}">
               <TextBlock Classes="formlabel" Text="CODE-SIGNING IDENTITY (CERTIFICATE NAME)" />
               <TextBox Text="{Binding SigningIdentity}" PlaceholderText="Apple Distribution: Company (TEAMID)" />
@@ -463,6 +492,21 @@
               <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Stop}" /><TextBlock Text="Cancel" /></StackPanel>
             </Button>
           </StackPanel>
+          <Border Classes="callout warning" Padding="14" IsVisible="{Binding HasSigningResolution}">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="label" Text="SIGNING NEEDS ATTENTION" />
+              <ItemsControl ItemsSource="{Binding SigningProblems}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String"><SelectableTextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,4" /></DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                         Text="Fix it here (team, signing mode, Xcode-managed provisioning) or in Signing Vault, then confirm trust and start the build again. The project does not need to be imported again." />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="primary small" Content="Resolve Signing" Command="{Binding ResolveSigningCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
           <Border Classes="callout error" Padding="14" IsVisible="{Binding HasFirstError}">
             <StackPanel Spacing="8">
               <TextBlock Classes="label" Text="FIRST ERROR" />

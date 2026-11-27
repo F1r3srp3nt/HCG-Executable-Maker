@@ -673,10 +673,45 @@ jobs:
           dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-ipa
           --trust --expect-failure "no code-signing identities were found for this destination"
 
-      - name: Signed archive without a development team fails honestly (no certificates in CI)
+      - name: Signed archive without a development team stops before compiling, with Resolve Signing (no certificates in CI)
         run: >
           dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-archive
-          --trust --expect-failure "failed with exit code"
+          --trust --expect-failure "requires a development team"
+
+      # Apple Signing Assistant, Unimatch-shaped fixture (automatic signing, no team committed, bundle ID from a
+      # variable, a Development Run compiled into Debug only). CI has no Apple certificates or account.
+      - name: SigningProbe — Simulator Debug builds with no team (signed to run locally) and contains the Debug-only Development Run
+        run: |
+          set -o pipefail
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-sim" --output ios-simulator --trust | tee "$OUT/probe-sim.txt"
+          app="$(find "$OUT/probe-sim" -name 'SigningProbe.app' -type d -path '*ios-simulator*' | head -1)"
+          echo "app: $app"
+          codesign -dv "$app" 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
+          strings "$app/SigningProbe" | grep -q "SIGNINGPROBE-DEVELOPMENT-RUN" && echo "Debug build contains the Development Run (positive control)."
+
+      - name: SigningProbe — iPhone Debug build without a team stops before compiling (Resolve Signing)
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-device" --output ios-device
+          --signing automatic --allow-provisioning-updates --trust --expect-failure "requires a development team"
+
+      - name: SigningProbe — iPhone Debug build with a team but no Apple account — Xcode's signing error becomes Resolve Signing
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-device-team" --output ios-device
+          --signing automatic --team ABCDE12345 --allow-provisioning-updates --trust --expect-failure "Xcode could not sign the app"
+
+      - name: SigningProbe — a Debug distribution archive is refused (the Development Run cannot ship)
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-debug-archive" --output ios-archive
+          --variant Debug --signing unsigned --trust --expect-failure "must be a Release build"
+
+      - name: SigningProbe — Release archive (unsigned, inspection) excludes the Development Run
+        run: |
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-archive" --output ios-archive --signing unsigned --trust
+          exe="$(find "$OUT/probe-archive" -path '*Products/Applications/SigningProbe.app/SigningProbe' -type f | head -1)"
+          echo "archived executable: $exe"
+          [ -n "$exe" ]
+          if strings "$exe" | grep -q "SIGNINGPROBE-DEVELOPMENT-RUN"; then echo "Release archive contains the Development Run"; exit 1; fi
+          echo "Release archive contains no Development Run code or text."
 
       - name: Upload iOS outputs
         if: always()

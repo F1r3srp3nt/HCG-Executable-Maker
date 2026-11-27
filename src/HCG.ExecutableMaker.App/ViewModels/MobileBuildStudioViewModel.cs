@@ -68,8 +68,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
 
     public MobileBuildStudioViewModel(ProjectService projectService, IProjectRepository projects, MobileBuildService builder, MobileArtifactVerifier verifier,
         IToolchainService toolchains, IBuildWorker worker, IAppPaths paths, IDialogService dialogs, IPlatformShell shell, NavigationService? navigation = null,
-        IProcessRunner? runner = null)
+        IProcessRunner? runner = null, HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService? signingAssistant = null)
     {
+        _signingAssistant = signingAssistant;
         _navigation = navigation;
         _runner = runner;
         _projectService = projectService;
@@ -414,6 +415,8 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         if (m is null || output is null) { OnPropertyChanged(nameof(ShowDeviceSpec)); return; }
         var android = output.Value.Platform() == TargetPlatform.Android;
         var debugOutput = output is MobileOutput.AndroidDebugApk or MobileOutput.IosSimulatorApp;
+        // Physical-device builds are Debug by default (development features stay available) but are signed.
+        var debugConfiguration = debugOutput || output == MobileOutput.IosDeviceApp;
 
         if (android && m.Android is { } a && m.ArtifactPath is null)
         {
@@ -433,7 +436,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             SelectedScheme = Schemes.FirstOrDefault();
             foreach (var c in ios.Configurations) Variants.Add(c);
             ShowVariants = Variants.Count > 1;
-            SelectedVariant = Variants.FirstOrDefault(c => c == (debugOutput ? "Debug" : "Release")) ?? Variants.FirstOrDefault();
+            SelectedVariant = Variants.FirstOrDefault(c => c == (debugConfiguration ? "Debug" : "Release")) ?? Variants.FirstOrDefault();
         }
 
         if (!debugOutput && output != MobileOutput.AndroidAabToApk)
@@ -465,6 +468,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
         ShowApkSet = output == MobileOutput.AndroidAabToApk;
         SelectedApkSetMode = ApkSetModes[0];
         OnPropertyChanged(nameof(ShowDeviceSpec));
+        RefreshAppleOptions();
         PrepareSummary();
     }
 
@@ -507,6 +511,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             DeviceSpecPath = DeviceSpecPath,
             InputArtifact = m.ArtifactPath,
             SigningIdentity = string.IsNullOrWhiteSpace(SigningIdentity) ? null : SigningIdentity.Trim(),
+            DeviceFamily = SelectedDeviceFamily?.Value ?? AppleDeviceFamily.IPhone,
+            BundleIdentifier = string.IsNullOrWhiteSpace(BundleIdentifierOverride) ? null : BundleIdentifierOverride.Trim(),
+            Destination = SelectedExportMethod?.Value == IosExportMethod.AppStoreConnect ? SelectedStoreDestination?.Value : null,
         };
     }
 
@@ -549,12 +556,12 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
     public event EventHandler? LogAppended;
 
     partial void OnSelectedSigningChanged(Choice<MobileSigningMode>? value) => PrepareSummary();
-    partial void OnSelectedVariantChanged(string? value) => PrepareSummary();
+    partial void OnSelectedVariantChanged(string? value) { PrepareSummary(); NotifyDestination(); }
     partial void OnOutputDirectoryChanged(string value) => PrepareSummary();
     partial void OnAppNameChanged(string value) => PrepareSummary();
     partial void OnAppVersionChanged(string value) => PrepareSummary();
     partial void OnSelectedOutputChanged(MobileOutputItem? value) => PrepareSummary();
-    partial void OnSelectedExportMethodChanged(Choice<IosExportMethod>? value) => PrepareSummary();
+    partial void OnSelectedExportMethodChanged(Choice<IosExportMethod>? value) { PrepareSummary(); RefreshAppleOptions(); }
     partial void OnProvisioningProfileChanged(string value) => PrepareSummary();
     partial void OnAllowProvisioningUpdatesChanged(bool value) => PrepareSummary();
 
@@ -696,6 +703,9 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             if (!allowOverwrite) return;
         }
 
+        await RememberTeamAsync(options);
+        HasSigningResolution = false;
+        SigningProblems.Clear();
         LogLines.Clear();
         while (_pendingLog.TryDequeue(out _)) { }
         LiveWarnings = LiveErrors = 0;
@@ -736,6 +746,7 @@ public sealed partial class MobileBuildStudioViewModel : PageViewModel
             ? $"{result.Artifacts.Count} artifact(s) in {Format.Duration(result.Duration)}. Nothing was uploaded or published."
             : result.FailureReason ?? "";
         foreach (var a in result.Artifacts) BuiltArtifacts.Add(new ArtifactItem(a, result));
+        ApplySigningResolution(result);
         OnPropertyChanged(nameof(HasBuiltArtifacts));
         OnPropertyChanged(nameof(CanShipToStore));
         OnPropertyChanged(nameof(CanUnleashifyBuild));

@@ -30,6 +30,8 @@ public enum PackagingFormat
     JailbreakDeb,
     /// <summary>Xcode archive (.xcarchive) of a native macOS app, made by xcodebuild archive, delivered as a ZIP (ditto).</summary>
     MacXcodeArchive,
+    /// <summary>iOS .app built for physical devices and signed for development (installable on registered devices).</summary>
+    IosDeviceApp,
 }
 
 public enum PackagingAvailability
@@ -77,6 +79,7 @@ public static class PackagingFormatNames
         PackagingFormat.AndroidAab => "Android App Bundle (.aab)",
         PackagingFormat.AndroidApkSet => "Android APK set (.apks)",
         PackagingFormat.IosSimulatorApp => "iOS Simulator app (.app)",
+        PackagingFormat.IosDeviceApp => "iOS device app (.app, development signed)",
         PackagingFormat.IosArchive => "Xcode archive (.xcarchive)",
         PackagingFormat.IosIpa => "iOS app package (.ipa)",
         PackagingFormat.JailbreakDeb => "Jailbreak package (.deb, Theos)",

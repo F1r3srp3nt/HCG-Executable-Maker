@@ -83,6 +83,9 @@ public static class Composition
         services.AddSingleton<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>();
         services.AddSingleton<IProjectSigningStore, HCG.ExecutableMaker.Infrastructure.Persistence.SqliteProjectSigningStore>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck>();
+        // Apple Signing Assistant: effective build settings + Signing Vault + this Mac's assets → signing for each destination.
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService(
+            sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>(), sp.GetRequiredService<IProjectSigningStore>(), TimeProvider.System));
         // HCG Impactor: IPA inspection, signing (codesign with Keychain identities), devices (devicectl), installation, history.
         services.AddSingleton(sp => new HCG.Impactor.Storage.ImpactorStore(sp.GetRequiredService<IAppPaths>().Root));
         services.AddSingleton<HCG.Impactor.ISigningInventorySource>(sp => new HCG.Impactor.Signing.SigningInventorySource(sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>()));
