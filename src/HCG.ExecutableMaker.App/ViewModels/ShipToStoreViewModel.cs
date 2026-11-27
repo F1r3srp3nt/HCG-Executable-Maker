@@ -705,6 +705,7 @@ public sealed partial class ShipToStoreViewModel(
             && !await dialogs.ConfirmAsync("Not ready for ordinary installation", string.Join("\n", limited.Select(f => $"• {f.FileName}: {f.Candidate.Readiness.Label}")) +
                 "\n\nYou asked for a public release. HCG Store shows these labels to approvers and customers, and refuses public approval of unsigned iOS device builds. Upload the draft anyway?", "Upload draft")) return;
         if (Client() is not { } client) return;
+        if (StoreSessionPolicy.Refusal(account.Configuration, client.Origin) is { } refusal) { await dialogs.AlertAsync("Not sent", refusal); return; }
         IsShipping = true;
         _cts = new CancellationTokenSource();
         var service = new ShipToStoreService(client, features);

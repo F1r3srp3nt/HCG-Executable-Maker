@@ -2,6 +2,42 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Distribution Studio final qualification
+
+### Security
+- **The stored HCG session is bound to its issuer.**
+  - A session from another issuer is never refreshed: its refresh token is never sent, and the session is deleted.
+  - Sessions stored before this change restore as before and gain their issuer at the next refresh.
+  - Production (`session`), development (`session-development`) and TEST (`session-local-test`) sessions were
+    already separate entries.
+- **A sign-in goes only to a Store of the same kind** (`StoreSessionPolicy`): a production sign-in is never sent to
+  a Store on this computer, and a TEST sign-in never to a real Store. Diagnostics, the CLI and the upload button
+  explain the refusal.
+
+### Added
+- **Maker's own build provenance is embedded at packaging time** (`build-source.txt` → assembly metadata):
+  - it records the full commit, whether the tree had uncommitted changes, and the GitHub repository;
+  - `--version` prints `Source: <commit>`;
+  - `--release-passport --self` uses it, needs no git, and is valid only for the running app's own bundle;
+  - a checkout given with it must agree, or no passport is written.
+- **Projects Maker packages keep their own git provenance.** Without git or a commit, the source is unknown; nothing
+  is guessed.
+- `--release-passport` covers `.pkg` and `.dmg` archives as well as `.zip`.
+- **Acceptance test 16b:** a revoked central `store.publish` refuses the next upload, even with a stored session.
+- **CI (Package macos):**
+  - the packaged app's passport must name the build commit;
+  - the same with git removed from PATH;
+  - a project without git is recorded as source unknown;
+  - `--self` is refused for another bundle.
+- **Docs:**
+  - `PRODUCTION-COMPATIBILITY.md`: the live Store and what Maker does against it;
+  - `HCG-MAIL-MACOS.md`: implemented, partial and unsupported steps for HCG Mail on Apple Silicon;
+  - the M4 Max acceptance checklist.
+
+### Fixed
+- `--release-passport` resolves git to an absolute path; it no longer aborts.
+- The macOS acceptance run clears only the TEST Keychain entry between accounts and Stores.
+
 ## [Unreleased] — Distribution Studio delivery
 
 ### Added

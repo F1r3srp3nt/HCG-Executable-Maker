@@ -212,9 +212,9 @@ Store; **Check connection** still runs the public checks. The token is sent only
 | 9 | Release Manager connectivity | `GET /api/v1/publishing/manager`: releases listed and the audit trail state |
 | 10 | Public publication | **Off** unless HCG Store states it on. Not needed for private uploads; Maker never publishes |
 
-Live production (checked 26 Nov 2026 without signing in): `health` answers `status ok, mode production, hcgConnect
-configured, payments disabled, protectedDownloads disabled, publishing uploads`; every publishing route needs a
-sign-in. Checks 5–9 therefore need the physical test on the Mac (see
+Live production (checked 27 Nov 2026 without signing in): `health` answers `status ok, mode production, hcgConnect
+configured, entitlementAuthority hcg-ecosystem, payments disabled, protectedDownloads free-testing-only,
+anonymousFreeProducts ["hcg-mail"], publishing enabled`. Every publishing route needs a sign-in. Checks 5–9 therefore need the physical test on the Mac (see
 [DISTRIBUTION-STUDIO-PRODUCTION-TEST.md](DISTRIBUTION-STUDIO-PRODUCTION-TEST.md)).
 
 ### Products and editions
@@ -225,13 +225,12 @@ products are selected, never re-created; **Create a draft product** is only for 
 
 ## Not available yet (blockers)
 
-1. **Store main is not deployed yet.** Production HCG Store runs `HCG_STORE_PUBLISHING=uploads` (private drafts
-   and uploads on; approval and publication off) on the earlier contract. HCG Store main has the release lifecycle
-   (#27) and the reviewed Distribution Studio API (#28: official product metadata, descriptive draft products,
-   publication requests, recorded requests). It is merged there but not deployed, and deploying is the founder's
-   decision. Until then Maker shows names and editions from the product list plus the public release resolution.
-   It explains availability changes instead of sending them, and everything else works. Once main is deployed, Maker
-   discovers its capabilities and uses them with no Maker change. CI checks M1–M5 already run against Store main.
+1. **Production now runs the release-lifecycle contract** (see [PRODUCTION-COMPATIBILITY.md](PRODUCTION-COMPATIBILITY.md)).
+   On 27 Nov 2026 the live health answer states `publishing enabled`, `protectedDownloads free-testing-only` and
+   `anonymousFreeProducts ["hcg-mail"]`. That field first appears in Store #30, which contains #27 (release lifecycle)
+   and #28 (Distribution Studio API). Maker discovers this from capabilities after sign-in: Disable and Enable go
+   through HCG Store from Maker, and Supersede and Restore are browser decisions. The signed-in checks still need the
+   physical test on the Mac.
 2. **Signed-in production checks** (client authorization, `store.publish`, catalogue, Release Manager) can only be run
    with a real HCG sign-in on the Mac: see the production test plan. Whether HCG Store lists Maker's client in
    `HCG_STORE_PUBLISHING_CLIENT_IDS`, and whether HCG has granted `store.publish`, is shown by checks 6 and 7.

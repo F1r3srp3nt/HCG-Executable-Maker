@@ -53,6 +53,31 @@ if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HCG_SOURCE_REVISION
     }
     catch (System.ComponentModel.Win32Exception) { /* git not installed: the app reports commit "unknown" */ }
 }
+// Maker's own build provenance (full commit, uncommitted changes, GitHub repository), embedded in the app so a packaged
+// Maker can name its source in its Release Passport without git on the computer it runs on. Nothing is guessed: without
+// git (or outside a working copy) no file is written and the app reports its source as unknown.
+string? sourceFile = null;
+try
+{
+    string Git(params string[] a)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo("git") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        psi.ArgumentList.Add("-C"); psi.ArgumentList.Add(repo);
+        foreach (var x in a) psi.ArgumentList.Add(x);
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var o = p.StandardOutput.ReadToEnd().Trim();
+        p.WaitForExit();
+        return p.ExitCode == 0 ? o : "";
+    }
+    var full = Git("rev-parse", "--verify", "HEAD");
+    if (full.Length == 40)
+    {
+        var dirtyNow = Git("status", "--porcelain", "--untracked-files=no").Length > 0;
+        var repository = HCG.ExecutableMaker.Packaging.Jailbreak.LocalBuild.RepositoryFromRemote(Git("remote", "get-url", "origin"));
+        sourceFile = $"commit={full.ToLowerInvariant()}\ndirty={(dirtyNow ? "true" : "false")}\nrepository={repository ?? ""}\n";
+    }
+}
+catch (System.ComponentModel.Win32Exception) { /* git not installed: no embedded source */ }
 var output = Path.GetFullPath(args[1]);
 string? Option(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
 var targets = (Option("--targets") ?? "osx-arm64,osx-x64,win-x64").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -95,6 +120,7 @@ if (analysis.Support != SupportLevel.Supported || analysis.PrimaryProjectPath is
 // Executable Maker's build environment removes HCG_* variables, so the commit travels as a file in the imported copy.
 if (Environment.GetEnvironmentVariable("HCG_SOURCE_REVISION") is { Length: > 0 } revision)
     File.WriteAllText(Path.Combine(import.Project.SourceDirectory, "build-revision.txt"), revision + "\n");
+if (sourceFile is not null) File.WriteAllText(Path.Combine(import.Project.SourceDirectory, "build-source.txt"), sourceFile);
 var icon = Path.Combine(import.Project.SourceDirectory, "src", "HCG.ExecutableMaker.App", "Assets", "Branding", "hcg-app-icon.png");
 if (dist is not null) Directory.CreateDirectory(dist);
 

@@ -64,6 +64,11 @@ internal static class ShipToStoreCommand
         if (!account.IsSignedIn) return 3;
 
         var origin = StoreOrigin.Parse(Arg("--store")) ?? services.GetRequiredService<StoreClientFactory>().OriginAsync().GetAwaiter().GetResult();
+        if (StoreSessionPolicy.Refusal(account.Configuration, origin) is { } refusal)
+        {
+            Console.Error.WriteLine(refusal + " Nothing was sent.");
+            return 3;
+        }
         var client = services.GetRequiredService<StoreClientFactory>().Create(origin);
         var runner = services.GetRequiredService<IProcessRunner>();
         // Enforced at command execution by the same shared service the UI uses: HCG Store decides the staff permission.

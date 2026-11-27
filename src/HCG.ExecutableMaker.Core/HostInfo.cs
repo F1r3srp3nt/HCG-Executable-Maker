@@ -32,6 +32,14 @@ public static class HostInfo
     /// <summary>Git commit this build was made from ("+uncommitted" when the working tree had changes); "unknown" without git.</summary>
     public static string ProductCommit => Metadata("HcgCommit") is { Length: > 0 } c ? c : "unknown";
 
+    /// <summary>The full source commit Maker itself was built from (40 hex), embedded at build time; null when the build
+    /// recorded none (built without git and without a CI-written build-source.txt). Never guessed.</summary>
+    public static string? SourceCommit => Metadata("HcgSourceCommit") is { Length: 40 } c && c.All(Uri.IsHexDigit) ? c.ToLowerInvariant() : null;
+    /// <summary>Whether that working copy had uncommitted changes; null when unknown.</summary>
+    public static bool? SourceDirty => Metadata("HcgSourceDirty") switch { "true" => true, "false" => false, _ => null };
+    /// <summary>The GitHub repository (OWNER/NAME) Maker was built from, when the build recorded it.</summary>
+    public static string? SourceRepository => Metadata("HcgSourceRepository") is { Length: > 0 } r ? r : null;
+
     /// <summary>UTC build time (ISO 8601).</summary>
     public static string BuildDate => Metadata("HcgBuildDate") ?? "unknown";
 

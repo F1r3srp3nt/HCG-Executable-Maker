@@ -171,7 +171,8 @@ public static class StoreConnectionDiagnostics
         // HCG Connect: this Mac's session (the token is fetched once; it goes only to a server that answered as HCG Store).
         var signedIn = ctx.SignedIn;
         string? token = null, tokenProblem = null;
-        if (signedIn)
+        var pairing = StoreSessionPolicy.Refusal(ctx.Connect, client.Origin);
+        if (signedIn && pairing is null)
         {
             try { token = await accessToken(ct).ConfigureAwait(false); }
             catch (Exception ex) when (ex is not OperationCanceledException) { tokenProblem = SecretRedactor.RedactCredentials(ex.Message); }
@@ -229,6 +230,8 @@ public static class StoreConnectionDiagnostics
         checks.Add(!signedIn
             ? new("auth", "HCG Connect authentication", StoreCheckState.Failed, ctx.AccountMessage is { Length: > 0 } m ? $"Not signed in: {m}" : "Not signed in with HCG Connect.",
                 "Sign in on the Account page (HCG Connect, in your browser with PKCE). Maker never asks for your password.", null, "you")
+            : pairing is not null
+                ? new("auth", "HCG Connect authentication", StoreCheckState.Failed, pairing, "Use the Store that matches your sign-in (the Store address above, or the HCG Connect configuration on the Account page).", null, "you")
             : token is null
                 ? new("auth", "HCG Connect authentication", StoreCheckState.Failed, $"Signed in as {ctx.AccountEmail ?? "your HCG account"}, but no access token could be obtained{(tokenProblem is { } p ? ": " + p : "")}.",
                     "Sign out and sign in again on the Account page.", null, "you")

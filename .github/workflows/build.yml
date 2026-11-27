@@ -283,10 +283,24 @@ jobs:
           kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
           j="$X/screens/release-app-distribution-studio.jpg"; sips -s format jpeg -s formatOptions 60 -Z 1400 "$X/screens/release-app-distribution-studio.png" --out "$j" >/dev/null
           echo "=====BEGIN-IMG release-app-distribution-studio.jpg====="; base64 -i "$j" | tr -d '\n'; echo; echo "=====END-IMG====="
-          # The packaged app issues the Release Passport (build half) of its own archive: measured facts only.
-          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --app "$APP" --file "$ZIP" --source-repo "$GITHUB_WORKSPACE" \
+          # The packaged app issues the Release Passport (build half) of its own archive: measured facts only. Its source is
+          # Maker's OWN build provenance, embedded at packaging time (--self), so it needs no git; the checkout is a cross-check.
+          HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --self --app "$APP" --file "$ZIP" --source-repo "$GITHUB_WORKSPACE" \
             --provider github-actions --toolchain ".NET SDK $(dotnet --version); HCG Executable Maker $VERSION"
-          check "Release Passport of $(basename "$ZIP") names its exact SHA-256" '[ "$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"artifact\"][\"sha256\"])" "$ZIP.release-passport.json")" = "$(shasum -a 256 "$ZIP" | cut -c1-64)" ]'
+          pj() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2], {}, {'d': d}))" "$@"; }
+          check "Release Passport of $(basename "$ZIP") names its exact SHA-256" '[ "$(pj "$ZIP.release-passport.json" "d[\"artifact\"][\"sha256\"]")" = "$(shasum -a 256 "$ZIP" | cut -c1-64)" ]'
+          check "Release Passport source commit is this build's commit ($GITHUB_SHA)" '[ "$(pj "$ZIP.release-passport.json" "d[\"source\"][\"commit\"]")" = "$GITHUB_SHA" ]'
+          check "the app reports its full source commit" '"$EXE" --version | grep -q "Source: $GITHUB_SHA"'
+          # Without git on PATH (as on a customer's Mac without developer tools): Maker still names its own build commit,
+          # and a project without readable provenance is recorded as source unknown (never a guessed commit).
+          NOGIT="$X/no-git-bin"; mkdir -p "$NOGIT"; for t in python3 shasum; do ln -sf "$(command -v $t)" "$NOGIT/$t"; done
+          PATH="$NOGIT" HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --self --app "$APP" --file "$ZIP" --out "$X/nogit-self.json" > "$X/nogit-self.log" 2>&1
+          check "without git, --self still names this build's commit" '[ "$(pj "$X/nogit-self.json" "d[\"source\"][\"commit\"]")" = "$GITHUB_SHA" ]'
+          cp "$ZIP" "$X/copy-of-app.zip"; cp -R "$APP" "$X/Copy.app"
+          PATH="$NOGIT" HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --app "$X/Copy.app" --file "$X/copy-of-app.zip" --source-repo "$GITHUB_WORKSPACE" --out "$X/nogit-project.json" > "$X/nogit-project.log" 2>&1
+          check "without git, a project's source is recorded as unknown (no crash, no invented commit)" '[ "$(pj "$X/nogit-project.json" "d[\"source\"][\"commit\"]")" = "None" ]'
+          rcs=0; HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --self --app "$X/Copy.app" --file "$X/copy-of-app.zip" --out "$X/not-self.json" > "$X/not-self.log" 2>&1 || rcs=$?
+          check "--self is refused for a bundle that is not the running app (exit $rcs)" '[ $rcs = 2 ] && [ ! -e "$X/not-self.json" ]'
           cp -R "$X/screens" "$D/screens-macos"
           echo "=====BEGIN-PASSPORT====="; cat "$ZIP.release-passport.json"; echo "=====END-PASSPORT====="
 

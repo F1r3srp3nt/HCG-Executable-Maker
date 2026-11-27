@@ -25,6 +25,10 @@ public sealed class StoreClientFactory(HcgAccountService account, ISettingsStore
         return StoreOrigin.Parse(configured) ?? HcgStoreClient.DefaultOrigin;
     }
 
+    /// <summary>A client for <paramref name="origin"/>. The HCG session is sent only to a Store of the same kind
+    /// (StoreSessionPolicy): a production sign-in never to a local TEST Store, a TEST sign-in never to a real one.</summary>
     public HcgStoreClient Create(Uri origin) =>
-        new(Http, origin, account.GetAccessTokenAsync, account.RecoverFromUnauthorizedAsync);
+        StoreSessionPolicy.Refusal(account.Configuration, origin) is null
+            ? new(Http, origin, account.GetAccessTokenAsync, account.RecoverFromUnauthorizedAsync)
+            : new(Http, origin, _ => Task.FromResult<string?>(null));
 }

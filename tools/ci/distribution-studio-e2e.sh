@@ -181,6 +181,14 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: applicat
 fcode=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'content-range: bytes 0-0/1' --data-binary x "$STORE/publishing-upload/v1/forged.token")
 check "16 Unauthorised: an account without store.publish is refused (exit $rc; diagnostics name the permission), no sign-in ($code) and a forged upload URL ($fcode) are refused" \
   '[ $rc != 0 ] && grep -q "\[Problem\] Central publisher permission" "$OUT/diag-carol.txt" && [ "$code" = 401 ] && { [ "$fcode" = 403 ] || [ "$fcode" = 400 ]; }'
+# 16b · Central permission revocation is respected at once: alice keeps her session (on macOS it stays in the Keychain)
+#       but HCG revokes store.publish; HCG Store asks HCG live, so the next upload is refused.
+WHO=e2e-alice; maker_home "$INFO" alice
+M "${SHIP[@]}" --store-catalogue > "$OUT/alice-before-revoke.txt" 2>&1; rcb=$?
+ctl revoke-all '{"sub":"e2e-alice"}' >/dev/null
+M "${SHIP[@]}" --release-version 9.9.8 --build-number 1 --eligibility private --file "$Z1" > "$OUT/ship-after-revoke.log" 2>&1; rcr=$?
+check "16b Central permission revocation: alice could list the catalogue (exit $rcb); after HCG revoked store.publish her upload is refused (exit $rcr) and no 9.9.8 release exists" \
+  '[ $rcb = 0 ] && [ $rcr != 0 ] && ! grep -q "Release rel-" "$OUT/ship-after-revoke.log"'
 pkill -f "ship-e2e-server.ts $INFO" 2>/dev/null; sleep 1; WHO=e2e-alice
 
 # ════════ 17 · TEST Store in "uploads" mode (as production): publication off, authorised private uploads work ════════

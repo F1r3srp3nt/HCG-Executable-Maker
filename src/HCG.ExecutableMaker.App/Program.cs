@@ -15,6 +15,7 @@ internal static class Program
         {
             Console.WriteLine(Core.HostInfo.BuildIdentity);
             Console.WriteLine(Account.HcgConnectConfiguration.BuiltInDescription(Account.HcgConnectConfiguration.SelectedEnvironment()));
+            Console.WriteLine("Source: " + (Core.HostInfo.SourceCommit is { } sc ? sc + (Core.HostInfo.SourceDirty == true ? " (with uncommitted changes)" : "") + (Core.HostInfo.SourceRepository is { } sr ? " · " + sr : "") : "not recorded in this build"));
             Console.WriteLine("Executable: " + Core.HostInfo.ExecutablePath);
             if (Core.HostInfo.AppBundlePath is { } app) Console.WriteLine("App bundle: " + app);
             return 0;
