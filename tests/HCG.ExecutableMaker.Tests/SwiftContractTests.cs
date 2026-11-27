@@ -269,6 +269,17 @@ public class SwiftContractTests(ITestOutputHelper output) : IDisposable
 
     // ───────────── Info.plist template and verification ─────────────
 
+    [Theory]
+    [InlineData("AppIcon", true)]
+    [InlineData("AppIcon.icns", true)]
+    [InlineData(" AppIcon ", true)]
+    [InlineData("OtherIcon", false)]
+    [InlineData("appicon", false)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    public void A_template_that_names_the_installed_icon_keeps_its_spelling(string? templateIcon, bool kept) =>
+        Assert.Equal(kept, SwiftAppBundlePackager.SameIcon(templateIcon, "AppIcon.icns"));
+
     [Fact]
     public void The_Info_plist_template_keeps_its_own_keys_and_takes_HCGs_values()
     {

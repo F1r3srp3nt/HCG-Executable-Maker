@@ -192,11 +192,15 @@ public sealed partial class MobileBuildService(
                 // (Resolve Signing) and after the build's own verification, never as a dead end before it.
                 var assistantDecidesSigning = options.Framework == MobileFramework.NativeIos && signingAssistant is not null
                                               && report.Host.Platform == TargetPlatform.MacOS && analysis.Ios is not null;
+                string? deferredSigningGap = null;
                 if (!option.IsAvailable)
                 {
                     var signingGap = options.Output.Platform() == TargetPlatform.IOS && option.Reason is { } why && SigningReason().IsMatch(why);
                     if (signingGap && assistantDecidesSigning)
+                    {
+                        deferredSigningGap = option.Reason;
                         Log(BuildLogKind.Warning, $"{options.Output.DisplayName()}: {option.Reason} The Apple Signing Assistant checks this build's signing next.");
+                    }
                     else
                     {
                         if (signingGap)
@@ -218,7 +222,7 @@ public sealed partial class MobileBuildService(
                 // effective build settings and decide how this destination is signed. Simulator builds need no team;
                 // device builds need Apple Development signing; distribution builds must be Release.
                 if (assistantDecidesSigning)
-                    (iosConfiguration, iosSigningArguments) = await PlanAppleSigningAsync(request, options, analysis, report, build, Log, AddMessage, overall.Token).ConfigureAwait(false);
+                    (iosConfiguration, iosSigningArguments) = await PlanAppleSigningAsync(request, options, analysis, report, build, Log, AddMessage, deferredSigningGap, overall.Token).ConfigureAwait(false);
 
             }
             else if (options.Output != MobileOutput.AndroidAabToApk)
@@ -486,7 +490,7 @@ public sealed partial class MobileBuildService(
     /// signing plan. A plan that is not ready stops the build before compilation with Resolve Signing.
     /// </summary>
     private async Task<(string Configuration, IReadOnlyList<string> Arguments)> PlanAppleSigningAsync(MobileBuildRequest request, MobileBuildOptions options, MobileAnalysis analysis,
-        ToolchainReport report, BuildRecord build, Action<BuildLogKind, string> log, Action<BuildMessage> addMessage, CancellationToken ct)
+        ToolchainReport report, BuildRecord build, Action<BuildLogKind, string> log, Action<BuildMessage> addMessage, string? signingGap, CancellationToken ct)
     {
         var destination = AppleDestinations.Of(options);
         var configuration = options.Variant ?? destination.DefaultConfiguration();
@@ -569,6 +573,8 @@ public sealed partial class MobileBuildService(
                 addMessage(new BuildMessage(DiagnosticSeverity.Error, $"{f.Title}: {f.Detail}{(f.Remedy is null ? "" : " Fix: " + f.Remedy)}", HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode));
             throw new BuildValidationException($"Signing is not ready for {destination.Label()} ({configuration}). " +
                 string.Join(" ", plan.Failures.Select(f => f.Detail + (f.Remedy is null ? "" : " Fix: " + f.Remedy))) +
+                // The certificate gap found before the Assistant ran is part of the same refusal, not only a warning.
+                (signingGap is { Length: > 0 } gap ? " Also: " + gap : "") +
                 " Use Resolve Signing, then build again; the project does not need to be imported again.");
         }
         if (plan.Arguments.Count > 0) log(BuildLogKind.Info, "Signing build settings for this build (the project's files are not changed): " + string.Join(" ", plan.Arguments));

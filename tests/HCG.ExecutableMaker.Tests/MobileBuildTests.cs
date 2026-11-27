@@ -599,6 +599,9 @@ public class MobileBuildServiceTests : IDisposable
         Assert.Equal(BuildStatus.Failed, build.Status);
         Assert.Contains("requires a development team", build.FailureReason);
         Assert.DoesNotContain("is not available", build.FailureReason);
+        // The certificate gap stays in the refusal itself (CI run 46048952267: the IPA refusal had lost it).
+        Assert.Contains("Also: " + option.Reason, build.FailureReason);
+        Assert.Contains("no code-signing identities were found for this destination", build.FailureReason);
         Assert.Contains("The Apple Signing Assistant checks this build's signing next", observer.Text);
         Assert.All(worker.Calls, c => Assert.Contains("-showBuildSettings", c.Arguments)); // nothing compiled
         Assert.Contains(build.Messages, m => m.Code == HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode);

@@ -21,6 +21,14 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   The real HCG Store Manager (private) is built at a pinned commit when the read-only secret
   `HCG_STORE_MANAGER_READ_TOKEN` is configured; until then it is reported as pending.
 
+### Fixed
+- **Info.plist template's icon name kept.** A contract template that already names the installed icon
+  (`CFBundleIconFile` `AppIcon` or `AppIcon.icns`) keeps its own spelling instead of being rewritten to `AppIcon.icns`
+  (HCG Store Manager's template uses `AppIcon`; both resolve to `Contents/Resources/AppIcon.icns`).
+- **iOS signing refusal names every gap.** When the Apple Signing Assistant refuses a device build or development IPA,
+  the missing certificate found before it ran ("no code-signing identities were found for this destination") is part of
+  the refusal again, next to the missing team, instead of only a warning in the log.
+
 ## [Unreleased] — Build Provider (HCG Server Build Host in the New Build wizard)
 
 ### Added
