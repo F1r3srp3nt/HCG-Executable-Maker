@@ -644,7 +644,7 @@ jobs:
     name: Mobile — iOS (real Xcode builds)
     needs: test
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       OUT: ${{ github.workspace }}/mobile-out
     steps:
