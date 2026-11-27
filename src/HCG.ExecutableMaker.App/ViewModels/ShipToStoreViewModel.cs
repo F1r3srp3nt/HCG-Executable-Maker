@@ -171,7 +171,7 @@ public sealed partial class ShipToStoreViewModel(
     public StatusTag ConnectionTag => new(Connection, ConnectionTone);
     [ObservableProperty] private string? _connectionDetail;
     public ObservableCollection<ShipCheckItem> Diagnostics { get; } = [];
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasDiagnostics), nameof(CapabilitiesText), nameof(CanRequestPublication), nameof(PublicationRequestNote), nameof(Contract), nameof(AvailabilityHelp))] private StoreDiagnosticsReport? _report;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasDiagnostics), nameof(CapabilitiesText), nameof(CanRequestPublication), nameof(PublicationRequestNote), nameof(Contract), nameof(AvailabilityHelp), nameof(OperationNote))] private StoreDiagnosticsReport? _report;
     public bool HasDiagnostics => Report is not null;
     /// <summary>The checks stay open when something needs attention; when everything is ready they fold away (one click shows them).</summary>
     [ObservableProperty] private bool _diagnosticsExpanded = true;
@@ -234,7 +234,7 @@ public sealed partial class ShipToStoreViewModel(
         DistributionOperation.NewUpdate => "A new version or build of the selected product, uploaded as a private draft. The current release stays available until a replacement is approved and published in HCG Store.",
         DistributionOperation.NewProduct => "A private product draft in HCG Store. Listing it, its central product ID, editions and official artwork are HCG's decisions: export the registration request for HCG. Nothing is published and no access is granted.",
         DistributionOperation.AddToListedProduct => "Another platform, architecture or package for a release of the selected product. An open draft takes the files; a submitted or published release is never changed, so a new revision is prepared.",
-        _ => "Current, superseded, withdrawn and private releases. Availability changes are requests for the people who approve and publish in HCG Store; each needs the version typed to confirm.",
+        _ => "Current, superseded, disabled and private releases, as HCG Store holds them. " + Contract.Explanation + " Every change needs a reason and the version typed to confirm.",
     };
 
     // ───────────── New product ─────────────
