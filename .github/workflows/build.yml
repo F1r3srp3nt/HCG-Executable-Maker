@@ -301,7 +301,7 @@ jobs:
           check "without git, a project's source is recorded as unknown (no crash, no invented commit)" '[ "$(pj "$X/nogit-project.json" "d[\"source\"][\"commit\"]")" = "None" ]'
           rcs=0; HCG_EXECUTABLE_MAKER_HOME="$X/home" "$EXE" --release-passport --self --app "$X/Copy.app" --file "$X/copy-of-app.zip" --out "$X/not-self.json" > "$X/not-self.log" 2>&1 || rcs=$?
           check "--self is refused for a bundle that is not the running app (exit $rcs)" '[ $rcs = 2 ] && [ ! -e "$X/not-self.json" ]'
-          cp -R "$X/screens" "$D/screens-macos"
+          rm -rf "$RUNNER_TEMP/screens-macos"; cp -R "$X/screens" "$RUNNER_TEMP/screens-macos"   # not in dist: dist holds only release files
           echo "=====BEGIN-PASSPORT====="; cat "$ZIP.release-passport.json"; echo "=====END-PASSPORT====="
 
       - name: Build manifest, checksums and installation instructions
@@ -320,6 +320,15 @@ jobs:
         with:
           name: hcg-executable-maker-${{ matrix.name }}
           path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload native launch screenshots
+        if: matrix.name == 'macos'
+        uses: actions/upload-artifact@v7
+        with:
+          name: hcg-executable-maker-macos-screenshots
+          path: ${{ runner.temp }}/screens-macos/*
           if-no-files-found: error
           retention-days: 14
 
