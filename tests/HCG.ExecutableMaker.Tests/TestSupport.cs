@@ -96,6 +96,14 @@ public sealed class UnixFactAttribute : FactAttribute
     }
 }
 
+public sealed class UnixTheoryAttribute : TheoryAttribute
+{
+    public UnixTheoryAttribute()
+    {
+        if (OperatingSystem.IsWindows()) Skip = "Requires a Unix host (Unix paths).";
+    }
+}
+
 /// <summary>Linux only (reads /proc).</summary>
 public sealed class LinuxFactAttribute : FactAttribute
 {
