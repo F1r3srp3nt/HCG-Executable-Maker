@@ -50,8 +50,8 @@ Store is never switched off because of it:
 | Store | Disable / Enable | Supersede / Restore | Draft-time "replace current" |
 |---|---|---|---|
 | Deployed today (`uploads`, no lifecycle operations) | explained: done in HCG Store's Release Manager | explained: done in HCG Store's Release Manager | not offered (explained) |
-| HCG Store main (release lifecycle) | from Maker, through HCG Store's endpoint (reason + typed version + confirmation; HCG's permission checked by the Store) | in HCG Store's browser review, by a person with the publication permission (Maker opens the release there) | recorded with the draft; applied only when a person publishes |
-| Proposed `claude/distribution-studio-api` | recorded request | recorded request | recorded request |
+| HCG Store main (release lifecycle, #27 + #28; merged, not deployed) | from Maker, through HCG Store's endpoint (reason + typed version + confirmation; HCG's permission checked by the Store) | in HCG Store's browser review, by a person with the publication permission (Maker opens the release there) | recorded with the draft; applied only when a person publishes |
+| `claude/distribution-studio-api` (proposal; integrated into main as #28) | recorded request | recorded request | recorded request |
 
 A working public release is never disabled before its replacement is published: the replacement takes over only in
 the same step as its publication, and only on its own platform, architecture and channel.

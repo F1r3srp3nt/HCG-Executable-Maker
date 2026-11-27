@@ -319,8 +319,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     env:
-      # HCG Store's Distribution Studio additions (store branch claude/distribution-studio-api, proposed in
-      # docs/PUBLISHING.md for founder review; not merged or deployed there). Switch to main once HCG Store merges it.
+      # Acceptance 1–18 run against the proposal branch (its recorded-request contract); HCG Store main, which integrated
+      # it with its release lifecycle (#27, #28; not deployed), is checked as the second Store (M1–M5).
       STORE_REF: claude/distribution-studio-api
     steps:
       - uses: actions/checkout@v7

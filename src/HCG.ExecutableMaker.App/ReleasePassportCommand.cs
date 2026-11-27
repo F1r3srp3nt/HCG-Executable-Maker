@@ -31,8 +31,11 @@ internal static class ReleasePassportCommand
         var facts = MacAppFacts.Read(app);
         if (facts.Problem is { } problem) { Console.Error.WriteLine($"{Path.GetFileName(app)}: {problem}"); return 6; }
         var signing = new MacSigningDoctor(runner).InspectAsync(app, CancellationToken.None).GetAwaiter().GetResult();
-        var source = Arg("--source-repo") is { } repo
-            ? SourceProvenance.ReadAsync(runner, "git", Path.GetFullPath(repo), CancellationToken.None).GetAwaiter().GetResult()
+        // Processes run by absolute path only: git is looked up on PATH; without it the source is recorded as unknown.
+        var git = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(d => Path.Combine(d, "git")).FirstOrDefault(File.Exists);
+        var source = Arg("--source-repo") is { } repo && git is not null
+            ? SourceProvenance.ReadAsync(runner, git, Path.GetFullPath(repo), CancellationToken.None).GetAwaiter().GetResult()
             : SourceProvenance.Unknown;
         string sha;
         using (var s = File.OpenRead(file)) sha = Convert.ToHexStringLower(SHA256.HashData(s));

@@ -52,7 +52,11 @@ start_store() {   # $1 = publishing mode, $2 = info file [, $3 = Store dir]
   STORE=$(jq -r .storeOrigin "$2"); ISS=$(jq -r .issuer "$2"); CTL=$(jq -r .control "$2"); CLIENT=$(jq -r .makerClientId "$2")
 }
 trap 'pkill -f "ship-e2e-server.ts $OUT/" 2>/dev/null; true' EXIT
+clear_session() {   # macOS keeps the HCG session in the Keychain under one TEST key, whatever the data folder: forget it
+  [ "$(uname)" = Darwin ] && security delete-generic-password -s com.hakmicapitalgroup.executablemaker.hcg -a session-local-test >/dev/null 2>&1; true
+}
 maker_home() {   # $1 = info file, $2 = person
+  clear_session
   export HCG_EXECUTABLE_MAKER_HOME="$OUT/maker-home-$(basename "$1" .json)-$2"; rm -rf "$HCG_EXECUTABLE_MAKER_HOME"; mkdir -p "$HCG_EXECUTABLE_MAKER_HOME"
   local iss; iss=$(jq -r .issuer "$1")
   jq -n --arg iss "$iss" --arg c "$(jq -r .makerClientId "$1")" '{contractVersion:"hcg.executable-maker.connect/1", clientId:$c, issuer:$iss,
@@ -197,6 +201,7 @@ check "17 Publication disabled (uploads mode): diagnostics ready (exit $rcd, Pub
 UI=tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll
 if [ -f "$UI" ]; then
   sign_in_as e2e-alice
+  clear_session
   ISS_UI=$ISS; curl -s -X POST "${ISS_UI%/auth/v1}/__test/next-user/e2e-alice" >/dev/null
   dotnet "$UI" --source "$Z2" --ship-page --ship-store "$UP" --ship-product hcg-mail --ship-edition windows-desktop --ship-version 3.0.0 --ship-build-number 30 \
     --output "$OUT/ui" --screenshots "$OUT/shots" --prefix studio > "$OUT/ui.log" 2>&1; rc=$?
@@ -223,8 +228,8 @@ if [ -n "$STORE_MAIN_DIR" ]; then
   ctl grant '{"sub":"e2e-bob","central":"store.release.publish"}' >/dev/null
   M --ship-to-store --store-status --sign-in --store "$STORE" --diagnostics-out "$OUT/main-diag.txt" > /dev/null 2>&1; rc=$?
   M "${SHIP[@]}" --store-catalogue > "$OUT/main-catalogue.txt" 2>&1; rcc=$?
-  check "M1 Store main: diagnostics ready (exit $rc), its release lifecycle discovered from capabilities; catalogue listed with summaries from the public release resolution (exit $rcc)" \
-    '[ $rc = 0 ] && grep -q "Release management: HCG Store release lifecycle" "$OUT/main-diag.txt" && [ $rcc = 0 ] && grep -q "^- HCG Mail \[hcg-mail\]" "$OUT/main-catalogue.txt" && grep -q "public release resolution" "$OUT/main-catalogue.txt"'
+  check "M1 Store main: diagnostics ready (exit $rc), its release lifecycle discovered from capabilities; catalogue listed (official metadata, or the public release resolution on Stores without it) (exit $rcc)" \
+    '[ $rc = 0 ] && grep -q "Release management: HCG Store release lifecycle" "$OUT/main-diag.txt" && [ $rcc = 0 ] && grep -q "^- HCG Mail \[hcg-mail\]" "$OUT/main-catalogue.txt" && grep -qE "official metadata from HCG Store|public release resolution" "$OUT/main-catalogue.txt"'
   M "${SHIP[@]}" --release-version $V1 --build-number 1 --channel stable --eligibility public --note "v1" --file "$Z1" --submit > "$OUT/main-ship-1.log" 2>&1; rc1=$?
   M1R=$(rel_of "$OUT/main-ship-1.log")
   ctl approve "{\"releaseId\":\"$M1R\",\"eligibility\":\"public\",\"confirm\":\"$V1\",\"approver\":\"e2e-bob\"}" >/dev/null

@@ -225,12 +225,13 @@ products are selected, never re-created; **Create a draft product** is only for 
 
 ## Not available yet (blockers)
 
-1. **Distribution Studio's Store additions are not deployed.** Production HCG Store runs `HCG_STORE_PUBLISHING=uploads`
-   (private drafts and uploads on, approval and publication off). Official product metadata in the product list,
-   publication requests, compatible supersede and availability requests are on HCG Store branch
-   `claude/distribution-studio-api` (not merged or deployed; HCG Store `docs/PUBLISHING.md`, founder review). Until
-   then Maker shows names and editions from the product list plus the public release resolution, sends no publication
-   or availability request (it says so), and everything else works.
+1. **Store main is not deployed yet.** Production HCG Store runs `HCG_STORE_PUBLISHING=uploads` (private drafts
+   and uploads on; approval and publication off) on the earlier contract. HCG Store main has the release lifecycle
+   (#27) and the reviewed Distribution Studio API (#28: official product metadata, descriptive draft products,
+   publication requests, recorded requests). It is merged there but not deployed, and deploying is the founder's
+   decision. Until then Maker shows names and editions from the product list plus the public release resolution.
+   It explains availability changes instead of sending them, and everything else works. Once main is deployed, Maker
+   discovers its capabilities and uses them with no Maker change. CI checks M1–M5 already run against Store main.
 2. **Signed-in production checks** (client authorization, `store.publish`, catalogue, Release Manager) can only be run
    with a real HCG sign-in on the Mac: see the production test plan. Whether HCG Store lists Maker's client in
    `HCG_STORE_PUBLISHING_CLIENT_IDS`, and whether HCG has granted `store.publish`, is shown by checks 6 and 7.
