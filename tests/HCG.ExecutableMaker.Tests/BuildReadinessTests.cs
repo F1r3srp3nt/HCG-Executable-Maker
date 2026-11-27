@@ -56,7 +56,7 @@ public sealed class BuildReadinessTests : IDisposable
     private static async Task<ToolResolution> Go(FakeMac mac, string? min = "1.25", IReadOnlyList<PreferredTool>? preferred = null, ProbeRunner? runner = null) =>
         await new ToolResolver(runner ?? new ProbeRunner(mac), mac.Host).ResolveAsync(ToolCatalog.Go, min, preferred ?? [], CancellationToken.None);
 
-    [Fact]
+    [UnixFact]
     public async Task Go_on_PATH_is_found_with_its_version()
     {
         var mac = new FakeMac { Path = "/Users/owner/tools/bin:/usr/bin:/bin" };
@@ -68,7 +68,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains("PATH", r.Selected.Source);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task Go_from_Apple_Silicon_Homebrew_is_found_when_the_app_was_opened_from_Finder()
     {
         var mac = new FakeMac();
@@ -94,7 +94,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Equal("Homebrew (Intel)", r.Selected.Source);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task Go_from_the_official_installer_and_golang_dl_sdks_are_found()
     {
         var mac = new FakeMac();
@@ -108,7 +108,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains(r.Found, f => f.Path == "/usr/local/go/bin/go" && f.Source == "Official Go installer" && f.Version == "1.24.7");
     }
 
-    [Fact]
+    [UnixFact]
     public async Task An_older_Go_first_on_PATH_is_kept_and_a_compatible_installation_is_used_instead()
     {
         var mac = new FakeMac { Path = "/usr/local/bin:/usr/bin:/bin" };
@@ -120,7 +120,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Equal(2, r.Found.Count);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task Only_older_Go_installations_make_the_requirement_incompatible_with_every_version_listed()
     {
         var mac = new FakeMac();
@@ -133,7 +133,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains("1.24.7", r.Detail);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task No_Go_anywhere_is_NotFound_and_names_where_HCG_looked()
     {
         var r = await Go(new FakeMac());
@@ -142,7 +142,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains("/usr/local/go/bin", r.Detail);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task A_chosen_Go_location_wins_over_PATH_and_is_never_silently_replaced()
     {
         var mac = new FakeMac { Path = "/opt/homebrew/bin:/usr/bin" };
@@ -157,7 +157,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Null(missing.Selected);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task Choosing_a_folder_finds_the_executable_and_rejects_the_wrong_tool()
     {
         var mac = new FakeMac();
@@ -172,7 +172,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains("not go", wrong.Detail);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task The_Go_version_probe_never_downloads_a_toolchain_and_never_runs_in_the_project()
     {
         var mac = new FakeMac();
@@ -185,7 +185,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Equal(Path.GetTempPath(), probe.WorkingDirectory);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task Apple_shims_are_not_run_without_the_developer_tools()
     {
         var mac = new FakeMac { DeveloperTools = false };
@@ -224,7 +224,7 @@ public sealed class BuildReadinessTests : IDisposable
 
     // ---------- installing ----------
 
-    [Fact]
+    [UnixFact]
     public void Homebrew_install_is_offered_only_as_an_approved_catalogue_formula_that_upgrades_nothing()
     {
         var mac = new FakeMac();
@@ -239,7 +239,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains(options, o => o.Method == InstallMethod.Official && o.Url == "https://go.dev/dl/");
     }
 
-    [Fact]
+    [UnixFact]
     public void Intel_Homebrew_is_used_when_it_is_the_only_Homebrew()
     {
         var mac = new FakeMac();
@@ -249,7 +249,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains("Intel", brew.Label);
     }
 
-    [Fact]
+    [UnixFact]
     public void An_installed_but_older_Homebrew_formula_is_never_upgraded_by_HCG()
     {
         var mac = new FakeMac();
@@ -260,7 +260,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains(options, o => o.CommandLine == "brew upgrade go" && o.Note!.Contains("does not upgrade", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [UnixFact]
     public void Without_Homebrew_HCG_explains_and_never_installs_Homebrew()
     {
         var mac = new FakeMac();
@@ -269,7 +269,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains(options, o => o.Url == "https://brew.sh" && o.Note!.Contains("does not install Homebrew", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [UnixFact]
     public void A_tool_a_project_names_but_HCG_does_not_know_is_never_installed()
     {
         var mac = new FakeMac();
@@ -277,7 +277,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Empty(new DependencyInstaller(new ProbeRunner(mac), mac.Host).Options(ToolCatalog.For("evil-formula"), ReadinessState.NotFound, null));
     }
 
-    [Fact]
+    [UnixFact]
     public async Task Installing_needs_approval_and_only_runs_catalogue_formulae()
     {
         var mac = new FakeMac();
@@ -398,7 +398,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Contains(SwiftContractPlanner.ReadinessCode, error);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task The_build_uses_the_installation_Build_Readiness_resolves()
     {
         var root = HcgServerLayout();
@@ -424,7 +424,7 @@ public sealed class BuildReadinessTests : IDisposable
         public Task<ToolchainReport> GetAsync(bool refresh = false, CancellationToken cancellationToken = default) => Task.FromResult(Fixtures.Toolchains());
     }
 
-    [Fact]
+    [UnixFact]
     public async Task A_location_chosen_for_one_project_goes_into_its_profile_and_leaves_other_projects_alone()
     {
         var mac = new FakeMac();
@@ -454,7 +454,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Equal("/opt/homebrew/bin/go", (await svc.ResolveForBuildAsync("go", null, other, CancellationToken.None)).Selected!.Path);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task A_location_that_does_not_work_is_not_saved()
     {
         var mac = new FakeMac();
@@ -466,7 +466,7 @@ public sealed class BuildReadinessTests : IDisposable
         Assert.Null((await settings.LoadAsync()).ToolPaths);
     }
 
-    [Fact]
+    [UnixFact]
     public async Task The_readiness_report_for_HCG_Server_lists_install_options_and_blocks_the_build_when_Go_is_missing()
     {
         var mac = new FakeMac();
@@ -490,7 +490,7 @@ public sealed class BuildReadinessTests : IDisposable
         public string? CannotBuild(TargetPlatform platform) => null;
     }
 
-    [Fact]
+    [UnixFact]
     public async Task An_authorized_remote_build_host_with_a_compatible_Go_is_offered_without_sending_anything()
     {
         var mac = new FakeMac();
