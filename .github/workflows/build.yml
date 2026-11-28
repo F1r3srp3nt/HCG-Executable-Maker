@@ -2228,7 +2228,11 @@ jobs:
           A="$OUT/adhoc-src/HelloDotNetIos"; mkdir -p "$A"; cp -R tests/Fixtures/DotNetIos/HelloDotNetIos/. "$A/"
           printf '<Project><PropertyGroup><CodesignKey>-</CodesignKey></PropertyGroup></Project>\n' > "$A/Directory.Build.props"
           for kind in ios-archive ios-ipa; do
-            dotnet run --no-cache tools/mobile-build/mobile-build.cs -- "$A" "$OUT/adhoc-$kind" --output $kind --signing project --trust 2>&1 | tee "$OUT/adhoc-$kind.log"
+            # Maker's data (and so the imported copy) stays inside this checkout, as for the UI driver, so the
+            # repository's global.json selects the .NET 10 SDK that has the pinned iOS workload (the runner also has
+            # SDK 11 without it; a temporary folder outside the checkout would pick that one).
+            HCG_EXECUTABLE_MAKER_HOME="$OUT/adhoc-home-$kind" \
+              dotnet run --no-cache tools/mobile-build/mobile-build.cs -- "$A" "$OUT/adhoc-$kind" --output $kind --signing project --trust 2>&1 | tee "$OUT/adhoc-$kind.log"
             grep -q "^Result: Succeeded" "$OUT/adhoc-$kind.log"
           done
       - name: Independent checks of the ad-hoc archive and IPA (plutil, lipo, vtool, codesign, ditto)
