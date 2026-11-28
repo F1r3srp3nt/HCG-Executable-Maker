@@ -796,6 +796,41 @@ public class SigningPrebuildCheckTests : IDisposable
     }
 
     [Fact]
+    public async Task A_dotnet_ios_app_signed_manually_takes_the_team_of_its_certificate_and_profile()
+    {
+        // Regression (HCG Mail, CI run 46087206454): a .NET for iOS project states no team (there is no DEVELOPMENT_TEAM),
+        // so the pre-check refused every manual build with "No Apple Developer Team ID is selected" — also with real assets.
+        using var dev = Development();
+        var keychain = new FakeKeychain();
+        keychain.Add(dev, hasKey: true);
+        var store = Store(_dir);
+        Directory.CreateDirectory(_dir.Combine("dl"));
+        File.WriteAllBytes(_dir.Combine("dl", "wild.mobileprovision"), Profile(new ProfileSpec
+        {
+            Name = "Wildcard Development", Certificates = [dev], AppId = Team + ".*", GetTaskAllow = true, Devices = ["00008140-001A2B3C4D5E001E"],
+        }));
+        var profile = store.Import(_dir.Combine("dl", "wild.mobileprovision"), Now).Profile!;
+        var check = new HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck(new AppleSigningAssetService(keychain, store, new FixedTime(Now)), new MemoryStore(), new FixedTime(Now));
+        var project = new ProjectRecord { Id = Guid.NewGuid(), Name = "Mail", SourceKind = ProjectSourceKind.Directory, SourceLocation = "/orig", WorkspacePath = _dir.Combine("mail"), ImportedAt = Now };
+        Directory.CreateDirectory(project.SourceDirectory);
+        var analysis = new MobileAnalysis
+        {
+            Framework = MobileFramework.DotNetIos,
+            DotNetIos = new DotNetIosProjectInfo { ProjectPath = "Mail.iOS.csproj", TargetFramework = "net10.0-ios", AssemblyName = "Mail.iOS", ApplicationId = "com.example.mail" },
+        };
+        var options = new MobileBuildOptions
+        {
+            Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosDeviceApp, Signing = MobileSigningMode.AppleManual,
+            SigningIdentity = Info(dev).CommonName, ProvisioningProfile = profile.Name, ExportMethod = IosExportMethod.Debugging,
+        };
+        var report = await check.CheckIosAsync(project, options, analysis, project.SourceDirectory, Report(), CancellationToken.None);
+        Assert.Equal(Team, report!.Configuration.TeamId);                                  // the certificate's team, not "none selected"
+        Assert.DoesNotContain(report.Failures, f => f.Category == SigningCheckCategory.Team);
+        if (OperatingSystem.IsMacOS()) Assert.False(report.HasFailures, string.Join(" | ", report.Failures.Select(f => f.Detail)));
+        else Assert.Equal([SigningCheckCategory.Tools], report.Failures.Select(f => f.Category).Distinct());
+    }
+
+    [Fact]
     public async Task A_profile_that_is_not_installed_is_named_in_the_failure()
     {
         using var dist = Distribution();

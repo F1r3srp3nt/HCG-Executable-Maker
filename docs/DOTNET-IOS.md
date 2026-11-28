@@ -103,6 +103,11 @@ Nothing is uploaded to TestFlight or HCG Store.
   - a signed Debug device app, an XCArchive and the SDK's IPA, signed with a **synthetic** Apple Development identity and wildcard profile;
   - codesign, plutil, `security cms` and unzip check the bundle ID, platform, signature, resolved entitlements and the embedded profile;
   - Maker's own codesign verdict for the device app, archive and IPA, and the IPA's Release Passport (hash, size, bundle ID, version, source commit, profile, entitlements, codesign verdict, nothing claimed about devices).
+- **What CI substitutes, and only there:** Apple's certificates and profiles cannot exist on a CI runner. The runner
+  creates a synthetic CA-signed "Apple Development" identity and profile, trusts the certificate in its own System
+  keychain, and the UI driver (a test harness, never shipped) passes `--test-profile-root` so that Maker's Signing Vault
+  accepts a profile signed by that CA. Every other Signing Vault check runs unchanged, and the app itself always requires
+  a profile that chains to Apple's root.
 - **Not verified in CI:**
   - signing with your real Apple certificate and profile;
   - installation and launch on a physical iPhone;

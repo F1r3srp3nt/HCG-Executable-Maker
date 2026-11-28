@@ -79,6 +79,19 @@ internal static partial class Program
         {
             services.AddSingleton<IPlatformShell>(new ScriptedShell(source));
             services.AddSingleton<IDialogService>(new LoggingDialogs());
+            // CI only (this driver is a test harness, never shipped): trust the runner's synthetic CA as the root of
+            // provisioning-profile signatures, through the same constructor parameter the unit tests use. Every other
+            // Signing Vault check runs as in the app, which always requires Apple's root (Composition uses ForCurrentUser).
+            if (_args.GetValueOrDefault("test-profile-root") is { Length: > 0 } rootPem)
+            {
+                var root = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(File.ReadAllText(rootPem));
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var modern = Path.Combine(home, "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles");
+                var legacy = Path.Combine(home, "Library", "MobileDevice", "Provisioning Profiles");
+                services.AddSingleton(new HCG.ExecutableMaker.Packaging.Signing.ProvisioningProfileStore(modern, [modern, legacy],
+                    new System.Security.Cryptography.X509Certificates.X509Certificate2Collection(root)));
+                Report.Add($"TEST ONLY: provisioning-profile signatures are trusted when they chain to {root.Subject} (SHA-1 {root.Thumbprint}), not Apple's root.");
+            }
         };
 
         AppBuilder.Configure<AppClass>()

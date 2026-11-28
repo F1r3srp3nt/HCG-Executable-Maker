@@ -7,6 +7,8 @@
 #      and a synthetic WILDCARD development profile (HCGCI00001.*) CMS-signed by it. Neither is Apple's: the device app and
 #      IPA would not install on a real device. They prove the pipeline: the .NET iOS SDK compiles, signs with the chosen
 #      identity and profile, archives into ArchiveDir and makes its own IPA; Maker finds exactly those files.
+#   Maker's Signing Vault pre-check runs in full. Its one test-only input: the UI driver (a CI harness, never shipped)
+#   passes --test-profile-root, so a profile signed by the synthetic CA counts as signed; the app always requires Apple's root.
 # Independent checks use Apple's tools (codesign, plutil, security cms, unzip), not Maker.
 set -euo pipefail
 
@@ -55,7 +57,10 @@ security import "$OUT/id.p12" -k "$KC" -P ci -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KC" >/dev/null
 security list-keychains -d user -s "$KC" $ORIG_KEYCHAINS
 SHA1="$(/usr/bin/openssl x509 -in "$OUT/cert.pem" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')"
-sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$OUT/cert.pem" && TRUSTED_SHA1="$SHA1"
+# Trusted for every policy on this throwaway runner: Maker reads identities with `security find-identity` (all
+# policies, so untrusted, expired and revoked ones are listed with macOS's reason), as an Apple-issued certificate is.
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$OUT/cert.pem" && TRUSTED_SHA1="$SHA1"
+security find-identity | sed -n '1,4p'
 security find-identity -v -p codesigning "$KC"
 CERT_B64="$(/usr/bin/openssl x509 -in "$OUT/cert.pem" -outform der | base64 | tr -d '\n')"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; EXP="$(date -u -v+30d +%Y-%m-%dT%H:%M:%SZ)"
@@ -91,7 +96,7 @@ endgroup
 run() { # name, then driver options
   local name="$1"; shift
   group "Mobile Build Studio: $name"
-  dotnet "$DRIVER" --mobile --source "$MAIL" "$@" --output "$OUT/$name" --screenshots "$OUT/screens" --prefix "mail-$name"
+  dotnet "$DRIVER" --mobile --source "$MAIL" "$@" --output "$OUT/$name" --screenshots "$OUT/screens" --prefix "mail-$name" --test-profile-root "$OUT/cert.pem"
   endgroup
 }
 signed=(--signing manual --identity "$CN" --profile "$PROFILE_NAME")

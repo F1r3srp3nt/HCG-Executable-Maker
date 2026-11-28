@@ -14,6 +14,9 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   `$(PRODUCT_BUNDLE_IDENTIFIER)`) are resolved for each profile's team before entitlements are compared with the profile.
 - **A manually named profile must cover the bundle ID.** A profile for another App ID of the same team is refused with
   the reason. App Store distribution never accepts a wildcard profile.
+- **A .NET for iOS app signed with a named certificate and profile was refused with "No Apple Developer Team ID is
+  selected"**: such a project states no team. The team is now the chosen certificate's (or profile's); a certificate
+  and profile of different teams are still refused. Found by the HCG Mail CI run.
 - The .NET archive was judged as "unsigned" for availability and always showed unavailable. It is now judged with this Mac's certificates and profiles.
 
 ### Added

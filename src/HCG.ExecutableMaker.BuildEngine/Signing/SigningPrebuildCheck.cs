@@ -70,7 +70,13 @@ public sealed class SigningPrebuildCheck(AppleSigningAssetService assets, IProje
             Platform = SigningPlatform.Ios,
             Mode = options.Signing == MobileSigningMode.AppleAutomatic ? ProjectSigningMode.XcodeAutomatic : ProjectSigningMode.Manual,
             Route = route,
-            TeamId = options.DevelopmentTeam ?? saved?.TeamId,
+            // Manual signing with a named certificate and profile: the team is theirs. A .NET for iOS project never states
+            // a team (there is no DEVELOPMENT_TEAM); codesign signs for the certificate's team. A certificate and profile
+            // of different teams are still refused by the validator's team checks.
+            TeamId = options.DevelopmentTeam ?? saved?.TeamId
+                     ?? (options.Signing == MobileSigningMode.AppleManual
+                         ? inventory.Certificates.FirstOrDefault(c => string.Equals(c.Sha1, identity, StringComparison.OrdinalIgnoreCase))?.TeamId ?? profile?.TeamId
+                         : null),
             IdentitySha1 = identity,
             ProfileUuid = profile?.Uuid ?? saved?.ProfileUuid,
             Targets = targets.Select(t => saved?.Targets.FirstOrDefault(s => s.TargetName == t.Name) is { } s
