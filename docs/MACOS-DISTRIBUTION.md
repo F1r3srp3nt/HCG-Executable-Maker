@@ -1,8 +1,10 @@
 # macOS distribution: signing, installer packages, notarization, Mac App Store
 
 This page covers what HCG Executable Maker does after it builds a macOS app, which Apple requirements each step
-follows, and what is verified where. It applies to Swift (SwiftPM) GUI apps. .NET apps get the unsigned installer
-package only (see [Limits](#limits)).
+follows, and what is verified where. Swift (SwiftPM) GUI apps get every route. .NET GUI apps get Developer ID and
+the signed installer package, in a build (single-file publish) or afterwards. Any already-built `.app` can be signed,
+packaged and notarized on **Sign an existing app** (see [Already-built apps](#already-built-apps-sign-an-existing-app)).
+The Mac App Store route is for Swift apps only (see [Limits](#limits)).
 
 ## Apple requirements this follows
 
@@ -80,6 +82,53 @@ reported separately:
 
 SwiftPM resource bundles must sit at the app root, outside the seal (see SWIFT-MACOS.md), so Developer ID and Mac App
 Store signing are **incompatible** with packages that have them. HCG says so before building; it does not strip them.
+
+### Developer ID app (.NET)
+Available when the .NET GUI app is published as a **single file** (Configure › Single file). A multi-file publish
+would put managed assemblies in `Contents/MacOS` as data, so HCG says *Setup required* instead. Every Mach-O next to
+the single-file host (SkiaSharp, HarfBuzzSharp, Avalonia native) is signed first with the hardened runtime and a
+secure timestamp. Then the bundle is signed with the confirmed entitlements. `com.apple.security.cs.allow-jit` is
+proposed, with CoreCLR's just-in-time compilation as its evidence. The checks are those of the Swift app, plus the
+hardened runtime of every nested Mach-O. The signed `.pkg` and **Notarize** work as for Swift apps.
+
+### Already-built apps (Sign an existing app)
+The **Sign an existing app** page (`--mac-sign-existing` without the UI) takes an `.app` that was built elsewhere,
+for example HCG Mail's CI output. It never rebuilds or changes it:
+
+1. **Checks before anything runs.** It refuses:
+   - a host that is not a Mac;
+   - an identity that is not in the keychain or is not *Developer ID Application*;
+   - an installer identity of another team;
+   - unconfirmed entitlements, or entitlements with `get-task-allow` or non-boolean values;
+   - data files in `Contents/MacOS`;
+   - an output folder inside the app, one that would overwrite the input, or one that already holds a signed copy;
+   - a release version whose numeric part differs from `CFBundleShortVersionString`;
+   - an ad-hoc test build with notarization or a signed package.
+
+   It warns when a .NET app's entitlements lack `allow-jit`.
+2. **Copy:** `ditto` to the output folder, then `xattr -cr`.
+3. **Sign** inside out: every Mach-O and nested bundle (frameworks, helpers, plug-ins, XPC services), deepest first,
+   then the bundle with the entitlements plist exactly as written. Hardened runtime and secure timestamp. An ad-hoc
+   **test build** (`--sign -`, `--timestamp=none`) is for build machines only and is named
+   `…-adhoc-TEST-not-for-distribution`.
+4. **Verify:** strict signature, certificate and team, hardened runtime, timestamp, exact entitlements, every nested
+   Mach-O's hardened runtime and team.
+5. **Notarize** (optional, keychain profile): the app goes through `NotaryClient` (submit, staple, validate,
+   Gatekeeper). It is stapled before it is zipped.
+6. **ZIP** of the stapled app (`ditto -c -k --sequesterRsrc --keepParent`). Then the optional **.pkg**
+   (`MacPkgPackager.PackageAppAsync`, Developer ID Installer). The .pkg version is the release version. A signed
+   .pkg is notarized and stapled too.
+7. `SHA256SUMS.txt`, one **Release Passport** per file (with the release version), and a signing report.
+8. **Ship to Store (private draft)…** hands the files to Distribution Studio.
+
+The page also has the **Signing Doctor** (read-only report of any `.app`), and **Release Passport** for an archive
+signed elsewhere (`--release-passport … --version`).
+
+### Saved Project signing
+When a project has a saved *macOS Developer ID* route (Signing & Security › Project signing, manual), New Build
+starts the macOS distribution choices from it: Developer ID, its application identity and its installer identity.
+Sign an existing app can fill its identities from it too. An identity that is no longer in the keychain is not
+applied, and the page says so.
 
 ### DMG
 `hdiutil create` from a staging folder containing the app and an Applications link. For Developer ID builds the DMG
@@ -198,13 +247,18 @@ The Command Line Tools stay sufficient for ad-hoc Swift builds. The build log re
 | Unsigned .pkg generated + inspected | — | ✅ | — |
 | .pkg installed (`sudo installer -target /` on the disposable runner, and the app's own Test install into `~/Applications`) + launched | — | ✅ | — |
 | Xcode selected for HCG only; build used it; `xcode-select` unchanged | — | ✅ | — |
+| Sign an existing app: gating, inside-out order, step sequence (scripted tools) | ✅ | ✅ | — |
+| Sign an existing .NET app with an ad-hoc TEST identity: real `codesign` (hardened runtime, exact entitlements, every nested Mach-O), unsigned .pkg, passports, input unchanged, the signed app launches | — | ✅ (`macos-sign-existing`; first passed in run 46112104774, PR #22) | — |
 | Developer ID signing, signed DMG/.pkg, notarization, stapling | — | — | ✅ (certificates + notary profile) |
 | Mac App Store package, App Store Connect validation | — | — | ✅ (distribution certificates, profile, API key) |
 
 ## Limits
 
-- .NET apps: unsigned `.pkg` only. Developer ID and the Mac App Store are *incompatible in this version*: the hardened
-  runtime needs .NET-specific exceptions, and the sandbox needs a review that HCG does not perform.
+- .NET apps: Developer ID needs a single-file publish (managed assemblies must not sit in `Contents/MacOS`). The Mac
+  App Store stays *incompatible in this version*: the sandbox needs a review that HCG does not perform.
+- Sign an existing app: only boolean `true` entitlements (no application identifier, no provisioning profile). It does
+  not make a DMG. Signed copies are listed on the page and in their output folder, not in Build History or the
+  Artifact Vault, which hold Maker's own builds.
 - Command-line tools are not packaged as `.pkg` or signed for distribution.
 - Packages with SwiftPM resource bundles cannot be Developer ID or App Store signed (see above).
 - Developer ID provisioning profiles, needed only for restricted entitlements such as iCloud, are not embedded. HCG

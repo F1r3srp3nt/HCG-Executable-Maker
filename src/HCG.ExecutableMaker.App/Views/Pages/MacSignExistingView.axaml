@@ -1,0 +1,216 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.MacSignExistingView"
+             x:DataType="vm:MacSignExistingViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.formlabel">
+      <Setter Property="FontSize" Value="11.5" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="Foreground" Value="{DynamicResource Hcg.Brush.TextSecondary}" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+  </UserControl.Styles>
+  <ScrollViewer>
+    <StackPanel Margin="{DynamicResource Hcg.Padding.Page}" Spacing="18" MaxWidth="1100" HorizontalAlignment="Left">
+      <Border Classes="callout warning" IsVisible="{Binding !IsMac}">
+        <TextBlock Text="{Binding HostNote}" TextWrapping="Wrap" />
+      </Border>
+
+      <!-- 1. The app -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="1 · THE BUILT APP" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="For example HCG Mail's .app as CI built and qualified it, unsigned. It is copied first; the copy is signed. Executable Maker never changes the input app and never rebuilds it." />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding AppPath}" PlaceholderText="/path/to/App.app" />
+            <Button Grid.Column="1" Classes="small" Content="Choose .app…" Command="{Binding PickAppCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <TextBlock Classes="muted" Text="{Binding AppSummary}" TextWrapping="Wrap" />
+          <TextBlock Classes="formlabel" Text="OUTPUT FOLDER (OUTSIDE THE APP)" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding OutputDirectory}" />
+            <Button Grid.Column="1" Classes="small" Content="Choose…" Command="{Binding PickOutputCommand}" Margin="8,0,0,0" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- 2. Signing -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="label" Text="2 · SIGNING" />
+              <TextBlock Classes="muted" Text="{Binding InventoryNote}" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" Classes="small" Content="Refresh certificates" Command="{Binding RefreshIdentitiesCommand}" VerticalAlignment="Top" />
+          </Grid>
+          <ComboBox ItemsSource="{Binding ModeOptions}" SelectedItem="{Binding SelectedMode}" HorizontalAlignment="Stretch" />
+          <StackPanel Spacing="6" IsVisible="{Binding !IsTest}">
+            <TextBlock Classes="formlabel" Text="FROM A PROJECT'S SAVED SIGNING (SIGNING &amp; SECURITY › PROJECT SIGNING)" />
+            <ComboBox ItemsSource="{Binding SavedRoutes}" SelectedItem="{Binding SelectedSavedRoute}" HorizontalAlignment="Stretch" />
+            <TextBlock Classes="muted" FontSize="12" Text="{Binding SavedRouteNote}" TextWrapping="Wrap" />
+            <TextBlock Classes="formlabel" Text="DEVELOPER ID APPLICATION CERTIFICATE (KEYCHAIN; THE PRIVATE KEY NEVER LEAVES IT)" />
+            <ComboBox ItemsSource="{Binding Identities}" SelectedItem="{Binding SelectedIdentity}" HorizontalAlignment="Stretch" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- 3. Entitlements -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="3 · ENTITLEMENTS" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="Read from the app's own entitlements plist (for HCG Mail: packaging/macos/HCGMail.entitlements). A .NET app needs com.apple.security.cs.allow-jit under the hardened runtime." />
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBox Text="{Binding EntitlementsFile}" PlaceholderText="none" />
+            <Button Grid.Column="1" Classes="small" Content="Choose plist…" Command="{Binding PickEntitlementsCommand}" Margin="8,0,0,0" />
+            <Button Grid.Column="2" Classes="small ghost" Content="None" Command="{Binding ClearEntitlementsCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <TextBlock Classes="muted" Text="{Binding EntitlementsNote}" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding EntitlementKeys}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <TextBlock Classes="mono" Text="{Binding}" Margin="12,2,0,2" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <CheckBox IsChecked="{Binding EntitlementsConfirmed}">
+            <TextBlock Text="I reviewed these entitlements (exactly these are signed into the app)" FontWeight="Medium" TextWrapping="Wrap" />
+          </CheckBox>
+        </StackPanel>
+      </Border>
+
+      <!-- 4. Package, notarization, release -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="label" Text="4 · PACKAGE, NOTARIZATION AND RELEASE" />
+          <CheckBox IsChecked="{Binding MakePkg}" Content="Also make an installer package (.pkg: installs into /Applications, no scripts)" />
+          <StackPanel Spacing="6" IsVisible="{Binding MakePkg}">
+            <TextBlock Classes="formlabel" Text="INSTALLER SIGNATURE (DEVELOPER ID INSTALLER)" />
+            <ComboBox ItemsSource="{Binding InstallerIdentities}" SelectedItem="{Binding SelectedInstaller}" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsTest}" />
+          </StackPanel>
+          <CheckBox IsChecked="{Binding Notarize}" IsEnabled="{Binding !IsTest}" Content="Notarize and staple now (Apple's notary service; usually a few minutes)" />
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding Notarize}">
+            <TextBlock Classes="formlabel" Text="KEYCHAIN PROFILE" VerticalAlignment="Center" Margin="0,0,10,0" />
+            <TextBox Grid.Column="1" Text="{Binding NotaryProfile}" PlaceholderText="HCG-Notary" />
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding NotaryNote}" TextWrapping="Wrap" />
+          <UniformGrid Columns="2">
+            <StackPanel Margin="0,0,6,0">
+              <TextBlock Classes="formlabel" Text="RELEASE VERSION (OPTIONAL)" />
+              <TextBox Text="{Binding ReleaseVersion}" PlaceholderText="e.g. 1.0.0-beta.2 (numeric part = CFBundleShortVersionString)" />
+            </StackPanel>
+            <StackPanel Margin="6,0,0,0">
+              <TextBlock Classes="formlabel" Text="BUILD NUMBER (OPTIONAL)" />
+              <TextBox Text="{Binding BuildNumber}" PlaceholderText="CFBundleVersion" />
+            </StackPanel>
+          </UniformGrid>
+          <TextBlock Classes="formlabel" Text="SOURCE CHECKOUT (FOR THE PASSPORT'S COMMIT; OPTIONAL)" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding SourceRepository}" PlaceholderText="unknown without it (never guessed)" />
+            <Button Grid.Column="1" Classes="small" Content="Choose…" Command="{Binding PickSourceCommand}" Margin="8,0,0,0" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- Plan and run -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Check and sign" />
+          <Border Classes="callout error" IsVisible="{Binding HasProblems}">
+            <ItemsControl ItemsSource="{Binding Problems}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String"><TextBlock Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" Margin="0,2" /></DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+          <Border Classes="callout warning" IsVisible="{Binding HasWarnings}">
+            <ItemsControl ItemsSource="{Binding Warnings}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String"><TextBlock Text="{Binding StringFormat='• {0}'}" TextWrapping="Wrap" Margin="0,2" /></DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+          <TextBlock Classes="muted" Text="{Binding PlanSummary}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="primary" Content="Sign" Command="{Binding SignCommand}" />
+            <Button Classes="ghost" Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding IsBusy}" />
+          </StackPanel>
+          <TextBlock Text="{Binding ResultSummary}" TextWrapping="Wrap" FontWeight="Medium" />
+          <ItemsControl ItemsSource="{Binding Steps}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ExistingAppStepItem">
+                <Grid ColumnDefinitions="200,Auto,*" Margin="0,4">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                  <c:StatusChip Grid.Column="1" Status="{Binding Status}" Margin="8,0,12,0" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="2" Classes="muted" FontSize="12.5" Text="{Binding Detail}" TextWrapping="Wrap" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Spacing="6" IsVisible="{Binding HasFiles}">
+            <TextBlock Classes="formlabel" Text="FILES" />
+            <ItemsControl ItemsSource="{Binding Files}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String"><TextBlock Classes="mono muted" Text="{Binding}" TextWrapping="Wrap" /></DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="small" Content="Open folder" Command="{Binding OpenOutputCommand}" />
+              <Button Classes="small" Content="Signing Doctor on the signed app" Command="{Binding DoctorSignedAppCommand}" />
+              <Button Classes="small primary" Content="Ship to Store (private draft)…" Command="{Binding ShipToStoreCommand}" />
+            </StackPanel>
+          </StackPanel>
+          <Expander Header="Log" HorizontalAlignment="Stretch">
+            <TextBox Classes="mono" Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="360" />
+          </Expander>
+        </StackPanel>
+      </Border>
+
+      <!-- Signing Doctor -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Signing Doctor" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="Read-only report of any .app: identity and team, signature kind, hardened runtime, timestamp, entitlements, every nested framework and helper, strict verification, Gatekeeper's verdict and the notarization ticket. It never signs or changes anything." />
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBox Text="{Binding DoctorApp}" PlaceholderText="/path/to/App.app" />
+            <Button Grid.Column="1" Classes="small" Content="Choose .app…" Command="{Binding PickDoctorAppCommand}" Margin="8,0,0,0" />
+            <Button Grid.Column="2" Classes="small primary" Content="Inspect" Command="{Binding RunDoctorCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <TextBox Classes="mono" Text="{Binding DoctorReport}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="420" />
+        </StackPanel>
+      </Border>
+
+      <!-- Release Passport -->
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Release Passport for an existing archive" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="Writes &lt;file&gt;.release-passport.json next to a .zip, .pkg or .dmg of the app: its SHA-256 and size, the bundle's identity and architectures, the code signing as the Signing Doctor reads it, and the source commit as Git states it. Run it after notarization so it describes the final bytes." />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding PassportApp}" PlaceholderText="The .app (the one inside the archive)" />
+            <Button Grid.Column="1" Classes="small" Content="Choose .app…" Command="{Binding PickPassportAppCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding PassportFile}" PlaceholderText="The archive: .zip, .pkg or .dmg" />
+            <Button Grid.Column="1" Classes="small" Content="Choose file…" Command="{Binding PickPassportFileCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <UniformGrid Columns="2">
+            <TextBox Text="{Binding PassportVersion}" PlaceholderText="Release version, e.g. 1.0.0-beta.2 (optional)" Margin="0,0,6,0" />
+            <TextBox Text="{Binding PassportBuild}" PlaceholderText="Build number (optional)" Margin="6,0,0,0" />
+          </UniformGrid>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding PassportSource}" PlaceholderText="Source checkout (optional; unknown without it)" />
+            <Button Grid.Column="1" Classes="small" Content="Choose…" Command="{Binding PickPassportSourceCommand}" Margin="8,0,0,0" />
+          </Grid>
+          <Button Classes="primary" Content="Write Release Passport" Command="{Binding WritePassportCommand}" HorizontalAlignment="Left" />
+          <TextBlock Classes="mono muted" Text="{Binding PassportResult}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

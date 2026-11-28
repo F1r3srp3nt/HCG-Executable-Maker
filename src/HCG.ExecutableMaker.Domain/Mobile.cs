@@ -244,6 +244,8 @@ public sealed record DotNetIosProjectInfo
     public required string ProjectPath { get; init; }
     public required string TargetFramework { get; init; }
     public string? AssemblyName { get; init; }
+    /// <summary>The project's own CodesignKey (its "project default" signing), when it sets one plainly; "-" means ad hoc.</summary>
+    public string? CodesignKey { get; init; }
     public string? ApplicationId { get; init; }
     public string? ApplicationTitle { get; init; }
     public string? DisplayVersion { get; init; }

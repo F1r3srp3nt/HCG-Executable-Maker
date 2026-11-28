@@ -186,12 +186,14 @@ public class AppleProjectRoutesTests : IDisposable
         var sargs = Assert.Single(signed.Steps).Process.Arguments;   // one SDK invocation; no xcodebuild -exportArchive for .NET
         Assert.Contains("-p:CodesignKey=Apple Distribution: Hakmi Capital Group (ABCDE12345)", sargs);
         Assert.Contains("-p:CodesignProvision=HCG Mail App Store", sargs);
-        // The IPA is the .NET iOS SDK's own (BuildIpa), at an exact per-build path, with the archive alongside.
+        // The IPA is the .NET iOS SDK's own (BuildIpa), at an exact per-build path; the build service takes the archive and
+        // the IPA from their exact paths (no output search).
         var signedInput = Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosIpa, Signing = MobileSigningMode.AppleManual, SigningIdentity = "x", ProvisioningProfile = "y" });
+        Assert.Empty(signed.Outputs);
         Assert.Contains("-p:BuildIpa=true", sargs);
         Assert.Contains("-p:IpaPackagePath=" + DotNetIosPlanner.IpaPath(signedInput), sargs);
-        Assert.Equal([PackagingFormat.IosIpa, PackagingFormat.IosArchive], signed.Outputs.Select(o => o.Format));
         Assert.EndsWith(".ipa", DotNetIosPlanner.IpaPath(signedInput));
+        Assert.StartsWith(_t.Combine("hcg data", "builds", "b1", "work"), DotNetIosPlanner.IpaPath(signedInput));
 
         var archiveOptions = new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.AppleManual, SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "HCG Mail Dev" };
         var archive = DotNetIosPlanner.Plan(Input(m, archiveOptions));
@@ -199,13 +201,15 @@ public class AppleProjectRoutesTests : IDisposable
         Assert.Equal(["publish", project, "-c", "Release", "-r", "ios-arm64"], args.Take(6));
         Assert.Contains("-p:ArchiveOnBuild=true", args);
         Assert.Contains("-p:BuildIpa=false", args);
+        Assert.DoesNotContain(args, a => a.StartsWith("-p:IpaPackagePath=", StringComparison.Ordinal));
         // Regression (HCG Mail on Xcode 27.2): the SDK's Archive task writes the archive INTO ArchiveDir, so ArchiveDir must be
         // the .xcarchive itself; a parent folder produced an archive no search for "*.xcarchive" could find.
         var archiveDir = args.Single(a => a.StartsWith("-p:ArchiveDir=", StringComparison.Ordinal))["-p:ArchiveDir=".Length..];
         Assert.EndsWith(".xcarchive", archiveDir);
         Assert.Equal(DotNetIosPlanner.ArchivePath(Input(m, archiveOptions)), archiveDir);
+        Assert.Equal(DotNetIosPlanner.ArchiveDirectory(Input(m, archiveOptions)), Path.GetDirectoryName(archiveDir));
         Assert.Equal("HCGMail.iOS.xcarchive", Path.GetFileName(archiveDir));   // the AssemblyName, as the SDK names HCGMail.iOS.app (HCG Mail PR #28)
-        Assert.Equal(PackagingFormat.IosArchive, Assert.Single(archive.Outputs).Format);
+        Assert.Empty(archive.Outputs);
         Assert.Contains(args, a => a.StartsWith("-p:OutputPath=", StringComparison.Ordinal) && a.Contains(DotNetIosPlanner.DeviceDirectory(Input(m, archiveOptions)), StringComparison.Ordinal));
         Assert.DoesNotContain("-p:EnableCodeSigning=false", args);
         Assert.Equal(Path.Combine(MailRepo(), "iOS App Store Submission", "src", "HCG.Mail.iOS"), archive.Steps[0].Process.WorkingDirectory);   // inside the whole repository

@@ -4,6 +4,9 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 
 ## [Unreleased] — .NET for iOS: genuine XCArchive and IPA (HCG Mail), device route, signing by route
 
+Builds on the exact-path archive and IPA of PR #23 (next section): its archive and IPA checks and its Xcode Archives
+search for iOS workloads before 27.x are kept as they are.
+
 ### Fixed
 - **"dotnet publish succeeded but created no .xcarchive"** (HCG Mail, Xcode 27.2, workload 27.2.10000). The .NET iOS
   SDK's Archive task uses `ArchiveDir` verbatim as the archive's root. Maker passed a parent folder and then searched it
@@ -46,6 +49,59 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - Maker's own codesign verdict on the device app, archive and IPA, and the IPA's Release Passport.
 
   See [docs/DOTNET-IOS.md](docs/DOTNET-IOS.md).
+
+## [Unreleased] — .NET for iOS archive and IPA at exact paths
+
+### Fixed
+- **.NET for iOS Archive and IPA** failed with "dotnet publish succeeded but created no .xcarchive". The cause: the
+  .NET iOS SDK's `ArchiveDir` is the `.xcarchive` itself, not a folder for it, so the archive was written into
+  `<work>/archives` directly. HCG Mail iOS, HCG-Mail CI run 46074732453.
+  - Maker now passes `-p:ArchiveDir=<work>/archives/<AssemblyName>.xcarchive` and uses exactly that path.
+  - It checks the archive's `Info.plist` and its one app in `Products/Applications`, with a precise message for each
+    gap. It no longer searches for a child `*.xcarchive`.
+  - iOS workloads before 27.x ignore `ArchiveDir` (26.2's Archive task does not take it) and write to Xcode's Archives
+    folder. Maker takes the one archive this build created there (by bundle identifier and time, never a guess) and
+    copies it to the exact path. This was seen on CI with workload 26.2.10233.
+  - The IPA is packaged by the SDK in the same build (`-p:BuildIpa=true -p:IpaPackagePath=<work>/ipa/<name>.ipa`) and
+    checked for `Payload/<app>.app` with its `Info.plist` and executable. `xcodebuild -exportArchive` is no longer
+    used for .NET.
+- **The .NET for iOS Archive output was never available**: it was judged as unsigned, which the SDK cannot do. It is now
+  judged with the chosen signing.
+- **Project-default signing that is ad hoc** (`CodesignKey=-` in the project) no longer demands an Apple Development
+  certificate. Maker says the result installs on no device and cannot be distributed.
+- CI: the HCG Mail iOS job builds the .NET iOS sample's ad-hoc archive and IPA through Mobile Build Studio, then checks
+  them with `plutil`, `lipo`, `vtool`, `codesign` and `ditto`.
+
+## [Unreleased] — Sign an existing macOS app
+
+### Added
+- **Sign an existing app** (new page; `--mac-sign-existing` without the UI) signs, packages, notarizes, staples and
+  Gatekeeper-checks an already-built macOS `.app`, for example HCG Mail's CI-qualified .NET app, without rebuilding it.
+  - The input is copied (`ditto`, `xattr -cr`) and never changed.
+  - Every Mach-O and nested bundle is signed inside out with the hardened runtime. Then the bundle is signed with the
+    entitlements plist exactly as the person reviewed it.
+  - Optional: a Developer ID Installer–signed `.pkg`, and notarization with a keychain profile (the app is stapled
+    before it is zipped).
+  - Outputs: checksums, a Release Passport per file, a signing report, and a hand-off to Ship to Store.
+  - Everything is checked before anything runs: identity kind and team, entitlements (`get-task-allow` refused; a
+    missing `allow-jit` on a .NET app is warned about), data in `Contents/MacOS`, output location, release version.
+  - An ad-hoc test build (`--test`) runs the same checks without a certificate. It is never notarized and its files are
+    named `…-adhoc-TEST-not-for-distribution`.
+- The page also has the **Signing Doctor** and **Release Passport** for an existing archive, which were command-line
+  only before.
+- **.NET GUI apps can be signed with Developer ID in New Build** (single-file publish), with `allow-jit` proposed for
+  CoreCLR. The signed `.pkg` and Notarize are offered for them.
+- **Saved Project signing (macOS Developer ID)** is now used: New Build's macOS distribution choices and Sign an
+  existing app start from it.
+- `--release-passport --version <release version>` records a pre-release version (such as `1.0.0-beta.2`) whose
+  numeric part equals `CFBundleShortVersionString`. Distribution Studio no longer reports a discrepancy for it.
+- CI: `macos-sign-existing` signs a .NET fixture app with an ad-hoc test identity (no notarization). It checks the
+  result with Apple's own tools and launches the signed app.
+
+### Changed
+- Notarization is a file-level `NotaryClient`; a build's **Notarize** uses it unchanged.
+- `docs/HCG-MAIL-MACOS.md`, `docs/MACOS-DISTRIBUTION.md` and the Signing & Security page now describe what the code
+  does.
 
 ## [Unreleased] — HCG Store Manager compatibility (Swift apps with a command-line tool)
 

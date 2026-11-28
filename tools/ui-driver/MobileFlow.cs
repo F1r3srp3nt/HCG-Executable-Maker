@@ -45,14 +45,19 @@ internal static partial class Program
         if (item is null) return 1;
         if (_args.ContainsKey("expect-no-unsigned"))
         {
-            // .NET for iOS archives only with code signing: the archive is listed but unavailable, with that reason,
-            // and cannot be selected or started; no unsigned signing mode exists for it.
-            Check(!item.IsEnabled, $"Output {wanted} is unavailable without code signing");
-            // Judged with this Mac's signing assets: without any certificate the reason names the missing signing identity.
-            Check(item.Reason?.Contains("only with code signing", StringComparison.Ordinal) == true || item.Reason?.Contains("code-signing identities", StringComparison.Ordinal) == true,
-                $"Reason names the signing requirement: {item.Reason}");
-            studio.SelectOutputCommand.Execute(item);
-            Check(studio.SelectedOutput?.Option.Output != wanted, "The unavailable archive cannot be selected");
+            // .NET for iOS archives only with code signing. The archive is judged with the project's own signing (not
+            // as "unsigned", which made it unavailable whatever signing was chosen), and no unsigned mode is offered.
+            Check(item.Reason?.Contains("only with code signing", StringComparison.Ordinal) != true, $"Output {wanted} is judged with the project's signing, not as unsigned: {item.Reason ?? "available"}");
+            if (item.IsEnabled)
+            {
+                studio.SelectOutputCommand.Execute(item);
+                Check(studio.SigningModes.All(m => m.Value != MobileSigningMode.Unsigned), $"No unsigned signing mode is offered ({string.Join(", ", studio.SigningModes.Select(m => m.Name))})");
+            }
+            else
+            {
+                studio.SelectOutputCommand.Execute(item);
+                Check(studio.SelectedOutput?.Option.Output != wanted, $"The unavailable archive cannot be selected ({item.Reason})");
+            }
             return Failures.Count == 0 ? 0 : 1;
         }
         studio.SelectOutputCommand.Execute(item);

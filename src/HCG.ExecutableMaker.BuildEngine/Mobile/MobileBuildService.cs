@@ -321,20 +321,35 @@ public sealed partial class MobileBuildService(
 
                 if (options.Framework == MobileFramework.DotNetIos && options.Output is MobileOutput.IosArchive or MobileOutput.IosIpa)
                 {
-                    // The .NET iOS SDK made the archive (and, for an IPA, the IPA itself) at the exact paths HCG passed.
+                    // The SDK writes the archive (and the IPA) exactly where HCG said: those paths are checked, not searched.
                     var archive = DotNetIosPlanner.ArchivePath(input);
                     if (!Directory.Exists(archive))
-                        throw new StepFailedException($"dotnet publish succeeded but {archive} does not exist: the SDK did not run its Archive target. " +
-                            "Check above that ArchiveOnBuild is true and the build is for ios-arm64 with code signing (the SDK archives only signed device builds).");
-                    if (!File.Exists(Path.Combine(archive, "Info.plist")) || !Directory.Exists(Path.Combine(archive, "Products", "Applications")) ||
-                        !Directory.EnumerateDirectories(Path.Combine(archive, "Products", "Applications"), "*.app").Any())
-                        throw new StepFailedException($"{archive} is not a complete archive (Info.plist and Products/Applications/*.app are required).");
-                    if (options.Output == MobileOutput.IosIpa && !File.Exists(DotNetIosPlanner.IpaPath(input)))
-                        throw new StepFailedException($"dotnet publish succeeded and archived, but made no IPA at {DotNetIosPlanner.IpaPath(input)}: the SDK's CreateIpa target did not run (BuildIpa).");
-                    Log(BuildLogKind.Success, $"Archive: {archive}" + (options.Output == MobileOutput.IosIpa ? $" · IPA: {DotNetIosPlanner.IpaPath(input)} (made by the .NET iOS SDK; no xcodebuild export)" : ""));
-                    products.AddRange(Locate(plan.Outputs, startedUtc));
+                    {
+                        // iOS workloads before 27.x ignore ArchiveDir and write to Xcode's Archives folder (the build's HOME).
+                        var home = input.Environment.GetValueOrDefault("HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                        var (found, ambiguous) = DotNetIosPlanner.FindArchiveInXcodeFolder(DotNetIosPlanner.XcodeArchivesFolder(home), analysis!.DotNetIos?.ApplicationId, startedUtc);
+                        if (ambiguous is not null) throw new StepFailedException(ambiguous);
+                        if (found is not null)
+                        {
+                            CopyDirectory(found, archive);
+                            Log(BuildLogKind.Info, $"This iOS workload ignores ArchiveDir (before 27.x) and wrote the archive to Xcode's Archives folder: {found}. " +
+                                                   $"It was copied to {archive}; the original stays in Xcode's Organizer.");
+                        }
+                    }
+                    var (app, problem) = DotNetIosPlanner.InspectArchive(archive);
+                    if (problem is not null) throw new StepFailedException(problem);
+                    Log(BuildLogKind.Info, $"Archive: {archive} (app {Path.GetFileName(app)})");
+                    products.Add((PackagingFormat.IosArchive, archive));
+                    if (options.Output == MobileOutput.IosIpa)
+                    {
+                        var ipa = DotNetIosPlanner.IpaPath(input);
+                        var executable = Packaging.Mobile.PlistReader.ParseDictionary(File.ReadAllBytes(Path.Combine(app!, "Info.plist"))).GetValueOrDefault("CFBundleExecutable") as string;
+                        if (DotNetIosPlanner.InspectIpa(ipa, Path.GetFileName(app!), executable) is { } ipaProblem) throw new StepFailedException(ipaProblem);
+                        Log(BuildLogKind.Success, $"IPA: {ipa} (made by the .NET iOS SDK; no xcodebuild export)");
+                        products.Add((PackagingFormat.IosIpa, ipa));
+                    }
                 }
-                else if (options.Framework is MobileFramework.NativeIos && options.Output == MobileOutput.IosIpa)
+                else if (options.Framework == MobileFramework.NativeIos && options.Output == MobileOutput.IosIpa)
                 {
                     var archive = XcodePlanner.ArchivePath(input, XcodePlanner.ResolveContainer(input).Scheme);
                     Log(BuildLogKind.Info, $"Archive: {archive}");

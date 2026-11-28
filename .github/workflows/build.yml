@@ -535,6 +535,158 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  macos-sign-existing:
+    name: macOS — sign an already-built .NET app (Sign an existing app; ad-hoc TEST identity, no notarization; refusals, inside-out hardened runtime, .pkg, passports, launch)
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      OUT: ${{ github.workspace }}/macsign
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build HCG Executable Maker; publish the fixture app for osx-arm64 as a single file and wrap it in an unsigned .app (the already-built app)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build src/HCG.ExecutableMaker.App -c Release
+          dotnet publish tests/Fixtures/HelloAvalonia/HelloAvalonia.csproj -c Release -r osx-arm64 --self-contained \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=false -p:DebugType=none -o "$OUT/publish"
+          APP="$OUT/ci/Hello Avalonia.app"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp -R "$OUT/publish/." "$APP/Contents/MacOS/"
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>HelloAvalonia</string>
+            <key>CFBundleIdentifier</key><string>org.example.helloavalonia</string>
+            <key>CFBundleName</key><string>Hello Avalonia</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>1.2.0</string>
+            <key>CFBundleVersion</key><string>7</string>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          plutil -lint "$APP/Contents/Info.plist"
+          cat > "$OUT/app.entitlements" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>
+          PLIST
+          ls -la "$APP/Contents/MacOS"
+          (cd "$OUT/ci" && find . -type f -exec shasum -a 256 {} \; | sort) > "$OUT/input-before.txt"
+
+      - name: Refusals — nothing is copied or signed (no entitlement review, version mismatch, test build with notarization, data in Contents/MacOS, output inside the app)
+        shell: bash
+        run: |
+          # Not -e: each refusal is expected to exit 1, and the exit code is checked below (Actions runs bash with -e).
+          set +e -uo pipefail
+          maker() { dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --mac-sign-existing "$@"; }
+          APP="$OUT/ci/Hello Avalonia.app"; E="$OUT/app.entitlements"
+          refuse() { # refuse <label> <expected text> <args…>
+            local label="$1" want="$2"; shift 2
+            local log="$OUT/refusal-$label.log"; maker "$@" > "$log" 2>&1; local rc=$?
+            if [ $rc -ne 1 ] || ! grep -qF "$want" "$log"; then cat "$log"; echo "::error::$label: expected exit 1 and \"$want\", got $rc"; exit 1; fi
+            echo "✓ refused: $label"
+          }
+          refuse not-confirmed "confirm them" --app "$APP" --out "$OUT/refused" --test --entitlements "$E" --pkg
+          refuse version-mismatch "does not match the app" --app "$APP" --out "$OUT/refused" --test --entitlements "$E" --confirm-entitlements --version 1.2.1-beta.1
+          refuse test-notarize "Test builds are not notarized" --app "$APP" --out "$OUT/refused" --test --entitlements "$E" --confirm-entitlements --notary-profile HCG-Notary
+          refuse output-inside "must be outside the app" --app "$APP" --out "$APP/Contents/out" --test --entitlements "$E" --confirm-entitlements
+          MULTI="$OUT/multi/Hello Avalonia.app"; mkdir -p "$OUT/multi"; ditto "$APP" "$MULTI"; echo "MZ" > "$MULTI/Contents/MacOS/HelloAvalonia.dll"
+          refuse data-in-macos "Contents/MacOS holds files that are not code" --app "$MULTI" --out "$OUT/refused" --test --entitlements "$E" --confirm-entitlements
+          if [ -e "$OUT/refused" ] && [ -n "$(find "$OUT/refused" -type f)" ]; then echo "::error::a refused run wrote files"; exit 1; fi
+
+      - name: Sign — ad-hoc TEST identity, hardened runtime, entitlements from the plist, .pkg, release version 1.2.0-beta.1, passports (no notarization)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --mac-sign-existing --app "$OUT/ci/Hello Avalonia.app" --out "$OUT/signed" \
+            --test --entitlements "$OUT/app.entitlements" --confirm-entitlements --pkg --version 1.2.0-beta.1 --build-number 7 \
+            --source-repo "$GITHUB_WORKSPACE" --provider github-actions | tee "$OUT/sign.log"
+          grep -q "All steps passed." "$OUT/sign.log"
+
+      - name: Verify with Apple's own tools — input unchanged, every Mach-O hardened, entitlements exact, package without scripts, passports describe the files
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() { if eval "$2"; then echo "✓ $1"; else echo "::error::Sign an existing app check failed: $1"; exit 1; fi; }
+          pj() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2"; }
+          S="$OUT/signed"; A="$S/Hello Avalonia.app"; T="-1.2.0-beta.1-osx-arm64-adhoc-TEST-not-for-distribution"
+          ZIP="$S/Hello Avalonia$T.app.zip"; PKG="$S/Hello Avalonia$T.pkg"
+          ls -la "$S"
+          (cd "$OUT/ci" && find . -type f -exec shasum -a 256 {} \; | sort) > "$OUT/input-after.txt"
+          check "the input .app is unchanged (every file's SHA-256)" 'diff -q "$OUT/input-before.txt" "$OUT/input-after.txt"'
+          check "codesign --verify --deep --strict on the signed copy" 'codesign --verify --deep --strict --verbose=2 "$A"'
+          codesign -dvvv "$A" > "$OUT/describe.txt" 2>&1
+          check "ad-hoc signature (test identity)" 'grep -q "^Signature=adhoc" "$OUT/describe.txt"'
+          check "hardened runtime on the bundle" 'grep -E "^CodeDirectory .*flags=.*runtime" "$OUT/describe.txt" >/dev/null'
+          check "entitlements are exactly the plist's (allow-jit)" '[ "$(codesign -d --entitlements - --xml "$A" 2>/dev/null | plutil -convert json -o - -)" = "$(plutil -convert json -o - "$OUT/app.entitlements")" ]'
+          n=0
+          while IFS= read -r -d "" f; do
+            [ "$(basename "$f")" = HelloAvalonia ] && continue
+            case "$(file -b "$f")" in Mach-O*) ;; *) continue ;; esac
+            n=$((n + 1))
+            codesign -dvv "$f" 2>&1 | grep -E "flags=.*runtime" >/dev/null || { echo "::error::$f is not signed with the hardened runtime"; exit 1; }
+          done < <(find "$A/Contents" -type f -print0)
+          check "every nested Mach-O ($n) is signed with the hardened runtime" '[ $n -gt 0 ]'
+          check "distribution ZIP named as a TEST build" 'test -f "$ZIP"'
+          check "the ZIP holds the signed app" 'rm -rf "$OUT/unzip" && ditto -x -k "$ZIP" "$OUT/unzip" && codesign --verify --deep --strict "$OUT/unzip/Hello Avalonia.app"'
+          check "installer package is unsigned (test build)" '{ pkgutil --check-signature "$PKG" 2>&1 || true; } | grep -q "no signature"'
+          rm -rf "$OUT/pkgx"; pkgutil --expand "$PKG" "$OUT/pkgx"
+          check "installer runs no scripts" '[ -z "$(find "$OUT/pkgx" -name Scripts -o -name preinstall -o -name postinstall)" ]'
+          check "package version is the release version" 'grep -q "version=\"1.2.0-beta.1\"" "$OUT"/pkgx/*.pkg/PackageInfo'
+          for f in "$ZIP" "$PKG"; do
+            P="$f.release-passport.json"
+            check "$(basename "$P"): version 1.2.0-beta.1" '[ "$(pj "$P" "d[\"version\"]")" = 1.2.0-beta.1 ]'
+            check "$(basename "$P"): build 7" '[ "$(pj "$P" "d[\"build_number\"]")" = 7 ]'
+            check "$(basename "$P"): SHA-256 of the file" '[ "$(pj "$P" "d[\"artifact\"][\"sha256\"]")" = "$(shasum -a 256 "$f" | cut -c1-64)" ]'
+            check "$(basename "$P"): source commit $GITHUB_SHA" '[ "$(pj "$P" "d[\"source\"][\"commit\"]")" = "$GITHUB_SHA" ]'
+            check "$(basename "$P"): code signing ad-hoc" '[ "$(pj "$P" "d[\"code_signing\"][\"status\"]")" = ad-hoc ]'
+          done
+          check "SHA256SUMS lists both files" '[ "$(wc -l < "$S/SHA256SUMS-adhoc-TEST-not-for-distribution.txt" | tr -d " ")" = 2 ]'
+          check "signing report records the test mode" '[ "$(pj "$S/Hello Avalonia-adhoc-TEST-not-for-distribution.signing-report.json" "d[\"mode\"]")" = adhoc-test ]'
+          # The Signing Doctor reads the signed copy (read-only).
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --mac-signing-doctor "$A" | tee "$OUT/doctor.txt"
+
+      - name: Launch — the signed .NET app runs under the hardened runtime with allow-jit and opens its window
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() { if eval "$2"; then echo "✓ $1"; else echo "::error::Launch check failed: $1"; exit 1; fi; }
+          A="$OUT/signed/Hello Avalonia.app"
+          swiftc -O tools/ci/window-of-pid.swift -o "$OUT/window-of-pid"
+          "$A/Contents/MacOS/HelloAvalonia" > "$OUT/launch.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 60); do
+            if "$OUT/window-of-pid" $PID > "$OUT/windows.txt" 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then echo "The app exited"; cat "$OUT/launch.log"; exit 1; fi
+            sleep 2
+          done
+          check "window on screen: $(head -1 "$OUT/windows.txt" 2>/dev/null)" 'test -s "$OUT/windows.txt"'
+          sleep 5
+          check "still running (CoreCLR's JIT works under the hardened runtime)" 'kill -0 $PID'
+          kill $PID; sleep 2; kill -9 $PID 2>/dev/null || true
+
+      - name: Upload the signed files and evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-sign-existing
+          path: |
+            ${{ env.OUT }}/signed/*.zip
+            ${{ env.OUT }}/signed/*.pkg
+            ${{ env.OUT }}/signed/*.json
+            ${{ env.OUT }}/signed/*.txt
+            ${{ env.OUT }}/*.log
+            ${{ env.OUT }}/*.txt
+          if-no-files-found: warn
+
   windows-installer:
     name: Windows installer (build, install, launch, uninstall)
     needs: test
@@ -1367,7 +1519,7 @@ jobs:
           ICON="$(plutil -extract CFBundleIconFile raw "$APP/Contents/Info.plist")"
           test -s "$APP/Contents/Resources/${ICON%.icns}.icns"
           # Ad-hoc signature only: labelled unsigned for distribution, never presented as Developer ID signed.
-          codesign -dv "$APP" 2>&1 | tee "$OUT/codesign.txt" | grep -q "Signature=adhoc"
+          codesign -dv "$APP" 2>&1 | tee "$OUT/codesign.txt" | grep "Signature=adhoc" >/dev/null
           dir="$(dirname "$APP")"
           hdiutil verify "$dir"/*.dmg
           unzip -tq "$dir"/*.zip
@@ -2105,7 +2257,7 @@ jobs:
       # The .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode archive"); hosted
       # runners have no certificate, so Maker blocks the archive before building. A signed archive/IPA needs the owner's
       # certificate and provisioning profile.
-      - name: Device archive — unavailable without code signing (the .NET iOS SDK archives only signed)
+      - name: Device archive — judged with the project's signing; never offered unsigned (the .NET iOS SDK archives only signed)
         run: >
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --mobile --source "$OUT/src/HCG Mail"
           --mobile-output archive --signing unsigned --expect-no-unsigned --output "$OUT/archive" --screenshots "$OUT/screens" --prefix mail-archive
@@ -2120,6 +2272,43 @@ jobs:
           dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --doctor --source "$PWD/tests/Fixtures/DotNetIos/HelloDotNetIos"
           --doctor-expect-no-category ProjectReferences,MsBuildProperties,ImportScope,Workload,Sdk --doctor-build
           --output "$OUT/hello" --screenshots "$OUT/screens" --prefix hello-dotnet-ios
+      # The .NET iOS SDK's ArchiveDir is the .xcarchive itself: Maker passes <work>/archives/<name>.xcarchive and
+      # -p:BuildIpa=true -p:IpaPackagePath=<work>/ipa/<name>.ipa, then checks exactly those paths. The project signs
+      # ad hoc (CodesignKey=-, its "project default"), so no certificate or profile is needed; the results install on no
+      # device. Real development signing needs the owner's certificate and profile on their Mac.
+      - name: Known-good .NET for iOS sample — ad-hoc signed device archive and IPA through Mobile Build Studio (project signs ad hoc, CodesignKey=-)
+        run: |
+          set -euo pipefail
+          A="$OUT/adhoc-src/HelloDotNetIos"; mkdir -p "$A"; cp -R tests/Fixtures/DotNetIos/HelloDotNetIos/. "$A/"
+          printf '<Project><PropertyGroup><CodesignKey>-</CodesignKey></PropertyGroup></Project>\n' > "$A/Directory.Build.props"
+          for kind in ios-archive ios-ipa; do
+            # Maker's data (and so the imported copy) stays inside this checkout, as for the UI driver, so the
+            # repository's global.json selects the .NET 10 SDK that has the pinned iOS workload (the runner also has
+            # SDK 11 without it; a temporary folder outside the checkout would pick that one).
+            HCG_EXECUTABLE_MAKER_HOME="$OUT/adhoc-home-$kind" \
+              dotnet run --no-cache tools/mobile-build/mobile-build.cs -- "$A" "$OUT/adhoc-$kind" --output $kind --signing project --trust 2>&1 | tee "$OUT/adhoc-$kind.log"
+            grep -q "^Result: Succeeded" "$OUT/adhoc-$kind.log"
+          done
+      - name: Independent checks of the ad-hoc archive and IPA (plutil, lipo, vtool, codesign, ditto)
+        run: |
+          set -euo pipefail
+          check() { if eval "$2"; then echo "✓ $1"; else echo "::error::.NET iOS archive/IPA check failed: $1"; exit 1; fi; }
+          X="$(find "$OUT/adhoc-ios-archive" -maxdepth 3 -name 'HelloDotNetIos.xcarchive' -type d | head -1)"
+          check "archive at its exact name: ${X:-none}" 'test -n "$X" && test -d "$X"'
+          check "archive Info.plist is a valid property list" 'plutil -lint "$X/Info.plist"'
+          APP="$X/Products/Applications/HelloDotNetIos.app"
+          check "the app is in Products/Applications" 'test -d "$APP"'
+          check "ApplicationProperties.ApplicationPath names it" '[ "$(plutil -extract ApplicationProperties.ApplicationPath raw "$X/Info.plist")" = Applications/HelloDotNetIos.app ]'
+          EXE="$APP/$(plutil -extract CFBundleExecutable raw "$APP/Info.plist")"
+          check "arm64 iOS device executable" 'lipo -archs "$EXE" | grep -qw arm64 && xcrun vtool -show-build "$EXE" | grep -q "platform IOS"'
+          check "the archived app's signature verifies" 'codesign --verify --deep --strict "$APP"'
+          check "the signature is ad hoc (no certificate)" 'codesign -dv "$APP" 2>&1 | grep "^Signature=adhoc" >/dev/null'
+          IPA="$(find "$OUT/adhoc-ios-ipa" -maxdepth 3 -name 'HelloDotNetIos.ipa' -type f | head -1)"
+          check "IPA at its exact name: ${IPA:-none}" 'test -n "$IPA" && test -f "$IPA"'
+          rm -rf "$OUT/ipa-x"; mkdir -p "$OUT/ipa-x"; ditto -x -k "$IPA" "$OUT/ipa-x"
+          check "IPA holds Payload/HelloDotNetIos.app" 'test -d "$OUT/ipa-x/Payload/HelloDotNetIos.app"'
+          check "the IPA's app signature verifies" 'codesign --verify --deep --strict "$OUT/ipa-x/Payload/HelloDotNetIos.app"'
+          grep -q "signs ad hoc (CodesignKey=-)" "$OUT/adhoc-ios-ipa.log" && echo "✓ the build log says it is an ad-hoc test build"
       - name: Independent checks of what HCG produced
         run: |
           for d in doctor hello; do
@@ -2157,6 +2346,7 @@ jobs:
             ${{ github.workspace }}/mail-out/screens
             ${{ github.workspace }}/mail-out/*/*.json
             ${{ github.workspace }}/mail-out/*/*.log
+            ${{ github.workspace }}/mail-out/*.log
           if-no-files-found: warn
           retention-days: 7
 
