@@ -11,6 +11,9 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   - Maker now passes `-p:ArchiveDir=<work>/archives/<AssemblyName>.xcarchive` and uses exactly that path.
   - It checks the archive's `Info.plist` and its one app in `Products/Applications`, with a precise message for each
     gap. It no longer searches for a child `*.xcarchive`.
+  - iOS workloads before 27.x ignore `ArchiveDir` (26.2's Archive task does not take it) and write to Xcode's Archives
+    folder. Maker takes the one archive this build created there (by bundle identifier and time, never a guess) and
+    copies it to the exact path. This was seen on CI with workload 26.2.10233.
   - The IPA is packaged by the SDK in the same build (`-p:BuildIpa=true -p:IpaPackagePath=<work>/ipa/<name>.ipa`) and
     checked for `Payload/<app>.app` with its `Info.plist` and executable. `xcodebuild -exportArchive` is no longer
     used for .NET.

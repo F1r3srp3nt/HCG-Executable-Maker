@@ -46,7 +46,7 @@ public static class DotNetIosPlanner
             var misplaced = parent is not null && File.Exists(Path.Combine(parent, "Info.plist"));
             return (null, $"dotnet publish succeeded but did not create the archive {archive}." + (misplaced
                 ? $" An archive was written into {parent} itself: the .NET iOS SDK uses ArchiveDir as the .xcarchive."
-                : " Check the publish log for the Archive task."));
+                : " No new archive for this app was found in Xcode's Archives folder either (where iOS workloads before 27.x write it). Check the publish log for the Archive task."));
         }
         if (!File.Exists(Path.Combine(archive, "Info.plist")))
             return (null, $"{Path.GetFileName(archive)} has no Info.plist, so it is not a complete Xcode archive.");
@@ -58,6 +58,41 @@ public static class DotNetIosPlanner
             1 when !File.Exists(Path.Combine(apps[0], "Info.plist")) => (null, $"{Path.GetFileName(archive)}/Products/Applications/{Path.GetFileName(apps[0])} has no Info.plist."),
             1 => (apps[0], null),
             _ => (null, $"{Path.GetFileName(archive)} has {apps.Length} apps in Products/Applications ({string.Join(", ", apps.Select(Path.GetFileName))}); expected one."),
+        };
+    }
+
+    /// <summary>Xcode's default archive folder (~/Library/Developer/Xcode/Archives) for the build's HOME.</summary>
+    public static string XcodeArchivesFolder(string home) => Path.Combine(home, "Library", "Developer", "Xcode", "Archives");
+
+    /// <summary>
+    /// iOS workloads before 27.x do not pass <c>ArchiveDir</c> to their Archive task (Xamarin.Shared.targets 26.2: the
+    /// task only outputs it), so the archive goes to Xcode's Archives folder as
+    /// <c>&lt;yyyy-MM-dd&gt;/&lt;Project&gt; &lt;date&gt;.xcarchive</c>. Finds the one this build created: written at or after
+    /// <paramref name="sinceUtc"/> and naming <paramref name="bundleId"/> in its Info.plist. Never guesses between several.
+    /// </summary>
+    public static (string? Archive, string? Problem) FindArchiveInXcodeFolder(string archivesFolder, string? bundleId, DateTime sinceUtc)
+    {
+        if (!Directory.Exists(archivesFolder)) return (null, null);
+        var candidates = new List<string>();
+        foreach (var day in Directory.EnumerateDirectories(archivesFolder))
+            foreach (var archive in Directory.EnumerateDirectories(day, "*.xcarchive"))
+            {
+                var info = Path.Combine(archive, "Info.plist");
+                if (!File.Exists(info) || File.GetLastWriteTimeUtc(info) < sinceUtc) continue;
+                string? id = null;
+                try
+                {
+                    id = (HCG.ExecutableMaker.Packaging.Mobile.PlistReader.ParseDictionary(File.ReadAllBytes(info)).GetValueOrDefault("ApplicationProperties") as Dictionary<string, object>)
+                        ?.GetValueOrDefault("CFBundleIdentifier") as string;
+                }
+                catch (Exception ex) when (ex is InvalidDataException or System.Xml.XmlException or FormatException) { continue; }
+                if (bundleId is null || id == bundleId) candidates.Add(archive);
+            }
+        return candidates.Count switch
+        {
+            0 => (null, null),
+            1 => (candidates[0], null),
+            _ => (null, $"{candidates.Count} new archives for {bundleId ?? "this app"} are in {archivesFolder} ({string.Join(", ", candidates.Select(Path.GetFileName))}); HCG does not guess which one this build created."),
         };
     }
 

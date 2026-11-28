@@ -46,6 +46,7 @@ public sealed class DotNetIosArchiveTests : IDisposable
         Assert.Null(app);
         Assert.Contains("did not create the archive", problem);
         Assert.Contains("uses ArchiveDir as the .xcarchive", problem);
+        Assert.Contains("Xcode's Archives folder", DotNetIosPlanner.InspectArchive(_t.Combine("elsewhere", "X.xcarchive")).Problem);
     }
 
     [Theory]
@@ -68,6 +69,38 @@ public sealed class DotNetIosArchiveTests : IDisposable
         var (app, problem) = DotNetIosPlanner.InspectArchive(path);
         Assert.Null(app);
         Assert.Contains(expected, problem);
+    }
+
+    private string XcodeArchive(string folder, string name, string bundleId, DateTime written)
+    {
+        var path = Path.Combine(folder, "2026-11-28", name + ".xcarchive");
+        Directory.CreateDirectory(Path.Combine(path, "Products", "Applications", "HelloDotNetIos.app"));
+        var info = Path.Combine(path, "Info.plist");
+        File.WriteAllText(info, $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>ApplicationProperties</key><dict><key>CFBundleIdentifier</key><string>{bundleId}</string></dict></dict></plist>");
+        File.SetLastWriteTimeUtc(info, written);
+        return path;
+    }
+
+    [Fact]
+    public void Workloads_before_27_write_to_Xcodes_Archives_folder_and_only_this_builds_archive_is_taken_from_there()
+    {
+        // Xamarin.Shared.targets 26.2 does not pass ArchiveDir to its Archive task (27.2 does): the archive goes to
+        // ~/Library/Developer/Xcode/Archives/<date>/<Project> <date>.xcarchive (CI run 46124360927, workload 26.2.10233).
+        var folder = DotNetIosPlanner.XcodeArchivesFolder(_t.Combine("home"));
+        Assert.Equal(_t.Combine("home", "Library", "Developer", "Xcode", "Archives"), folder);
+        var started = new DateTime(2026, 11, 28, 8, 0, 0, DateTimeKind.Utc);
+        Assert.Equal((null, null), DotNetIosPlanner.FindArchiveInXcodeFolder(folder, "com.example.hello", started)); // no folder at all
+
+        XcodeArchive(folder, "HelloDotNetIos 11-27-26 9.00 AM", "com.example.hello", started.AddDays(-1));        // older: another build's
+        XcodeArchive(folder, "Other 11-28-26 8.01 AM", "com.example.other", started.AddMinutes(1));               // another app
+        var mine = XcodeArchive(folder, "HelloDotNetIos 11-28-26 8.01 AM", "com.example.hello", started.AddMinutes(1));
+        Assert.Equal((mine, (string?)null), DotNetIosPlanner.FindArchiveInXcodeFolder(folder, "com.example.hello", started));
+
+        XcodeArchive(folder, "HelloDotNetIos 11-28-26 8.02 AM", "com.example.hello", started.AddMinutes(2));
+        var (none, ambiguous) = DotNetIosPlanner.FindArchiveInXcodeFolder(folder, "com.example.hello", started);
+        Assert.Null(none);
+        Assert.Contains("2 new archives for com.example.hello", ambiguous);
+        Assert.Contains("does not guess", ambiguous);
     }
 
     private string Ipa(params string[] entries)

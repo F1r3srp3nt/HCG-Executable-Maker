@@ -284,6 +284,19 @@ public sealed partial class MobileBuildService(
                 {
                     // The SDK writes the archive (and the IPA) exactly where HCG said: those paths are checked, not searched.
                     var archive = DotNetIosPlanner.ArchivePath(input);
+                    if (!Directory.Exists(archive))
+                    {
+                        // iOS workloads before 27.x ignore ArchiveDir and write to Xcode's Archives folder (the build's HOME).
+                        var home = input.Environment.GetValueOrDefault("HOME") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                        var (found, ambiguous) = DotNetIosPlanner.FindArchiveInXcodeFolder(DotNetIosPlanner.XcodeArchivesFolder(home), analysis!.DotNetIos?.ApplicationId, startedUtc);
+                        if (ambiguous is not null) throw new StepFailedException(ambiguous);
+                        if (found is not null)
+                        {
+                            CopyDirectory(found, archive);
+                            Log(BuildLogKind.Info, $"This iOS workload ignores ArchiveDir (before 27.x) and wrote the archive to Xcode's Archives folder: {found}. " +
+                                                   $"It was copied to {archive}; the original stays in Xcode's Organizer.");
+                        }
+                    }
                     var (app, problem) = DotNetIosPlanner.InspectArchive(archive);
                     if (problem is not null) throw new StepFailedException(problem);
                     Log(BuildLogKind.Info, $"Archive: {archive} (app {Path.GetFileName(app)})");
