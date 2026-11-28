@@ -216,6 +216,12 @@ public static class MobileReadiness
         if (m.Framework == MobileFramework.DotNetIos && !simulator && signing == MobileSigningMode.Unsigned)
             items.Add(new("Code signing", ReadinessState.SetupRequired, true, DotNetIosArchiveNeedsSigning,
                 "Choose a certificate and provisioning profile (CodesignKey / CodesignProvision), or build for the iOS Simulator."));
+        else if (m.Framework == MobileFramework.DotNetIos && !simulator && signing == MobileSigningMode.ProjectDefault && m.DotNetIos?.CodesignKey == "-")
+        {
+            // The project signs ad hoc itself (CodesignKey=-, e.g. CI): the SDK archives and packages it without a
+            // certificate or profile. Such an archive or IPA installs on no device and cannot be distributed.
+            items.Add(new("Code signing", ReadinessState.NotNeeded, false, DotNetIosAdHocProjectSigning));
+        }
         else if (unsigned)
         {
             var why = simulator ? "Simulator builds are not code-signed for devices." : "Unsigned archive (inspection only).";
@@ -267,6 +273,9 @@ public static class MobileReadiness
     }
 
     /// <summary>The .NET iOS SDK refuses an unsigned archive (Xamarin.Shared.targets, CI run 78).</summary>
+    public const string DotNetIosAdHocProjectSigning =
+        "The project signs ad hoc (CodesignKey=-): no certificate or provisioning profile is used. The archive and IPA are for checks only; they install on no device and cannot be distributed.";
+
     public const string DotNetIosArchiveNeedsSigning =
         ".NET for iOS creates an Xcode archive (and an IPA) only with code signing: the iOS SDK stops with \"Code signing must be enabled to create an Xcode archive\". An unsigned device archive is not possible for this project type.";
 

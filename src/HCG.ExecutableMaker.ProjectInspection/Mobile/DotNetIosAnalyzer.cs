@@ -85,6 +85,7 @@ public static class DotNetIosAnalyzer
         return new DotNetIosProjectInfo
         {
             ProjectPath = rel, TargetFramework = tfm, AssemblyName = Clean(file.Get("AssemblyName")) ?? Path.GetFileNameWithoutExtension(rel),
+            CodesignKey = Clean(file.Get("CodesignKey")),
             ApplicationId = Clean(file.Get("ApplicationId")), ApplicationTitle = Clean(file.Get("ApplicationTitle")),
             DisplayVersion = Clean(file.Get("ApplicationDisplayVersion")) ?? Clean(file.Get("Version")), BuildNumber = Clean(file.Get("ApplicationVersion")),
             MinimumOS = Clean(file.Get("SupportedOSPlatformVersion")), UiFramework = avalonia is not null ? "Avalonia" : null, UiFrameworkVersion = Clean(avalonia?.Version),

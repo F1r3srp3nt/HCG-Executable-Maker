@@ -248,7 +248,7 @@ The Command Line Tools stay sufficient for ad-hoc Swift builds. The build log re
 | .pkg installed (`sudo installer -target /` on the disposable runner, and the app's own Test install into `~/Applications`) + launched | — | ✅ | — |
 | Xcode selected for HCG only; build used it; `xcode-select` unchanged | — | ✅ | — |
 | Sign an existing app: gating, inside-out order, step sequence (scripted tools) | ✅ | ✅ | — |
-| Sign an existing .NET app with an ad-hoc TEST identity: real `codesign` (hardened runtime, exact entitlements, every nested Mach-O), unsigned .pkg, passports, input unchanged, the signed app launches | — | ✅ (`macos-sign-existing`) | — |
+| Sign an existing .NET app with an ad-hoc TEST identity: real `codesign` (hardened runtime, exact entitlements, every nested Mach-O), unsigned .pkg, passports, input unchanged, the signed app launches | — | ✅ (`macos-sign-existing`; first passed in run 46112104774, PR #22) | — |
 | Developer ID signing, signed DMG/.pkg, notarization, stapling | — | — | ✅ (certificates + notary profile) |
 | Mac App Store package, App Store Connect validation | — | — | ✅ (distribution certificates, profile, API key) |
 

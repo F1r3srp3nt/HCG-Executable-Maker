@@ -71,6 +71,14 @@ launches the signed app.
 
 `--release-passport` also takes `--version` (and `--build-number`), for an archive that was signed elsewhere.
 
+## What has been verified
+
+| What | Where | Result |
+|---|---|---|
+| Gating, inside-out signing order, the full step sequence, notary rejection, passports with the release version | Unit tests (scripted Mac tools) | Pass |
+| Ad-hoc test signing of a single-file .NET app on a real Mac | CI `macos-sign-existing` (run 46112104774) | Passed: five refusals; input unchanged; `codesign --verify --deep --strict`; hardened runtime and exactly `allow-jit` on the app and all nested Mach-O files; ZIP; unsigned `.pkg` without scripts at version `1.2.0-beta.1`; passports with the files' SHA-256 and the source commit; the signed app launched and kept its window open (CoreCLR's JIT works under the hardened runtime) |
+| **Developer ID signing, notarization, stapling, Gatekeeper acceptance** | Not yet | Needs the owner's Developer ID Application and Installer certificates and a notary keychain profile, on the owner's Mac. Nothing in CI proves these steps against Apple's services |
+
 ## Building HCG Mail with Maker instead
 
 The New Build wizard can also sign a .NET GUI app for distribution. Choose macOS → Configure › **Single file** →

@@ -186,13 +186,24 @@ public class AppleProjectRoutesTests : IDisposable
         var sargs = signed.Steps[0].Process.Arguments;
         Assert.Contains("-p:CodesignKey=Apple Distribution: Hakmi Capital Group (ABCDE12345)", sargs);
         Assert.Contains("-p:CodesignProvision=HCG Mail App Store", sargs);
-        Assert.Empty(signed.Outputs);                // an IPA only comes from the separate export stage, never from the archive step
+        Assert.Empty(signed.Outputs);                // the build service takes the archive and the IPA from their exact paths
+        Assert.Contains("-p:BuildIpa=true", sargs);
+        var ipaPath = sargs.Single(a => a.StartsWith("-p:IpaPackagePath=", StringComparison.Ordinal))["-p:IpaPackagePath=".Length..];
+        Assert.EndsWith(".ipa", ipaPath);
+        Assert.StartsWith(_t.Combine("hcg data", "builds", "b1", "work"), ipaPath);
 
         var archiveOptions = new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.AppleManual, SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "HCG Mail Dev" };
         var archive = DotNetIosPlanner.Plan(Input(m, archiveOptions));
         var args = Assert.Single(archive.Steps).Process.Arguments;
         Assert.Equal(["publish", project, "-c", "Release", "-r", "ios-arm64", "-p:ArchiveOnBuild=true"], args.Take(7));
-        Assert.Contains("-p:ArchiveDir=" + DotNetIosPlanner.ArchiveDirectory(Input(m, archiveOptions)), args);
+        // The .NET iOS SDK's ArchiveDir IS the .xcarchive (Xamarin.MacDev.Tasks.Archive), so the exact archive path is passed.
+        var archivePath = DotNetIosPlanner.ArchivePath(Input(m, archiveOptions));
+        Assert.Contains("-p:ArchiveDir=" + archivePath, args);
+        Assert.EndsWith(".xcarchive", archivePath);
+        Assert.Equal(DotNetIosPlanner.ArchiveDirectory(Input(m, archiveOptions)), Path.GetDirectoryName(archivePath));
+        Assert.Contains("-p:BuildIpa=false", args);
+        Assert.DoesNotContain(args, a => a.StartsWith("-p:IpaPackagePath=", StringComparison.Ordinal));
+        Assert.Empty(archive.Outputs);
         Assert.DoesNotContain("-p:EnableCodeSigning=false", args);
         Assert.Equal(Path.Combine(MailRepo(), "iOS App Store Submission", "src", "HCG.Mail.iOS"), archive.Steps[0].Process.WorkingDirectory);   // inside the whole repository
 

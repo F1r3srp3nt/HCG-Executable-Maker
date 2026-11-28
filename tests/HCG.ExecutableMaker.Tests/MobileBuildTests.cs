@@ -43,7 +43,7 @@ public sealed class MobileTestKit : IDisposable
             _ => "/x/" + id,
         };
         string[] all = [ToolchainIds.DotNetSdk, ToolchainIds.Jdk, ToolchainIds.AndroidSdk, ToolchainIds.Bundletool, ToolchainIds.Xcode,
-            ToolchainIds.IosSdk, ToolchainIds.AppleSigningIdentities, ToolchainIds.Flutter, ToolchainIds.MauiWorkloads];
+            ToolchainIds.IosSdk, ToolchainIds.AppleSigningIdentities, ToolchainIds.Flutter, ToolchainIds.MauiWorkloads, ToolchainIds.DotNetIosWorkload];
         return new ToolchainReport(new HostEnvironment(host, TargetArchitecture.Arm64, "test", ".NET", "m"),
             all.Select(id => new ToolchainInfo
             {
@@ -739,6 +739,137 @@ public class MobileBuildServiceTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_paths.Root, "signing", "hcg-debug.keystore")));
         Assert.DoesNotContain("pass:android", observer.Text);
         Assert.Contains("not a store-signed release", observer.Text);
+    }
+
+    // ───────────── .NET for iOS: the archive and the IPA at the exact paths HCG passes ─────────────
+
+    private static string Arg(ProcessSpec spec, string prefix) => spec.Arguments.Single(a => a.StartsWith(prefix, StringComparison.Ordinal))[prefix.Length..];
+
+    private ToolchainReport DotNetIosMac() => _k.Report(TargetPlatform.MacOS, [.. MobileTestKit.Apple, ToolchainIds.DotNetSdk, ToolchainIds.DotNetIosWorkload]);
+
+    [Fact]
+    public async Task A_dotnet_ios_archive_is_taken_from_the_exact_ArchiveDir_not_searched_for()
+    {
+        var report = DotNetIosMac();
+        var p = await Project("DotNetIos/HelloDotNetIos", report);
+        // Regression: the archive output was judged as "unsigned", which .NET for iOS cannot do, so it was never available.
+        var offered = HCG.ExecutableMaker.ProjectInspection.Mobile.MobileCapabilities.Evaluate(p.Analysis!.Mobile!, report).Single(o => o.Output == MobileOutput.IosArchive);
+        Assert.True(offered.IsAvailable, offered.Reason);
+        var worker = new ScriptedMobileWorker((spec, _, _) =>
+        {
+            var archive = Arg(spec, "-p:ArchiveDir=");
+            WriteArchive(archive, signedProfile: null);
+            // A stale archive next to it must not be picked up: the path is exact, nothing is searched.
+            WriteArchive(Path.Combine(Path.GetDirectoryName(archive)!, "Stale.xcarchive"), signedProfile: null);
+            return ScriptedMobileWorker.Exit(0);
+        });
+        var observer = new Observer();
+        var build = await Service(worker, report).RunAsync(Request(p, new MobileBuildOptions
+        {
+            Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosArchive, Signing = MobileSigningMode.ProjectDefault,
+        }), observer, CancellationToken.None);
+
+        Assert.True(build.Status == BuildStatus.Succeeded, build.FailureReason + "\n" + observer.Text);
+        var call = Assert.Single(worker.Calls);
+        Assert.EndsWith(Path.Combine("work", "archives", "HelloDotNetIos.xcarchive"), Arg(call, "-p:ArchiveDir="));
+        Assert.Contains("-p:BuildIpa=false", call.Arguments);
+        Assert.DoesNotContain(call.Arguments, a => a.StartsWith("-p:Codesign", StringComparison.Ordinal)); // project-default signing: the project decides
+        var artifact = Assert.Single(build.Artifacts);
+        Assert.Equal(PackagingFormat.IosArchive, artifact.Format);
+        Assert.Equal("HelloDotNetIos.xcarchive", Path.GetFileName(artifact.Path));
+    }
+
+    [Fact]
+    public async Task A_dotnet_ios_ipa_is_packaged_by_the_sdk_at_IpaPackagePath_without_an_xcodebuild_export()
+    {
+        var report = DotNetIosMac();
+        var p = await Project("DotNetIos/HelloDotNetIos", report);
+        var worker = new ScriptedMobileWorker((spec, _, _) =>
+        {
+            WriteArchive(Arg(spec, "-p:ArchiveDir="), signedProfile: null);
+            var ipa = Arg(spec, "-p:IpaPackagePath=");
+            Directory.CreateDirectory(Path.GetDirectoryName(ipa)!);
+            MobileSamples.Ipa(ipa, "iphoneos", MobileSamples.MachO(0x0100000C), signed: true, profile: null);
+            return ScriptedMobileWorker.Exit(0);
+        });
+        var observer = new Observer();
+        var build = await Service(worker, report).RunAsync(Request(p, new MobileBuildOptions
+        {
+            Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosIpa, Signing = MobileSigningMode.AppleManual,
+            SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "HCG Dev",
+        }), observer, CancellationToken.None);
+
+        Assert.True(build.Status == BuildStatus.Succeeded, build.FailureReason + "\n" + observer.Text);
+        var call = Assert.Single(worker.Calls); // the SDK makes the IPA in the same publish; no xcodebuild -exportArchive
+        Assert.Contains("-p:BuildIpa=true", call.Arguments);
+        Assert.EndsWith(Path.Combine("work", "ipa", "HelloDotNetIos.ipa"), Arg(call, "-p:IpaPackagePath="));
+        Assert.Contains("-p:CodesignKey=Apple Development: Jane (ABCDE12345)", call.Arguments);
+        Assert.Contains("-p:CodesignProvision=HCG Dev", call.Arguments);
+        var artifact = Assert.Single(build.Artifacts);
+        Assert.Equal(PackagingFormat.IosIpa, artifact.Format);
+        Assert.Equal("HelloDotNetIos.ipa", Path.GetFileName(artifact.Path));
+    }
+
+    [Fact]
+    public async Task A_project_that_signs_ad_hoc_itself_archives_without_a_certificate_on_this_Mac()
+    {
+        // CI and HCG Mail's own check: CodesignKey=- in the project (its "project default" signing). The SDK archives and
+        // packages it without a certificate or profile; HCG must not demand an Apple Development certificate for it.
+        var report = _k.Report(TargetPlatform.MacOS, ToolchainIds.Xcode, ToolchainIds.IosSdk, ToolchainIds.DotNetSdk, ToolchainIds.DotNetIosWorkload); // no identities
+        var ws = Path.Combine(_paths.WorkspacesDirectory, Guid.NewGuid().ToString("N"));
+        MobileTestKit.CopyTree(MobileTestKit.Fixture("DotNetIos/HelloDotNetIos"), Path.Combine(ws, "source"));
+        File.WriteAllText(Path.Combine(ws, "source", "Directory.Build.props"), "<Project><PropertyGroup><CodesignKey>-</CodesignKey></PropertyGroup></Project>");
+        var p = new ProjectRecord { Id = Guid.NewGuid(), Name = "adhoc", SourceKind = ProjectSourceKind.Directory, SourceLocation = "/orig", WorkspacePath = ws, ImportedAt = DateTimeOffset.UtcNow };
+        p.Analysis = await MobileInspectionTests.Service().InspectAsync(p.SourceDirectory, report, CancellationToken.None);
+        await new SqliteProjectRepository(new SqliteDatabase(_paths)).UpsertAsync(p);
+        Assert.Equal("-", p.Analysis!.Mobile!.DotNetIos!.CodesignKey);
+
+        var withoutKey = await Project("DotNetIos/HelloDotNetIos", report);
+        var refused = HCG.ExecutableMaker.ProjectInspection.Mobile.MobileCapabilities.Evaluate(withoutKey.Analysis!.Mobile!, report).Single(o => o.Output == MobileOutput.IosArchive);
+        Assert.False(refused.IsAvailable); // a project without its own signing still needs a certificate here
+        Assert.Contains("Apple Development certificate", refused.Reason);
+
+        var worker = new ScriptedMobileWorker((spec, _, _) =>
+        {
+            WriteArchive(Arg(spec, "-p:ArchiveDir="), signedProfile: null);
+            var ipa = Arg(spec, "-p:IpaPackagePath=");
+            Directory.CreateDirectory(Path.GetDirectoryName(ipa)!);
+            MobileSamples.Ipa(ipa, "iphoneos", MobileSamples.MachO(0x0100000C), signed: true, profile: null);
+            return ScriptedMobileWorker.Exit(0);
+        });
+        var observer = new Observer();
+        var build = await Service(worker, report).RunAsync(Request(p, new MobileBuildOptions
+        {
+            Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosIpa, Signing = MobileSigningMode.ProjectDefault,
+        }), observer, CancellationToken.None);
+        Assert.True(build.Status == BuildStatus.Succeeded, build.FailureReason + "\n" + observer.Text);
+        Assert.Contains("signs ad hoc (CodesignKey=-)", observer.Text);
+        Assert.DoesNotContain(Assert.Single(worker.Calls).Arguments, a => a.StartsWith("-p:Codesign", StringComparison.Ordinal));
+        Assert.Equal(PackagingFormat.IosIpa, Assert.Single(build.Artifacts).Format);
+    }
+
+    [Theory]
+    [InlineData("into-folder", "uses ArchiveDir as the .xcarchive")]
+    [InlineData("no-archive", "did not create the archive")]
+    [InlineData("no-ipa", "did not create the IPA")]
+    public async Task A_dotnet_ios_build_fails_precisely_when_the_archive_or_ipa_is_not_where_HCG_asked(string scenario, string expected)
+    {
+        var report = DotNetIosMac();
+        var p = await Project("DotNetIos/HelloDotNetIos", report);
+        var worker = new ScriptedMobileWorker((spec, _, _) =>
+        {
+            var archive = Arg(spec, "-p:ArchiveDir=");
+            if (scenario == "into-folder") WriteArchive(Path.GetDirectoryName(archive)!, signedProfile: null); // the archive written into the parent itself
+            if (scenario == "no-ipa") WriteArchive(archive, signedProfile: null);
+            return ScriptedMobileWorker.Exit(0);
+        });
+        var build = await Service(worker, report).RunAsync(Request(p, new MobileBuildOptions
+        {
+            Framework = MobileFramework.DotNetIos, Output = scenario == "no-ipa" ? MobileOutput.IosIpa : MobileOutput.IosArchive, Signing = MobileSigningMode.ProjectDefault,
+        }), new Observer(), CancellationToken.None);
+        Assert.Equal(BuildStatus.Failed, build.Status);
+        Assert.Contains(expected, build.FailureReason);
+        Assert.Empty(build.Artifacts);
     }
 
     private static void WriteArchive(string archive, byte[]? signedProfile)
