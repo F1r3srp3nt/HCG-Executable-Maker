@@ -44,6 +44,8 @@ public sealed partial class MacSignExistingViewModel(
     [ObservableProperty] private string _appPath = "";
     [ObservableProperty] private string _appSummary = "Choose the built .app.";
     [ObservableProperty] private string _outputDirectory = "";
+    /// <summary>Optional SHA256SUMS-style list that must name the input ZIP with its SHA-256 (for a ZIP input).</summary>
+    [ObservableProperty] private string _inputChecksums = "";
 
     // ---------- 2. Signing ----------
     public IReadOnlyList<Choice<bool>> ModeOptions { get; } =
@@ -68,6 +70,7 @@ public sealed partial class MacSignExistingViewModel(
 
     // ---------- 4. Package, notarization, release ----------
     [ObservableProperty] private bool _makePkg = true;
+    [ObservableProperty] private bool _makeDmg;
     public ObservableCollection<IdentityChoice> InstallerIdentities { get; } = [];
     [ObservableProperty] private IdentityChoice? _selectedInstaller;
     [ObservableProperty] private bool _notarize;
@@ -86,6 +89,9 @@ public sealed partial class MacSignExistingViewModel(
     public ObservableCollection<ExistingAppStepItem> Steps { get; } = [];
     public ObservableCollection<string> Files { get; } = [];
     [ObservableProperty] private bool _hasFiles;
+    /// <summary>Only notarized, stapled, Gatekeeper-accepted Developer ID files; never a test build's.</summary>
+    public ObservableCollection<string> ReadyForStore { get; } = [];
+    [ObservableProperty] private string _storeNote = "";
     [ObservableProperty] private string _resultSummary = "";
     [ObservableProperty] private string _log = "";
     private string? _signedApp;
@@ -146,7 +152,9 @@ public sealed partial class MacSignExistingViewModel(
         _facts = Directory.Exists(value) && value.TrimEnd('/').EndsWith(".app", StringComparison.Ordinal) ? MacAppFacts.Read(value) : null;
         AppSummary = _facts switch
         {
-            null => value.Length == 0 ? "Choose the built .app." : $"{value} is not a macOS .app bundle.",
+            null when ExistingAppDistribution.IsZipInput(value) && File.Exists(value) =>
+                $"{Path.GetFileName(value)}: a ZIP of the app. It is checked (against the checksum list, if chosen) and extracted when signing starts; its app is checked before anything is signed. The ZIP is not modified.",
+            null => value.Length == 0 ? "Choose the built .app (or a ZIP that holds it)." : $"{value} is not a macOS .app bundle (or a .zip that holds one).",
             { Problem: { } p } => p,
             var f => $"{f.Label} · {f.BundleIdentifier} · version {f.ShortVersion} (build {f.BuildVersion}) · {string.Join("/", f.Architectures)} · minimum macOS {f.MinimumSystemVersion ?? "not set"} · " +
                      $"{f.MachOFiles.Count} Mach-O file(s){(MacBundleLayout.LooksLikeDotNet(value, f) ? " · .NET app" : "")}",
@@ -160,6 +168,8 @@ public sealed partial class MacSignExistingViewModel(
     partial void OnSelectedIdentityChanged(IdentityChoice? value) => UpdatePlan();
     partial void OnSelectedInstallerChanged(IdentityChoice? value) => UpdatePlan();
     partial void OnMakePkgChanged(bool value) => UpdatePlan();
+    partial void OnMakeDmgChanged(bool value) => UpdatePlan();
+    partial void OnInputChecksumsChanged(string value) => UpdatePlan();
     partial void OnNotarizeChanged(bool value) => UpdatePlan();
     partial void OnNotaryProfileChanged(string value) => UpdatePlan();
     partial void OnReleaseVersionChanged(string value) => UpdatePlan();
@@ -199,12 +209,14 @@ public sealed partial class MacSignExistingViewModel(
     private ExistingAppRequest? BuildRequest() => AppPath.Length == 0 || OutputDirectory.Length == 0 ? null : new ExistingAppRequest
     {
         InputApp = AppPath,
+        InputChecksums = InputChecksums.Trim().Length == 0 ? null : InputChecksums.Trim(),
         OutputDirectory = OutputDirectory,
         IdentitySha1 = IsTest ? null : SelectedIdentity?.Sha1,
         AdHocTest = IsTest,
         EntitlementsFile = EntitlementsFile.Length == 0 ? null : EntitlementsFile,
         EntitlementsConfirmed = EntitlementsConfirmed,
         MakePkg = MakePkg,
+        MakeDmg = MakeDmg,
         InstallerSha1 = IsTest ? null : SelectedInstaller?.Sha1,
         NotaryKeychainProfile = Notarize && !IsTest ? NotaryProfile.Trim() : null,
         ReleaseVersion = ReleaseVersion.Trim().Length == 0 ? null : ReleaseVersion.Trim(),
@@ -242,6 +254,8 @@ public sealed partial class MacSignExistingViewModel(
     }
 
     [RelayCommand] private async Task PickAppAsync() { if (await shell.PickApplicationAsync("Choose the built .app") is { } p) AppPath = p; }
+    [RelayCommand] private async Task PickZipAsync() { if (await shell.PickFileAsync("A ZIP that holds the built .app", "ZIP archives", "*.zip") is { } p) AppPath = p; }
+    [RelayCommand] private async Task PickChecksumsAsync() { if (await shell.PickFileAsync("Checksum list that names the ZIP (SHA256SUMS)", "Checksum lists", "*.txt", "SHA256SUMS*") is { } p) InputChecksums = p; }
     [RelayCommand] private async Task PickOutputAsync() { if (await shell.PickFolderAsync("Output folder for the signed app and its files") is { } p) OutputDirectory = p; }
     [RelayCommand] private async Task PickEntitlementsAsync() { if (await shell.PickFileAsync("Entitlements plist", "Property lists", "*.entitlements", "*.plist") is { } p) EntitlementsFile = p; }
     [RelayCommand] private void ClearEntitlements() => EntitlementsFile = "";
@@ -258,6 +272,9 @@ public sealed partial class MacSignExistingViewModel(
         Steps.Clear();
         Files.Clear();
         HasFiles = false;
+        ReadyForStore.Clear();
+        StoreNote = "";
+        ShipToStoreCommand.NotifyCanExecuteChanged();
         Log = "";
         ResultSummary = "Working… notarization usually takes a few minutes.";
         _cts = new CancellationTokenSource();
@@ -269,6 +286,8 @@ public sealed partial class MacSignExistingViewModel(
             foreach (var f in result.Files.Concat(result.Passports)) Files.Add(f);
             if (result.Report is { } r) Files.Add(r);
             HasFiles = result.Files.Count > 0;
+            if (!IsTest) foreach (var f in result.ReadyForStore) ReadyForStore.Add(f);
+            StoreNote = result.StoreNote ?? "";
             _signedApp = result.SignedApp;
             ResultSummary = result.Succeeded
                 ? (IsTest ? "Test build complete. These files are ad-hoc signed and not notarized: do not distribute them." : "Done. Review the steps, then hand the files to Ship to Store (a private draft; nothing is published).")
@@ -280,6 +299,7 @@ public sealed partial class MacSignExistingViewModel(
         {
             IsBusy = false;
             SignCommand.NotifyCanExecuteChanged();
+            ShipToStoreCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -287,12 +307,17 @@ public sealed partial class MacSignExistingViewModel(
 
     [RelayCommand] private async Task OpenOutputAsync() => await shell.OpenFolderAsync(OutputDirectory);
 
-    /// <summary>Hands the ZIP and the .pkg (their passports are next to them) to Ship to Store as a new private draft.</summary>
-    [RelayCommand]
+    /// <summary>
+    /// Hands the files that are ready (notarized, stapled, Gatekeeper-accepted; never a test build's) to Ship to Store as a
+    /// new private draft; their passports are next to them. Publication stays a separate, manual approval in HCG Store.
+    /// </summary>
+    private bool CanShipToStore() => !IsBusy && !IsTest && ReadyForStore.Count > 0;
+
+    [RelayCommand(CanExecute = nameof(CanShipToStore))]
     private void ShipToStore()
     {
-        var files = Files.Where(f => f.EndsWith(".zip", StringComparison.Ordinal) || f.EndsWith(".pkg", StringComparison.Ordinal)).ToList();
-        if (files.Count > 0) navigation.Navigate("ship", files);
+        if (!CanShipToStore()) return;
+        navigation.Navigate("ship", ReadyForStore.ToList());
     }
 
     // ---------- Signing Doctor (read-only) ----------

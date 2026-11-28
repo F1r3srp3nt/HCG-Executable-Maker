@@ -36,31 +36,36 @@ keys, approving or publishing in HCG Store, and making the macOS release current
 
 ## Order for the first HCG Mail macOS release
 
-1. **Get the qualified build:** download HCG Mail's CI `.app` (unsigned, `osx-arm64`, single file), or the artifact
-   of the release candidate.
+1. **Get the qualified build:** download HCG Mail's CI signing input (unsigned, `osx-arm64`, single file). Unzip the
+   artifact itself (`signing-input/…`), but keep `HCGMail-<version>-osx-arm64-unsigned-app.zip` as it is: Maker reads
+   the ZIP and compares it with `SHA256SUMS-signing-input.txt` before extracting it.
 2. **Sign an existing app** (side bar):
-   - **App:** `HCG Mail.app`, and an output folder outside it.
+   - **App:** **Choose ZIP…** → `HCGMail-<version>-osx-arm64-unsigned-app.zip`, and **Checksum list for a ZIP** →
+     `SHA256SUMS-signing-input.txt` (or **Choose .app…** for an app folder), and an output folder outside it.
    - **Signing:** Developer ID. Choose *Developer ID Application* directly, or fill it from a project's saved
      signing (Signing & Security › Project signing › macOS Developer ID).
    - **Entitlements:** HCG Mail's `packaging/macos/HCGMail.entitlements` (`com.apple.security.cs.allow-jit`). Tick
      *I reviewed these entitlements*.
-   - **Package:** `.pkg` with *Developer ID Installer*.
+   - **Package:** `.pkg` with *Developer ID Installer*; optionally a `.dmg` too.
    - **Notarize and staple now:** with the keychain profile from Settings › Apple credentials.
    - **Release version** `1.0.0-beta.2`, **build number**, and the HCG Mail checkout as **source**.
    - Press **Sign**. Each step is reported on its own; the first failure stops the run, and the input app is never changed.
-3. **Check:** *Signing Doctor on the signed app* should report Developer ID, notarized, ticket stapled, and Gatekeeper
-   accepted.
-4. **Ship to Store (private draft)…:** Distribution Studio opens with `HCG Mail.app.zip` and
-   `HCG Mail-1.0.0-beta.2-osx-arm64.pkg` and their passports. Choose HCG Mail → Add New Update (or Add to Listed
+3. **Check:** every step passed, including *ZIP: Stapled ticket* and *ZIP: Gatekeeper* (the ZIP extracted as a
+   customer receives it) and *Original input* (the ZIP unchanged after every stage). *Signing Doctor on the signed app*
+   should report Developer ID, notarized, ticket stapled, and Gatekeeper accepted.
+4. **Ship to Store (private draft)…** (enabled only for notarized, stapled, Gatekeeper-accepted files): Distribution
+   Studio opens with `HCG Mail.app.zip` and `HCG Mail-1.0.0-beta.2-osx-arm64.pkg` (and the `.dmg` if made) and their
+   passports. Choose HCG Mail → Add New Update (or Add to Listed
    Product) → macOS arm64, channel beta, eligibility private, then **Upload private draft**.
 5. **Publish:** review, approval and publication happen in HCG Store, by a person.
 
 The same run without the UI (for a build machine):
 
 ```bash
-HCGExecutableMaker --mac-sign-existing --app "HCG Mail.app" --out signed \
+HCGExecutableMaker --mac-sign-existing --app HCGMail-1.0.0-beta.2-osx-arm64-unsigned-app.zip \
+  --input-checksums SHA256SUMS-signing-input.txt --out signed \
   --identity "<Developer ID Application SHA-1>" --entitlements HCGMail.entitlements --confirm-entitlements \
-  --pkg --installer-identity "<Developer ID Installer SHA-1>" --notary-profile HCG-Notary \
+  --pkg --installer-identity "<Developer ID Installer SHA-1>" --dmg --notary-profile HCG-Notary \
   --version 1.0.0-beta.2 --build-number <N> --source-repo "<HCG Mail checkout>"
 ```
 

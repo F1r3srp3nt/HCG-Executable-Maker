@@ -77,7 +77,9 @@ public sealed class ExistingAppDistributionTests : IDisposable
         return tweak is null ? r : tweak(r);
     }
 
-    private ExistingAppDistribution Service(FakeMac? mac = null, bool isMac = true) => new(mac ?? new FakeMac(), _t.Combine("logs"), isMac);
+    private ExistingAppDistribution Service(FakeMac? mac = null, bool isMac = true) => new(mac ?? new FakeMac(), _t.Combine("logs"), isMac, tempDirectory: TempRoot);
+
+    private string TempRoot { get { var d = _t.Combine("tmp"); Directory.CreateDirectory(d); return d; } }
 
     private static string TreeHash(string dir)
     {
@@ -369,12 +371,204 @@ public sealed class ExistingAppDistributionTests : IDisposable
     }
 
     /// <summary>The Mac tools HCG runs, scripted with their real effects on disk (copies, archives, packages) and recorded.</summary>
+    // ───────────── Ported from the earlier Sign & Notarize branch: ZIP input, original re-hashed, DMG, ZIP as downloaded, Ship gate ─────────────
+
+    private static string Fail(ExistingAppResult r) => string.Join("\n", r.Steps.Where(s => s.Status == VerificationStatus.Failed).Select(s => $"{s.Name}: {s.Detail}"));
+
+    private string ZipOf(string app, string name = "HCG Mail.app.zip")
+    {
+        var zip = _t.Combine("download", name);
+        Directory.CreateDirectory(Path.GetDirectoryName(zip)!);
+        System.IO.Compression.ZipFile.CreateFromDirectory(app, zip, System.IO.Compression.CompressionLevel.Fastest, includeBaseDirectory: true);
+        return zip;
+    }
+
+    [Fact]
+    public async Task Only_notarized_stapled_Gatekeeper_accepted_files_are_ready_for_Ship_to_Store()
+    {
+        var notarized = await Service().RunAsync(Request(MailLikeApp(), r => r with { NotaryKeychainProfile = "HCG-Notary" }), Keychain, _ => { }, CancellationToken.None);
+        Assert.True(notarized.Succeeded, Fail(notarized));
+        Assert.Equal(["HCG Mail.app.zip", "HCG Mail-1.0.0-beta.2-osx-arm64.pkg"], notarized.ReadyForStore.Select(Path.GetFileName));
+        // The ZIP is checked as a customer receives it: extracted, ticket present, Gatekeeper accepts the extracted app.
+        Assert.Contains(notarized.Steps, s => s is { Name: "ZIP: Stapled ticket", Status: VerificationStatus.Passed });
+        Assert.Contains(notarized.Steps, s => s is { Name: "ZIP: Gatekeeper", Status: VerificationStatus.Passed });
+        Assert.Contains(notarized.Steps, s => s is { Name: "Original input", Status: VerificationStatus.Passed });
+        Assert.Equal("[\"HCG Mail.app.zip\",\"HCG Mail-1.0.0-beta.2-osx-arm64.pkg\"]",
+            JsonNode.Parse(File.ReadAllText(notarized.Report!))!["readyForStore"]!.ToJsonString());
+        Assert.Empty(Directory.EnumerateFileSystemEntries(TempRoot));                       // no extracted copy left behind
+    }
+
+    [Fact]
+    public async Task Signed_but_not_notarized_files_and_test_builds_are_never_ready_for_Ship_to_Store()
+    {
+        var signedOnly = await Service().RunAsync(Request(MailLikeApp()), Keychain, _ => { }, CancellationToken.None);
+        Assert.True(signedOnly.Succeeded, Fail(signedOnly));
+        Assert.Empty(signedOnly.ReadyForStore);
+        Assert.Contains("Not notarized", signedOnly.StoreNote);
+
+        var t = new TempDir();
+        try
+        {
+            var app = MailLikeApp();
+            var test = await new ExistingAppDistribution(new FakeMac(), t.Combine("logs"), true, tempDirectory: TempRoot)
+                .RunAsync(Request(app, r => r with { IdentitySha1 = null, InstallerSha1 = null, AdHocTest = true, MakeDmg = true, OutputDirectory = t.Combine("out") }), new MacSigningInventory(), _ => { }, CancellationToken.None);
+            Assert.True(test.Succeeded, Fail(test));
+            Assert.Empty(test.ReadyForStore);
+            Assert.Contains("Test build", test.StoreNote);
+            var dmg = Assert.Single(test.Files, f => f.EndsWith(".dmg", StringComparison.Ordinal));
+            Assert.Contains(ExistingAppDistribution.TestSuffix, Path.GetFileName(dmg));       // a test build's image says so in its name
+            Assert.Contains(test.Steps, s => s is { Name: "Disk image: Disk image signature", Status: VerificationStatus.PassedWithWarnings });
+        }
+        finally { t.Dispose(); }
+    }
+
+    [Fact]
+    public async Task An_unsigned_pkg_is_not_offered_even_when_the_app_is_notarized()
+    {
+        var result = await Service().RunAsync(Request(MailLikeApp(), r => r with { InstallerSha1 = null, NotaryKeychainProfile = "HCG-Notary" }), Keychain, _ => { }, CancellationToken.None);
+        Assert.True(result.Succeeded, Fail(result));
+        Assert.Equal(["HCG Mail.app.zip"], result.ReadyForStore.Select(Path.GetFileName));
+        Assert.Contains("HCG Mail-1.0.0-beta.2-osx-arm64.pkg", result.StoreNote);
+    }
+
+    [Fact]
+    public async Task A_ZIP_without_the_ticket_fails_the_download_check_and_is_not_offered()
+    {
+        var result = await Service(new FakeMac { ZipWithoutTicket = true }).RunAsync(Request(MailLikeApp(), r => r with { NotaryKeychainProfile = "HCG-Notary" }), Keychain, _ => { }, CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Steps, s => s is { Name: "ZIP: Stapled ticket", Status: VerificationStatus.Failed });
+        Assert.Empty(result.ReadyForStore);
+    }
+
+    [Fact]
+    public async Task A_Developer_ID_disk_image_is_made_from_the_stapled_app_signed_notarized_and_stapled()
+    {
+        var mac = new FakeMac();
+        var result = await Service(mac).RunAsync(Request(MailLikeApp(), r => r with { NotaryKeychainProfile = "HCG-Notary", MakeDmg = true }), Keychain, _ => { }, CancellationToken.None);
+        Assert.True(result.Succeeded, Fail(result));
+        var dmg = _t.Combine("out", "HCG Mail-1.0.0-beta.2-osx-arm64.dmg");
+        Assert.Contains(dmg, result.Files);
+        Assert.Contains(dmg, result.ReadyForStore);
+        int Index(Func<ProcessSpec, bool> f) => mac.Calls.FindIndex(c => f(c));
+        var copy = _t.Combine("out", "HCG Mail.app");
+        Assert.True(Index(c => c.Arguments is ["stapler", "staple", var p] && p == copy) < Index(c => c.Executable == "/usr/bin/hdiutil" && c.Arguments[0] == "create"));
+        var create = mac.Calls.Single(c => c.Executable == "/usr/bin/hdiutil" && c.Arguments[0] == "create");
+        Assert.Contains("UDZO", create.Arguments);
+        var sign = mac.Calls.Single(c => c.Executable.EndsWith("codesign") && c.Arguments.Contains("--sign") && c.Arguments[^1] == dmg);
+        Assert.Equal(AppSha, sign.Arguments[sign.Arguments.ToList().IndexOf("--sign") + 1]);
+        Assert.Contains("--timestamp", sign.Arguments);
+        Assert.Equal(3, mac.Calls.Count(c => c.Arguments is ["notarytool", "submit", ..]));   // app, package, disk image
+        Assert.Contains(mac.Calls, c => c.Arguments is ["stapler", "staple", var p] && p == dmg);
+        Assert.Contains(result.Steps, s => s is { Name: "Disk image: Gatekeeper", Status: VerificationStatus.Passed });
+        Assert.True(File.Exists(dmg + ".release-passport.json"));
+        Assert.Contains("  HCG Mail-1.0.0-beta.2-osx-arm64.dmg\n", File.ReadAllText(_t.Combine("out", "SHA256SUMS.txt")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(TempRoot));                       // the staging folder is removed
+    }
+
+    [Fact]
+    public void A_ZIP_input_is_planned_without_extracting_it_and_says_when_its_app_is_checked()
+    {
+        var zip = ZipOf(MailLikeApp());
+        var plan = Service().Plan(Request(zip), Keychain);
+        Assert.True(plan.CanRun, string.Join(" | ", plan.Problems));
+        Assert.Contains(plan.Warnings, w => w.Contains("extracted and its app checked when signing starts", StringComparison.Ordinal));
+        Assert.Equal(_t.Combine("out", "HCG Mail.app"), plan.OutputApp);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(TempRoot));
+        Assert.Contains(Service().Plan(Request(_t.Write("x.tar", "x")), Keychain).Problems, p => p.Contains("is not a macOS .app bundle (or a .zip that holds one)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_ZIP_input_is_checked_against_its_checksum_list_extracted_and_never_modified()
+    {
+        var zip = ZipOf(MailLikeApp());
+        var zipSha = await Checksums.Sha256FileAsync(zip);
+        var sums = _t.Write("download/SHA256SUMS-signing-input.txt", $"{zipSha}  HCG Mail.app.zip\n");
+        var mac = new FakeMac();
+        var result = await Service(mac).RunAsync(Request(zip, r => r with { InputChecksums = sums }), Keychain, _ => { }, CancellationToken.None);
+
+        Assert.True(result.Succeeded, Fail(result));
+        Assert.Contains(result.Steps, s => s is { Name: "Published checksum", Status: VerificationStatus.Passed });
+        Assert.Contains(result.Steps, s => s is { Name: "Input", Status: VerificationStatus.Passed } && s.Detail.Contains(zipSha, StringComparison.Ordinal));
+        Assert.Contains(result.Steps, s => s is { Name: "Original input", Status: VerificationStatus.Passed });
+        Assert.Equal(zipSha, await Checksums.Sha256FileAsync(zip));
+        Assert.Equal(_t.Combine("out", "HCG Mail.app"), result.SignedApp);
+        Assert.Equal(zip, (string?)JsonNode.Parse(File.ReadAllText(result.Report!))!["input"]);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(TempRoot));                       // the extracted input is removed
+    }
+
+    [Theory]
+    [InlineData("mismatch", "this is not the file that was published")]
+    [InlineData("unlisted", "does not list HCG Mail.app.zip")]
+    [InlineData("not-a-zip", "could not extract")]
+    [InlineData("two-apps", "holds 2 apps")]
+    public async Task A_bad_ZIP_input_stops_before_anything_is_signed_and_leaves_no_staging_folder(string scenario, string expected)
+    {
+        string zip;
+        string? sums = null;
+        switch (scenario)
+        {
+            case "not-a-zip":
+                zip = _t.Write("download/HCG Mail.app.zip", "not a zip");
+                break;
+            case "two-apps":
+                var app = MailLikeApp();
+                var root = _t.Combine("two");
+                FakeMacCopy(app, Path.Combine(root, "HCG Mail.app"));
+                FakeMacCopy(app, Path.Combine(root, "Other.app"));
+                zip = _t.Combine("download", "HCG Mail.app.zip");
+                Directory.CreateDirectory(Path.GetDirectoryName(zip)!);
+                System.IO.Compression.ZipFile.CreateFromDirectory(root, zip);
+                break;
+            default:
+                zip = ZipOf(MailLikeApp());
+                sums = _t.Write("download/SHA256SUMS.txt", scenario == "mismatch" ? $"{new string('0', 64)}  HCG Mail.app.zip\n" : $"{new string('0', 64)}  Other.zip\n");
+                break;
+        }
+        var mac = new FakeMac();
+        var result = await Service(mac).RunAsync(Request(zip, r => r with { InputChecksums = sums }), Keychain, _ => { }, CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Steps, s => s.Status == VerificationStatus.Failed && s.Detail.Contains(expected, StringComparison.Ordinal));
+        Assert.DoesNotContain(mac.Calls, c => c.Executable.EndsWith("codesign"));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(TempRoot));
+    }
+
+    private static void FakeMacCopy(string from, string to)
+    {
+        foreach (var f in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(to, Path.GetRelativePath(from, f));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(f, target);
+        }
+    }
+
+    [Fact]
+    public async Task A_change_to_the_original_app_during_the_run_stops_it()
+    {
+        var app = MailLikeApp();
+        var copy = _t.Combine("out", "HCG Mail.app");
+        var mac = new FakeMac
+        {
+            // Something else writes into the original while the copy's bundle is signed.
+            OnCall = spec => { if (spec.Executable.EndsWith("codesign") && spec.Arguments.Contains("--sign") && spec.Arguments[^1] == copy) File.WriteAllText(Path.Combine(app, "Contents", "Resources", "late.txt"), "x"); },
+        };
+        var result = await Service(mac).RunAsync(Request(app), Keychain, _ => { }, CancellationToken.None);
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Steps, s => s is { Name: "Original input", Status: VerificationStatus.Failed } && s.Detail.Contains("changed during signing", StringComparison.Ordinal));
+        Assert.Empty(result.Files);
+        Assert.Empty(result.ReadyForStore);
+    }
+
     private sealed class FakeMac : IProcessRunner
     {
         public List<ProcessSpec> Calls { get; } = [];
         public List<string> SignedEntitlements { get; } = [];
         public string NotaryStatus { get; init; } = "Accepted";
         public bool WrongTeam { get; init; }
+        /// <summary>The distribution ZIP is made without the ticket (as if the app had been zipped before stapling).</summary>
+        public bool ZipWithoutTicket { get; init; }
+        /// <summary>Called for every process before it is answered (for example to change the original input mid-run).</summary>
+        public Action<ProcessSpec>? OnCall { get; init; }
         public string? PkgVersion { get; private set; }
         private string? _pkgId, _pkgRoot;
         private bool _adHoc;
@@ -384,6 +578,7 @@ public sealed class ExistingAppDistributionTests : IDisposable
         public Task<ProcessResult> RunAsync(ProcessSpec spec, Action<OutputStream, string>? onOutput, CancellationToken cancellationToken)
         {
             Calls.Add(spec);
+            OnCall?.Invoke(spec);
             var (exit, stdout, stderr) = Answer(spec, [.. spec.Arguments]);
             foreach (var l in stdout.Split('\n')) onOutput?.Invoke(OutputStream.StdOut, l);
             foreach (var l in stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries)) onOutput?.Invoke(OutputStream.StdErr, l);
@@ -402,8 +597,22 @@ public sealed class ExistingAppDistributionTests : IDisposable
             switch (Path.GetFileName(spec.Executable))
             {
                 case "ditto" when a[0] == "-c":
-                    File.WriteAllText(a[^1], $"zip of {a[^2]}; stapled={_stapled.Contains(a[^2])}");
+                    File.WriteAllText(a[^1], $"zip of {a[^2]}\nstapled={!ZipWithoutTicket && _stapled.Contains(a[^2])}");
                     return (0, "", "");
+                case "ditto" when a[0] == "-x":
+                {
+                    var (src, dest) = (a[2], a[3]);
+                    var head = File.ReadAllBytes(src).Take(2).ToArray();
+                    if (head is [(byte)'P', (byte)'K']) { System.IO.Compression.ZipFile.ExtractToDirectory(src, dest); return (0, "", ""); }
+                    var text = File.ReadAllText(src);
+                    if (!text.StartsWith("zip of ", StringComparison.Ordinal)) return (1, "", "ditto: Couldn't read PKZip signature");
+                    var lines = text.Split('\n');
+                    var from = lines[0]["zip of ".Length..];
+                    var to = Path.Combine(dest, Path.GetFileName(from));
+                    Copy(from, to);
+                    if (lines.Contains("stapled=True")) _stapled.Add(to);
+                    return (0, "", "");
+                }
                 case "ditto":
                     Copy(a[0], a[1]);
                     return (0, "", "");
@@ -454,6 +663,11 @@ public sealed class ExistingAppDistributionTests : IDisposable
                 case "xcrun" when a is ["stapler", "staple", var path]:
                     _stapled.Add(path);
                     return (0, "The staple and validate action worked!", "");
+                case "xcrun" when a is ["stapler", "validate", var vpath]:
+                    return _stapled.Contains(vpath) ? (0, "The validate action worked!", "") : (65, "", $"{vpath} does not have a ticket stapled to it.");
+                case "hdiutil" when a[0] == "create":
+                    File.WriteAllText(a[^1], "disk image of " + a[Array.IndexOf(a, "-srcfolder") + 1]);
+                    return (0, "created: " + a[^1], "");
                 default:
                     return (0, "", "");
             }

@@ -2,6 +2,34 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Sign an existing app: ZIP input, original re-hashed, DMG, the ZIP as downloaded, gated Ship to Store
+
+One pipeline: PR #22's **Sign an existing app** (`--mac-sign-existing`, `ExistingAppDistribution`) stays the only page
+and command for an already-built macOS app. The earlier `feature/mac-existing-app-unified` branch (its separate *Sign &
+Notarize* page, `--mac-distribute` command and engine) is not merged; what PR #22 lacked was ported into it:
+
+### Added
+- **ZIP input with its checksum list** (`--app X.app.zip --input-checksums SHA256SUMS.txt`; page: *Choose ZIP…*). The
+  ZIP's SHA-256 must match the line that names it, or nothing is extracted; it is extracted with `ditto -x -k` into a
+  staging folder of the run only (exactly one `.app`), never modified, and the staging folder is removed when the run
+  ends, also when reading the input fails.
+- **The original input is hashed again** after signing, notarization and packaging (every file of the `.app`, or the
+  ZIP); any change stops the run. PR #22 checked this only in CI.
+- **DMG** (`--dmg`; page: *Also make a disk image*): the stapled app and an Applications link (`hdiutil create
+  -format UDZO`, `hdiutil verify`), signed with Developer ID Application and a secure timestamp, notarized, stapled and
+  assessed by Gatekeeper. A test build's image stays unsigned and is named as a test.
+- **The ZIP checked as a customer receives it:** when notarized, the final ZIP is extracted again; `stapler validate`
+  and Gatekeeper must accept the extracted app.
+
+### Changed
+- **Ship to Store (private draft)** is enabled only for files that are Developer ID signed, notarized, stapled and
+  accepted by Gatekeeper: never a test build, a run without notarization, or an unsigned .pkg. The page, its command
+  and `--mac-sign-existing` (*Ready for Ship to Store* lines) say which files are ready and why the others are not; the
+  signing report lists them. Review, approval and publication stay manual in HCG Store.
+
+Not ported: Build History / Artifact Vault records for signed copies. PR #22 keeps them in the output folder with the
+signing report, and a record would need a new build kind in History and the Vault (see docs/MACOS-DISTRIBUTION.md › Limits).
+
 ## [Unreleased] — .NET for iOS: genuine XCArchive and IPA (HCG Mail), device route, signing by route
 
 Builds on the exact-path archive and IPA of PR #23 (next section): its archive and IPA checks and its Xcode Archives

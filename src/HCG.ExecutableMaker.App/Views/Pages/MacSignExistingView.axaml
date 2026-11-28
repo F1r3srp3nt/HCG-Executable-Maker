@@ -24,11 +24,17 @@
           <TextBlock Classes="label" Text="1 · THE BUILT APP" />
           <TextBlock Classes="muted" TextWrapping="Wrap"
                      Text="For example HCG Mail's .app as CI built and qualified it, unsigned. It is copied first; the copy is signed. Executable Maker never changes the input app and never rebuilds it." />
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBox Text="{Binding AppPath}" PlaceholderText="/path/to/App.app" />
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBox Text="{Binding AppPath}" PlaceholderText="/path/to/App.app or App.app.zip" />
             <Button Grid.Column="1" Classes="small" Content="Choose .app…" Command="{Binding PickAppCommand}" Margin="8,0,0,0" />
+            <Button Grid.Column="2" Classes="small" Content="Choose ZIP…" Command="{Binding PickZipCommand}" Margin="8,0,0,0" />
           </Grid>
           <TextBlock Classes="muted" Text="{Binding AppSummary}" TextWrapping="Wrap" />
+          <TextBlock Classes="formlabel" Text="CHECKSUM LIST FOR A ZIP (OPTIONAL: SHA256SUMS THAT NAMES IT)" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox Text="{Binding InputChecksums}" PlaceholderText="/path/to/SHA256SUMS.txt" />
+            <Button Grid.Column="1" Classes="small" Content="Choose…" Command="{Binding PickChecksumsCommand}" Margin="8,0,0,0" />
+          </Grid>
           <TextBlock Classes="formlabel" Text="OUTPUT FOLDER (OUTSIDE THE APP)" />
           <Grid ColumnDefinitions="*,Auto">
             <TextBox Text="{Binding OutputDirectory}" />
@@ -88,6 +94,7 @@
         <StackPanel Spacing="10">
           <TextBlock Classes="label" Text="4 · PACKAGE, NOTARIZATION AND RELEASE" />
           <CheckBox IsChecked="{Binding MakePkg}" Content="Also make an installer package (.pkg: installs into /Applications, no scripts)" />
+          <CheckBox IsChecked="{Binding MakeDmg}" Content="Also make a disk image (.dmg with an Applications link, from the stapled app; signed and notarized like the app)" />
           <StackPanel Spacing="6" IsVisible="{Binding MakePkg}">
             <TextBlock Classes="formlabel" Text="INSTALLER SIGNATURE (DEVELOPER ID INSTALLER)" />
             <ComboBox ItemsSource="{Binding InstallerIdentities}" SelectedItem="{Binding SelectedInstaller}" HorizontalAlignment="Stretch" IsEnabled="{Binding !IsTest}" />
@@ -163,6 +170,7 @@
               <Button Classes="small" Content="Signing Doctor on the signed app" Command="{Binding DoctorSignedAppCommand}" />
               <Button Classes="small primary" Content="Ship to Store (private draft)…" Command="{Binding ShipToStoreCommand}" />
             </StackPanel>
+            <TextBlock Classes="muted" Text="{Binding StoreNote}" TextWrapping="Wrap" />
           </StackPanel>
           <Expander Header="Log" HorizontalAlignment="Stretch">
             <TextBox Classes="mono" Text="{Binding Log}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="360" />

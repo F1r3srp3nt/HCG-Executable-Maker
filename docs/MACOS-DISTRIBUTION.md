@@ -93,7 +93,14 @@ hardened runtime of every nested Mach-O. The signed `.pkg` and **Notarize** work
 
 ### Already-built apps (Sign an existing app)
 The **Sign an existing app** page (`--mac-sign-existing` without the UI) takes an `.app` that was built elsewhere,
-for example HCG Mail's CI output. It never rebuilds or changes it:
+for example HCG Mail's CI output, or a **ZIP that holds it** (the signing input a CI run published). It never
+rebuilds or changes it:
+
+0. **A ZIP input** (`--app X.app.zip`, page: **Choose ZIP…**) is compared with its published checksum list first
+   (`--input-checksums SHA256SUMS.txt`, page: *Checksum list for a ZIP*): a mismatch, or a list that does not name the
+   ZIP, stops before anything is extracted. The ZIP is then extracted with `ditto -x -k` into a staging folder of this
+   run only, which must hold exactly one `.app` at its top level; that app goes through every step below. The ZIP is
+   only read, and the staging folder is removed when the run ends, also when reading the input fails.
 
 1. **Checks before anything runs.** It refuses:
    - a host that is not a Mac;
@@ -115,11 +122,23 @@ for example HCG Mail's CI output. It never rebuilds or changes it:
    Mach-O's hardened runtime and team.
 5. **Notarize** (optional, keychain profile): the app goes through `NotaryClient` (submit, staple, validate,
    Gatekeeper). It is stapled before it is zipped.
-6. **ZIP** of the stapled app (`ditto -c -k --sequesterRsrc --keepParent`). Then the optional **.pkg**
-   (`MacPkgPackager.PackageAppAsync`, Developer ID Installer). The .pkg version is the release version. A signed
-   .pkg is notarized and stapled too.
-7. `SHA256SUMS.txt`, one **Release Passport** per file (with the release version), and a signing report.
-8. **Ship to Store (private draft)…** hands the files to Distribution Studio.
+6. **ZIP** of the stapled app (`ditto -c -k --sequesterRsrc --keepParent`). When notarized, the ZIP is then checked
+   **as a customer receives it**: extracted again, `stapler validate` on the extracted app, and Gatekeeper
+   (`spctl --assess --type execute`) must accept it. Then the optional **.pkg** (`MacPkgPackager.PackageAppAsync`,
+   Developer ID Installer); its version is the release version, and a signed .pkg is notarized and stapled too. Then
+   the optional **.dmg** (`--dmg`): the stapled app and an `Applications` link, `hdiutil create -format UDZO`,
+   `hdiutil verify`, signed with the Developer ID Application identity and a secure timestamp, notarized, stapled and
+   assessed by Gatekeeper (`--type open`). A test build's disk image stays unsigned and is named as a test. Every file
+   is made from the stapled app, never from an earlier copy.
+7. **The original input is hashed again** after signing, after notarization and after packaging (every file of the
+   `.app`, or the ZIP's SHA-256). Any change stops the run: Executable Maker works on a copy, so a change means
+   something else modified the input.
+8. `SHA256SUMS.txt`, one **Release Passport** per file (with the release version), and a signing report that also
+   lists the files ready for Ship to Store.
+9. **Ship to Store (private draft)…** is enabled only for files that are Developer ID signed, notarized, stapled and
+   accepted by Gatekeeper (the ZIP as extracted, the signed .pkg and the .dmg). A test build, a run without
+   notarization and an unsigned .pkg are never offered; the page and the command line say why. The draft is private;
+   review, approval and publication stay manual in HCG Store.
 
 The page also has the **Signing Doctor** (read-only report of any `.app`), and **Release Passport** for an archive
 signed elsewhere (`--release-passport … --version`).
@@ -249,6 +268,7 @@ The Command Line Tools stay sufficient for ad-hoc Swift builds. The build log re
 | Xcode selected for HCG only; build used it; `xcode-select` unchanged | — | ✅ | — |
 | Sign an existing app: gating, inside-out order, step sequence (scripted tools) | ✅ | ✅ | — |
 | Sign an existing .NET app with an ad-hoc TEST identity: real `codesign` (hardened runtime, exact entitlements, every nested Mach-O), unsigned .pkg, passports, input unchanged, the signed app launches | — | ✅ (`macos-sign-existing`; first passed in run 46112104774, PR #22) | — |
+| Sign an existing app: ZIP input with its checksum list (match, mismatch, unlisted, not a ZIP, two apps; staging removed), original re-hashed after every stage, DMG, the ZIP checked as downloaded, the Ship to Store gate (scripted tools) | ✅ | ✅ (`macos-sign-existing` also runs a ZIP input, a checksum refusal and a test DMG with `hdiutil`) | — |
 | Developer ID signing, signed DMG/.pkg, notarization, stapling | — | — | ✅ (certificates + notary profile) |
 | Mac App Store package, App Store Connect validation | — | — | ✅ (distribution certificates, profile, API key) |
 
@@ -256,8 +276,8 @@ The Command Line Tools stay sufficient for ad-hoc Swift builds. The build log re
 
 - .NET apps: Developer ID needs a single-file publish (managed assemblies must not sit in `Contents/MacOS`). The Mac
   App Store stays *incompatible in this version*: the sandbox needs a review that HCG does not perform.
-- Sign an existing app: only boolean `true` entitlements (no application identifier, no provisioning profile). It does
-  not make a DMG. Signed copies are listed on the page and in their output folder, not in Build History or the
+- Sign an existing app: only boolean `true` entitlements (no application identifier, no provisioning profile). Signed
+  copies are listed on the page and in their output folder (with the signing report), not in Build History or the
   Artifact Vault, which hold Maker's own builds.
 - Command-line tools are not packaged as `.pkg` or signed for distribution.
 - Packages with SwiftPM resource bundles cannot be Developer ID or App Store signed (see above).

@@ -580,6 +580,10 @@ jobs:
           PLIST
           ls -la "$APP/Contents/MacOS"
           (cd "$OUT/ci" && find . -type f -exec shasum -a 256 {} \; | sort) > "$OUT/input-before.txt"
+          # The same app as a published ZIP with its checksum list (the signing input a CI run hands over).
+          mkdir -p "$OUT/input"; ditto -c -k --keepParent "$APP" "$OUT/input/Hello Avalonia.app.zip"
+          (cd "$OUT/input" && shasum -a 256 "Hello Avalonia.app.zip") > "$OUT/input/SHA256SUMS.txt"
+          printf '%064d  Hello Avalonia.app.zip\n' 0 > "$OUT/input/SHA256SUMS-wrong.txt"
 
       - name: Refusals — nothing is copied or signed (no entitlement review, version mismatch, test build with notarization, data in Contents/MacOS, output inside the app)
         shell: bash
@@ -600,16 +604,25 @@ jobs:
           refuse output-inside "must be outside the app" --app "$APP" --out "$APP/Contents/out" --test --entitlements "$E" --confirm-entitlements
           MULTI="$OUT/multi/Hello Avalonia.app"; mkdir -p "$OUT/multi"; ditto "$APP" "$MULTI"; echo "MZ" > "$MULTI/Contents/MacOS/HelloAvalonia.dll"
           refuse data-in-macos "Contents/MacOS holds files that are not code" --app "$MULTI" --out "$OUT/refused" --test --entitlements "$E" --confirm-entitlements
+          refuse zip-checksum "this is not the file that was published" --app "$OUT/input/Hello Avalonia.app.zip" --input-checksums "$OUT/input/SHA256SUMS-wrong.txt" --out "$OUT/refused" --test --entitlements "$E" --confirm-entitlements
           if [ -e "$OUT/refused" ] && [ -n "$(find "$OUT/refused" -type f)" ]; then echo "::error::a refused run wrote files"; exit 1; fi
 
-      - name: Sign — ad-hoc TEST identity, hardened runtime, entitlements from the plist, .pkg, release version 1.2.0-beta.1, passports (no notarization)
+      - name: Sign — ad-hoc TEST identity, hardened runtime, entitlements from the plist, .pkg, .dmg, release version 1.2.0-beta.1, passports (no notarization); then the same app from its published ZIP
         shell: bash
         run: |
           set -euo pipefail
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --mac-sign-existing --app "$OUT/ci/Hello Avalonia.app" --out "$OUT/signed" \
-            --test --entitlements "$OUT/app.entitlements" --confirm-entitlements --pkg --version 1.2.0-beta.1 --build-number 7 \
-            --source-repo "$GITHUB_WORKSPACE" --provider github-actions | tee "$OUT/sign.log"
-          grep -q "All steps passed." "$OUT/sign.log"
+            --test --entitlements "$OUT/app.entitlements" --confirm-entitlements --pkg --dmg --version 1.2.0-beta.1 --build-number 7 \
+            --source-repo "$GITHUB_WORKSPACE" --provider github-actions > "$OUT/sign.log" 2>&1 || { cat "$OUT/sign.log"; exit 1; }
+          cat "$OUT/sign.log"
+          grep "All steps passed." "$OUT/sign.log" >/dev/null
+          # A ZIP input: its SHA-256 is checked against the list, it is extracted into a staging folder and never modified.
+          shasum -a 256 "$OUT/input/Hello Avalonia.app.zip" > "$OUT/zip-before.txt"
+          dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --mac-sign-existing --app "$OUT/input/Hello Avalonia.app.zip" \
+            --input-checksums "$OUT/input/SHA256SUMS.txt" --out "$OUT/signed-zip" --test --entitlements "$OUT/app.entitlements" --confirm-entitlements \
+            > "$OUT/sign-zip.log" 2>&1 || { cat "$OUT/sign-zip.log"; exit 1; }
+          cat "$OUT/sign-zip.log"
+          grep "All steps passed." "$OUT/sign-zip.log" >/dev/null
 
       - name: Verify with Apple's own tools — input unchanged, every Mach-O hardened, entitlements exact, package without scripts, passports describe the files
         shell: bash
@@ -618,7 +631,7 @@ jobs:
           check() { if eval "$2"; then echo "✓ $1"; else echo "::error::Sign an existing app check failed: $1"; exit 1; fi; }
           pj() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2"; }
           S="$OUT/signed"; A="$S/Hello Avalonia.app"; T="-1.2.0-beta.1-osx-arm64-adhoc-TEST-not-for-distribution"
-          ZIP="$S/Hello Avalonia$T.app.zip"; PKG="$S/Hello Avalonia$T.pkg"
+          ZIP="$S/Hello Avalonia$T.app.zip"; PKG="$S/Hello Avalonia$T.pkg"; DMG="$S/Hello Avalonia$T.dmg"
           ls -la "$S"
           (cd "$OUT/ci" && find . -type f -exec shasum -a 256 {} \; | sort) > "$OUT/input-after.txt"
           check "the input .app is unchanged (every file's SHA-256)" 'diff -q "$OUT/input-before.txt" "$OUT/input-after.txt"'
@@ -637,11 +650,20 @@ jobs:
           check "every nested Mach-O ($n) is signed with the hardened runtime" '[ $n -gt 0 ]'
           check "distribution ZIP named as a TEST build" 'test -f "$ZIP"'
           check "the ZIP holds the signed app" 'rm -rf "$OUT/unzip" && ditto -x -k "$ZIP" "$OUT/unzip" && codesign --verify --deep --strict "$OUT/unzip/Hello Avalonia.app"'
-          check "installer package is unsigned (test build)" '{ pkgutil --check-signature "$PKG" 2>&1 || true; } | grep -q "no signature"'
+          check "installer package is unsigned (test build)" '{ pkgutil --check-signature "$PKG" 2>&1 || true; } | grep "no signature" >/dev/null'
           rm -rf "$OUT/pkgx"; pkgutil --expand "$PKG" "$OUT/pkgx"
           check "installer runs no scripts" '[ -z "$(find "$OUT/pkgx" -name Scripts -o -name preinstall -o -name postinstall)" ]'
           check "package version is the release version" 'grep -q "version=\"1.2.0-beta.1\"" "$OUT"/pkgx/*.pkg/PackageInfo'
-          for f in "$ZIP" "$PKG"; do
+          check "disk image named as a TEST build, made by hdiutil and verified" 'test -f "$DMG" && hdiutil verify "$DMG"'
+          dmgcheck() { rm -rf "$OUT/dmgx"; mkdir -p "$OUT/dmgx"; hdiutil attach -nobrowse -readonly -mountpoint "$OUT/dmgx" "$DMG" >/dev/null || return 1; local rc=0; codesign --verify --deep --strict "$OUT/dmgx/Hello Avalonia.app" && [ "$(readlink "$OUT/dmgx/Applications")" = /Applications ] || rc=1; hdiutil detach "$OUT/dmgx" >/dev/null || true; return $rc; }
+          check "the disk image holds the signed app and an Applications link" dmgcheck
+          check "the original input is re-hashed after every stage (product check)" 'grep "Original input — .* unchanged after every stage" "$OUT/sign.log" >/dev/null'
+          check "a test build is never offered to Ship to Store" '! grep "Ready for Ship to Store" "$OUT/sign.log" >/dev/null && grep "never offered to Ship to Store" "$OUT/sign.log" >/dev/null'
+          check "ZIP input: checksum list matched" 'grep "Published checksum — Hello Avalonia.app.zip matches SHA256SUMS.txt" "$OUT/sign-zip.log" >/dev/null'
+          check "ZIP input: the ZIP is unchanged" 'shasum -a 256 -c "$OUT/zip-before.txt"'
+          check "ZIP input: the extracted app was signed (codesign --verify)" 'codesign --verify --deep --strict "$OUT/signed-zip/Hello Avalonia.app"'
+          check "ZIP input: the signing report names the ZIP as the input" '[ "$(pj "$OUT/signed-zip/Hello Avalonia-adhoc-TEST-not-for-distribution.signing-report.json" "d[\"input\"]")" = "$OUT/input/Hello Avalonia.app.zip" ]'
+          for f in "$ZIP" "$PKG" "$DMG"; do
             P="$f.release-passport.json"
             check "$(basename "$P"): version 1.2.0-beta.1" '[ "$(pj "$P" "d[\"version\"]")" = 1.2.0-beta.1 ]'
             check "$(basename "$P"): build 7" '[ "$(pj "$P" "d[\"build_number\"]")" = 7 ]'
@@ -649,7 +671,7 @@ jobs:
             check "$(basename "$P"): source commit $GITHUB_SHA" '[ "$(pj "$P" "d[\"source\"][\"commit\"]")" = "$GITHUB_SHA" ]'
             check "$(basename "$P"): code signing ad-hoc" '[ "$(pj "$P" "d[\"code_signing\"][\"status\"]")" = ad-hoc ]'
           done
-          check "SHA256SUMS lists both files" '[ "$(wc -l < "$S/SHA256SUMS-adhoc-TEST-not-for-distribution.txt" | tr -d " ")" = 2 ]'
+          check "SHA256SUMS lists the ZIP, the .pkg and the .dmg" '[ "$(wc -l < "$S/SHA256SUMS-adhoc-TEST-not-for-distribution.txt" | tr -d " ")" = 3 ]'
           check "signing report records the test mode" '[ "$(pj "$S/Hello Avalonia-adhoc-TEST-not-for-distribution.signing-report.json" "d[\"mode\"]")" = adhoc-test ]'
           # The Signing Doctor reads the signed copy (read-only).
           dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --mac-signing-doctor "$A" | tee "$OUT/doctor.txt"
@@ -681,6 +703,7 @@ jobs:
           path: |
             ${{ env.OUT }}/signed/*.zip
             ${{ env.OUT }}/signed/*.pkg
+            ${{ env.OUT }}/signed/*.dmg
             ${{ env.OUT }}/signed/*.json
             ${{ env.OUT }}/signed/*.txt
             ${{ env.OUT }}/*.log
