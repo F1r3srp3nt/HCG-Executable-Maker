@@ -231,10 +231,12 @@ public class HcgAuthTests
     [Fact]
     public void A_busy_port_moves_to_the_next_registered_redirect_and_all_busy_is_reported()
     {
-        var p1 = FreePort();
-        var p2 = FreePort();
-        var blocker = new System.Net.Sockets.TcpListener(IPAddress.Loopback, p1);
+        // The blocker takes its port from the OS in one step (port 0): probing a free port and binding it again later
+        // raced with tests running in parallel ("Address already in use", CI run 46105513857).
+        var blocker = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
         blocker.Start();
+        var p1 = ((IPEndPoint)blocker.LocalEndpoint).Port;
+        var p2 = FreePort();
         try
         {
             using var l = LoopbackCallbackListener.StartFirstAvailable([new Uri($"http://127.0.0.1:{p1}/cb"), new Uri($"http://127.0.0.1:{p2}/cb")]);
