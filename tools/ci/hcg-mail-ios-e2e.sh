@@ -135,6 +135,18 @@ IPA="$(find "$OUT/ipa/artifacts" -maxdepth 4 -name '*.ipa' -type f | head -1)"
 check "ipa: a real IPA (Payload/<App>.app)" "unzip -l '$IPA' | grep -Eq 'Payload/[^/]+\\.app/Info.plist'"
 rm -rf "$OUT/ipa-x" && mkdir -p "$OUT/ipa-x" && (cd "$OUT/ipa-x" && unzip -q "$IPA")
 app_checks ipa "$(ls -d "$OUT"/ipa-x/Payload/*.app | head -1)"
+check "the archive and IPA carry the project's own product name (AssemblyName HCGMail.iOS)" "[ \"\$(basename '$ARCHIVE')\" = HCGMail.iOS.xcarchive ] && [ \"\$(basename '$IPA')\" = HCGMail.iOS.ipa ]"
+for x in "$DEVICE_APP" "$(ls -d "$ARCHIVE"/Products/Applications/*.app | head -1)" "$(ls -d "$OUT"/ipa-x/Payload/*.app | head -1)"; do
+  exe="$x/$(plutil -extract CFBundleExecutable raw "$x/Info.plist")"
+  check "$(basename "$(dirname "$(dirname "$x")")")/$(basename "$x"): the executable is arm64 (device), not the Simulator's" "lipo -archs '$exe' | grep -qx arm64"
+done
+# The IPA route makes both files from one publish: the app inside the IPA is the archive's app, byte for byte.
+IPA_ARCHIVE="$(find "$OUT/ipa/artifacts" -maxdepth 4 -name '*.xcarchive' -type d | head -1)"
+IPA_ARCHIVE_APP="$(ls -d "$IPA_ARCHIVE"/Products/Applications/*.app | head -1)"
+IPA_APP="$(ls -d "$OUT"/ipa-x/Payload/*.app | head -1)"
+EXE_NAME="$(plutil -extract CFBundleExecutable raw "$IPA_APP/Info.plist")"
+check "ipa route: the archive's app binary and the IPA's app binary are identical" "cmp -s '$IPA_ARCHIVE_APP/$EXE_NAME' '$IPA_APP/$EXE_NAME'"
+check "ipa route: the same embedded profile in the archive and the IPA" "cmp -s '$IPA_ARCHIVE_APP/embedded.mobileprovision' '$IPA_APP/embedded.mobileprovision'"
 check "the IPA was made by the .NET iOS SDK, not by xcodebuild -exportArchive" "! grep -q -- '-exportArchive' '$OUT/ipa/mail-ipa-build.log' && grep -q -- '-p:BuildIpa=true' '$OUT/ipa/mail-ipa-build.log'"
 check "the archive was written where ArchiveDir named it" "grep -Eq -- '-p:ArchiveDir=[^ ]+\\.xcarchive' '$OUT/archive/mail-archive-build.log'"
 check "the effective MSBuild properties were read before compiling" "grep -q 'ArchiveOnBuild = true' '$OUT/archive/mail-archive-build.log'"

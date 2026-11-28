@@ -32,7 +32,7 @@ Each route has its own folder under the build's work directory, so only files ma
 | iOS Simulator | `dotnet build -r iossimulator-arm64 -o work/simulator` | Debug (or Release) | none | `.app` for the Simulator; **Launch in Simulator** |
 | Signed device app | `dotnet build -r ios-arm64 -o work/device` + CodesignKey/CodesignProvision | Debug (or Release) | Apple Development + development profile (a compatible wildcard is fine) | signed `.app`; **Install on device** |
 | XCArchive | `dotnet publish -r ios-arm64 -p:ArchiveOnBuild=true -p:ArchiveDir=work/archive/<App>.xcarchive -p:BuildIpa=false` | Release (or Debug) | signed (the SDK refuses unsigned) | `.xcarchive`; **Open in Xcode Organizer** |
-| IPA | the same plus `-p:BuildIpa=true -p:IpaPackagePath=work/ipa/<App>.ipa` | Release (Debug only for a development IPA) | the certificate and profile decide the IPA type (below) | the SDK's `.ipa` and the archive; **Open in HCG Impactor**, **Install on device** (development) |
+| IPA | the same plus `-p:BuildIpa=true -p:IpaPackagePath=work/ipa/<AssemblyName>.ipa` | Release (Debug only for a development IPA) | the certificate and profile decide the IPA type (below) | the SDK's `.ipa` and the archive; **Open in HCG Impactor**, **Install on device** (development) |
 
 Device routes also set `OutputPath=work/device/`. If packaging fails after compiling and signing, the failure names the
 signed `.app`, which is kept. Maker never renames a Simulator app or invents an archive.
@@ -43,6 +43,18 @@ signed `.app`, which is kept. Maker never renames a Simulator app or invents an 
 | Ad hoc (Release testing) | Apple Distribution | Ad hoc for this bundle ID; lists the devices |
 | App Store | Apple Distribution | App Store for **exactly** this bundle ID (never a wildcard). HCG never uploads. |
 | Enterprise | Enterprise distribution | In-house |
+
+The file names are the project's AssemblyName, the name the SDK gives the app: for HCG Mail `HCGMail.iOS.xcarchive`
+and `HCGMail.iOS.ipa` (containing `HCGMail.iOS.app`), as HCG Mail's own `scripts/export-ipa.sh` names them since its
+PR #28. Each build has its own empty folder, because the SDK copies into ArchiveDir without emptying it.
+
+**Signing is passed in, never written into the project.** With "Named certificate and provisioning profile" Maker
+passes `-p:CodesignKey=<identity> -p:CodesignProvision=<profile>`; nothing in the source is changed. With "Project
+default" the project decides; HCG Mail (since PR #28) reads an untracked `signing.local.props` that names a keychain
+identity and an installed profile (template: `signing.local.example.props`). Command-line values take precedence.
+
+An ad-hoc signed app (Simulator builds) is never treated as installable on a physical iPhone: Maker labels it
+"not installable on devices", and HCG Impactor refuses to install it ("Not signed for devices").
 
 ## Before compiling
 
@@ -80,6 +92,29 @@ signed `.app`, which is kept. Maker never renames a Simulator app or invents an 
 
 Nothing is uploaded to TestFlight or HCG Store.
 
+## Your iPhone: signed IPA → HCG Impactor → install
+
+1. **Prepare once (your Mac):** your `Apple Development: … (TEAMID)` certificate with its private key in the login
+   keychain; a development provisioning profile for `com.hakmicapitalgroup.hcgmail` (or a wildcard of your team) that
+   lists your iPhone's UDID, installed via Xcode or Signing & Security › Apple Signing › Import. On the iPhone: trust
+   the Mac and turn on Developer Mode.
+2. **Import HCG Mail** (the repository folder, or its `HCG Mail Project/iOS` subfolder; Build Doctor resolves the
+   project references) and open it in **Mobile Build Studio**.
+3. Output **iOS IPA**, configuration **Release** (Debug is allowed for a development IPA), export method
+   **Debugging** (development).
+4. Signing **Named certificate and provisioning profile**: choose your Apple Development certificate and the
+   profile. Readiness and the Signing Vault check, before compiling: the certificate is in the profile; the profile is a
+   development profile that covers the bundle ID; it lists devices and is not expired; every entitlement in
+   `Entitlements.plist` (keychain groups resolved for your team) is granted. A failed check names the cause and the fix.
+5. **Start.** The log shows the effective MSBuild properties, then `dotnet publish … -p:ArchiveDir=…/HCGMail.iOS.xcarchive
+   -p:BuildIpa=true -p:IpaPackagePath=…/HCGMail.iOS.ipa`. The result card lists the IPA (with its Release Passport) and
+   the archive; Apple's `codesign --verify` result is among the checks.
+6. **Open in HCG Impactor** on the IPA card. Impactor inspects it (signer, team, embedded profile, devices,
+   entitlements) and checks it against the connected iPhone (UDID in the profile, iOS version, Developer Mode). Install
+   it from there (`devicectl`), or use **Install on device** on the result card.
+
+Maker never uploads to TestFlight or HCG Store.
+
 ## Verified
 
 - **Unit tests:**
@@ -98,7 +133,7 @@ Nothing is uploaded to TestFlight or HCG Store.
 
   Device installation and launch stay `not-recorded`: the builder never claims them. A development IPA is platform `ios`; only an App Store profile makes it `ios-app-store`.
 - **Maker's own verifier** runs Apple's `codesign --verify --deep --strict` on device apps, archives and (new) the app inside an IPA, on a Mac. The service tests replace codesign with a recording runner because their scripted bundles carry synthetic signatures; the production verifier is unchanged and its real verdict on HCG Mail is asserted in CI.
-- **CI** (`hcg-mail-ios-signed`, `xcode-27`, `tools/ci/hcg-mail-ios-e2e.sh`), on the real HCG Mail at `6ddd667` through Mobile Build Studio's own UI:
+- **CI** (`hcg-mail-ios-signed`, `xcode-27`, `tools/ci/hcg-mail-ios-e2e.sh`), on the real HCG Mail at `b3ecfad` (main after its PR #28) through Mobile Build Studio's own UI:
   - a Simulator launch;
   - a signed Debug device app, an XCArchive and the SDK's IPA, signed with a **synthetic** Apple Development identity and wildcard profile;
   - codesign, plutil, `security cms` and unzip check the bundle ID, platform, signature, resolved entitlements and the embedded profile;

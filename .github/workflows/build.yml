@@ -2014,14 +2014,14 @@ jobs:
           retention-days: 7
 
   hcg-mail-ios-signed:
-    name: HCG Mail iOS (main 6ddd667, Xcode 27.2, workload 27.2.10000) — Simulator launch, signed device app, XCArchive and the SDK's own IPA through Mobile Build Studio (synthetic identity)
+    name: HCG Mail iOS (main b3ecfad, PR #28, Xcode 27.2, workload 27.2.10000) — Simulator launch, signed device app, XCArchive and the SDK's own IPA through Mobile Build Studio (synthetic identity)
     needs: test
     runs-on: xcode-27
     timeout-minutes: 180
     env:
       OUT: ${{ github.workspace }}/mail-ios-out
-      # HCG Mail main (merge of PR #27, 1.0.0-beta.2): toolchain.props pins Xcode 27.2 and iOS workload 27.2.10000.
-      MAIL_COMMIT: 6ddd667d9dc189e24f5d31a313a9ae96299d2dfa
+      # HCG Mail main (merge of PR #28): toolchain.props (unchanged since PR #27) pins Xcode 27.2 and iOS workload 27.2.10000.
+      MAIL_COMMIT: b3ecfad5a4bd5a6b7aefe7b8230b3c4b592d5685  # HCG Mail main after PR #28 (fixed ArchiveDir/IpaPackagePath, external signing)
       XCODE_VERSION: "27.2"
     steps:
       - uses: actions/checkout@v7

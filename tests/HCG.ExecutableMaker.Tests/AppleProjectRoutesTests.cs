@@ -204,6 +204,7 @@ public class AppleProjectRoutesTests : IDisposable
         var archiveDir = args.Single(a => a.StartsWith("-p:ArchiveDir=", StringComparison.Ordinal))["-p:ArchiveDir=".Length..];
         Assert.EndsWith(".xcarchive", archiveDir);
         Assert.Equal(DotNetIosPlanner.ArchivePath(Input(m, archiveOptions)), archiveDir);
+        Assert.Equal("HCGMail.iOS.xcarchive", Path.GetFileName(archiveDir));   // the AssemblyName, as the SDK names HCGMail.iOS.app (HCG Mail PR #28)
         Assert.Equal(PackagingFormat.IosArchive, Assert.Single(archive.Outputs).Format);
         Assert.Contains(args, a => a.StartsWith("-p:OutputPath=", StringComparison.Ordinal) && a.Contains(DotNetIosPlanner.DeviceDirectory(Input(m, archiveOptions)), StringComparison.Ordinal));
         Assert.DoesNotContain("-p:EnableCodeSigning=false", args);

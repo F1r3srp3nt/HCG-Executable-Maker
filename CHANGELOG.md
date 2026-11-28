@@ -27,6 +27,9 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - **Signing Vault validation for .NET for iOS**: the app's ApplicationId and CodesignEntitlements file are validated
   against the chosen identity and profile, by route.
 - **When packaging fails after signing**, the signed `.app` is kept and named in the failure.
+- The archive and IPA are named after the project's AssemblyName (`HCGMail.iOS.xcarchive`, `HCGMail.iOS.ipa`), the name
+  the SDK gives the app, as HCG Mail's own script does since its PR #28. CI now builds HCG Mail at `b3ecfad` and also
+  checks the names, arm64 executables, and that the IPA's app binary and profile equal the archive's.
 - **Release Passport for iOS IPAs from Mobile Build Studio** (`<file>.ipa.release-passport.json`, build half): the IPA's
   SHA-256, bundle ID, version, source commit, toolchain and `code_signing` read from the app inside (Mach-O signatures,
   signed entitlements, embedded profile, Apple's `codesign --verify` verdict). Device installation and launch are never
@@ -35,7 +38,7 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
   production verifier. A failing codesign fails the IPA.
 - **Artifact actions in Mobile Build Studio**: Launch in Simulator, Open in Xcode Organizer, Open in HCG Impactor, and
   Inspect signature and entitlements. Install on device now also covers the .NET device app and development IPA.
-- CI job `hcg-mail-ios-signed` (`xcode-27`) builds the real HCG Mail (`6ddd667`, Xcode 27.2, workload 27.2.10000)
+- CI job `hcg-mail-ios-signed` (`xcode-27`) builds the real HCG Mail (`b3ecfad`, Xcode 27.2, workload 27.2.10000)
   through Mobile Build Studio's UI:
   - a Simulator launch;
   - a signed device app, an XCArchive and the SDK's IPA, signed with a synthetic identity and wildcard development profile;

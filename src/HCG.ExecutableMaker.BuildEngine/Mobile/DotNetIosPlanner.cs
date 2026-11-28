@@ -30,9 +30,12 @@ public static partial class DotNetIosPlanner
     public static string ArchiveRoot(MobilePlanInput input) => Path.Combine(input.WorkDirectory, "archive");
     public static string IpaDirectory(MobilePlanInput input) => Path.Combine(input.WorkDirectory, "ipa");
 
-    /// <summary>The file-system name of the app's packages: its title (or assembly name), without characters a shell or URL trips over.</summary>
+    /// <summary>
+    /// The product name the .NET iOS SDK gives the app (its AssemblyName, e.g. HCGMail.iOS for HCGMail.iOS.app), so the
+    /// archive and IPA are &lt;AssemblyName&gt;.xcarchive and &lt;AssemblyName&gt;.ipa, as HCG Mail's own export-ipa.sh names them.
+    /// </summary>
     public static string PackageName(DotNetIosProjectInfo p) =>
-        UnsafeName().Replace((p.ApplicationTitle ?? p.AssemblyName ?? Path.GetFileNameWithoutExtension(p.ProjectPath)).Trim(), "-").Trim('-') is { Length: > 0 } n ? n : "App";
+        UnsafeName().Replace((p.AssemblyName ?? Path.GetFileNameWithoutExtension(p.ProjectPath)).Trim(), "-").Trim('-') is { Length: > 0 } n ? n : "App";
 
     /// <summary>The exact .xcarchive this build creates (ArchiveDir).</summary>
     public static string ArchivePath(MobilePlanInput input) => Path.Combine(ArchiveRoot(input), PackageName(input.Analysis.DotNetIos!) + ".xcarchive");
