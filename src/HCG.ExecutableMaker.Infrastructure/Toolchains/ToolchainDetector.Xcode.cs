@@ -58,8 +58,17 @@ public sealed partial class ToolchainDetector
                 {
                     var (fl, _, _) = await runner.CaptureAsync(new ProcessSpec { Executable = xcodebuild, Arguments = ["-checkFirstLaunchStatus"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
                     firstLaunch = fl.ExitCode;
-                    var (sr, so, _) = await runner.CaptureAsync(new ProcessSpec { Executable = xcodebuild, Arguments = ["-showsdks", "-json"], Timeout = ProbeTimeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
-                    if (sr.Succeeded) sdks.AddRange(ParseXcodeSdks(so).Select(s => $"{s.Platform} {s.Version}").Distinct());
+                    // On a busy Mac (a build in progress, the Simulator booting) -showsdks can fail or outlast the probe
+                    // timeout once; "no SDKs" would then wrongly send the person to install the iOS platform. It is asked
+                    // again with a longer timeout before anything is concluded (seen on the HCG Mail CI runner).
+                    foreach (var timeout in new[] { ProbeTimeout, TimeSpan.FromSeconds(90) })
+                    {
+                        var (sr, so, _) = await runner.CaptureAsync(new ProcessSpec { Executable = xcodebuild, Arguments = ["-showsdks", "-json"], Timeout = timeout, Environment = ProbeEnvironment() }, ct).ConfigureAwait(false);
+                        var listed = sr.Succeeded ? ParseXcodeSdks(so).Select(s => $"{s.Platform} {s.Version}").Distinct().ToList() : [];
+                        if (listed.Count == 0) { _logger.LogWarning("xcodebuild -showsdks listed no SDKs (exit {Exit}{TimedOut}); asking again", sr.ExitCode, sr.TimedOut ? ", timed out" : ""); continue; }
+                        sdks.AddRange(listed);
+                        break;
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
