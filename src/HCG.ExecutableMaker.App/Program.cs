@@ -54,6 +54,9 @@ internal static class Program
         // `HCGExecutableMaker --mac-signing-doctor <App.app>`: read-only signing report of a macOS app.
         if (args.Contains("--mac-signing-doctor"))
             return XcodeMacCommand.SigningDoctor(args);
+        // `HCGExecutableMaker --mac-sign-existing --app X.app --out DIR …`: sign, package, notarize and passport an already-built app.
+        if (args.Contains("--mac-sign-existing"))
+            return MacSignExistingCommand.Run(args);
         // `HCGExecutableMaker --impactor <command> …`: HCG Impactor (inspect, sign, devices, install, diagnose) without the UI.
         if (args.Contains("--impactor"))
             return ImpactorCommand.Run(args);

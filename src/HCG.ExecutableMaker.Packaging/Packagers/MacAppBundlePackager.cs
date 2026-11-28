@@ -1,4 +1,6 @@
+using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
+using HCG.ExecutableMaker.Packaging.MacDistribution;
 using HCG.ExecutableMaker.Packaging.Verification;
 
 namespace HCG.ExecutableMaker.Packaging.Packagers;
@@ -6,14 +8,53 @@ namespace HCG.ExecutableMaker.Packaging.Packagers;
 /// <summary>
 /// Builds a standard macOS application bundle:
 /// <c>Name.app/Contents/{Info.plist, PkgInfo, MacOS/&lt;publish output&gt;, Resources/&lt;icon&gt;.icns}</c>.
-/// The bundle is unsigned beyond the ad-hoc signature the .NET SDK applies to the app host.
+/// By default the bundle is unsigned beyond the ad-hoc signature the .NET SDK applies to the app host. With Developer ID
+/// (Configure › Distribution, on a Mac, single-file publish) every Mach-O is signed inside out with the hardened runtime
+/// and a secure timestamp, then the bundle with the confirmed entitlements, and the result is verified.
 /// </summary>
-public sealed class MacAppBundlePackager : IPackager
+public sealed class MacAppBundlePackager(IProcessRunner? runner = null) : IPackager
 {
     public PackagingFormat Format => PackagingFormat.MacAppBundle;
     public bool Handles(BuildSettings settings) => settings.Swift is null && settings.Electron is null && settings.Native is null; // Swift/Electron apps have their own packagers
 
-    public Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken) => Task.Run(() =>
+    public async Task<IReadOnlyList<PackagedOutput>> PackageAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken)
+    {
+        var outputs = await AssembleAsync(request, log, cancellationToken).ConfigureAwait(false);
+        var distribution = request.Settings.MacDistribution;
+        if (distribution.SigningMode != MacSigningMode.DeveloperId) return outputs;
+        if (request.Host.Platform != TargetPlatform.MacOS || runner is null)
+            throw new InvalidOperationException("Developer ID signing runs on a Mac (codesign). Build on a Mac, or choose ad-hoc signing and sign the app afterwards on Sign an existing app.");
+        if (distribution.DeveloperIdApplicationSha1 is not { Length: > 0 } sha1)
+            throw new InvalidOperationException("Developer ID signing needs the Developer ID Application certificate; choose it in Configure › Distribution.");
+        var bundle = outputs[0].Path;
+        var facts = MacAppFacts.Read(bundle);
+        if (MacBundleLayout.DataInMacOS(bundle, facts) is { Count: > 0 } data)
+            throw new InvalidOperationException($"Contents/MacOS holds files that are not code ({string.Join(", ", data.Take(5))}{(data.Count > 5 ? ", …" : "")}). " + MacBundleLayout.DataInMacOSAdvice);
+        var codesign = request.Toolchains.Find(ToolchainIds.Codesign)?.ExecutablePath ?? "/usr/bin/codesign";
+        var signer = new MacCodeSigner(runner, codesign);
+        var nested = MacBundleLayout.SigningOrder(bundle, facts);
+        log.Info($"Signing for direct distribution with Developer ID ({sha1}), hardened runtime, secure timestamp: {nested.Count} nested item(s) inside out, then the bundle with " +
+                 (distribution.DeveloperIdEntitlements.Count == 0 ? "no entitlements" : string.Join(", ", distribution.DeveloperIdEntitlements)));
+        foreach (var path in nested) await signer.SignHardenedAsync(path, sha1, null, log, cancellationToken).ConfigureAwait(false);
+        await signer.SignDeveloperIdAsync(bundle, sha1, distribution.DeveloperIdEntitlements, log, cancellationToken).ConfigureAwait(false);
+
+        var checks = outputs[0].Checks.Where(c => c.Name is not ("Code signature" or "Launch test")).ToList();
+        checks.AddRange(await signer.VerifyDeveloperIdAsync(bundle, new SigningIdentity(sha1, "", AppleCertificateKind.DeveloperIdApplication, null),
+            distribution.DeveloperIdEntitlements, cancellationToken).ConfigureAwait(false));
+        var unhardened = new List<string>();
+        foreach (var path in nested)
+            if (await signer.DescribeAsync(path, cancellationToken).ConfigureAwait(false) is not { HardenedRuntime: true })
+                unhardened.Add(Path.GetRelativePath(bundle, path));
+        checks.Add(unhardened.Count == 0
+            ? new VerificationCheck("Nested code", VerificationStatus.Passed, nested.Count == 0 ? "No nested code." : $"All {nested.Count} nested item(s) signed with the hardened runtime.")
+            : new VerificationCheck("Nested code", VerificationStatus.Failed, "Without the hardened runtime: " + string.Join(", ", unhardened)));
+        checks.Add(await signer.GatekeeperAsync(bundle, "execute", cancellationToken).ConfigureAwait(false));
+        checks.Add(new VerificationCheck("Notarization", VerificationStatus.NotVerifiable, "Not notarized yet. Notarization is a separate, explicit step (Build results › Notarize)."));
+        checks.Add(Checks.LaunchNotPerformed());
+        return [new PackagedOutput(Format, ArtifactKind.Directory, bundle, checks), .. outputs.Skip(1)];
+    }
+
+    private Task<IReadOnlyList<PackagedOutput>> AssembleAsync(PackagingRequest request, IPackagingLog log, CancellationToken cancellationToken) => Task.Run(() =>
     {
         if (request.Settings.Platform != TargetPlatform.MacOS)
             throw new InvalidOperationException("A macOS application bundle can only be produced for a macOS target.");

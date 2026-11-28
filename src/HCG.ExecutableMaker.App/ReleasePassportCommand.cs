@@ -1,5 +1,4 @@
-using System.Security.Cryptography;
-using HCG.ExecutableMaker.BuildEngine.MacXcode;
+using HCG.ExecutableMaker.BuildEngine.MacDistribution;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Infrastructure.Processes;
 using HCG.ExecutableMaker.Packaging.Distribution;
@@ -9,11 +8,12 @@ namespace HCG.ExecutableMaker.App;
 
 /// <summary>
 /// <c>HCGExecutableMaker --release-passport --app &lt;X.app&gt; --file &lt;X.app.zip&gt; [--source-repo &lt;dir&gt;]
-/// [--provider executable-maker-local|github-actions] [--toolchain "…"] [--out &lt;file&gt;]</c>: the Release Passport build
+/// [--provider executable-maker-local|github-actions] [--toolchain "…"] [--build-number N] [--version 1.0.0-beta.2] [--out &lt;file&gt;]</c>: the Release Passport build
 /// half for a macOS app archive (.zip of the .app, .pkg or .dmg) that already exists, e.g. a .NET app's distribution
 /// files or Maker's own packaged app (<c>--self</c>: Maker's embedded build provenance, no git needed). Facts are measured: the archive's
 /// SHA-256 and size, the bundle's identity, version and architectures, the code signing as the Signing Doctor reads it
-/// (macOS only), and the source commit as Git states it. Nothing is claimed that was not measured.
+/// (macOS only), and the source commit as Git states it. Nothing is claimed that was not measured. <c>--version</c> records
+/// a pre-release version (CFBundleShortVersionString is numeric only); its numeric part must equal the bundle's.
 /// </summary>
 internal static class ReleasePassportCommand
 {
@@ -55,34 +55,13 @@ internal static class ReleasePassportCommand
             }
         }
         else source = checkout;
-        string sha;
-        using (var s = File.OpenRead(file)) sha = Convert.ToHexStringLower(SHA256.HashData(s));
-        var size = new FileInfo(file).Length;
-        // What the archive is, from its own name: a ZIP of the .app, an installer package or a disk image.
-        var kind = Path.GetExtension(file).ToLowerInvariant() switch { ".pkg" => "installer package", ".dmg" => "disk image", ".zip" => "zip of the .app", _ => "" };
-        if (kind.Length == 0) { Console.Error.WriteLine($"{Path.GetFileName(file)}: a Release Passport here describes a .zip, .pkg or .dmg of the app."); return 2; }
-        var checks = new List<(string, string, string)>
-        {
-            ("archive", "Passed", $"{Path.GetFileName(file)}: {size:N0} bytes, SHA-256 {sha}"),
-            ("bundle identity", facts.BundleIdentifier is null ? "Failed" : "Passed", $"{facts.BundleIdentifier} {facts.ShortVersion} ({facts.BuildVersion})"),
-            ("architectures", facts.Architectures.Count > 0 ? "Passed" : "Failed", string.Join(", ", facts.Architectures)),
-            ("code signature", signing.SignatureValid ? "Passed" : "PassedWithWarnings", $"{signing.Status}; Gatekeeper {signing.Gatekeeper}; {signing.Notarization}"),
-        };
-        var passport = ReleasePassport.ForArtifact(new ReleasePassport.ArtifactFacts(
-            Platform: "macos", Architecture: MacXcodePassport.ArchitectureName(facts.Architectures), Package: facts.BundleIdentifier ?? facts.Label,
-            Version: facts.ShortVersion ?? "0", BuildNumber: Arg("--build-number") ?? facts.BuildVersion, ProductName: facts.Label,
-            FileName: Path.GetFileName(file), Sha256: sha, Size: size, ArtifactKind: kind,
-            Source: source, Provider: Arg("--provider") ?? "executable-maker-local",
-            Toolchain: Arg("--toolchain") ?? "HCG Executable Maker " + HostInfo.ProductVersion, BuiltAt: DateTimeOffset.UtcNow,
-            StaticInspectionState: checks.Any(c => c.Item2 == "Failed") ? "failed" : checks.Any(c => c.Item2 == "PassedWithWarnings") ? "passed-with-warnings" : "passed",
-            StaticInspectionNote: $"{checks.Count} checks of the {kind} by Executable Maker (archive, identity, architectures, signature as built)",
-            Checks: checks, Tests: null, CodeSigning: MacXcodePassport.CodeSigning(signing, Path.GetFileName(app)),
-            IssuedBy: "HCG Executable Maker " + HostInfo.ProductVersion));
-        if (ReleasePassport.ValidateBuildHalf(passport) is { Count: > 0 } problems) { Console.Error.WriteLine("Not written: " + string.Join("; ", problems)); return 6; }
-        var output = Arg("--out") ?? file + ".release-passport.json";
-        File.WriteAllText(output, passport.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        var result = MacReleasePassportWriter.CreateAsync(new MacReleasePassportWriter.Input(
+            app, file, facts, signing, source, Arg("--provider") ?? "executable-maker-local", Arg("--toolchain") ?? "HCG Executable Maker " + HostInfo.ProductVersion,
+            Arg("--build-number"), Arg("--version"), "HCG Executable Maker " + HostInfo.ProductVersion), CancellationToken.None).GetAwaiter().GetResult();
+        if (result.Passport is null) { Console.Error.WriteLine("Not written: " + string.Join("; ", result.Problems)); return MacReleasePassportWriter.KindOf(file).Length == 0 ? 2 : 6; }
+        var output = MacReleasePassportWriter.WriteAsync(result.Passport, file, Arg("--out"), CancellationToken.None).GetAwaiter().GetResult();
         Console.WriteLine($"Release Passport: {output}");
-        Console.WriteLine($"  {Path.GetFileName(file)} · SHA-256 {sha} · {size:N0} bytes · {facts.BundleIdentifier} {facts.ShortVersion} · {string.Join("/", facts.Architectures)}");
+        Console.WriteLine($"  {Path.GetFileName(file)} · SHA-256 {result.Sha256} · {result.Size:N0} bytes · {facts.BundleIdentifier} {result.Version} · {string.Join("/", facts.Architectures)}");
         Console.WriteLine($"  code signing: {signing.Status} ({MacSigningDoctor.Describe(signing.SignatureKind)}); Gatekeeper {signing.Gatekeeper}; {signing.Notarization}");
         Console.WriteLine($"  source: {source.Commit ?? "unknown"}{(source.Dirty == true ? " (uncommitted changes)" : "")}");
         return 0;

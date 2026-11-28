@@ -30,20 +30,28 @@ public static class MacDistributionCatalog
             return (PackagingAvailability.Available, "Signed with " + ctx.Signing!.Find(sha)!.Name + ". Notarize it afterwards (explicit step) before distributing.");
         }
         var hasInstaller = ctx.Signing?.OfKind(AppleCertificateKind.DeveloperIdInstaller).Any() == true;
-        return (PackagingAvailability.Available, dotNet
-            ? "Unsigned: for local testing only (.NET apps are ad-hoc signed in this version, so a Developer ID Installer signature is not offered)."
-            : hasInstaller
+        if (dotNet && !ctx.SingleFile)
+            return (PackagingAvailability.Available, "Unsigned: for local testing only. A signed .NET package needs the app signed with Developer ID, which needs a single-file publish (Configure › Single file).");
+        return (PackagingAvailability.Available, hasInstaller
                 ? "Unsigned: for local testing only. Choose your Developer ID Installer certificate in Configure › Distribution to sign it for distribution."
                 : "Unsigned: for local testing only. Signed distribution needs a Developer ID Installer certificate (none found). " + CertificatesHelp);
     }
 
+    /// <summary>A .NET GUI app (Avalonia, or any WinExe) built by HCG's .NET path for macOS.</summary>
+    public static bool IsDotNetGui(PackagingContext ctx) =>
+        ctx.SwiftKind is null && ctx.IsGuiApplication && !ctx.IsElectron && !ctx.IsNative && !ctx.IsNativeMacBundle && !ctx.IsTheos && !ctx.IsMacXcode;
+
     /// <summary>Whether Developer ID signing of the app can be chosen (shown next to the signing-mode choice).</summary>
     public static (PackagingAvailability, string?) DeveloperId(PackagingContext ctx)
     {
-        if (ctx.SwiftKind != SwiftAppKind.GuiApp)
+        var dotNet = IsDotNetGui(ctx);
+        if (ctx.SwiftKind != SwiftAppKind.GuiApp && !dotNet)
             return (PackagingAvailability.NotApplicable, ctx.SwiftKind is null
-                ? ".NET apps stay ad-hoc signed in this version: the hardened runtime needs .NET-specific exceptions HCG does not configure."
+                ? "Developer ID signing in a build is offered for Swift and .NET GUI apps. Other apps can be signed afterwards on Sign an existing app."
                 : "Command-line tools are not signed for distribution in this version.");
+        if (dotNet && !ctx.SingleFile)
+            return (PackagingAvailability.SetupRequired, "A .NET app is signed for distribution as a single-file publish: the managed assemblies of a multi-file publish would sit in Contents/MacOS as data, " +
+                                                         "signed only in extended attributes that ZIPs and installers drop (macOS then reports the app as damaged). Turn on Single file in Configure.");
         if (ctx.Host.Platform != TargetPlatform.MacOS) return (PackagingAvailability.RequiresDifferentHost, "Signing requires codesign on a Mac.");
         if (ctx.HasRootResourceBundles)
             return (PackagingAvailability.NotApplicable, "Incompatible with this project: its SwiftPM resource bundles must sit at the .app root (where Bundle.module looks), outside the signed Contents folder, and Gatekeeper rejects such an app after download. Load resources from Bundle.main or build with Xcode.");

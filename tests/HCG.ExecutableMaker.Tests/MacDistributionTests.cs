@@ -413,7 +413,12 @@ public sealed class MacDistributionTests : IDisposable
         Assert.Equal(PackagingAvailability.Available, MacDistributionCatalog.DeveloperId(Ctx(Mac, Inventory())).Item1);
         Assert.Equal(PackagingAvailability.SetupRequired, MacDistributionCatalog.DeveloperId(Ctx(Mac, Inventory(devId: false))).Item1);
         Assert.Equal(PackagingAvailability.NotApplicable, MacDistributionCatalog.DeveloperId(Ctx(Mac, Inventory(), rootBundles: true)).Item1);
-        Assert.Equal(PackagingAvailability.NotApplicable, MacDistributionCatalog.DeveloperId(new PackagingContext(TargetPlatform.MacOS, Mac, null, true)).Item1);
+        // .NET GUI apps: Developer ID needs a single-file publish (no managed assemblies as data in Contents/MacOS).
+        var multiFile = MacDistributionCatalog.DeveloperId(new PackagingContext(TargetPlatform.MacOS, Mac, null, true) { Signing = Inventory() });
+        Assert.Equal(PackagingAvailability.SetupRequired, multiFile.Item1);
+        Assert.Contains("single-file", multiFile.Item2);
+        Assert.Equal(PackagingAvailability.Available, MacDistributionCatalog.DeveloperId(new PackagingContext(TargetPlatform.MacOS, Mac, null, true) { Signing = Inventory(), SingleFile = true }).Item1);
+        Assert.Equal(PackagingAvailability.NotApplicable, MacDistributionCatalog.DeveloperId(new PackagingContext(TargetPlatform.MacOS, Mac, null, false) { SingleFile = true }).Item1);
     }
 
     [Fact]

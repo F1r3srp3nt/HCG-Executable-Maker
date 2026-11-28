@@ -14,7 +14,7 @@ public static class CommandLine
     public static readonly IReadOnlyList<string> Commands =
     [
         "--toolchain-report", "--ship-to-store", "--release-passport", "--ship-to-repo", "--rootless-deb", "--rootless-deb-validate", "--xcode-mac",
-        "--package-windows", "--windows-signing-doctor", "--authenticode-sign", "--mac-signing-doctor", "--impactor", "--build-host", "--hcg-session",
+        "--package-windows", "--windows-signing-doctor", "--authenticode-sign", "--mac-signing-doctor", "--mac-sign-existing", "--impactor", "--build-host", "--hcg-session",
         "--build-readiness",
     ];
 

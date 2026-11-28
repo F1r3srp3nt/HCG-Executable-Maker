@@ -42,17 +42,26 @@ public sealed class MacCodeSigner(IProcessRunner runner, string codesign = "/usr
         if (!r.Succeeded) throw new InvalidOperationException($"codesign could not sign {Path.GetFileName(path)} (exit code {r.ExitCode}). See the log above for codesign's reason.");
     }
 
-    private async Task SignAsync(string path, string identitySha1, string entitlementsPlist, bool runtime, IPackagingLog log, CancellationToken ct)
+    /// <summary>
+    /// Hardened-runtime signature of one file or bundle with an entitlements plist taken as written (null = none). A
+    /// Developer ID identity (by SHA-1) signs with a secure timestamp; the ad-hoc identity <c>-</c> signs without one (test
+    /// builds only: the notary service and Gatekeeper reject them on other Macs).
+    /// </summary>
+    public Task SignHardenedAsync(string path, string identity, string? entitlementsPlist, IPackagingLog log, CancellationToken ct) =>
+        SignAsync(path, identity, entitlementsPlist, runtime: true, log, ct, timestamp: identity != "-");
+
+    private async Task SignAsync(string path, string identitySha1, string? entitlementsPlist, bool runtime, IPackagingLog log, CancellationToken ct, bool timestamp = true)
     {
         var dir = Path.Combine(Path.GetTempPath(), "hcg-entitlements-" + Guid.NewGuid().ToString("N")[..10]);
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, "entitlements.plist");
-        await File.WriteAllTextAsync(file, entitlementsPlist, ct).ConfigureAwait(false);
+        if (entitlementsPlist is not null) await File.WriteAllTextAsync(file, entitlementsPlist, ct).ConfigureAwait(false);
         try
         {
-            List<string> args = ["--force", "--timestamp"];
+            List<string> args = ["--force", timestamp ? "--timestamp" : "--timestamp=none"];
             if (runtime) args.AddRange(["--options", "runtime"]);
-            args.AddRange(["--entitlements", file, "--sign", identitySha1, path]);
+            if (entitlementsPlist is not null) args.AddRange(["--entitlements", file]);
+            args.AddRange(["--sign", identitySha1, path]);
             log.Info("codesign " + string.Join(' ', args.Select(a => a == file ? "<entitlements.plist>" : a)));
             var r = await runner.RunAsync(new ProcessSpec { Executable = codesign, Arguments = args, Timeout = SignTimeout }, (_, l) => log.Info(l), ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();

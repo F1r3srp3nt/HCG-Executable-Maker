@@ -68,4 +68,6 @@ public sealed record PackagingContext(TargetPlatform Target, HostEnvironment Hos
     public bool IsTheos { get; init; }
     /// <summary>A native macOS app built from an Xcode project with xcodebuild (the project's own .app).</summary>
     public bool IsMacXcode { get; init; }
+    /// <summary>A .NET app published as a single file (only then can its bundle be signed for distribution).</summary>
+    public bool SingleFile { get; init; }
 }
