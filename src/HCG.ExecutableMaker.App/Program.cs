@@ -45,6 +45,9 @@ internal static class Program
         // `HCGExecutableMaker --package-windows …`: package an app (built here, or an already-built folder) with its own identity.
         if (args.Contains("--package-windows"))
             return WindowsPackagingCommand.Run(args);
+        // `HCGExecutableMaker --windows-contract <folder> [--confirm <sha256>]`: follow the project's windows/WindowsPackaging.json.
+        if (args.Contains("--windows-contract"))
+            return WindowsContractCommand.Run(args);
         // `HCGExecutableMaker --windows-signing-doctor <file|zip|folder>`: read-only Authenticode report.
         if (args.Contains("--windows-signing-doctor"))
             return WindowsPackagingCommand.SigningDoctor(args);

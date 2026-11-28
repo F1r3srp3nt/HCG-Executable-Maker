@@ -1,0 +1,53 @@
+{
+  "schema": "hcg-windows-packaging/1",
+  "description": "How the Windows x64 package of HCG Server is built: the graphical app (.NET 10 + Avalonia) plus the Go host agent, as a portable ZIP and an installer. scripts/package-windows.sh is the reference implementation; see docs/WINDOWS.md#building-the-package.",
+  "product": "HCG Server",
+  "identifier": "com.hcg.server.windows",
+  "platform": "windows",
+  "architecture": "x64",
+  "runtimeIdentifier": "win-x64",
+  "requires": [
+    "dotnet >= 10.0",
+    "go >= 1.25",
+    "makensis >= 3.0",
+    "python3 >= 3.9"
+  ],
+  "optionalRequires": {
+    "makensis >= 3.0": "the installer only; the portable ZIP builds without it (--no-installer)"
+  },
+  "steps": [
+    {
+      "description": "Build the host agent for windows/amd64 (Go 1.25+, from go.mod)",
+      "requires": ["go >= 1.25"],
+      "command": ["go", "build", "-trimpath", "-o", "${STAGE}/hcg-agent.exe", "./cmd/hcg-agent"],
+      "environment": { "GOOS": "windows", "GOARCH": "amd64", "CGO_ENABLED": "0" }
+    },
+    {
+      "description": "Publish the graphical app as one self-contained win-x64 executable",
+      "requires": ["dotnet >= 10.0"],
+      "command": ["dotnet", "publish", "windows/HCGServerWindows/HCGServerWindows.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "-p:PublishSingleFile=true", "-o", "${STAGE}"]
+    },
+    {
+      "description": "Portable ZIP, NSIS installer, SHA-256 checksums and Release Passport build halves",
+      "requires": ["makensis >= 3.0", "python3 >= 3.9"],
+      "command": ["scripts/package-windows.sh"]
+    }
+  ],
+  "outputs": [
+    { "name": "HCG-Server-${VERSION}-windows-x64-portable.zip", "kind": "portable-zip" },
+    { "name": "HCG-Server-${VERSION}-windows-x64-setup.exe", "kind": "installer" },
+    { "name": "SHA256SUMS", "kind": "checksums" },
+    { "name": "*.release-passport.json", "kind": "release-passport-build-half" }
+  ],
+  "installed": {
+    "location": "%ProgramFiles%\\HCG Server",
+    "files": ["HCG Server.exe", "hcg-agent.exe", "README-WINDOWS.txt"],
+    "optionalService": {
+      "name": "HCGServer",
+      "account": "NT SERVICE\\HCGServer",
+      "default": "not installed"
+    },
+    "data": ["%LOCALAPPDATA%\\HCG Server\\agent", "%ProgramData%\\HCG Server\\agent (service only)"]
+  },
+  "codeSigning": "not configured: the executables and the installer are unsigned"
+}
