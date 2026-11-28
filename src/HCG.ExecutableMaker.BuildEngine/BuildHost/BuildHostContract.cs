@@ -294,6 +294,20 @@ public sealed record BuildHostStatus
     public IReadOnlyList<BuildProviderInfo> Providers { get; init; } = [];
     [JsonPropertyName("queued")] public int Queued { get; init; }
     public string? Running { get; init; }
+
+    /// <summary>
+    /// Why HCG Server refuses Build Host jobs on that computer, or null when its isolation is enforced. HCG Server never
+    /// runs a build step unconfined (internal/buildhost/run.go); Executable Maker does not send a job it would refuse and
+    /// never works around the refusal.
+    /// </summary>
+    public string? Refusal => Enforced ? null : Isolation switch
+    {
+        "none" => "HCG Server refuses Build Host jobs on that computer: it has no isolation backend, and HCG Server never runs build steps unconfined. " +
+                  "This is the state of HCG Server for Windows until its isolation (AppContainer + Job Objects) is implemented; on a Mac (Seatbelt) or Linux (Landlock) it is enforced. " +
+                  "Executable Maker does not send jobs there. Build locally, or use HCG Server on a Mac or Linux computer.",
+        "" => "HCG Server did not state an isolation backend, so its Build Host refuses jobs; Executable Maker does not send them.",
+        var backend => $"HCG Server's isolation ({backend}) is not available on that computer, so its Build Host refuses jobs (it never runs build steps unconfined); Executable Maker does not send them.",
+    };
 }
 
 /// <summary>The Build Host's error envelope (<c>{"error": "…", "code": "…"}</c>).</summary>

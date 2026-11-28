@@ -122,7 +122,8 @@ public static class BuildProviderPlanning
             var status = await client.GetStatusAsync(ct).ConfigureAwait(false);
             var projects = await client.GetProjectsAsync(ct).ConfigureAwait(false);
             return new(BuildHostConnectionState.Connected,
-                $"Connected to {client.BaseUrl} ({BuildHostContract.Contract}) · isolation {status.Isolation}{(status.Enforced ? " (enforced)" : " (NOT enforced)")} · {projects.Count} registered project(s) · queue {status.Queued}{(status.Running is { } r ? $", running {r}" : "")}.",
+                $"Connected to {client.BaseUrl} ({BuildHostContract.Contract}) · isolation {status.Isolation}{(status.Enforced ? " (enforced)" : " (NOT enforced)")} · {projects.Count} registered project(s) · queue {status.Queued}{(status.Running is { } r ? $", running {r}" : "")}." +
+                (status.Refusal is { } refusal ? " " + refusal : ""),
                 status, projects);
         }
         catch (HcgBuildHostException ex)
