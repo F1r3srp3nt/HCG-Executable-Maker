@@ -25,6 +25,32 @@ public sealed record ShipResult(StoreRelease Release, IReadOnlyList<ShipItemProg
 /// </summary>
 public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessService? features = null)
 {
+    /// <summary>
+    /// HCG Store's rule for a .deb that HCG Repo will deliver (publishing.ts debianVersionMatches): the control file's
+    /// Debian version must be the release version, or the release version followed by "-" and a Debian revision.
+    /// Sileo asks for the version it saw in HCG Repo's index, and the Store matches it against the release, so a package
+    /// numbered otherwise could never be delivered. Checked before anything is created or uploaded.
+    /// </summary>
+    public static bool DebianVersionMatches(string debVersion, string releaseVersion) =>
+        debVersion == releaseVersion
+        || (debVersion.StartsWith(releaseVersion + "-", StringComparison.Ordinal) && debVersion.Length > releaseVersion.Length + 1
+            && debVersion[(releaseVersion.Length + 1)..].All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '+' or '~'));
+
+    public static IReadOnlyList<string> RepoDeliveryProblems(string releaseVersion, IReadOnlyList<string> destinations, IReadOnlyList<StoreArtifactCandidate> files)
+    {
+        if (!destinations.Contains("hcg-repo")) return [];
+        var problems = new List<string>();
+        foreach (var f in files.Where(f => f.Format == "deb"))
+        {
+            if (f.Package is not { Id.Length: > 0, Version.Length: > 0 } pkg)
+                problems.Add($"{f.FileName}: HCG Repo needs the package identifier and version from the control file, and this .deb's control file could not be read.");
+            else if (!DebianVersionMatches(pkg.Version, releaseVersion))
+                problems.Add($"{f.FileName}: its Debian version is {pkg.Version}, but the release is {releaseVersion}. HCG Store refuses it for HCG Repo (Sileo asks for the version it saw in the index): " +
+                             $"use release version {pkg.Version}, or package version {releaseVersion} (or {releaseVersion}-1).");
+        }
+        return problems;
+    }
+
     /// <param name="existingReleaseId">Continue this draft (Retry after a failure) instead of creating a new release.</param>
     public async Task<ShipResult> ShipAsync(StoreReleaseRequest request, IReadOnlyList<StoreArtifactCandidate> files, string? existingReleaseId,
         IProgress<ShipItemProgress>? progress, CancellationToken ct)
@@ -35,6 +61,8 @@ public sealed class ShipToStoreService(HcgStoreClient client, FeatureAccessServi
         if (files.FirstOrDefault(f => !f.IsSupported) is { } bad) throw new InvalidOperationException($"{bad.FileName}: {string.Join(" ", bad.Problems)}");
         if (files.GroupBy(f => f.FileName, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1) is { } twice)
             throw new InvalidOperationException($"Two files are named {twice.Key}; a release holds each file name once.");
+        if (RepoDeliveryProblems(request.Version, request.Destinations, files) is { Count: > 0 } repoProblems)
+            throw new InvalidOperationException(string.Join(" ", repoProblems));
         StoreRelease release;
         if (existingReleaseId is not null) release = await client.ReleaseAsync(existingReleaseId, ct).ConfigureAwait(false);
         else

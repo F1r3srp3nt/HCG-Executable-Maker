@@ -465,6 +465,7 @@ public sealed partial class ShipToStoreViewModel(
     partial void OnVersionChanged(string value) => Recompare();
     partial void OnBuildChanged(string value) => Recompare();
     partial void OnChannelChanged(Choice? value) => Recompare();
+    partial void OnAlsoHcgRepoChanged(bool value) => Recompare();
 
     /// <summary>The product's version history, from HCG Store.</summary>
     [RelayCommand]
@@ -500,6 +501,10 @@ public sealed partial class ShipToStoreViewModel(
         Comparison = c;
         foreach (var f in c.Findings) Findings.Add(new StudioFindingItem(f));
         foreach (var d in DistributionStudio.Discrepancies(Version.Trim(), Build.Trim(), SelectedProduct.Title, files)) Discrepancies.Add(new StudioFindingItem(d));
+        // A .deb for HCG Repo must carry the release version (HCG Store's rule; Sileo asks for the version in the index).
+        if (AlsoHcgRepo && CanUseHcgRepo)
+            foreach (var problem in ShipToStoreService.RepoDeliveryProblems(Version.Trim(), ["hcg-store", "hcg-repo"], files))
+                Findings.Add(new StudioFindingItem(new DistributionFinding("repo-debian-version", FindingLevel.Blocker, problem)));
         ComparisonSummary =
             $"Current published: {(c.CurrentPublished is { } cp ? $"{cp.Version} (build {cp.Build}){(c.CurrentBasis == "catalogue" ? " — named current by HCG Store" : " — newest published")}" : "none")}" +
             $" · Latest private draft: {(c.LatestPrivateDraft is { } d0 ? $"{d0.Version} (build {d0.Build}, {d0.Stage ?? d0.Status})" : "none")}" +
@@ -693,6 +698,11 @@ public sealed partial class ShipToStoreViewModel(
         }
         if (Files.FirstOrDefault(f => !f.Candidate.IsSupported) is { } bad) { await dialogs.AlertAsync("Unsupported file", $"{bad.FileName}: {bad.Problems}\n\nRemove it from the list to ship the other files."); return; }
         Recompare();
+        if (Findings.Where(f => f.Finding.Code == "repo-debian-version").Select(f => "• " + f.Finding.Message).ToList() is { Count: > 0 } repo)
+        {
+            await dialogs.AlertAsync("Not deliverable through HCG Repo", string.Join("\n", repo) + "\n\nNothing was uploaded.");
+            return;
+        }
         if (Comparison is { Blocked: true } blocked && ReleaseId is null)
         {
             await dialogs.AlertAsync("Version conflict", string.Join("\n", blocked.Findings.Where(f => f.Level == FindingLevel.Blocker).Select(f => "• " + f.Message)));

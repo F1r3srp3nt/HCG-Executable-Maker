@@ -163,3 +163,33 @@ public sealed class WindowsContractTests : IDisposable
         Assert.Contains(armZip.Checks, x => x.Name == "Release Passport" && x.Status == VerificationStatus.Failed && x.Detail.Contains("artifact.sha256"));   // the passport describes other bytes
     }
 }
+
+/// <summary>HCG Store's rule for .deb files that HCG Repo delivers (publishing.ts debianVersionMatches, Store main 2d1429c).</summary>
+public sealed class RepoDeliveryVersionTests
+{
+    [Theory]
+    [InlineData("1.0.0", "1.0.0", true)]
+    [InlineData("1.0.0-1", "1.0.0", true)]
+    [InlineData("0.1.0~beta1-2", "0.1.0~beta1", true)]
+    [InlineData("0.1.0~beta1", "0.1.0-beta.1", false)]   // Maker's display comparison treats these as equal; HCG Store does not
+    [InlineData("1.0.0-", "1.0.0", false)]
+    [InlineData("1.0.0-1/x", "1.0.0", false)]
+    [InlineData("1.0.1", "1.0.0", false)]
+    public void Debian_versions_match_the_release_exactly_as_HCG_Store_checks_them(string deb, string release, bool expected) =>
+        Assert.Equal(expected, HCG.ExecutableMaker.BuildEngine.Distribution.ShipToStoreService.DebianVersionMatches(deb, release));
+
+    [Fact]
+    public void A_deb_for_HCG_Repo_with_another_version_is_refused_before_anything_is_uploaded()
+    {
+        var deb = new HCG.ExecutableMaker.BuildEngine.Distribution.StoreArtifactCandidate
+        {
+            Path = "/x/com.hakmicapitalgroup.sentinel_0.1.0~beta1_iphoneos-arm64.deb", FileName = "com.hakmicapitalgroup.sentinel_0.1.0~beta1_iphoneos-arm64.deb",
+            SizeBytes = 1, Sha256 = new string('a', 64), Platform = "ios", Format = "deb",
+            Package = new HCG.ExecutableMaker.Account.Store.StorePackage("com.hakmicapitalgroup.sentinel", "0.1.0~beta1", "iphoneos-arm64"),
+        };
+        var problems = HCG.ExecutableMaker.BuildEngine.Distribution.ShipToStoreService.RepoDeliveryProblems("0.1.0-beta.1", ["hcg-store", "hcg-repo"], [deb]);
+        Assert.Contains("use release version 0.1.0~beta1", Assert.Single(problems));
+        Assert.Empty(HCG.ExecutableMaker.BuildEngine.Distribution.ShipToStoreService.RepoDeliveryProblems("0.1.0-beta.1", ["hcg-store"], [deb]));   // HCG Store alone: no rule
+        Assert.Empty(HCG.ExecutableMaker.BuildEngine.Distribution.ShipToStoreService.RepoDeliveryProblems("0.1.0~beta1", ["hcg-store", "hcg-repo"], [deb]));
+    }
+}

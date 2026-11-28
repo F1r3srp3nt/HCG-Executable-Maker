@@ -15,6 +15,11 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - **Build Host:** an HCG Server whose isolation is not enforced (HCG Server for Windows: no backend yet) is explained
   in the provider check and the Build Host panel; no job is submitted to it.
 
+- **Ship to Store with HCG Repo as a destination** checks a `.deb`'s Debian version with HCG Store's own rule (the
+  release version, or it followed by `-<revision>`) before anything is created or uploaded, and the page shows it as a
+  blocker. HCG Store refuses such a file for HCG Repo because Sileo asks for the version it saw in the index; Maker's
+  looser display comparison (`~` as `-`) had let it through.
+
 ### Fixed
 - Builds could not run git when the environment configured it through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`: only the
   keys were removed. Git's environment configuration is now removed as a whole.
