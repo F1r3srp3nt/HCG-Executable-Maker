@@ -689,7 +689,7 @@ jobs:
           grep -q "Expected commit: Passed" "$OUT/probe-sim.txt"
           app="$(find "$OUT/probe-sim" -name 'SigningProbe.app' -type d -path '*ios-simulator*' | head -1)"
           echo "app: $app"
-          codesign -dv "$app" 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
+          codesign -dv "$app" 2>&1 | tee /dev/stderr | grep "Signature=adhoc" >/dev/null
           # Xcode 16+ links Debug apps as a stub executable plus <App>.debug.dylib: search every file in the bundle.
           hits="$(grep -r -a -l "SIGNINGPROBE-DEVELOPMENT-RUN" "$app" || true)"
           echo "marker found in: ${hits:-nothing}"
@@ -1023,8 +1023,8 @@ jobs:
           ls -l "$h"
           archs="$(lipo -archs "$h")"; echo "helper slices: $archs"
           echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64
-          "$h" version | tee /dev/stderr | grep -qx "hcg-agent 1.0.0 (darwin/arm64)"
-          if arch -x86_64 /usr/bin/true 2>/dev/null; then arch -x86_64 "$h" version | tee /dev/stderr | grep -qx "hcg-agent 1.0.0 (darwin/amd64)"
+          "$h" version | tee /dev/stderr | grep -x "hcg-agent 1.0.0 (darwin/arm64)" >/dev/null
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then arch -x86_64 "$h" version | tee /dev/stderr | grep -x "hcg-agent 1.0.0 (darwin/amd64)" >/dev/null
           else echo "Rosetta is not installed on this runner: the x86_64 slice is verified with lipo and file only"; file "$h"; fi
           codesign --verify --strict --deep --verbose=2 "$app"
           rm -f "$TMPDIR/hcg-agent-helper-probe.txt"
@@ -2632,7 +2632,7 @@ jobs:
       - name: The produced programs are real (run here by CI, never by HCG)
         run: |
           calc="$(sed -n 1p "$OUT/multi/native-multi-artifacts.txt")/calc"
-          file "$calc"; "$calc" 2 3 | tee /dev/stderr | grep -qx "2 + 3 = 5 (dep 42)"
+          file "$calc"; "$calc" 2 3 | tee /dev/stderr | grep -x "2 + 3 = 5 (dep 42)" >/dev/null
           mk="$(sed -n 1p "$OUT/make/native-make-artifacts.txt")/makehello"
           "$mk" | grep -qx "Hello from make: from CI"
           unzip -tq "$(sed -n 2p "$OUT/multi/native-multi-artifacts.txt")"
@@ -2649,7 +2649,7 @@ jobs:
           echo "App: $APP"; [[ "$APP" == *"/MacHello.app" ]]
           plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle(Name|Identifier|Executable|ShortVersionString)'
           plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist" | grep -qx com.example.machello
-          lipo -archs "$APP/Contents/MacOS/MacHello" | tee /dev/stderr | grep -q "x86_64" && lipo -archs "$APP/Contents/MacOS/MacHello" | grep -q "arm64"
+          lipo -archs "$APP/Contents/MacOS/MacHello" | tee /dev/stderr | grep "x86_64" >/dev/null && lipo -archs "$APP/Contents/MacOS/MacHello" | grep -q "arm64"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv "$APP" 2>&1 | grep -E "Signature=adhoc"
           ditto -x -k "$(sed -n 2p "$OUT/bundle/native-bundle-artifacts.txt")" "$OUT/unzipped" && codesign --verify --deep --strict "$OUT/unzipped/MacHello.app"
