@@ -33,6 +33,199 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 - `docs/HCG-MAIL-MACOS.md`, `docs/MACOS-DISTRIBUTION.md` and the Signing & Security page now describe what the code
   does.
 
+## [Unreleased] — HCG Store Manager compatibility (Swift apps with a command-line tool)
+
+### Added
+- **Product preselection.** A Swift package whose `AppPackaging.json` names a product has that product preselected
+  when it has several executables (HCG Store Manager: `HCGStoreManager`, not the `hcg-store-manager` CLI).
+- **Product guidance.** Without a contract, the Inspect step names the app product. Choosing a command-line tool next
+  to an app is explained: it is built as a folder or ZIP, not a macOS app.
+- **Regression case `store-manager`.** `tests/Fixtures/StoreShapedApp` has HCG Store Manager's shape: library, CLI and
+  SwiftUI app, a Linux-only dependency, and a contract with an icon, an Info.plist template and artwork. CI builds it
+  through the wizard and checks:
+  - the preselected product, and only the app in `Contents/MacOS`;
+  - `AppIcon.icns` and the artwork in the bundle, and the template keys kept;
+  - a full seal;
+  - APP, ZIP, DMG and PKG, with the PKG installed;
+  - a GUI launch that finds its artwork.
+
+  The real HCG Store Manager (private) is built at a pinned commit when the read-only secret
+  `HCG_STORE_MANAGER_READ_TOKEN` is configured; until then it is reported as pending.
+
+### Fixed
+- **Info.plist template's icon name kept.** A contract template that already names the installed icon
+  (`CFBundleIconFile` `AppIcon` or `AppIcon.icns`) keeps its own spelling instead of being rewritten to `AppIcon.icns`
+  (HCG Store Manager's template uses `AppIcon`; both resolve to `Contents/Resources/AppIcon.icns`).
+- **iOS signing refusal names every gap.** When the Apple Signing Assistant refuses a device build or development IPA,
+  the missing certificate found before it ran ("no code-signing identities were found for this destination") is part of
+  the refusal again, next to the missing team, instead of only a warning in the log.
+- **A Debug distribution archive is refused by its rule first.** The build verification that runs before the Apple
+  Signing Assistant refused a Debug distribution archive only for the development flag it would ship; the refusal now
+  starts with the rule ("… must be a Release build") and keeps the flag as evidence.
+
+## [Unreleased] — Build Provider (HCG Server Build Host in the New Build wizard)
+
+### Added
+- **Build provider** selector on the New Build wizard's Inspect step: Local Machine (default, unchanged), HCG Server
+  Build Host, and GitHub Actions (listed, not available yet). See docs/BUILD-PROVIDERS.md.
+- **HCG Server Build Host** goes Inspect → Build. The panel offers:
+  - authorized discovery on loopback, with the build-client token stored in the OS credential store and never shown again;
+  - Test connection, with distinct states (token needed, token refused, not `hcg.buildhost/1`, not loopback, not reachable);
+  - isolation, queue, toolchains, providers and the registered projects;
+  - the host's device, OS/architecture and isolation rules from verified provenance;
+  - the signing key, with **Pin this key**;
+  - the resource limits;
+  - the registered project matched to the imported one (same working copy, or same repository and folder);
+  - the commit recorded at import;
+  - target OS/architecture per provider;
+  - operations and options.
+- **Explicit authorization before submitting.** The statement names the host, key, commit, repository, source remote,
+  operations and provider, and says that Executable Maker sends no source files. It is cleared by any change and used
+  once.
+- **Running reuses `HcgServerBuildHost`**, writing the same `native-build-request.json` / `native-build-result.json`.
+  - The plan and the redacted log stream into the build view.
+  - The wizard shows that the job waits for the owner's approval on HCG Server.
+  - Cancel Build cancels the job there.
+- **Results: Build provenance and evidence.**
+  - Job and approver; each step with exit code, time, peak memory and CPU.
+  - The verified provenance, the host key check, device and OS/architecture.
+  - Source commit and tree, toolchain, validation, artifact SHA-256s, Release Passports, HCG Repo evidence and the
+    contract files.
+  - **Unsigned — not ready for public distribution**: Ship to Store is not offered for this output.
+- **Toolchain Manager.** The wizard's Build Readiness panel shows the Build Host's compatible version next to a tool
+  that is missing or too old here (Go 1.25 for the HCG Server-shaped helper).
+- `MakerFeatures.BuildHostServer` (`buildhost.local`, free, decided by HCG Server's owner). Proposed for founder review,
+  not registered: a central key for non-loopback build hosts, and OS/arch, key and limits in the Build Host's status.
+
+### Fixed
+- **Keyring not reachable.** When the OS keyring exists but cannot be reached (no D-Bus session), the Build Host token
+  is kept for this run only and the panel says so. Before, the connection test failed with an exception.
+- **Commit in the request purpose.** A Build Host request's purpose text now uses the normalized (lowercase) commit.
+- **Test on Windows.** The SigningProbe fixture test no longer depends on line endings.
+- **Unsigned iOS archives.** Unsigned archives (Mobile Build Studio, `mobile-build --output ios-archive --signing
+  unsigned`, the Sentinel archive matrix) again pass `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+  CODE_SIGN_IDENTITY=`. The Apple Signing Assistant's arguments replace the planner's, and its unsigned branch had
+  dropped them, so Xcode asked for a development team.
+- **Device builds without a certificate.** For native Xcode iOS projects, a signing gap found by the generic
+  capability check (for example no Apple Development certificate in the keychain) is now decided by the Apple Signing
+  Assistant. It runs after the build's own verification (expected commit, development flags), knows that authorized
+  Xcode-managed provisioning can create the development certificate, and reports what is missing with Resolve
+  Signing. Before, the build stopped earlier with "not available".
+
+## [Unreleased] — Apple Signing Assistant
+
+### Added
+- **Apple Signing Assistant** (Mobile Build Studio, native Xcode iOS projects). Before compiling it reads the effective
+  build settings (`xcodebuild -showBuildSettings`, so xcconfig files and `Config/Local.xcconfig` count), the project's
+  Signing Vault profile, and this Mac's identities and profiles. It then decides the signing for the destination and
+  passes it as build settings for this build only; the project is never modified. See docs/APPLE-SIGNING-ASSISTANT.md.
+- **Build destinations:**
+  - iOS Simulator (Debug);
+  - Physical iPhone / iPad (Debug): a new **iOS device build**, signed with Apple Development;
+  - iOS distribution archive;
+  - TestFlight and App Store: the App Store Connect .ipa, exported locally and never uploaded;
+  - macOS development and Developer ID (existing macOS Xcode provider).
+- **Debug/Release are explicit.** Simulator and device builds default to Debug, so development features such as
+  Unimatch's Development Run stay available. Distribution builds must be Release: a Debug distribution build, or a
+  Release configuration that compiles with `DEBUG`, is refused before compiling.
+- **Simulator builds never need a team.** A project without one is signed to run locally (ad hoc, entitlements kept).
+- **Device signing checks:**
+  - team (chosen, saved in Signing Vault, or the project's own);
+  - Apple Development identity with its private key;
+  - development profile for the bundle identifier;
+  - entitlements;
+  - registration of intended devices;
+  - iPad family.
+
+  Xcode-managed provisioning (`-allowProvisioningUpdates -allowProvisioningDeviceRegistration`) is used only when
+  authorized.
+- **"Use team …"** for teams with a usable identity on this Mac. The chosen team is remembered in the project's signing
+  profile.
+- **A bundle identifier for one build** overrides the project's identifier variable (for example `UNIMATCH_BUNDLE_ID`).
+- **Resolve Signing.**
+  - Missing teams, certificates, profiles or device registrations, before or during the build, including xcodebuild's
+    "requires a development team" and "No profiles for", become `HCG-SIGNING-RESOLVE`.
+  - **Resolve Signing** opens Signing & Security for the project, and the build can be started again without
+    re-importing.
+- `mobile-build`: `--output ios-device`, `--device-family`, `--bundle-id`, `--allow-provisioning-updates`,
+  `--destination app-store`.
+
+- **Development builds are verified before compiling** (Unimatch: the Development Run was missing because the device
+  build was a Release archive):
+  - The source commit of the imported copy is checked. A stale copy is refused, and an optional expected commit can be
+    given.
+  - The compilation flags are checked. Flags that are in Debug but not in Release are the project's development-only
+    flags (`UNIMATCH_DEVELOPMENT_RUN`).
+  - A development build reports `DEBUG` and those flags as active, and optional expected flags must be active.
+  - A distribution build must contain none of them.
+  - The build records the source commit, configuration, compilation flags and development-only flags. Mobile Build
+    Studio shows them under "What this build is".
+- **A development-signed .ipa** (export method Debugging) is a device development build: Debug by default, not a
+  distribution build.
+- **Install and open on a connected device.** After a development build, Mobile Build Studio lists paired iPhones and
+  iPads (devicectl) and installs the build after confirmation, then opens it. The device is added to the project's
+  intended devices in Signing Vault, so later builds check its registration in the development profile.
+- `mobile-build`: `--expect-commit SHA`, `--expect-flags DEBUG,FLAG`.
+
+### Changed
+- A signed iOS archive without a development team now stops before compiling with the reason and Resolve Signing.
+  Previously it failed inside xcodebuild with exit code 65.
+
+### Tests
+- 22 Signing Assistant tests:
+  - Unimatch's effective settings;
+  - every destination;
+  - team source order;
+  - provisioning authorization;
+  - private key, profile, entitlements, device and iPad checks;
+  - the Debug distribution refusal;
+  - bundle-identifier variable override;
+  - xcodebuild error recognition;
+  - the device-build planner.
+- CI (macOS) with the Unimatch-shaped `tests/Fixtures/SigningProbe`:
+  - Simulator Debug without a team (ad hoc, contains the Development Run);
+  - device Debug stopped without a team;
+  - Xcode's signing error becomes Resolve Signing;
+  - Debug archive refused;
+  - Release archive without the Development Run.
+
+## [Unreleased] — Build Readiness Center
+
+### Added
+- **Build Readiness Center** (Toolchains › Build Readiness, the New Build wizard, `--build-readiness`).
+  - Before compilation it checks every tool the build needs. Requirements are read from the packaging contract and
+    the scripts it runs, `go.mod`, `Package.swift`, `package.json`, `Cargo.toml`, `pyproject.toml`, `CMakeLists.txt`,
+    `global.json` and the chosen build kind.
+  - For each tool it shows the installed and required versions, its path and where the requirement comes from.
+  - Go, Swift, Xcode, .NET, Node.js/npm, Python, Rust/Cargo, JDK, CMake, Ninja, Clang, GCC, make, lipo, Git, Docker
+    and pkg-config are found on PATH and in their install locations: Homebrew (Apple Silicon and Intel), official
+    installers and version managers. See docs/BUILD-READINESS.md.
+- **Missing tools are explained, not just a failed build.** The panel offers:
+  - **Install…**, only after approving the exact command: a Homebrew catalogue formula, which upgrades nothing, or
+    Apple's Command Line Tools;
+  - **Choose for this project / all projects** (verified before saving);
+  - the official download and **Refresh Toolchains**.
+
+  Start Build resumes once the tool is ready. HCG never installs Homebrew or runs installer scripts.
+- **Toolchain profiles:** reusable per-project tool locations, so projects can use different SDK versions without
+  replacing a shared installation.
+- **Remote build hosts:** authorized hosts that report a compatible tool are listed. Nothing is sent.
+- **The packaging-contract build uses the same resolution.** HCG Server's Go helper now builds with Go from Homebrew,
+  `/usr/local/go`, `~/sdk` or a chosen location. A missing tool names Build Readiness (`HCG-READINESS`).
+
+### Tests
+- 44 Build Readiness tests:
+  - Go discovery on PATH, in Apple Silicon and Intel Homebrew, from the official installer and golang.org/dl, and at a
+    chosen location;
+  - version parsing and choosing a compatible installation among several;
+  - installer safeguards;
+  - HCG Server's contract (go.mod, script checks, universal lipo);
+  - profiles;
+  - remote hosts.
+- CI `build-readiness-go` (macOS) with the HCG Server-shaped fixture `tests/Fixtures/AgentHelperApp`: missing Go
+  blocks Start Build, Go is chosen for the project, then the universal helper is built, the app is launched and the
+  helper is run. A Homebrew install of Go runs only with `--approve`.
+
 ## [Unreleased] — HCG Server Build Host
 
 ### Added

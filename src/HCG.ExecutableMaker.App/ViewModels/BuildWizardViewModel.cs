@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HCG.ExecutableMaker.App.Services;
 using HCG.ExecutableMaker.BuildEngine;
+using HCG.ExecutableMaker.BuildEngine.BuildHost;
 using HCG.ExecutableMaker.BuildEngine.MacXcode;
 using HCG.ExecutableMaker.Core;
 using HCG.ExecutableMaker.Domain;
@@ -60,9 +61,13 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService validator,
         IProcessRunner processRunner,
         HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator nativeConfigurator,
-        IProjectSigningStore projectSigning)
+        IProjectSigningStore projectSigning,
+        BuildReadinessPanelViewModel readiness,
+        BuildHostPanelViewModel buildHost)
     {
         _projectSigning = projectSigning;
+        Readiness = readiness;
+        BuildHost = buildHost;
         _processRunner = processRunner;
         _nativeConfigurator = nativeConfigurator;
         _signingReader = signingReader;
@@ -129,7 +134,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private bool CanGoNext() => Step switch
     {
         WizardStep.Import => Project is not null && !IsImporting,
-        WizardStep.Inspect => CanConfigure,
+        WizardStep.Inspect => CanContinueWithProvider,
         WizardStep.Configure => ConfigErrors.Count == 0,
         WizardStep.Package => PackagingOptions.Any(o => o.IsSelected && o.IsEnabled) && !HasDistributionErrors,
         _ => false,
@@ -143,6 +148,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             case WizardStep.Import:
                 Step = WizardStep.Inspect;
                 break;
+            case WizardStep.Inspect when UsesBuildHost:
+                await OpenBuildHostStepAsync();
+                return;
             case WizardStep.Inspect:
                 await PrepareConfigurationAsync();
                 Step = WizardStep.Configure;
@@ -165,7 +173,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [RelayCommand(CanExecute = nameof(CanGoBack))]
     private void Back()
     {
-        Step = Step - 1;
+        Step = Step == WizardStep.Build && UsesBuildHost ? WizardStep.Inspect : Step - 1;
         UpdateSteps();
     }
 
@@ -174,7 +182,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         foreach (var s in Steps)
         {
             s.IsActive = s.Step == Step;
-            s.IsDone = s.Step < Step;
+            // HCG Server's Build Host goes Inspect → Build: Configure and Package are skipped, not done.
+            s.IsDone = s.Step < Step && !(UsesBuildHost && s.Step is WizardStep.Configure or WizardStep.Package);
         }
         NextCommand.NotifyCanExecuteChanged();
         BackCommand.NotifyCanExecuteChanged();
@@ -195,6 +204,10 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         HasSwiftEvaluationLog = false;
         IconPath = null;
         ResetDesktopConversion();
+        SelectedBuildProvider = BuildProviderCatalog.LocalMachine;
+        ProviderEvidence.Clear();
+        HasProviderEvidence = false;
+        DistributionReadiness = "";
         Step = WizardStep.Import;
         UpdateSteps();
     }
@@ -885,8 +898,8 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     public ObservableCollection<SummaryRow> Summary { get; } = [];
     public ObservableCollection<LogLineItem> LogLines { get; } = [];
     [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand))] private bool _trustAcknowledged;
-    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand), nameof(CancelBuildCommand), nameof(BackCommand))]
-    [NotifyPropertyChangedFor(nameof(ShowTrustPanel))]
+    [ObservableProperty, NotifyCanExecuteChangedFor(nameof(StartBuildCommand), nameof(CancelBuildCommand), nameof(BackCommand), nameof(StartBuildOnHostCommand))]
+    [NotifyPropertyChangedFor(nameof(ShowTrustPanel), nameof(ShowLocalBuildPanel), nameof(ShowBuildHostPanel))]
     private bool _isBuilding;
     [ObservableProperty] private bool _hasBuildStarted;
     [ObservableProperty] private string _currentStage = "Ready";
@@ -991,6 +1004,30 @@ public sealed partial class BuildWizardViewModel : PageViewModel
 
     private bool CanStartBuild() => TrustAcknowledged && !IsBuilding && Project is not null;
 
+    /// <summary>Build Readiness for the configured build: checked when Start Build is pressed, before anything compiles.</summary>
+    public BuildReadinessPanelViewModel Readiness { get; }
+    [ObservableProperty] private bool _showReadiness;
+
+    /// <summary>
+    /// Checks every tool this build needs. Returns false (and shows the Build Readiness panel with Install…, Choose
+    /// location… and Refresh) when something required is missing; Start Build then resumes once it is fixed.
+    /// </summary>
+    private async Task<bool> EnsureReadyAsync(BuildSettings settings)
+    {
+        if (Project is null || settings.Mobile is not null) return true;
+        var report = await Readiness.CheckAsync(Project.Name, Project.SourceDirectory, Project.Id, settings, Project.Analysis);
+        if (report is null || report.CanBuild)
+        {
+            ShowReadiness = report is not null && report.Items.Any(i => i.State != ReadinessState.Ready);
+            return true;
+        }
+        ShowReadiness = true;
+        await _dialogs.AlertAsync("Build Readiness",
+            string.Join("\n\n", report.Blockers.Select(b => b.Detail)) +
+            "\n\nThe Build Readiness panel under Start Build lets you install the tool (only after you approve the exact command), choose its location for this project or all projects, or open the official download. Press Start Build again when it is ready.");
+        return false;
+    }
+
     [RelayCommand(CanExecute = nameof(CanStartBuild))]
     private async Task StartBuildAsync()
     {
@@ -1007,6 +1044,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             await _dialogs.AlertAsync("Configuration problem", ex.Message);
             return;
         }
+        if (!await EnsureReadyAsync(settings)) return;
 
         var allowOverwrite = false;
         var outputRoot = BuildService.OutputRootFor(settings);
@@ -1104,8 +1142,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     /// <summary>Every stage this build went through, in order (install, compile, package, verify, …).</summary>
     public ObservableCollection<string> StageHistory { get; } = [];
 
-    private sealed class Observer(BuildWizardViewModel vm) : IBuildObserver
+    private sealed class Observer(BuildWizardViewModel vm) : HCG.ExecutableMaker.BuildEngine.BuildHost.IBuildHostObserver
     {
+        public void OnAwaitingApproval(HCG.ExecutableMaker.BuildEngine.BuildHost.BuildJob job, string instruction) => vm.OnBuildHostAwaitingApproval(job, instruction);
+        public void OnJobUpdated(HCG.ExecutableMaker.BuildEngine.BuildHost.BuildJob job) => vm.OnBuildHostJobUpdated(job);
+
         public void OnLog(BuildLogLine line) => vm._pendingLog.Enqueue(line);
 
         public void OnStage(BuildStage stage, string description) => Dispatcher.UIThread.Post(() =>
@@ -1142,6 +1183,10 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private void ShowResult(BuildRecord build)
     {
         Result = build;
+        ProviderEvidence.Clear();
+        HasProviderEvidence = false;
+        DistributionReadiness = "";
+        var onBuildHost = IsBuildHostBuild(build);
         ResultSucceeded = build.Status == BuildStatus.Succeeded;
         ResultTag = new StatusTag(Format.Label(build.Status), Format.Tone(build.Status));
         ResultTitle = build.Status switch
@@ -1152,7 +1197,9 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             _ => "Build failed",
         };
         var notarized = build.Artifacts.Any(a => a.Checks.Any(c => c.Name == "Notarization" && c.Status == VerificationStatus.Passed));
-        ResultDetail = build.Status == BuildStatus.Succeeded
+        ResultDetail = build.Status == BuildStatus.Succeeded && onBuildHost
+            ? $"{build.Artifacts.Count} artifact(s) built on HCG Server's Build Host and verified here (checksums, signed provenance, the Build Host's validation). Unsigned: the Build Host never signs."
+            : build.Status == BuildStatus.Succeeded
             ? $"{build.Artifacts.Count} artifact(s) generated and verified · {build.WarningCount} warning(s). " +
               (build.Settings.Native is { Kind: NativeProjectKind.Theos }
                 ? "Debian package for jailbroken devices, checked by HCG (metadata, install prefix, payload, binaries). It was not installed: copy it to the device and install it yourself (INSTALL.txt next to the package explains how). Not an IPA."
@@ -1168,10 +1215,10 @@ public sealed partial class BuildWizardViewModel : PageViewModel
                    : "Ad-hoc signed only: not Developer ID signed or notarized.") +
               (build.Settings.Native is not null ? "" : build.Settings.Electron is null ? " Installation and launch are tested only when you run Test install." : " Launching the app is not part of the build.")
             : build.FailureReason ?? "The build did not complete.";
-        _ = PrepareDistributionActionsAsync(build);
+        if (!onBuildHost) _ = PrepareDistributionActionsAsync(build);
         LoadXcodeDiagnostics(build);
         ResultDuration = Format.Duration(build.Duration);
-        ResultOutput = build.Artifacts.Count > 0 ? BuildService.OutputRootFor(build.Settings) : "No output produced";
+        ResultOutput = build.Artifacts.Count == 0 ? "No output produced" : onBuildHost ? Path.GetDirectoryName(build.Artifacts[0].Path)! : BuildService.OutputRootFor(build.Settings);
         ResultArtifacts.Clear();
         foreach (var a in build.Artifacts) ResultArtifacts.Add(new ArtifactItem(a, build));
         HasResultArtifacts = ResultArtifacts.Count > 0;
@@ -1187,7 +1234,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     private async Task OpenOutputFolderAsync()
     {
         if (Result is null) return;
-        var target = Result.Artifacts.Count > 0 ? BuildService.OutputRootFor(Result.Settings) : Result.Settings.OutputDirectory;
+        var target = Result.Artifacts.Count > 0 ? (IsBuildHostBuild(Result) ? Path.GetDirectoryName(Result.Artifacts[0].Path)! : BuildService.OutputRootFor(Result.Settings)) : Result.Settings.OutputDirectory;
         if (!await _shell.OpenFolderAsync(target))
             await _dialogs.AlertAsync("Folder not found", $"The output folder does not exist:\n{target}");
     }
@@ -1217,7 +1264,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [RelayCommand]
     private void RebuildWithChanges()
     {
-        Step = WizardStep.Configure;
+        Step = UsesBuildHost ? WizardStep.Build : WizardStep.Configure;
         UpdateSteps();
     }
 

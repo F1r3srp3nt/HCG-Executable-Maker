@@ -1,0 +1,73 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.BuildReadinessPanel"
+             x:DataType="vm:BuildReadinessPanelViewModel">
+  <StackPanel Spacing="10">
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="2">
+        <TextBlock Classes="eyebrow" Text="BUILD READINESS" />
+        <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" />
+      </StackPanel>
+      <c:StatusChip Grid.Column="1" Status="{Binding State}" VerticalAlignment="Top" />
+    </Grid>
+    <Grid ColumnDefinitions="Auto,*,Auto,Auto" IsVisible="{Binding HasProject}">
+      <TextBlock Classes="label" Text="TOOLCHAIN PROFILE" VerticalAlignment="Center" Margin="0,0,12,0" />
+      <ComboBox Grid.Column="1" ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile}" HorizontalAlignment="Stretch" />
+      <Button Grid.Column="2" Content="New profile" Command="{Binding NewProfileCommand}" Margin="8,0,0,0" />
+      <Button Grid.Column="3" Command="{Binding RefreshCommand}" IsEnabled="{Binding !IsChecking}" Margin="8,0,0,0">
+        <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Refresh}" /><TextBlock Text="Refresh Toolchains" /></StackPanel>
+      </Button>
+    </Grid>
+    <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsChecking}" />
+    <Border Classes="callout" Padding="10" IsVisible="{Binding HasMessage}">
+      <SelectableTextBlock Text="{Binding Message}" TextWrapping="Wrap" />
+    </Border>
+    <ItemsControl ItemsSource="{Binding Items}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ReadinessToolItem">
+          <Border Classes="inset" Margin="0,0,0,8" Padding="14,12">
+            <StackPanel Spacing="4">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13.5" />
+                  <TextBlock Classes="muted" Text="{Binding Needs}" VerticalAlignment="Center" />
+                </StackPanel>
+                <c:StatusChip Grid.Column="1" Status="{Binding Tag}" />
+              </Grid>
+              <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding Using}" TextWrapping="Wrap" />
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding DeclaredBy, StringFormat='Declared by {0}'}" />
+              <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Text="{Binding Purpose, StringFormat='Used for {0}'}" />
+              <SelectableTextBlock Text="{Binding Detail}" IsVisible="{Binding HasDetail}" TextWrapping="Wrap" />
+              <SelectableTextBlock Classes="mono muted" FontSize="12" Text="{Binding Found}" IsVisible="{Binding HasFound}" TextWrapping="Wrap" />
+              <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding Notes}" IsVisible="{Binding HasNotes}" TextWrapping="Wrap" />
+              <SelectableTextBlock Classes="muted" FontSize="12" Text="{Binding InstallHelp}" IsVisible="{Binding HasInstallHelp}" TextWrapping="Wrap" />
+              <Border Classes="callout" Padding="8" IsVisible="{Binding HasRemote}">
+                <SelectableTextBlock FontSize="12" Text="{Binding Remote}" TextWrapping="Wrap" />
+              </Border>
+              <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Classes="primary" Content="{Binding InstallLabel, StringFormat='{}{0}…'}" IsVisible="{Binding CanInstall}"
+                        Command="{Binding $parent[ItemsControl].((vm:BuildReadinessPanelViewModel)DataContext).InstallCommand}" CommandParameter="{Binding}" Margin="0,0,8,6" />
+                <Button Content="Choose for this project…" IsVisible="{Binding CanChoose}"
+                        Command="{Binding $parent[ItemsControl].((vm:BuildReadinessPanelViewModel)DataContext).ChooseForProjectCommand}" CommandParameter="{Binding}" Margin="0,0,8,6" />
+                <Button Content="Choose for all projects…" IsVisible="{Binding CanChoose}"
+                        Command="{Binding $parent[ItemsControl].((vm:BuildReadinessPanelViewModel)DataContext).ChooseForAllCommand}" CommandParameter="{Binding}" Margin="0,0,8,6" />
+                <Button Content="Official download" IsVisible="{Binding HasOfficialUrl}"
+                        Command="{Binding $parent[ItemsControl].((vm:BuildReadinessPanelViewModel)DataContext).OpenDownloadCommand}" CommandParameter="{Binding}" Margin="0,0,8,6" />
+                <Button Content="Copy command" IsVisible="{Binding HasCommand}"
+                        Command="{Binding $parent[ItemsControl].((vm:BuildReadinessPanelViewModel)DataContext).CopyCommandCommand}" CommandParameter="{Binding}" Margin="0,0,8,6" />
+                <Button Content="Use automatic detection" IsVisible="{Binding CanChoose}"
+                        Command="{Binding $parent[ItemsControl].((vm:BuildReadinessPanelViewModel)DataContext).ClearLocationCommand}" CommandParameter="{Binding}" Margin="0,0,8,6" />
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsInstalling}" />
+    <SelectableTextBlock Classes="mono muted" FontSize="11.5" Text="{Binding InstallLog}" IsVisible="{Binding HasInstallLog}" TextWrapping="Wrap" MaxHeight="220" />
+    <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+               Text="HCG never installs Homebrew, runs installer scripts or upgrades a tool another project may use. Install… runs only the exact command you approve. Chosen locations apply to HCG's builds only; your PATH and shell profiles are not changed." />
+  </StackPanel>
+</UserControl>

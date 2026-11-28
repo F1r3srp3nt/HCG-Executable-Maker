@@ -43,5 +43,8 @@ public sealed class SigningViewModel(IToolchainService toolchains, IBuildWorker 
         Capabilities.Clear();
         foreach (var c in SigningCapabilityCatalog.Evaluate(report)) Capabilities.Add(new SigningCapabilityItem(c));
         await apple.LoadAsync();
+        // Resolve Signing from Mobile Build Studio: open this project's signing configuration directly.
+        if (parameter is Guid projectId && apple.SigningProjects.FirstOrDefault(p => p.Project.Id == projectId) is { } item)
+            apple.SelectedProject = item;
     }
 }

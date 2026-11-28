@@ -584,7 +584,8 @@ jobs:
       - name: Refusals — nothing is copied or signed (no entitlement review, version mismatch, test build with notarization, data in Contents/MacOS, output inside the app)
         shell: bash
         run: |
-          set -uo pipefail
+          # Not -e: each refusal is expected to exit 1, and the exit code is checked below (Actions runs bash with -e).
+          set +e -uo pipefail
           maker() { dotnet src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll --mac-sign-existing "$@"; }
           APP="$OUT/ci/Hello Avalonia.app"; E="$OUT/app.entitlements"
           refuse() { # refuse <label> <expected text> <args…>
@@ -795,7 +796,7 @@ jobs:
     name: Mobile — iOS (real Xcode builds)
     needs: test
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       OUT: ${{ github.workspace }}/mobile-out
     steps:
@@ -824,10 +825,65 @@ jobs:
           dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-ipa
           --trust --expect-failure "no code-signing identities were found for this destination"
 
-      - name: Signed archive without a development team fails honestly (no certificates in CI)
+      - name: Signed archive without a development team stops before compiling, with Resolve Signing (no certificates in CI)
         run: >
           dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/HelloIOS "$OUT/refused" --output ios-archive
-          --trust --expect-failure "failed with exit code"
+          --trust --expect-failure "requires a development team"
+
+      # Apple Signing Assistant, Unimatch-shaped fixture (automatic signing, no team committed, bundle ID from a
+      # variable, a Development Run compiled into Debug only). CI has no Apple certificates or account.
+      - name: SigningProbe — Simulator Debug builds with no team (signed to run locally) and contains the Debug-only Development Run
+        run: |
+          set -o pipefail
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-sim" --output ios-simulator --trust \
+            --expect-commit "$GITHUB_SHA" --expect-flags DEBUG,PROBE_DEVELOPMENT_RUN | tee "$OUT/probe-sim.txt"
+          grep -q "Development-only flags: Passed — Active in this build: PROBE_DEVELOPMENT_RUN" "$OUT/probe-sim.txt"
+          grep -q "Expected commit: Passed" "$OUT/probe-sim.txt"
+          app="$(find "$OUT/probe-sim" -name 'SigningProbe.app' -type d -path '*ios-simulator*' | head -1)"
+          echo "app: $app"
+          codesign -dv "$app" 2>&1 | tee /dev/stderr | grep -q "Signature=adhoc"
+          # Xcode 16+ links Debug apps as a stub executable plus <App>.debug.dylib: search every file in the bundle.
+          hits="$(grep -r -a -l "SIGNINGPROBE-DEVELOPMENT-RUN" "$app" || true)"
+          echo "marker found in: ${hits:-nothing}"
+          [ -n "$hits" ] && echo "Debug build contains the Development Run (positive control)."
+
+      - name: SigningProbe — a build from another commit than expected is refused before compiling
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-commit" --output ios-simulator
+          --expect-commit 0000000 --trust --expect-failure "Expected commit 0000000"
+
+      - name: SigningProbe — a Release device build cannot pass as a development build (DEBUG and the Development Run are not active)
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-release-device" --output ios-device
+          --variant Release --signing automatic --allow-provisioning-updates --expect-flags DEBUG,PROBE_DEVELOPMENT_RUN --trust
+          --expect-failure "Expected DEBUG, PROBE_DEVELOPMENT_RUN to be active"
+
+      - name: SigningProbe — iPhone Debug build without a team stops before compiling (Resolve Signing)
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-device" --output ios-device
+          --signing automatic --allow-provisioning-updates --trust --expect-failure "requires a development team"
+
+      - name: SigningProbe — iPhone Debug build with a team but no Apple account — Xcode's signing error becomes Resolve Signing
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-device-team" --output ios-device
+          --signing automatic --team ABCDE12345 --allow-provisioning-updates --trust --expect-failure "Xcode could not sign the app"
+
+      - name: SigningProbe — a Debug distribution archive is refused (the Development Run cannot ship)
+        run: >
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-debug-archive" --output ios-archive
+          --variant Debug --signing unsigned --trust --expect-failure "must be a Release build"
+
+      - name: SigningProbe — Release archive (unsigned, inspection) excludes the Development Run
+        run: |
+          set -o pipefail
+          dotnet run --no-cache tools/mobile-build/mobile-build.cs -- tests/Fixtures/SigningProbe "$OUT/probe-archive" --output ios-archive --signing unsigned --trust | tee "$OUT/probe-archive.txt"
+          grep -q "Development flags excluded: Passed" "$OUT/probe-archive.txt"
+          exe="$(find "$OUT/probe-archive" -path '*Products/Applications/SigningProbe.app/SigningProbe' -type f | head -1)"
+          echo "archived executable: $exe"
+          [ -n "$exe" ]
+          # Every file of the archived app, not only the main executable (a Debug-style .debug.dylib would carry the code).
+          if grep -r -a -l "SIGNINGPROBE-DEVELOPMENT-RUN" "$(dirname "$exe")"; then echo "Release archive contains the Development Run"; exit 1; fi
+          echo "Release archive contains no Development Run code or text."
 
       - name: Upload iOS outputs
         if: always()
@@ -1021,6 +1077,278 @@ jobs:
             ${{ github.workspace }}/swift-out/*/*.json
           if-no-files-found: warn
           retention-days: 7
+
+  build-readiness-go:
+    name: Build Readiness — HCG Server-shaped Go helper contract (missing Go blocked, chosen per project, universal helper, launch; Homebrew install only with approval)
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/readiness-out
+      FIXTURE: tests/Fixtures/AgentHelperApp
+      # What an app opened from Finder gets: no shell PATH, so Go from a toolcache or a custom folder is not visible.
+      FINDER_PATH: /usr/bin:/bin:/usr/sbin:/sbin
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: false
+
+      - name: A real Go 1.25 installed outside every place HCG looks automatically
+        run: |
+          mkdir -p "$OUT/screens"
+          GO_BIN="$(go env GOROOT)/bin/go"
+          echo "GO_BIN=$GO_BIN" >> "$GITHUB_ENV"
+          "$GO_BIN" version
+          PRE="$(ls /opt/homebrew/bin/go /usr/local/bin/go /usr/local/go/bin/go /opt/homebrew/opt/go/libexec/bin/go /usr/local/opt/go/libexec/bin/go "$HOME"/sdk/go*/bin/go 2>/dev/null | head -1 || true)"
+          echo "PRE_GO=$PRE" >> "$GITHUB_ENV"
+          echo "Go already in a standard location on this runner image: ${PRE:-none}"
+          ls -l /opt/homebrew/bin/brew /usr/local/bin/brew 2>&1 || true
+
+      - name: Build HCG and the UI driver
+        run: |
+          dotnet build tools/ui-driver -c Release
+          echo "DOTNET=$(command -v dotnet)" >> "$GITHUB_ENV"
+
+      - name: CLI — Go not reachable — the build is not ready, and the fixes are listed (nothing installed)
+        run: |
+          set -o pipefail
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          rc=0
+          env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/rd-missing" \
+            "$DOTNET" "$app" --build-readiness "$FIXTURE" --json "$OUT/readiness-missing.json" | tee "$OUT/readiness-missing.txt" || rc=$?
+          echo "exit code $rc"
+          grep -q '^swift: Ready' "$OUT/readiness-missing.txt"
+          grep -q '^lipo: Ready' "$OUT/readiness-missing.txt"
+          grep -q 'declared by macos/AgentHelperApp/AppPackaging.json › prebuild “Build the host agent (Go) as a universal helper” requires “go >= 1.25”' "$OUT/readiness-missing.txt"
+          if [ -n "$PRE_GO" ]; then
+            echo "This image already has Go at $PRE_GO: HCG must find it there (Finder-style launch)."
+            grep -q "^go: Ready" "$OUT/readiness-missing.txt"
+            grep -q "using $PRE_GO" "$OUT/readiness-missing.txt"
+          else
+            [ "$rc" = 5 ]
+            grep -q '^go: NotFound' "$OUT/readiness-missing.txt"
+            grep -q 'how to get it: Official Go download — https://go.dev/dl/' "$OUT/readiness-missing.txt"
+            if [ -x /opt/homebrew/bin/brew ]; then grep -q 'install (needs approval): Install with Homebrew (Apple Silicon) — /opt/homebrew/bin/brew install go' "$OUT/readiness-missing.txt"; fi
+            [ ! -e /opt/homebrew/bin/go ] && echo "Nothing was installed by the check."
+          fi
+
+      - name: CLI — a Go location chosen for all projects is verified, saved and used
+        run: |
+          set -o pipefail
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/rd-chosen" \
+            "$DOTNET" "$app" --build-readiness "$FIXTURE" --tool-path "go=$(dirname "$(dirname "$GO_BIN")")" | tee "$OUT/readiness-chosen.txt"
+          v="$("$GO_BIN" version | sed -E 's/.*go([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')"
+          grep -q "^Saved for all projects: Go $v at $GO_BIN" "$OUT/readiness-chosen.txt"
+          grep -q "^go: Ready" "$OUT/readiness-chosen.txt"
+          grep -q "using $GO_BIN (version $v; Chosen in HCG for all projects)" "$OUT/readiness-chosen.txt"
+          grep -q '^READY' "$OUT/readiness-chosen.txt"
+
+      - name: New Build wizard — Start Build stops before compiling, Go is chosen for this project, the build resumes
+        run: |
+          args=(--source "$FIXTURE" --package macos/AgentHelperApp --product AgentHelperApp --name "Agent Helper"
+                --bundle-id com.hakmicapital.agenthelper --version 1.0.0 --build-number 1 --arch universal --formats app,zip
+                --expect-contract-helpers Contents/Helpers/hcg-agent --confirm-contract
+                --output "$OUT/wizard" --screenshots "$OUT/screens" --prefix readiness)
+          if [ -z "$PRE_GO" ]; then args+=(--expect-readiness-blocker go --choose-tool "go=$GO_BIN"); fi
+          env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" TMPDIR="$TMPDIR" \
+            "$DOTNET" tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll "${args[@]}"
+          python3 - "$OUT/wizard/readiness-build.json" "${PRE_GO:-$GO_BIN}" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          go = d["ToolchainVersions"].get("go", "")
+          print("Go recorded by the build:", go)
+          assert sys.argv[2] in go, (go, sys.argv[2])
+          PY
+
+      - name: The universal helper is in the app, both slices run, and the launched app runs its host agent
+        run: |
+          app="$(find "$OUT/wizard/artifacts" -maxdepth 3 -name 'Agent Helper.app' -type d | head -1)"
+          h="$app/Contents/Helpers/hcg-agent"
+          ls -l "$h"
+          archs="$(lipo -archs "$h")"; echo "helper slices: $archs"
+          echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64
+          "$h" version | tee /dev/stderr | grep -qx "hcg-agent 1.0.0 (darwin/arm64)"
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then arch -x86_64 "$h" version | tee /dev/stderr | grep -qx "hcg-agent 1.0.0 (darwin/amd64)"
+          else echo "Rosetta is not installed on this runner: the x86_64 slice is verified with lipo and file only"; file "$h"; fi
+          codesign --verify --strict --deep --verbose=2 "$app"
+          rm -f "$TMPDIR/hcg-agent-helper-probe.txt"
+          tools/ui-driver/verify-macos-app.sh "$app" "$OUT/screens/launch-agent-helper.png" "arm64 x86_64"
+          echo "--- what the launched app's helper printed:"; cat "$TMPDIR/hcg-agent-helper-probe.txt"
+          grep -qx "helper=hcg-agent 1.0.0 (darwin/arm64)" "$TMPDIR/hcg-agent-helper-probe.txt"
+
+      - name: Install Dependency — refused without approval, then Homebrew installs Go only after --approve
+        run: |
+          set -o pipefail
+          if [ -n "$PRE_GO" ] || [ ! -x /opt/homebrew/bin/brew ] || [ -d /opt/homebrew/opt/go ]; then
+            echo "Homebrew Go is already installed or Homebrew is absent on this image: the install path is covered by unit tests only."; exit 0
+          fi
+          app=src/HCG.ExecutableMaker.App/bin/Release/net10.0/HCGExecutableMaker.dll
+          run() { env -i HOME="$HOME" PATH="$FINDER_PATH" DOTNET_ROOT="$DOTNET_ROOT" HCG_EXECUTABLE_MAKER_HOME="$RUNNER_TEMP/rd-install" "$DOTNET" "$app" --build-readiness "$FIXTURE" "$@"; }
+          rc=0; run --install go | tee "$OUT/install-unapproved.txt" || rc=$?
+          [ "$rc" = 4 ]
+          grep -q '^Install command (not run): /opt/homebrew/bin/brew install go$' "$OUT/install-unapproved.txt"
+          [ ! -e /opt/homebrew/bin/go ] && echo "Without --approve nothing was installed."
+          run --install go --approve | tee "$OUT/install-approved.txt"
+          grep -q '^go: Ready' <(sed -n '/^Installed. Checking again:/,$p' "$OUT/install-approved.txt")
+          grep -q 'using /opt/homebrew/bin/go (version .*Homebrew (Apple Silicon)' "$OUT/install-approved.txt"
+
+      - name: Screenshots (JPEG, base64 in the log)
+        if: always()
+        run: |
+          shopt -s nullglob
+          for f in "$OUT"/screens/*.png; do
+            j="${f%.png}.jpg"
+            sips -s format jpeg -s formatOptions 60 -Z 1400 "$f" --out "$j" >/dev/null
+            echo "=====BEGIN-IMG $(basename "$j")====="
+            base64 -i "$j" | tr -d '\n'; echo
+            echo "=====END-IMG====="
+          done
+
+      - name: Upload Build Readiness evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-readiness-go
+          path: |
+            ${{ github.workspace }}/readiness-out/screens
+            ${{ github.workspace }}/readiness-out/*.txt
+            ${{ github.workspace }}/readiness-out/*.json
+            ${{ github.workspace }}/readiness-out/wizard/*.json
+            ${{ github.workspace }}/readiness-out/wizard/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  store-manager:
+    name: HCG Store Manager — Store-shaped fixture (contract product, icon, Info.plist, artwork, sealed app; APP/ZIP/DMG/PKG; GUI launch) and the real repository when read access is configured
+    needs: test
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      OUT: ${{ github.workspace }}/store-manager-out
+      FIXTURE: tests/Fixtures/StoreShapedApp
+      # HCG Store Manager is a private repository: it is built only when this public repository has a read-only token
+      # for it (secret HCG_STORE_MANAGER_READ_TOKEN). Its build log stays in this job; its app is never uploaded.
+      STORE_MANAGER_REPOSITORY: F1r3srp3nt/HCG-Store-Manager
+      STORE_MANAGER_COMMIT: 24454ed595fb09f2ee18585533eb330d50d0a9fc  # HCG-Store-Manager main (PR #1 merged)
+      HAS_STORE_MANAGER_ACCESS: ${{ secrets.HCG_STORE_MANAGER_READ_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Toolchain
+        run: |
+          sw_vers; xcode-select -p; swift --version; xcrun --sdk macosx --show-sdk-version
+          mkdir -p "$OUT/screens"
+
+      - name: Build HCG and the UI driver (real app views, headless)
+        run: dotnet build tools/ui-driver -c Release
+
+      - name: Store-shaped package through the New Build wizard — the contract's app product is preselected (not the CLI); APP, ZIP, DMG, PKG; PKG installed and launched
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$FIXTURE" --package ""
+          --expect-products "ShapeManager,shape-tool" --expect-libraries ShapeKit --expect-tests ShapeKitTests
+          --expect-preselected-product ShapeManager --product ShapeManager
+          --expect-name "Store-shaped Manager" --expect-bundle-id com.hakmicapital.store-shaped --version 1.2.0 --build-number 7
+          --arch arm64 --formats app,zip,dmg,pkg --test-install launch
+          --output "$OUT/shape" --screenshots "$OUT/screens" --prefix shape
+
+      - name: The app is the GUI product with the icon, the Info.plist template, the artwork, a full seal and a launching window
+        run: |
+          app="$(find "$OUT/shape/artifacts" -maxdepth 3 -name 'Store-shaped Manager.app' -type d | head -1)"
+          echo "app: $app"; find "$app" -maxdepth 3 | sed "s#$app#.#" | sort
+          [ "$(ls "$app/Contents/MacOS")" = "ShapeManager" ] && echo "Contents/MacOS holds only the SwiftUI app (no shape-tool)"
+          cmp "$app/Contents/Resources/AppIcon.icns" "$FIXTURE/Assets/AppIcon.icns" && echo "AppIcon.icns is the contract's icon, byte for byte"
+          cmp "$app/Contents/Resources/Brand-512.png" "$FIXTURE/Assets/Branding/Brand-512.png" && echo "Sidebar artwork is in Contents/Resources, byte for byte"
+          plist="$app/Contents/Info.plist"
+          pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
+          [ "$(pb CFBundleIconFile)" = "AppIcon" ]
+          [ "$(pb CFBundleExecutable)" = "ShapeManager" ]
+          [ "$(pb CFBundleIdentifier)" = "com.hakmicapital.store-shaped" ]
+          [ "$(pb CFBundleShortVersionString)" = "1.2.0" ] && [ "$(pb CFBundleVersion)" = "7" ]
+          [ "$(pb LSMinimumSystemVersion)" = "14.0" ]
+          [ "$(pb NSHumanReadableCopyright)" = "Template key kept by HCG: store-shaped fixture" ] && echo "Template keys kept"
+          if ls -d "$app"/*.bundle 2>/dev/null; then echo "Unexpected SwiftPM resource bundle at the app root"; exit 1; fi
+          codesign --verify --strict --deep --verbose=2 "$app" && echo "Fully sealed (no unsealed root content)"
+          for ext in zip dmg pkg; do f="$(find "$OUT/shape/artifacts" -maxdepth 3 -name "*.$ext" | head -1)"; [ -n "$f" ] && ls -l "$f"; done
+          rm -f "$TMPDIR/hcg-store-shaped-probe.txt"
+          tools/ui-driver/verify-macos-app.sh "$app" "$OUT/screens/launch-store-shaped.png" arm64
+          echo "--- what the launched app reported:"; cat "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "window=ShapeManager" "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "artwork=loaded" "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "icon=AppIcon file=present" "$TMPDIR/hcg-store-shaped-probe.txt"
+          grep -qx "bundle=com.hakmicapital.store-shaped" "$TMPDIR/hcg-store-shaped-probe.txt"
+
+      - name: Choosing the command-line product is explained (it is not the app)
+        run: >
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$FIXTURE" --package ""
+          --expect-preselected-product ShapeManager --product shape-tool --expect-product-note "shape-tool is a command-line tool"
+          --name shape-tool --bundle-id com.hakmicapital.shape-tool
+          --version 1.2.0 --build-number 7 --arch arm64 --formats folder,zip
+          --output "$OUT/tool" --screenshots "$OUT/screens" --prefix shape-tool
+
+      - name: HCG Store Manager (private repository) — pending until read access is configured
+        if: env.HAS_STORE_MANAGER_ACCESS != 'true'
+        run: |
+          echo "::notice title=HCG Store Manager regression pending::$STORE_MANAGER_REPOSITORY is private. Add a read-only token for it as the repository secret HCG_STORE_MANAGER_READ_TOKEN to build the real app here (commit $STORE_MANAGER_COMMIT). The Store-shaped fixture above covers the same package shape."
+          echo "HCG Store Manager real-repository build: PENDING (no read access configured)" | tee "$OUT/store-manager-status.txt"
+
+      - name: HCG Store Manager at the pinned commit
+        if: env.HAS_STORE_MANAGER_ACCESS == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.STORE_MANAGER_REPOSITORY }}
+          ref: ${{ env.STORE_MANAGER_COMMIT }}
+          token: ${{ secrets.HCG_STORE_MANAGER_READ_TOKEN }}
+          path: store-manager-src
+          persist-credentials: false
+
+      - name: HCG Store Manager through the New Build wizard — HCGStoreManager preselected; APP, ZIP, DMG, PKG; launched
+        if: env.HAS_STORE_MANAGER_ACCESS == 'true'
+        run: |
+          dotnet tools/ui-driver/bin/Release/net10.0/hcg-ui-driver.dll --source "$GITHUB_WORKSPACE/store-manager-src" --package / \
+            --expect-products "HCGStoreManager,hcg-store-manager" --expect-libraries StoreManagerKit \
+            --expect-preselected-product HCGStoreManager --product HCGStoreManager \
+            --expect-name "HCG Store Manager" --expect-bundle-id com.hakmicapitalgroup.hcg-store-manager --version 0.1.0 --build-number 1 \
+            --arch arm64 --formats app,zip,dmg,pkg \
+            --output "$OUT/store-manager" --screenshots "$OUT/screens" --prefix store-manager
+          app="$(find "$OUT/store-manager/artifacts" -maxdepth 3 -name 'HCG Store Manager.app' -type d | head -1)"
+          [ "$(ls "$app/Contents/MacOS")" = "HCGStoreManager" ]
+          cmp "$app/Contents/Resources/AppIcon.icns" store-manager-src/Assets/AppIcon.icns
+          cmp "$app/Contents/Resources/HCGMark-512.png" store-manager-src/Assets/Branding/HCGMark-512.png
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")" = "AppIcon" ]
+          codesign --verify --strict --deep --verbose=2 "$app"
+          tools/ui-driver/verify-macos-app.sh "$app" "$OUT/screens/launch-hcg-store-manager.png" arm64
+          # Store Manager's own native self-test: static bundle checks, then a launch that visits every section and
+          # finds the icon and sidebar mark through Bundle.main (no TEST Store needed).
+          store-manager-src/scripts/smoke-test-macos-app.sh "$app" "$OUT/store-manager-smoke"
+          cat "$OUT/store-manager-smoke/self-test.json"
+          echo "HCG Store Manager real-repository build: PASSED at $STORE_MANAGER_COMMIT" | tee "$OUT/store-manager-status.txt"
+          rm -rf "$OUT/store-manager/artifacts" store-manager-src   # private: never uploaded from this public repository
+
+      - name: Upload Store-shaped evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: store-manager-shape
+          path: |
+            ${{ github.workspace }}/store-manager-out/screens/shape-*
+            ${{ github.workspace }}/store-manager-out/screens/launch-store-shaped.png
+            ${{ github.workspace }}/store-manager-out/shape/*.txt
+            ${{ github.workspace }}/store-manager-out/shape/*.json
+            ${{ github.workspace }}/store-manager-out/store-manager-status.txt
+          if-no-files-found: warn
+          retention-days: 14
 
   electron-macos:
     name: Electron — Presentation Studio through the New Build wizard (arm64 .app, zip, dmg; launch; packaged-app e2e)

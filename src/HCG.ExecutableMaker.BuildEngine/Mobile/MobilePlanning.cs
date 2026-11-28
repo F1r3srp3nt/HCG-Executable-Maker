@@ -35,6 +35,13 @@ public sealed record MobilePlanInput
     public required string ToolHomeDirectory { get; init; }
     /// <summary>HCG's local debug keystore, when the chosen signing mode needs it. Never a production key.</summary>
     public DebugKeystore? Keystore { get; init; }
+    /// <summary>
+    /// iOS (Xcode): signing build settings decided by the Apple Signing Assistant for this destination. When set, they
+    /// replace the signing-mode defaults; the project's files are never changed.
+    /// </summary>
+    public IReadOnlyList<string>? SigningArguments { get; init; }
+    /// <summary>The build configuration the assistant checked (Debug for simulator/device builds unless chosen otherwise).</summary>
+    public string? Configuration { get; init; }
 }
 
 /// <summary>HCG's generated Android debug keystore. The password is the public Android debug convention, not a secret.</summary>

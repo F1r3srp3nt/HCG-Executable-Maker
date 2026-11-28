@@ -1,0 +1,150 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:bh="using:HCG.ExecutableMaker.BuildEngine.BuildHost"
+             xmlns:c="using:HCG.ExecutableMaker.App.Controls"
+             xmlns:p="using:HCG.ExecutableMaker.App.Views.Pages"
+             x:Class="HCG.ExecutableMaker.App.Views.Pages.BuildHostPanel"
+             x:DataType="vm:BuildHostPanelViewModel">
+  <Grid ColumnDefinitions="*,*">
+    <!-- Left: connection, host, toolchains -->
+    <StackPanel Spacing="12" Margin="0,0,9,0">
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="eyebrow" Text="BUILD PROVIDER" />
+              <TextBlock Classes="h2" Text="HCG Server Build Host" />
+            </StackPanel>
+            <c:StatusChip Grid.Column="1" Status="{Binding ConnectionTag}" VerticalAlignment="Top" />
+          </Grid>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding AccessLabel}" TextWrapping="Wrap" />
+          <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto">
+            <TextBlock Classes="label" Text="ADDRESS" VerticalAlignment="Center" Margin="0,0,12,0" />
+            <TextBox Grid.Column="1" Text="{Binding BaseUrl}" FontFamily="{DynamicResource Hcg.Font.Mono}" />
+            <Button Grid.Column="2" Margin="8,0,0,0" Command="{Binding TestConnectionCommand}" IsEnabled="{Binding !IsTesting}">
+              <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Refresh}" /><TextBlock Text="Test connection" /></StackPanel>
+            </Button>
+            <TextBlock Grid.Row="1" Classes="label" Text="BUILD-CLIENT TOKEN" VerticalAlignment="Center" Margin="0,8,12,0" />
+            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding TokenEntry}" PasswordChar="•"
+                     Watermark="{Binding StoreDescription, StringFormat='Stored in {0}; never shown again'}" />
+            <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal" Margin="8,8,0,0" Spacing="6">
+              <Button Content="Store token" Command="{Binding SaveTokenCommand}" />
+              <Button Classes="ghost" Content="Forget" Command="{Binding ForgetTokenCommand}" IsVisible="{Binding HasToken}" />
+            </StackPanel>
+            <TextBlock Grid.Row="2" Classes="label" Text="PINNED HOST KEY" VerticalAlignment="Center" Margin="0,8,12,0" />
+            <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" Text="{Binding KeyPin}" FontFamily="{DynamicResource Hcg.Font.Mono}"
+                     Watermark="SHA-256 of HCG Server's device key (hcg-agent fingerprint)" />
+          </Grid>
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsTesting}" />
+          <SelectableTextBlock FontSize="12.5" Text="{Binding ConnectionMessage}" TextWrapping="Wrap" />
+          <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding HostSummary}" TextWrapping="Wrap" IsVisible="{Binding IsConnected}" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card" IsVisible="{Binding IsConnected}">
+        <StackPanel Spacing="8">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="h2" Text="Host" />
+            <c:StatusChip Grid.Column="1" Status="{Binding KeyTag}" />
+          </Grid>
+          <SelectableTextBlock FontSize="12.5" Text="{Binding HostIdentity}" TextWrapping="Wrap" />
+          <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding HostKey}" TextWrapping="Wrap" />
+          <Button Classes="small" HorizontalAlignment="Left" Content="Pin this key" Command="{Binding PinKeyCommand}" IsVisible="{Binding CanPinKey}" />
+          <TextBlock Classes="label" Text="TOOLCHAINS ON THE BUILD HOST" Margin="0,6,0,0" />
+          <ItemsControl ItemsSource="{Binding Toolchains}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SummaryRow">
+                <Grid ColumnDefinitions="90,*" Margin="0,2">
+                  <TextBlock Classes="label" Text="{Binding Label}" />
+                  <SelectableTextBlock Grid.Column="1" Classes="mono" FontSize="12" Text="{Binding Value}" TextWrapping="Wrap" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="label" Text="PROVIDERS" Margin="0,6,0,0" />
+          <ItemsControl ItemsSource="{Binding Providers}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SummaryRow">
+                <Grid ColumnDefinitions="110,*" Margin="0,2">
+                  <TextBlock Classes="label" Text="{Binding Label}" />
+                  <SelectableTextBlock Grid.Column="1" FontSize="12" Text="{Binding Value}" TextWrapping="Wrap" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="label" Text="ISOLATION AND LIMITS" Margin="0,6,0,0" />
+          <ItemsControl ItemsSource="{Binding Isolation}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="x:String">
+                <SelectableTextBlock FontSize="12" Text="{Binding}" TextWrapping="Wrap" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding Limits}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card" Padding="14">
+        <StackPanel Spacing="6">
+          <TextBlock Classes="eyebrow" Text="TOOLCHAIN MANAGER" />
+          <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                     Text="What this project needs on this computer. A tool that is missing here can be installed with your approval, located by hand, or used on the Build Host instead (its version is shown next to the requirement)." />
+          <p:BuildReadinessPanel DataContext="{Binding Readiness}" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <!-- Right: project, source, operations, authorization -->
+    <StackPanel Grid.Column="1" Spacing="12" Margin="9,0,0,0">
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="What the Build Host builds" />
+          <TextBlock Classes="label" Text="SOURCE OF THE IMPORTED PROJECT" />
+          <SelectableTextBlock FontSize="12.5" Text="{Binding SourceSummary}" TextWrapping="Wrap" />
+          <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding Commit, StringFormat='Commit {0}'}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" FontSize="12" Text="{Binding RevisionDetail}" TextWrapping="Wrap" />
+          <TextBlock Classes="label" Text="REGISTERED PROJECT ON HCG SERVER" Margin="0,6,0,0" />
+          <ComboBox ItemsSource="{Binding Projects}" SelectedItem="{Binding SelectedProject}" HorizontalAlignment="Stretch" />
+          <TextBlock FontSize="12" Text="{Binding MatchReason}" TextWrapping="Wrap" />
+          <TextBlock FontSize="12" Text="{Binding ProviderState}" TextWrapping="Wrap" />
+          <TextBlock Classes="label" Text="TARGET OPERATING SYSTEMS AND ARCHITECTURES" Margin="0,6,0,0" />
+          <TextBlock FontSize="12.5" Text="{Binding Targets}" TextWrapping="Wrap" />
+          <TextBlock Classes="label" Text="OPERATIONS" Margin="0,6,0,0" />
+          <ItemsControl ItemsSource="{Binding Operations}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:BuildHostOperationChoice">
+                <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding Operation}" FontWeight="SemiBold" />
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding Description}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </CheckBox>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto" Margin="0,4,0,0">
+            <TextBlock Classes="label" Text="CONFIGURATION" VerticalAlignment="Center" Margin="0,0,12,0" IsVisible="{Binding HasConfiguration}" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding Configurations}" SelectedItem="{Binding SelectedConfiguration}" IsVisible="{Binding HasConfiguration}" />
+            <TextBlock Grid.Row="1" Classes="label" Text="PRODUCTS / PACKAGES" VerticalAlignment="Center" Margin="0,8,12,0" />
+            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding Products}" Watermark="optional, comma-separated (provider default: all)" />
+            <TextBlock Grid.Row="2" Classes="label" Text="VERSION" VerticalAlignment="Center" Margin="0,8,12,0" />
+            <TextBox Grid.Row="2" Grid.Column="1" Margin="0,8,0,0" Text="{Binding Version}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="callout warning" Padding="18">
+        <StackPanel Spacing="10">
+          <TextBlock Classes="h2" Text="Authorize this build" />
+          <TextBlock Classes="body secondary" TextWrapping="Wrap"
+                     Text="Nothing is submitted until you authorize this exact build. The Build Host fetches the commit from the source its owner approved; Executable Maker transfers no source files. Changing the project, commit or operations needs a new authorization." />
+          <CheckBox IsChecked="{Binding Authorized}" IsEnabled="{Binding AuthorizationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Text="{Binding AuthorizationText}" TextWrapping="Wrap" FontWeight="SemiBold" />
+          </CheckBox>
+          <TextBlock Classes="warning" FontSize="12.5" Text="{Binding Blocker}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </Grid>
+</UserControl>

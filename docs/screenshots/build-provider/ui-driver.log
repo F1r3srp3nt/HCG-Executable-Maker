@@ -1,0 +1,106 @@
+Host: Linux x64 (Ubuntu 24.04.5 LTS) · footer: .NET SDK 10.0.114 ready
+PASS  Imported folder AgentHelperApp
+Inspection: Swift Package Manager · RequiresDifferentHost — Swift macOS apps are built on a Mac. This computer runs Linux; HCG does not build macOS SwiftUI/AppKit apps on Linux. Import this project in HCG Executable Maker on a Mac with Xcode or the Command Line Tools, or use a macOS CI runner (docs/SWIFT-MACOS.md).
+Build provider offered: Local Machine — Builds on this computer with its own toolchains, after you confirm that you trust the project. Nothing leaves this computer.
+Build provider offered: HCG Server Build Host — Builds on HCG Server's Build Host inside its sandbox. The Build Host checks out a pinned commit from the source its owner approved; Executable Maker sends no source files. You authorize each build here and the HCG Server owner approves it there. Its output is unsigned.
+Build provider offered: GitHub Actions — not available yet — Not available in the New Build wizard yet. A GitHub Actions run is used as evidence in HCG Repo (run ID, artifact and repository); it is not started from here.
+PASS  Build Provider selector: Local Machine · HCG Server Build Host · GitHub Actions (not available yet)
+PASS  Local Machine is the default provider
+Local Machine: can continue to Configure = False
+PASS  GitHub Actions cannot be chosen yet (falls back to Local Machine)
+PASS  HCG Server Build Host: Next is available from Inspect
+Connection: [Token needed] No build-client token is stored. On HCG Server, the owner runs `hcg-agent build client add executable-maker` and gives you the token it prints once; enter it here (it goes to this session only (the system keyring could not be reached: Cannot autolaunch D-Bus without X11 $DISPLAY), never to a file).
+PASS  Without a token nothing can be submitted: Connect to HCG Server's Build Host first (Test connection).
+PASS  The token field is cleared after storing (the token is never shown again)
+Token stored in this session only (the system keyring could not be reached: Cannot autolaunch D-Bus without X11 $DISPLAY); connection: [Connected] Connected to http://127.0.0.1:7600/buildhost/v1/ (hcg.buildhost/1) · isolation landlock (enforced) · 1 registered project(s) · queue 0.
+PASS  Connected to HCG Server's Build Host: Connected to http://127.0.0.1:7600/buildhost/v1/ (hcg.buildhost/1) · isolation landlock (enforced) · 1 registered project(s) · queue 0.
+Host: hcg.buildhost/1 · isolation landlock (enforced) · queue 0
+Identity: Device, operating system and architecture are read from the signed provenance of the first verified build (hcg.buildhost/1's status does not include them).
+Build Host toolchain dotnet: 10.0.114 · /usr/bin/dotnet
+Build Host toolchain git: git version 2.43.0 · /usr/bin/git
+Build Host toolchain go: go version go1.25.4 linux/amd64 · /opt/hcg-buildhost-go/bin/go
+Build Host toolchain node: v22.23.4 · /opt/node22/bin/node
+Build Host toolchain npm: 10.9.9 · /opt/node22/bin/npm
+Build Host toolchain python3: Python 3.13.18 · /usr/local/bin/python3
+Build Host provider dotnet: available — toolchain found
+Build Host provider go: available — toolchain found
+Build Host provider node: available — toolchain found
+Build Host provider python: available — toolchain found
+Build Host provider swiftpm: unavailable — swift was not found on this computer
+Build Host provider xcode: unavailable — xcodebuild was not found on this computer
+Build Host provider github-actions: unavailable — interchangeable remote provider used by Executable Maker directly; the Build Host does not run it
+Registered project: HCG Agent Helper (fixture) (agent-helper) · go · matches this project — SameWorkingCopy: The owner approved this working copy (/home/user/HCG-Executable-Maker) and folder tests/Fixtures/AgentHelperApp as the project's source.
+Source: F1r3srp3nt/HCG-Executable-Maker · tests/Fixtures/AgentHelperApp · working copy /home/user/HCG-Executable-Maker · commit 0dfa2dc634f9d4601765b2900da1bd4c960d545e · Up to date: the original folder is still at 0dfa2dc634f9 (feature/device-development-builds).
+PASS  The registered project matching the imported one is selected: agent-helper (The owner approved this working copy (/home/user/HCG-Executable-Maker) and folder tests/Fixtures/AgentHelperApp as the project's source.)
+PASS  Pinned commit from the import record: 0dfa2dc634f9d4601765b2900da1bd4c960d545e
+Targets: the Build Host's own operating system and architecture (shown after its first verified build)
+Provider: go provider available on the Build Host: go version go1.25.4 linux/amd64.
+PASS  The project's provider is available on the Build Host
+Toolchain Manager: Swift [Not found] —
+Toolchain Manager: Go [Incompatible version] — · remote: HCG Server Build Host (http://127.0.0.1:7600/buildhost/v1/) has Go go version go1.25.4 linux/amd64. The Build Host checks out the repository commit its owner approved on HCG Server; Executable Maker sends no source files. Nothing starts until the owner approves the job.
+Toolchain Manager: lipo [Other host] —
+Toolchain Manager: .NET SDK [Ready] /usr/bin/dotnet · version 10.0.114 · System package · on PATH
+PASS  Toolchain Manager offers the Build Host's go for a requirement this computer does not meet
+Operations: build, test, package
+PASS  Nothing is submitted before explicit authorization: Authorize this build (the checkbox above) to submit it.
+Authorization: I authorize HCG Server's Build Host at http://127.0.0.1:7600 to fetch commit 0dfa2dc634f9 of F1r3srp3nt/HCG-Executable-Maker (tests/Fixtures/AgentHelperApp) from the source its owner approved (/home/user/HCG-Executable-Maker), and to run build, test, package with the go provider inside its sandbox. Executable Maker sends no source files. The owner must still approve the job on HCG Server. The output is unsigned.
+PASS  The authorization names the commit and states that no source files are sent
+PASS  Authorized: Start Build on HCG Server is enabled
+Submitted: Job bj-20261127-140614-090dc731e2 · awaiting-approval · Waiting for approval on HCG Server (hcg-agent build approve bj-20261127-140614-090dc731e2 --confirm bj-20261127-140614-090dc731e2). Executable Maker cannot approve jobs; Cancel Build withdraws it.
+PASS  The wizard shows that the job waits for the owner's approval on HCG Server
+PASS  The authorization was used for this submission (a new build needs a new one)
+Result: Succeeded · 2 artifact(s) built on HCG Server's Build Host and verified here (checksums, signed provenance, the Build Host's validation). Unsigned: the Build Host never signs.
+  build-provider: hcg-server-build-host
+  buildhost-approved-by: owner
+  buildhost-device: buildhost-demo (dev_ba6b1d23986599820426, linux/amd64, hcg-agent 0.1.0)
+  buildhost-isolation: landlock (enforced)
+  buildhost-job: bj-20261127-140614-090dc731e2
+  buildhost-key: e8ff884ad1ea88c9e3f269550c772ef8c8fba363990a84c909a3262a846b15f0
+  buildhost:go: go version go1.25.4 linux/amd64
+  hcg-executable-maker: 0.4.0
+Evidence Provider: HCG Server Build Host (hcg-server-build-host) · landlock (enforced)
+Evidence Job: bj-20261127-140614-090dc731e2 · succeeded · approved by owner at 2026-11-27 14:06:20
+Evidence Step build: go build -trimpath ./... · exit 0 · 5.6s · peak 269 MB · CPU 5.4s
+Evidence Step test: go test -json -count=1 ./... · exit 0 · 6.2s · peak 285 MB · CPU 5.2s
+Evidence Step package: go build -trimpath -o <hcg-server-data>/buildhost/workspaces/bj-20261127-140614-090dc731e2/out/bin/ ./... · exit 0 · 0.3s · peak 0 MB · CPU 0.0s
+Evidence Provenance: Verified ES256 signature (hcg.buildhost.provenance/1) issued 2026-11-27 14:06:33
+Evidence Host key: ! Signed by HCG Server key E8FF 884A D1EA 88C9 E3F2 6955 0C77 2EF8 C8FB A363 990A 84C9 09A3 262A 846B 15F0. No key is pinned yet: compare it with `hcg-agent fingerprint` on HCG Server, then pin it so a different key is refused.
+Evidence Build Host: buildhost-demo (dev_ba6b1d23986599820426) · linux/amd64 · hcg-agent 0.1.0
+Evidence Source: F1r3srp3nt/HCG-Executable-Maker @ 0dfa2dc634f9d4601765b2900da1bd4c960d545e · tree 4e167b9e818c6d42ca8801d71ed4c6d6bbe514c4 · clean · from /home/user/HCG-Executable-Maker
+Evidence Toolchain: go version go1.25.4 linux/amd64
+Evidence Validation: passed · 12 check(s)
+Evidence Artifact: hcg-agent · 2,264,146 bytes · SHA-256 1c5ec0ba41ea1f633fea20b862997386640ad17ca29ca7e3d24cd5720ef496e8 · Passed
+Evidence Release Passport: hcg-agent.release-passport.json · build.provider hcg-server-build-host, run_id null, signing unsigned
+Evidence Artifact: build.log · 1,307 bytes · SHA-256 6cce127255bf2b54c1e06812bdacc267d8477d1b4773f4b9c40b6119f49e491c · Passed
+Evidence HCG Repo evidence: hcg-server-build-host · F1r3srp3nt/HCG-Executable-Maker@0dfa2dc634f9 · go version go1.25.4 linux/amd64 · built 2026-11-27T14:06:33Z · no CI run
+Evidence Contract file: <maker-data>/builds/8cd20b4bcb65435a9b852880c74418a2/native-build-request.json
+Evidence Contract file: <maker-data>/builds/8cd20b4bcb65435a9b852880c74418a2/native-build-result.json
+Evidence Contract file: <maker-data>/builds/8cd20b4bcb65435a9b852880c74418a2/buildhost-provenance.json
+Evidence Contract file: <maker-data>/builds/8cd20b4bcb65435a9b852880c74418a2/buildhost-validation.json
+PASS  Build Host build succeeded
+PASS  Results step shown
+PASS  Signed provenance verified (key e8ff884ad1ea88c9e3f269550c772ef8c8fba363990a84c909a3262a846b15f0)
+PASS  The Build Host's validation report passed
+PASS  Every artifact verified (checksum three ways, listed in the signed provenance, validated)
+PASS  Downloaded hcg-agent matches SHA-256 1c5ec0ba41ea1f633fea20b862997386640ad17ca29ca7e3d24cd5720ef496e8
+PASS  Downloaded build.log matches SHA-256 6cce127255bf2b54c1e06812bdacc267d8477d1b4773f4b9c40b6119f49e491c
+PASS  Release Passport written for the distributable output: hcg-agent.release-passport.json
+PASS  hcg-agent.release-passport.json: build.provider hcg-server-build-host, run_id null
+PASS  Wrote native-build-request.json
+PASS  Wrote native-build-result.json
+PASS  Wrote buildhost-provenance.json
+PASS  Wrote buildhost-validation.json
+PASS  native-build-request.json names provider hcg-server-build-host (the shared contract, no parallel protocol)
+PASS  Unsigned output is not marked distribution-ready and Ship to Store is not offered
+PASS  Each artifact records that it is unsigned
+Host key: [Verified, not pinned] Signed by HCG Server key E8FF 884A D1EA 88C9 E3F2 6955 0C77 2EF8 C8FB A363 990A 84C9 09A3 262A 846B 15F0. No key is pinned yet: compare it with `hcg-agent fingerprint` on HCG Server, then pin it so a different key is refused.
+PASS  The Build Host's identity is remembered from the verified provenance (device, OS/arch, isolation, key)
+Pinned: [Pinned key verified] Signed by the pinned HCG Server key E8FF 884A D1EA 88C9 E3F2 6955 0C77 2EF8 C8FB A363 990A 84C9 09A3 262A 846B 15F0.
+PASS  Host key fingerprint pinned and verified: Signed by the pinned HCG Server key E8FF 884A D1EA 88C9 E3F2 6955 0C77 2EF8 C8FB A363 990A 84C9 09A3 262A 846B 15F0.
+PASS  Adjust & Rebuild returns to the Build Host panel
+PASS  A new submission needs a new authorization: Authorize this build (the checkbox above) to submit it.
+Second submission: Job bj-20261127-140635-a330a0ac16 · awaiting-approval
+PASS  Cancel Build in the wizard: Cancelled — Cancelled in Executable Maker.
+PASS  Job bj-20261127-140635-a330a0ac16 is cancelled on HCG Server too (cancelled)
+Report: <out>/buildhost-ui-report.json
+UI DRIVER: PASSED

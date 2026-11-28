@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:HCG.ExecutableMaker.App.ViewModels"
+             xmlns:p="using:HCG.ExecutableMaker.App.Views.Pages"
              xmlns:c="using:HCG.ExecutableMaker.App.Controls"
              x:Class="HCG.ExecutableMaker.App.Views.Pages.BuildWizardView"
              x:DataType="vm:BuildWizardViewModel">
@@ -201,6 +202,12 @@
                     <ComboBox ItemsSource="{Binding BuildRouteOptions}" SelectedItem="{Binding SelectedBuildRoute}" HorizontalAlignment="Stretch" />
                     <TextBlock Classes="muted" FontSize="12" Text="{Binding BuildRouteDescription}" TextWrapping="Wrap" />
                   </StackPanel>
+                  <!-- Build Provider: where the build runs. HCG Server's Build Host builds with its own predefined operations (Inspect → Build). -->
+                  <StackPanel Spacing="6">
+                    <TextBlock Classes="formlabel" Text="Build provider" Margin="0" />
+                    <ComboBox ItemsSource="{Binding BuildProviderOptions}" SelectedItem="{Binding SelectedBuildProvider}" HorizontalAlignment="Stretch" />
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding BuildProviderDescription}" TextWrapping="Wrap" />
+                  </StackPanel>
                   <TextBlock Classes="body secondary" Text="{Binding Analysis.SupportSummary, FallbackValue=''}" />
                   <Button Classes="primary" HorizontalAlignment="Left" Margin="0,8,0,0" Command="{Binding OpenInMobileStudioCommand}" IsVisible="{Binding IsMobileProject}">
                     <StackPanel Orientation="Horizontal" Spacing="8"><PathIcon Data="{StaticResource Icon.Mobile}" /><TextBlock Text="Open in Mobile Build Studio" /></StackPanel>
@@ -286,6 +293,9 @@
                           </DataTemplate>
                         </ComboBox.ItemTemplate>
                       </ComboBox>
+                      <Border Classes="callout" Padding="10" IsVisible="{Binding SwiftProductNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <SelectableTextBlock FontSize="12.5" Text="{Binding SwiftProductNote}" TextWrapping="Wrap" />
+                      </Border>
                       <Grid ColumnDefinitions="170,*" Margin="0,4,0,0">
                         <TextBlock Classes="label" Text="Library products" />
                         <SelectableTextBlock Grid.Column="1" Text="{Binding SwiftLibrariesText}" FontSize="13" TextWrapping="Wrap" />
@@ -1347,6 +1357,26 @@
               </Grid>
             </Border>
 
+            <!-- HCG Server Build Host: provenance, host key, artifact hashes and Release Passport evidence. -->
+            <Border Classes="card" IsVisible="{Binding HasProviderEvidence}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="h2" Text="Build provenance and evidence" />
+                <Border Classes="callout warning" Padding="10" IsVisible="{Binding DistributionReadiness, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                  <SelectableTextBlock FontSize="12.5" FontWeight="SemiBold" Text="{Binding DistributionReadiness}" TextWrapping="Wrap" />
+                </Border>
+                <ItemsControl ItemsSource="{Binding ProviderEvidence}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SummaryRow">
+                      <Grid ColumnDefinitions="150,*" Margin="0,3">
+                        <TextBlock Classes="label" Text="{Binding Label}" />
+                        <SelectableTextBlock Grid.Column="1" Classes="mono" FontSize="12" Text="{Binding Value}" TextWrapping="Wrap" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
             <Border Classes="card" IsVisible="{Binding ShowDistributionSteps}">
               <StackPanel Spacing="10">
                 <TextBlock Classes="h2" Text="Distribution steps" />
@@ -1480,7 +1510,18 @@
 
       <!-- STEP 5 · BUILD (log fills the remaining height) -->
       <Grid RowDefinitions="Auto,*" IsVisible="{Binding IsBuildStep}">
-        <ScrollViewer MaxHeight="430" IsVisible="{Binding ShowTrustPanel}">
+        <ScrollViewer IsVisible="{Binding ShowBuildHostPanel}">
+          <StackPanel Spacing="12" Margin="0,0,6,0">
+            <p:BuildHostPanel DataContext="{Binding BuildHost}" />
+            <Button Classes="primary" HorizontalAlignment="Left" Command="{Binding StartBuildOnHostCommand}" IsEnabled="{Binding BuildHost.CanStart}">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <PathIcon Data="{StaticResource Icon.Play}" />
+                <TextBlock Text="Start Build on HCG Server" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+        </ScrollViewer>
+        <ScrollViewer MaxHeight="430" IsVisible="{Binding ShowLocalBuildPanel}">
           <Grid ColumnDefinitions="*,*" Margin="0,0,6,0">
             <Border Classes="callout warning" Margin="0,0,9,0" Padding="20">
               <StackPanel Spacing="10">
@@ -1505,6 +1546,9 @@
                     <TextBlock Text="Start Build" />
                   </StackPanel>
                 </Button>
+                <Border Classes="card" Padding="14" IsVisible="{Binding ShowReadiness}">
+                  <p:BuildReadinessPanel DataContext="{Binding Readiness}" />
+                </Border>
               </StackPanel>
             </Border>
             <Border Grid.Column="1" Classes="card" Margin="9,0,0,0">
@@ -1531,6 +1575,10 @@
               <TextBlock Classes="eyebrow" Text="BUILD IN PROGRESS" />
               <TextBlock Classes="h2" Text="{Binding CurrentStage}" />
               <ProgressBar IsIndeterminate="True" MaxWidth="520" HorizontalAlignment="Left" Width="520" />
+              <SelectableTextBlock Classes="mono" FontSize="12" Text="{Binding BuildHostJob}" IsVisible="{Binding UsesBuildHost}" TextWrapping="Wrap" />
+              <Border Classes="callout warning" Padding="10" IsVisible="{Binding IsAwaitingApproval}" MaxWidth="760" HorizontalAlignment="Left">
+                <SelectableTextBlock FontSize="12.5" Text="{Binding AwaitingApproval}" TextWrapping="Wrap" />
+              </Border>
             </StackPanel>
             <StackPanel Grid.Column="1" Spacing="2" Margin="18,0" VerticalAlignment="Center">
               <TextBlock Classes="label" Text="ELAPSED" />

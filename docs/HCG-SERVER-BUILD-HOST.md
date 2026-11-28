@@ -4,6 +4,9 @@ HCG Server's Build Host compiles and tests HCG applications on the owner's own c
 (Seatbelt on macOS, Landlock on Linux). The contract is `hcg.buildhost/1`, documented in HCG Server's
 `docs/BUILD-HOST.md` (HCG-Server commit 417a9cd).
 
+In the app it is chosen in the New Build wizard: **Build provider › HCG Server Build Host**
+([BUILD-PROVIDERS.md](BUILD-PROVIDERS.md)). From the command line it is `--build-host`.
+
 In Executable Maker it is an `IBuildHost` of kind `HcgServerHost` (`HcgServerBuildHost`), next to `LocalBuildHost`
 ([BUILD-HOSTS.md](BUILD-HOSTS.md)). It is the second provider of the native build-provider contract
 ([contracts/NATIVE-BUILD-PROVIDER.md](contracts/NATIVE-BUILD-PROVIDER.md)).

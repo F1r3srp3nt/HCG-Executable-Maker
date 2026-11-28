@@ -61,20 +61,45 @@ public sealed record HcgBuildHostSettings
 public sealed class BuildHostCredentials(ISecureCredentialStore store)
 {
     public const string Account = "buildhost-client-token";
-    public string StoreDescription => store.Description;
-    public bool IsPersistent => store.IsPersistent;
+    // The OS store exists but cannot be reached (a locked keyring, no D-Bus session): the token is kept in memory for
+    // this run only, as when there is no OS store at all, and the panel says so. Never written to a file.
+    private SessionOnlyCredentialStore? _fallback;
+    private string? _problem;
 
-    public Task<string?> ReadAsync(CancellationToken ct = default) => store.ReadAsync(Account, ct);
+    public string StoreDescription => _fallback is null ? store.Description : $"this session only (the system keyring could not be reached: {_problem})";
+    public bool IsPersistent => _fallback is null && store.IsPersistent;
 
-    public Task SaveAsync(string token, CancellationToken ct = default)
+    public async Task<string?> ReadAsync(CancellationToken ct = default)
+    {
+        if (_fallback is { } f) return await f.ReadAsync(Account, ct).ConfigureAwait(false);
+        try { return await store.ReadAsync(Account, ct).ConfigureAwait(false); }
+        catch (InvalidOperationException ex) { UseFallback(ex); return null; }
+    }
+
+    public async Task SaveAsync(string token, CancellationToken ct = default)
     {
         token = token.Trim();
         if (token.Length is < 16 or > 512 || token.Any(char.IsWhiteSpace))
             throw new ArgumentException("That is not a Build Host client token (hcg-agent build client add executable-maker prints it once).");
-        return store.WriteAsync(Account, token, ct);
+        if (_fallback is null)
+            try { await store.WriteAsync(Account, token, ct).ConfigureAwait(false); return; }
+            catch (InvalidOperationException ex) { UseFallback(ex); }
+        await _fallback!.WriteAsync(Account, token, ct).ConfigureAwait(false);
     }
 
-    public Task ForgetAsync(CancellationToken ct = default) => store.DeleteAsync(Account, ct);
+    public async Task ForgetAsync(CancellationToken ct = default)
+    {
+        if (_fallback is { } f) await f.DeleteAsync(Account, ct).ConfigureAwait(false);
+        try { await store.DeleteAsync(Account, ct).ConfigureAwait(false); }
+        catch (InvalidOperationException ex) { UseFallback(ex); }
+    }
+
+    private void UseFallback(InvalidOperationException ex)
+    {
+        _fallback ??= new SessionOnlyCredentialStore();
+        _problem = SecretRedactor.Redact(ex.Message.Replace("The keyring could not read the HCG session: ", "", StringComparison.Ordinal)
+            .Replace("The keyring could not store the HCG session: ", "", StringComparison.Ordinal).Replace("The keyring could not delete the HCG session: ", "", StringComparison.Ordinal));
+    }
 }
 
 /// <summary>A provenance document whose ES256 signature verified, with the key that signed it.</summary>

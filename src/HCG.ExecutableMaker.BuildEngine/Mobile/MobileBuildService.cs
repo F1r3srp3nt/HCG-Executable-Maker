@@ -26,7 +26,7 @@ public sealed record MobileBuildRequest
 /// (archive inspection → export | bundletool) → copy to output → verify → checksum → persist.
 /// A build succeeds only when every command exits 0, at least one fresh product is found, and no verification fails.
 /// </summary>
-public sealed class MobileBuildService(
+public sealed partial class MobileBuildService(
     IBuildWorker worker,
     IToolchainService toolchains,
     IBuildRepository builds,
@@ -34,7 +34,8 @@ public sealed class MobileBuildService(
     IAppPaths paths,
     TimeProvider time,
     ILogger<MobileBuildService>? logger = null,
-    HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck? signingCheck = null)
+    HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck? signingCheck = null,
+    HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService? signingAssistant = null)
 {
     private readonly ILogger _logger = logger ?? NullLogger<MobileBuildService>.Instance;
 
@@ -47,6 +48,7 @@ public sealed class MobileBuildService(
         MobileOutput.AndroidAabToApk => "android-apks",
         MobileOutput.IosSimulatorApp => "ios-simulator",
         MobileOutput.IosArchive => "ios-archive",
+        MobileOutput.IosDeviceApp => "ios-device",
         _ => "ios-ipa",
     };
 
@@ -146,6 +148,15 @@ public sealed class MobileBuildService(
                     lock (build.Messages) first = build.Messages.Skip(errorsBefore).FirstOrDefault(m => m.Severity == DiagnosticSeverity.Error && !m.Text.Contains("** ", StringComparison.Ordinal) && !m.Text.StartsWith("FAILURE:", StringComparison.Ordinal))
                                                   ?? build.Messages.Skip(errorsBefore).FirstOrDefault(m => m.Severity == DiagnosticSeverity.Error);
                     var bundle = step.Process.Arguments.SkipWhile(a => a != "-resultBundlePath").Skip(1).FirstOrDefault();
+                    // A signing failure (no team, certificate, profile or registered device) offers Resolve Signing.
+                    var signingFailures = options.Output.Platform() == TargetPlatform.IOS
+                        ? HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningFailures.Classify(build.Messages.Skip(errorsBefore).Select(m => m.Text).ToList())
+                        : [];
+                    foreach (var f in signingFailures)
+                        AddMessage(new BuildMessage(DiagnosticSeverity.Error, $"{f.Explanation} {f.Remedy}", HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode));
+                    if (signingFailures.Count > 0)
+                        throw new StepFailedException($"{step.Title} failed: Xcode could not sign the app. " + string.Join(" ", signingFailures.Select(f => f.Explanation + " " + f.Remedy)) +
+                            $"\nComplete log: {build.LogPath}" + (bundle is not null && Directory.Exists(bundle) ? $"\nResult bundle: {bundle}" : ""));
                     throw new StepFailedException($"{step.Title} failed with exit code {result.ExitCode}." +
                         (first is null ? " No error line was recognized; see the complete log." : $"\nFirst error: {(first.File is null ? "" : first.File + (first.Line is { } ln ? $":{ln}" : "") + ": ")}{parser.Describe(first)}") +
                         $"\nComplete log: {build.LogPath}" + (bundle is not null && Directory.Exists(bundle) ? $"\nResult bundle: {bundle}" : ""));
@@ -168,12 +179,35 @@ public sealed class MobileBuildService(
 
             var analysis = request.Project.Analysis?.Mobile;
             var artifactInput = options.InputArtifact is not null;
+            string? iosConfiguration = null;
+            IReadOnlyList<string>? iosSigningArguments = null;
             if (!artifactInput)
             {
                 if (analysis is null) throw new BuildValidationException("This project was not recognized as a mobile project. Re-inspect it or import a supported Android/iOS/Flutter/.NET MAUI project.");
                 var option = MobileCapabilities.Evaluate(analysis, report).FirstOrDefault(x => x.Output == options.Output)
                              ?? throw new BuildValidationException($"{options.Output.DisplayName()} does not apply to this project.");
-                if (!option.IsAvailable) throw new BuildValidationException($"{options.Output.DisplayName()} is not available: {option.Reason}");
+                // The Apple Signing Assistant (below) decides signing for native Xcode iOS projects in full: team, identity,
+                // profile and devices, and whether Xcode-managed provisioning (authorized) can create what is missing.
+                // A signing gap found by the generic capability check is left to it, so it is reported with its remedy
+                // (Resolve Signing) and after the build's own verification, never as a dead end before it.
+                var assistantDecidesSigning = options.Framework == MobileFramework.NativeIos && signingAssistant is not null
+                                              && report.Host.Platform == TargetPlatform.MacOS && analysis.Ios is not null;
+                string? deferredSigningGap = null;
+                if (!option.IsAvailable)
+                {
+                    var signingGap = options.Output.Platform() == TargetPlatform.IOS && option.Reason is { } why && SigningReason().IsMatch(why);
+                    if (signingGap && assistantDecidesSigning)
+                    {
+                        deferredSigningGap = option.Reason;
+                        Log(BuildLogKind.Warning, $"{options.Output.DisplayName()}: {option.Reason} The Apple Signing Assistant checks this build's signing next.");
+                    }
+                    else
+                    {
+                        if (signingGap)
+                            AddMessage(new BuildMessage(DiagnosticSeverity.Error, option.Reason!, HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode));
+                        throw new BuildValidationException($"{options.Output.DisplayName()} is not available: {option.Reason}");
+                    }
+                }
                 // Apple signing: validate what this Mac can check before xcodebuild starts (keychain, verified profiles,
                 // team, bundle IDs, entitlements, devices). Checks that need Apple's services are logged as not verified.
                 if (signingCheck is not null
@@ -184,6 +218,12 @@ public sealed class MobileBuildService(
                         throw new BuildValidationException("Signing is not ready: " + string.Join(" ", signing.Failures.Select(f =>
                             $"{f.Title}{(f.Target is { } t ? $" ({t})" : "")}: {f.Detail}{(f.Remedy is { } r ? " Fix: " + r : "")}")));
                 }
+                // Apple Signing Assistant (native Xcode iOS projects): before anything compiles, read the project's
+                // effective build settings and decide how this destination is signed. Simulator builds need no team;
+                // device builds need Apple Development signing; distribution builds must be Release.
+                if (assistantDecidesSigning)
+                    (iosConfiguration, iosSigningArguments) = await PlanAppleSigningAsync(request, options, analysis, report, build, Log, AddMessage, deferredSigningGap, overall.Token).ConfigureAwait(false);
+
             }
             else if (options.Output != MobileOutput.AndroidAabToApk)
                 throw new BuildValidationException("Only AAB → APK can start from an existing artifact.");
@@ -205,6 +245,7 @@ public sealed class MobileBuildService(
             {
                 Options = options, Analysis = analysis ?? new MobileAnalysis { Framework = options.Framework }, SourceDirectory = sourceDir,
                 WorkDirectory = workDir, Toolchains = report, Environment = scrub.Environment, ToolHomeDirectory = toolHome, Keystore = keystore,
+                SigningArguments = iosSigningArguments, Configuration = iosConfiguration,
             };
             var startedUtc = time.GetUtcNow().UtcDateTime.AddSeconds(-2);
             var products = new List<(PackagingFormat Format, string Path)>();
@@ -444,6 +485,111 @@ public sealed class MobileBuildService(
     /// Creates HCG's local Android debug keystore once (JDK keytool, conventional debug alias/password). It lives in
     /// HCG's app data, never in a project or repository, and is never used for production signing.
     /// </summary>
+    /// <summary>
+    /// Apple Signing Assistant step: xcodebuild -showBuildSettings for the destination and configuration, then the
+    /// signing plan. A plan that is not ready stops the build before compilation with Resolve Signing.
+    /// </summary>
+    private async Task<(string Configuration, IReadOnlyList<string> Arguments)> PlanAppleSigningAsync(MobileBuildRequest request, MobileBuildOptions options, MobileAnalysis analysis,
+        ToolchainReport report, BuildRecord build, Action<BuildLogKind, string> log, Action<BuildMessage> addMessage, string? signingGap, CancellationToken ct)
+    {
+        var destination = AppleDestinations.Of(options);
+        var configuration = options.Variant ?? destination.DefaultConfiguration();
+        MobileArgs.RequireToken(configuration, "configuration", out configuration);
+        var sourceDir = PathGuard.GetRealPath(request.Project.SourceDirectory);
+        var probeInput = new MobilePlanInput
+        {
+            Options = options, Analysis = analysis, SourceDirectory = sourceDir, WorkDirectory = Path.GetTempPath(), Toolchains = report,
+            Environment = new Dictionary<string, string>(), ToolHomeDirectory = Path.GetTempPath(),
+        };
+        var c = XcodePlanner.ResolveContainer(probeInput);
+        var output = new StringBuilder();
+        var spec = new ProcessSpec
+        {
+            Executable = XcodePlanner.Xcodebuild(probeInput), WorkingDirectory = sourceDir, Timeout = HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService.SettingsTimeout,
+            Arguments = HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService.SettingsArguments(c.Flag, c.Path, c.Scheme, configuration, destination),
+            Environment = worker.CreateEnvironment().Environment,
+        };
+        log(BuildLogKind.Info, $"Apple Signing Assistant: {destination.Label()} · configuration {configuration} · reading the effective build settings");
+        log(BuildLogKind.Command, spec.DisplayCommand);
+        var result = await worker.RunAsync(spec, (stream, line) => { if (stream == OutputStream.StdOut) lock (output) output.AppendLine(line); }, ct).ConfigureAwait(false);
+        HCG.ExecutableMaker.BuildEngine.Signing.XcodeTargetSettings? app = null;
+        if (result.ExitCode == 0) app = HCG.ExecutableMaker.BuildEngine.Signing.XcodeBuildSettings.App(HCG.ExecutableMaker.BuildEngine.Signing.XcodeBuildSettings.Parse(output.ToString()));
+        if (app is null) log(BuildLogKind.Warning, "The effective build settings could not be read; signing is checked from HCG's settings only.");
+        else log(BuildLogKind.Info, $"Effective settings of {app.Target}: PRODUCT_BUNDLE_IDENTIFIER={app.BundleIdentifier ?? "(empty)"} · DEVELOPMENT_TEAM={app.Team ?? "(empty)"} · CODE_SIGN_STYLE={app.Style ?? "(default)"}" +
+                                         (app.EntitlementsFile is { } ent ? $" · CODE_SIGN_ENTITLEMENTS={ent}" : "") + (app.CompilationConditions is { } cc ? $" · SWIFT_ACTIVE_COMPILATION_CONDITIONS={cc}" : ""));
+        // What this build is: its source commit, and its compilation flags compared with the other configuration
+        // (flags in Debug but not in Release are the project's development-only flags, e.g. a Development Run).
+        var other = configuration.Contains("debug", StringComparison.OrdinalIgnoreCase) ? "Release" : "Debug";
+        var otherConfig = analysis.Ios?.Configurations.FirstOrDefault(x => string.Equals(x, other, StringComparison.OrdinalIgnoreCase));
+        HCG.ExecutableMaker.BuildEngine.Signing.XcodeTargetSettings? otherApp = null;
+        if (otherConfig is not null)
+        {
+            var otherOutput = new StringBuilder();
+            var otherResult = await worker.RunAsync(spec with { Arguments = HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService.SettingsArguments(c.Flag, c.Path, c.Scheme, otherConfig, destination) },
+                (stream, line) => { if (stream == OutputStream.StdOut) lock (otherOutput) otherOutput.AppendLine(line); }, ct).ConfigureAwait(false);
+            if (otherResult.ExitCode == 0) otherApp = HCG.ExecutableMaker.BuildEngine.Signing.XcodeBuildSettings.App(HCG.ExecutableMaker.BuildEngine.Signing.XcodeBuildSettings.Parse(otherOutput.ToString()));
+        }
+        var debugIsBuilt = configuration.Contains("debug", StringComparison.OrdinalIgnoreCase);
+        var developmentOnly = HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.DevelopmentOnlyFlags(debugIsBuilt ? app : otherApp, debugIsBuilt ? otherApp : app);
+        var verification = HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.Source(request.Project, options.ExpectedSourceCommit)
+            .Concat(HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.CompilationFlags(destination, configuration, app, developmentOnly, options.ExpectedCompilationFlags))
+            .ToList();
+        foreach (var v in verification)
+            log(v.Outcome switch
+            {
+                SigningCheckOutcome.Failed => BuildLogKind.Error,
+                SigningCheckOutcome.Warning => BuildLogKind.Warning,
+                SigningCheckOutcome.Passed => BuildLogKind.Success,
+                _ => BuildLogKind.Info,
+            }, $"Verify · {v.Title}: {v.Outcome} — {v.Detail}" + (v.Remedy is { } vr && v.Outcome == SigningCheckOutcome.Failed ? " Fix: " + vr : ""));
+        if (ImportRevisions.Read(request.Project)?.Commit is { } sourceCommit) build.ToolchainVersions["source-commit"] = sourceCommit;
+        if (app?.CompilationConditions is { } conditions) build.ToolchainVersions["compilation-conditions"] = string.Join(" ", HCG.ExecutableMaker.BuildEngine.Signing.DevelopmentBuildVerification.Flags(conditions).Order(StringComparer.Ordinal));
+        build.ToolchainVersions["development-only-flags"] = developmentOnly.Count == 0 ? "(none)" : string.Join(" ", developmentOnly);
+        foreach (var v in verification.Where(v => v.Outcome == SigningCheckOutcome.Passed))
+            addMessage(new BuildMessage(DiagnosticSeverity.Info, $"{v.Title}: {v.Detail}", VerifyCode));
+        if (verification.Where(v => v.Outcome == SigningCheckOutcome.Failed).ToList() is { Count: > 0 } wrong)
+        {
+            // A Debug distribution build breaks a rule before it is evidence of anything: the rule leads the refusal.
+            if (HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.DebugDistribution(destination, configuration) is { } rule)
+                wrong.Insert(0, new HCG.ExecutableMaker.BuildEngine.Signing.BuildVerificationCheck(rule.Title, rule.Outcome, rule.Detail, rule.Remedy));
+            foreach (var v in wrong) addMessage(new BuildMessage(DiagnosticSeverity.Error, $"{v.Title}: {v.Detail}{(v.Remedy is null ? "" : " Fix: " + v.Remedy)}", VerifyCode));
+            throw new BuildValidationException("This build is not what was asked for. " + string.Join(" ", wrong.Select(v => v.Detail + (v.Remedy is null ? "" : " Fix: " + v.Remedy))));
+        }
+
+        var plan = await signingAssistant!.PlanAsync(request.Project, options, configuration, app, sourceDir, c.Path, ct).ConfigureAwait(false);
+        foreach (var check in plan.Checks)
+            log(check.Outcome switch
+            {
+                SigningCheckOutcome.Failed => BuildLogKind.Error,
+                SigningCheckOutcome.Warning => BuildLogKind.Warning,
+                SigningCheckOutcome.Passed => BuildLogKind.Success,
+                _ => BuildLogKind.Info,
+            }, $"Signing · {check.Title}: {check.Outcome}{(check.Scope == SigningCheckScope.RequiresApple ? " [needs Apple — not checked by HCG]" : "")} — {check.Detail}" +
+               (check.Remedy is { } r && check.Outcome == SigningCheckOutcome.Failed ? " Fix: " + r : ""));
+        foreach (var note in plan.Notes) log(BuildLogKind.Info, note);
+        build.ToolchainVersions["configuration"] = configuration;
+        build.ToolchainVersions["destination"] = destination.Label();
+        if (plan.Team is { } team) build.ToolchainVersions["development-team"] = $"{team} ({plan.TeamSource})";
+        if (!plan.Ready)
+        {
+            foreach (var f in plan.Failures)
+                addMessage(new BuildMessage(DiagnosticSeverity.Error, $"{f.Title}: {f.Detail}{(f.Remedy is null ? "" : " Fix: " + f.Remedy)}", HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistant.ResolveCode));
+            throw new BuildValidationException($"Signing is not ready for {destination.Label()} ({configuration}). " +
+                string.Join(" ", plan.Failures.Select(f => f.Detail + (f.Remedy is null ? "" : " Fix: " + f.Remedy))) +
+                // The certificate gap found before the Assistant ran is part of the same refusal, not only a warning.
+                (signingGap is { Length: > 0 } gap ? " Also: " + gap : "") +
+                " Use Resolve Signing, then build again; the project does not need to be imported again.");
+        }
+        if (plan.Arguments.Count > 0) log(BuildLogKind.Info, "Signing build settings for this build (the project's files are not changed): " + string.Join(" ", plan.Arguments));
+        return (configuration, plan.Arguments);
+    }
+
+    /// <summary>Build messages about what the build is (source commit, compilation flags).</summary>
+    public const string VerifyCode = "HCG-BUILD-VERIFY";
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"certificate|provisioning profile|code-signing|development team|Team ID", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex SigningReason();
+
     private async Task<DebugKeystore> EnsureDebugKeystoreAsync(ToolchainReport report, IReadOnlyDictionary<string, string> env, Action<BuildLogKind, string> log, CancellationToken ct)
     {
         var dir = Path.Combine(paths.Root, "signing");

@@ -14,6 +14,8 @@
 //   Packaging contract (AppPackaging.json): --expect-contract-command "<argv as shown>" proves the command is shown and the
 //       build is refused until confirmed; --expect-contract-helpers Contents/Helpers/x[,…]; --confirm-contract ticks
 //       “Run these commands while building”.
+//   Build Readiness: --expect-readiness-blocker go proves Start Build stops before compiling and offers the fixes;
+//       --choose-tool go=/path/to/go then saves it in the project's toolchain profile and Start Build is pressed again.
 // Usage (Electron app, built with the project's own electron-builder workflow):
 //   dotnet run --project tools/ui-driver -- --electron --source <folder|zip> [--project <dir>] [--arch arm64|x64]
 //       [--formats app,zip,dmg | folder] [--expect-name N] [--expect-bundle-id ID] [--expect-version V] --output <dir> --screenshots <dir>
@@ -44,6 +46,8 @@ internal static partial class Program
     private static Dictionary<string, string> _args = new();
     private static readonly List<string> Report = [];
     private static readonly List<string> Failures = [];
+    /// <summary>Alert titles a flow expects next (each allowed once); see LoggingDialogs.AlertAsync.</summary>
+    private static readonly List<string> ExpectedAlerts = [];
     private static MainWindow? _window;
     private static string _shots = "";
     private static string _prefix = "swift";
@@ -55,7 +59,7 @@ internal static partial class Program
             if (argv[i].StartsWith("--", StringComparison.Ordinal))
                 _args[argv[i][2..]] = i + 1 < argv.Length && !argv[i + 1].StartsWith("--", StringComparison.Ordinal) ? argv[++i] : "true";
         if (_args.ContainsKey("account-signed-in") && !_args.ContainsKey("source")) _args["source"] = Path.GetTempPath();
-        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("xcode-mac") && !_args.ContainsKey("mobile") && !_args.ContainsKey("unleashify") && !_args.ContainsKey("doctor") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing") && !_args.ContainsKey("ship-page") && !_args.ContainsKey("ship-build") && !_args.ContainsKey("impactor")))
+        if (!_args.ContainsKey("source") || (!_args.ContainsKey("package") && !_args.ContainsKey("electron") && !_args.ContainsKey("native") && !_args.ContainsKey("xcode-mac") && !_args.ContainsKey("mobile") && !_args.ContainsKey("unleashify") && !_args.ContainsKey("doctor") && !_args.ContainsKey("prepare-desktop") && !_args.ContainsKey("account-pages") && !_args.ContainsKey("account-signed-in") && !_args.ContainsKey("port") && !_args.ContainsKey("signing") && !_args.ContainsKey("ship-page") && !_args.ContainsKey("ship-build") && !_args.ContainsKey("impactor") && !_args.ContainsKey("build-host")))
         {
             Console.Error.WriteLine("Usage: hcg-ui-driver --source <folder|zip> --package <dir> [--product P --name N …] --output <dir> --screenshots <dir>");
             return 2;
@@ -268,6 +272,7 @@ internal static partial class Program
         if (_args.ContainsKey("account-pages")) return await RunAccountPagesAsync(main, wizard);
         if (_args.ContainsKey("signing")) return await RunSigningAsync(main);
         if (_args.ContainsKey("ship-build")) return await RunShipBuildAsync(main, wizard, output);
+        if (_args.ContainsKey("build-host")) return await RunBuildHostAsync(main, wizard, output);
 
         // 2. Inspect: packages listed, none auto-selected when there are several.
         Check(wizard.IsSwiftProject, $"Recognized as Swift project ({wizard.Analysis?.Framework}; support {wizard.Analysis?.Support})");
@@ -309,11 +314,21 @@ internal static partial class Program
         ExpectSet("expect-products", wizard.SwiftExecutableProducts.Select(p => p.Name), "Executable products");
         ExpectSet("expect-libraries", wizard.SwiftLibraryProducts, "Library products");
         ExpectSet("expect-tests", wizard.SwiftTestTargets, "Test targets");
-        if (wizard.SwiftExecutableProducts.Count > 1) Check(wizard.SelectedSwiftProduct is null, "Several executable products: none selected automatically");
+        if (wizard.SwiftExecutableProducts.Count > 1 && Arg("expect-preselected-product") is null)
+            Check(wizard.SelectedSwiftProduct is null, "Several executable products and no packaging contract: none selected automatically");
+        // --expect-preselected-product NAME: the wizard chose it by itself (the package's AppPackaging.json names it).
+        if (Arg("expect-preselected-product") is { } pre)
+        {
+            Log($"Products: {string.Join(", ", wizard.SwiftExecutableProducts.Select(p => p.Display))} · preselected: {wizard.SelectedSwiftProduct?.Name ?? "(none)"} · note: {wizard.SwiftProductNote}");
+            Check(wizard.SelectedSwiftProduct?.Name == pre, $"Product {pre} preselected by the packaging contract (not the command-line tool)");
+            Shot("product-preselected");
+        }
         var product = wizard.SwiftExecutableProducts.FirstOrDefault(p => p.Name == Arg("product"));
         Check(product is not null, $"Product {Arg("product")} available");
         if (product is null) { Shot("evaluated"); return 1; }
         wizard.SelectedSwiftProduct = product;
+        if (Arg("expect-product-note") is { } note)
+            Check(wizard.SwiftProductNote?.Contains(note, StringComparison.Ordinal) == true, $"Product guidance: {wizard.SwiftProductNote}");
         Shot("evaluated-products");
 
         // 4. Configure.
@@ -416,8 +431,36 @@ internal static partial class Program
         Check(!wizard.StartBuildCommand.CanExecute(null), "Build refused before trust is confirmed");
         wizard.TrustAcknowledged = true;
         Shot("build-summary");
-        await wizard.StartBuildCommand.ExecuteAsync(null);
+        // Build Readiness: with a required tool missing, Start Build is stopped before compilation and the panel offers
+        // the fixes; the tool is then chosen for this project (the Choose for this project… action) and Start Build resumes.
+        if (Arg("expect-readiness-blocker") is { } blocked)
+        {
+            ExpectedAlerts.Add("Build Readiness"); // Start Build explains the blocker in an alert, then shows the panel
+            await wizard.StartBuildCommand.ExecuteAsync(null);
+            Check(!ExpectedAlerts.Contains("Build Readiness"), "Start Build explains what is missing (Build Readiness alert)");
+            var report = wizard.Readiness.Report;
+            foreach (var i in report?.Items ?? []) Log($"Readiness {i.Requirement.ToolId}: {i.State} — {i.Detail} [{string.Join(" | ", i.Install.Select(o => o.Label + ": " + (o.CommandLine ?? o.Url)))}]");
+            Check(!wizard.HasBuildStarted && wizard.ShowReadiness, "Start Build stops before compiling and shows Build Readiness");
+            var item = report?.Blockers.FirstOrDefault(b => b.Requirement.ToolId == blocked);
+            Check(item is not null, $"Build Readiness names {blocked} as missing");
+            Check(item?.OfficialUrl is { Length: > 0 }, $"{blocked}: the official download is offered");
+            if (OperatingSystem.IsMacOS() && File.Exists("/opt/homebrew/bin/brew"))
+                Check(item?.Install.Any(o => o.Runnable && o.CommandLine == $"/opt/homebrew/bin/brew install {blocked}") == true, $"{blocked}: Install with Homebrew (Apple Silicon) is offered, to run only after approval");
+            ShotScrolledToEnd("readiness-blocked");
+            if (Arg("choose-tool") is { } choose && choose.Split('=', 2) is [var tool, var path])
+            {
+                var readiness = _services!.GetRequiredService<HCG.ExecutableMaker.BuildEngine.Readiness.BuildReadinessService>();
+                var (check, saved) = await readiness.ChooseLocationAsync(tool, path, item?.Requirement.MinimumVersion,
+                    new HCG.ExecutableMaker.BuildEngine.Readiness.ToolPathScope.Project(wizard.Project!.Id, wizard.Project.Name));
+                Log($"Chosen for this project: {check.Detail}");
+                Check(saved, $"{tool} at {path} verified and saved in the project's toolchain profile");
+            }
+            await wizard.StartBuildCommand.ExecuteAsync(null);
+        }
+        else await wizard.StartBuildCommand.ExecuteAsync(null);
         await WaitUntil(() => !wizard.IsBuilding, TimeSpan.FromMinutes(40), "build");
+        if (wizard.Readiness.Report is { } after)
+            foreach (var i in after.Items) Log($"Readiness at build: {i.Requirement.ToolId}: {i.State} — {(i.Selected is { } sel ? $"{sel.Path} {sel.Version} ({sel.Source})" : i.Detail)}");
         var result = wizard.Result;
         Check(result?.Status == BuildStatus.Succeeded, $"Build {result?.Status}: {wizard.ResultDetail}");
         Shot("results");
@@ -612,7 +655,8 @@ internal static partial class Program
         public Task AlertAsync(string title, string message)
         {
             Log($"Dialog (alert) {title}: {message}");
-            Failures.Add($"Unexpected alert: {title}: {message}");
+            // An alert a flow announced (ExpectAlert) is the behaviour under test, once; any other alert fails the run.
+            if (!ExpectedAlerts.Remove(title)) Failures.Add($"Unexpected alert: {title}: {message}");
             return Task.CompletedTask;
         }
 

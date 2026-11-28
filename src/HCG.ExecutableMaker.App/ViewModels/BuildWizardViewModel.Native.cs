@@ -91,7 +91,7 @@ public sealed partial class BuildWizardViewModel
     public bool IsNativeMacBundle => SelectedNativeTargetInfo?.IsMacBundle == true || (SelectedNativeProject?.Kind == NativeProjectKind.Make && NativeExpectedOutput.TrimEnd('/').EndsWith(".app", StringComparison.Ordinal));
 
     /// <summary>Notarize / test install / validate: not offered for a C/C++ executable outside a macOS app bundle.</summary>
-    public bool ShowDistributionSteps => ResultSucceeded && Result?.Settings.Native is not { IsMacBundle: false } && Result?.Settings.MacXcode is null;
+    public bool ShowDistributionSteps => ResultSucceeded && Result is { } r && !IsBuildHostBuild(r) && r.Settings.Native is not { IsMacBundle: false } && Result?.Settings.MacXcode is null;
     partial void OnResultSucceededChanged(bool value) => OnPropertyChanged(nameof(ShowDistributionSteps));
 
     /// <summary>.NET/Swift configuration choice; a C/C++ build uses the build type chosen in the C/C++ panel.</summary>

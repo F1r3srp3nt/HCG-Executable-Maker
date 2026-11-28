@@ -45,6 +45,18 @@ public sealed record AppSettings
     /// <summary>App Store Connect API key ID (for altool --validate-app). The .p8 key stays in ~/.appstoreconnect/private_keys.</summary>
     public string? AppStoreConnectKeyId { get; init; }
     public string? AppStoreConnectIssuerId { get; init; }
+    /// <summary>Build Readiness: tool locations chosen for all projects ("go" → /usr/local/go/bin/go). Verified before saving.</summary>
+    public Dictionary<string, string>? ToolPaths { get; init; }
+    /// <summary>Reusable toolchain profiles (named sets of tool locations) that projects can use.</summary>
+    public List<ToolchainProfile>? ToolchainProfiles { get; init; }
+    /// <summary>Project ID → profile ID. A project without an entry uses <see cref="ToolPaths"/> and automatic detection.</summary>
+    public Dictionary<string, string>? ProjectToolchainProfiles { get; init; }
+    /// <summary>HCG Server's Build Host address (loopback only). Null = HCG_BUILDHOST_URL or http://127.0.0.1:7600/buildhost/v1/.</summary>
+    public string? BuildHostUrl { get; init; }
+    /// <summary>The HCG Server device key pinned for the Build Host (SHA-256, hex). Provenance signed by another key is refused.</summary>
+    public string? BuildHostKeyPin { get; init; }
+    /// <summary>Build Hosts seen in verified provenance: device, OS/architecture, isolation and the key that signed (never the token).</summary>
+    public List<KnownBuildHost>? KnownBuildHosts { get; init; }
 }
 
 public interface ISettingsStore

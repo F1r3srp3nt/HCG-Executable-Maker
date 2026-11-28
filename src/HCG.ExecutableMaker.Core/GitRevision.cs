@@ -43,6 +43,68 @@ public static class GitRevision
     }
 
     private static bool IsSha(string s) => s.Length is 40 or 64 && s.All(Uri.IsHexDigit);
+
+    /// <summary>
+    /// The working copy containing <paramref name="path"/>: its root folder and the URL of its <c>origin</c> remote, read
+    /// from <c>.git/config</c> (no git command runs). Null when <paramref name="path"/> is not inside a working copy.
+    /// </summary>
+    public static (string Root, string? OriginUrl)? Repository(string path)
+    {
+        try
+        {
+            var dir = new DirectoryInfo(Path.GetFullPath(path));
+            while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, ".git")) && !File.Exists(Path.Combine(dir.FullName, ".git"))) dir = dir.Parent;
+            if (dir is null) return null;
+            var gitDir = Path.Combine(dir.FullName, ".git");
+            if (File.Exists(gitDir))
+            {
+                var line = File.ReadAllText(gitDir).Trim();
+                if (!line.StartsWith("gitdir:", StringComparison.Ordinal)) return (dir.FullName, null);
+                gitDir = Path.GetFullPath(Path.Combine(dir.FullName, line[7..].Trim()));
+                if (File.Exists(Path.Combine(gitDir, "commondir")))
+                    gitDir = Path.GetFullPath(Path.Combine(gitDir, File.ReadAllText(Path.Combine(gitDir, "commondir")).Trim()));
+            }
+            var config = Path.Combine(gitDir, "config");
+            return (dir.FullName, File.Exists(config) ? OriginUrl(File.ReadAllLines(config)) : null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>The <c>url</c> of <c>[remote "origin"]</c> in a Git config file.</summary>
+    public static string? OriginUrl(IEnumerable<string> configLines)
+    {
+        var inOrigin = false;
+        foreach (var raw in configLines)
+        {
+            var line = raw.Trim();
+            if (line.StartsWith('['))
+            {
+                inOrigin = line.Replace(" ", "", StringComparison.Ordinal).Equals("[remote\"origin\"]", StringComparison.Ordinal);
+                continue;
+            }
+            if (inOrigin && line.StartsWith("url", StringComparison.Ordinal) && line.IndexOf('=') is var eq and > 0 && line[..eq].Trim() == "url")
+                return line[(eq + 1)..].Trim();
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// OWNER/NAME of a GitHub remote URL (https://github.com/O/N(.git), git@github.com:O/N(.git), ssh://git@github.com/O/N),
+    /// without any credentials the URL may carry. Null for any other host.
+    /// </summary>
+    public static string? GitHubRepository(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        url = url.Trim();
+        string? rest = null;
+        if (url.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase)) rest = url["git@github.com:".Length..];
+        else if (Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                 && u.Scheme is "https" or "http" or "ssh" or "git") rest = u.AbsolutePath.TrimStart('/');
+        if (rest is null) return null;
+        if (rest.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) rest = rest[..^4];
+        var parts = rest.Trim('/').Split('/');
+        return parts.Length == 2 && parts.All(p => p.Length > 0 && p.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.')) ? $"{parts[0]}/{parts[1]}" : null;
+    }
 }
 
 /// <summary>

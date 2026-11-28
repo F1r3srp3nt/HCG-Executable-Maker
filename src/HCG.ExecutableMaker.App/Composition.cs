@@ -83,6 +83,9 @@ public static class Composition
         services.AddSingleton<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>();
         services.AddSingleton<IProjectSigningStore, HCG.ExecutableMaker.Infrastructure.Persistence.SqliteProjectSigningStore>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Signing.SigningPrebuildCheck>();
+        // Apple Signing Assistant: effective build settings + Signing Vault + this Mac's assets → signing for each destination.
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService(
+            sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>(), sp.GetRequiredService<IProjectSigningStore>(), TimeProvider.System));
         // HCG Impactor: IPA inspection, signing (codesign with Keychain identities), devices (devicectl), installation, history.
         services.AddSingleton(sp => new HCG.Impactor.Storage.ImpactorStore(sp.GetRequiredService<IAppPaths>().Root));
         services.AddSingleton<HCG.Impactor.ISigningInventorySource>(sp => new HCG.Impactor.Signing.SigningInventorySource(sp.GetRequiredService<HCG.ExecutableMaker.Packaging.Signing.AppleSigningAssetService>()));
@@ -97,6 +100,10 @@ public static class Composition
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.MacDistribution.AppleCredentialsService>();
         services.AddSingleton<IPackager, InnoSetupPackager>();
         services.AddSingleton<PackagingRegistry>();
+        // Build Readiness: what a build needs, checked before compilation; installs only with the person's approval.
+        // Remote build hosts are whatever IBuildHost implementations are registered (none are, until the Build Host lands).
+        services.AddSingleton(sp => new HCG.ExecutableMaker.BuildEngine.Readiness.BuildReadinessService(sp.GetRequiredService<IProcessRunner>(),
+            sp.GetRequiredService<ISettingsStore>(), sp.GetRequiredService<IToolchainService>(), sp.GetServices<IBuildHost>(), TimeProvider.System));
         services.AddSingleton<BuildService>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Swift.SwiftPackageEvaluator>();
         services.AddSingleton<HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator>();
@@ -172,6 +179,8 @@ public static class Composition
         services.AddSingleton<ShipToStoreViewModel>();
         services.AddSingleton<UnleashifyViewModel>();
         services.AddSingleton<ImpactorViewModel>();
+        services.AddTransient<BuildReadinessPanelViewModel>();
+        services.AddTransient<BuildHostPanelViewModel>();
         services.AddSingleton<ToolchainsViewModel>();
         services.AddSingleton<AppleSigningViewModel>();
         services.AddSingleton<SigningViewModel>();

@@ -122,13 +122,19 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
             ("CFBundleVersion", swift.BuildNumber),
             ("NSHighResolutionCapable", true),
         };
-        if (iconFile is not null) entries.Add(("CFBundleIconFile", iconFile));
+        var template = Path.Combine(staged, SwiftContractLayout.InfoPlistTemplateFile);
+        if (iconFile is not null)
+        {
+            // A template that already names the installed icon keeps its own spelling ("AppIcon" or "AppIcon.icns"):
+            // both resolve to Contents/Resources/AppIcon.icns, and the author's Info.plist stays as written.
+            var templateIcon = contract is not null && File.Exists(template) ? InfoPlist.Read(template).GetValueOrDefault("CFBundleIconFile") : null;
+            entries.Add(("CFBundleIconFile", SameIcon(templateIcon, iconFile) ? templateIcon! : iconFile));
+        }
         if (minimum is not null) entries.Add(("LSMinimumSystemVersion", minimum));
         if (!string.IsNullOrWhiteSpace(swift.Category)) entries.Add(("LSApplicationCategoryType", swift.Category));
         if (!string.IsNullOrWhiteSpace(identity.Publisher)) entries.Add(("NSHumanReadableCopyright", $"© {identity.Publisher}"));
         foreach (var (key, text) in swift.UsageDescriptions.OrderBy(k => k.Key, StringComparer.Ordinal))
             entries.Add((key, text));
-        var template = Path.Combine(staged, SwiftContractLayout.InfoPlistTemplateFile);
         if (contract is not null && File.Exists(template))
         {
             log.Info($"Info.plist from the template {contract.Bundle.InfoPlist} ({contract.Path}); identity, versions and the keys set in HCG replace the template's values.");
@@ -194,6 +200,13 @@ public sealed class SwiftAppBundlePackager(IProcessRunner runner) : IPackager
 
         var checks = await SwiftBundleVerifier.VerifyAsync(runner, codesign, bundle, settings, resourceBundles, cancellationToken).ConfigureAwait(false);
         return [new PackagedOutput(Format, ArtifactKind.Directory, bundle, checks)];
+    }
+
+    /// <summary>True when the template's CFBundleIconFile names the icon Executable Maker installs, with or without ".icns".</summary>
+    internal static bool SameIcon(string? templateIcon, string installed)
+    {
+        static string Stem(string n) => n.EndsWith(".icns", StringComparison.OrdinalIgnoreCase) ? n[..^5] : n;
+        return !string.IsNullOrWhiteSpace(templateIcon) && string.Equals(Stem(templateIcon.Trim()), Stem(installed), StringComparison.Ordinal);
     }
 
     internal static string? HighestMinimum(IEnumerable<MachO.Slice> slices) =>

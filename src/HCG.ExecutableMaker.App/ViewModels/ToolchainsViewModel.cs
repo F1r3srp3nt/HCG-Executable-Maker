@@ -8,8 +8,43 @@ using HCG.ExecutableMaker.Infrastructure.Toolchains;
 
 namespace HCG.ExecutableMaker.App.ViewModels;
 
-public sealed partial class ToolchainsViewModel(IToolchainService toolchains, DeveloperDirectorySelection developerDirectory, IPlatformShell shell, ToolPathSelection toolPaths) : PageViewModel
+public sealed partial class ToolchainsViewModel(IToolchainService toolchains, DeveloperDirectorySelection developerDirectory, IPlatformShell shell, ToolPathSelection toolPaths,
+    BuildReadinessPanelViewModel readiness, IProjectRepository projects) : PageViewModel
 {
+    // ---------- Build Readiness Center ----------
+    /// <summary>What a project's builds need, checked on this computer (shared panel; also shown in the New Build wizard).</summary>
+    public BuildReadinessPanelViewModel Readiness { get; } = readiness;
+    public ObservableCollection<ReadinessProjectChoice> ReadinessProjects { get; } = [];
+    [ObservableProperty] private ReadinessProjectChoice? _readinessProject;
+    private BuildSettings? _readinessBuild;
+
+    partial void OnReadinessProjectChanged(ReadinessProjectChoice? value)
+    {
+        if (value is not null) _ = CheckReadinessAsync(value, value.Project.Id == _readinessBuildProject ? _readinessBuild : null);
+    }
+    private Guid? _readinessBuildProject;
+
+    private async Task CheckReadinessAsync(ReadinessProjectChoice choice, BuildSettings? build)
+    {
+        var p = choice.Project;
+        await Readiness.CheckAsync(p.Name, p.SourceDirectory, p.Id, build, p.Analysis);
+    }
+
+    private async Task LoadReadinessProjectsAsync(ReadinessRequest? request)
+    {
+        var list = await projects.ListAsync();
+        ReadinessProjects.Clear();
+        foreach (var p in list.OrderByDescending(p => p.LastOpenedAt ?? p.ImportedAt)) ReadinessProjects.Add(new ReadinessProjectChoice(p));
+        if (request is not null)
+        {
+            _readinessBuild = request.Build;
+            _readinessBuildProject = request.ProjectId;
+        }
+        var target = ReadinessProjects.FirstOrDefault(c => c.Project.Id == request?.ProjectId) ?? ReadinessProject ?? ReadinessProjects.FirstOrDefault();
+        if (target is not null && target == ReadinessProject) await CheckReadinessAsync(target, request?.Build);
+        else ReadinessProject = target;
+    }
+
     public override string Title => "Toolchains";
     public override string Subtitle => "Development tools detected on this computer. HCG never installs tools automatically.";
 
@@ -41,7 +76,11 @@ public sealed partial class ToolchainsViewModel(IToolchainService toolchains, De
     partial void OnXcodeMessageChanged(string value) => OnPropertyChanged(nameof(HasXcodeMessage));
     private XcodeStatus? _xcode;
 
-    public override async Task OnNavigatedToAsync(object? parameter) => Apply(await toolchains.GetAsync());
+    public override async Task OnNavigatedToAsync(object? parameter)
+    {
+        Apply(await toolchains.GetAsync());
+        await LoadReadinessProjectsAsync(parameter as ReadinessRequest);
+    }
 
     [RelayCommand]
     private async Task RefreshAsync()
@@ -152,6 +191,15 @@ public sealed partial class ToolchainsViewModel(IToolchainService toolchains, De
         Domain.XcodeState.ValidationFailed => "Validation failed",
         _ => "Not applicable",
     };
+}
+
+/// <summary>Opens Toolchains › Build Readiness for one project (optionally for one configured build).</summary>
+public sealed record ReadinessRequest(Guid ProjectId, BuildSettings? Build);
+
+public sealed class ReadinessProjectChoice(ProjectRecord project)
+{
+    public ProjectRecord Project { get; } = project;
+    public override string ToString() => $"{Project.Name} — {Project.SourceLocation}";
 }
 
 public sealed class XcodeInstallItem(XcodeInstallation installation, bool isActive)

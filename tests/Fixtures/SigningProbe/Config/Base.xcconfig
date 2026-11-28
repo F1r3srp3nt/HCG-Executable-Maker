@@ -1,0 +1,13 @@
+// Shared settings for the SigningProbe app target (Debug and Release), shaped like Unimatch's Config/Base.xcconfig.
+// No development team is committed: each developer sets theirs in Config/Local.xcconfig (git-ignored), or HCG
+// Executable Maker passes it for one build (DEVELOPMENT_TEAM=…) without changing these files.
+PROBE_BUNDLE_ID = com.hakmicapital.signingprobe
+DEVELOPMENT_TEAM =
+
+// The Development Run: compiled into Debug builds only. Release builds and archives must never contain it.
+PROBE_ENABLE_DEVELOPMENT_RUN = YES
+PROBE_DEVELOPMENT_RUN_CONDITION_YES = PROBE_DEVELOPMENT_RUN
+PROBE_DEVELOPMENT_RUN_CONDITION_NO =
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=Debug] = $(inherited) $(PROBE_DEVELOPMENT_RUN_CONDITION_$(PROBE_ENABLE_DEVELOPMENT_RUN))
+
+#include? "Local.xcconfig"

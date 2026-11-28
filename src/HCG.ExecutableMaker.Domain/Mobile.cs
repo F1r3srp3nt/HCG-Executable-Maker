@@ -25,6 +25,11 @@ public enum MobileOutput
     IosSimulatorApp,
     IosArchive,
     IosIpa,
+    /// <summary>
+    /// A build for a physical iPhone or iPad (xcodebuild build for generic/platform=iOS), signed with Apple
+    /// Development. Debug by default, so development-only code the project limits to Debug stays available.
+    /// </summary>
+    IosDeviceApp,
 }
 
 public enum MobileSigningMode
@@ -297,6 +302,84 @@ public sealed record MobileBuildOptions
     public string? InputArtifact { get; init; }
     /// <summary>.NET iOS: the code-signing identity (certificate name, e.g. "Apple Distribution: … (TEAMID)") for CodesignKey. Not a secret.</summary>
     public string? SigningIdentity { get; init; }
+    /// <summary>Physical device builds: the device the build is meant for (iPhone or iPad); checked against the app's device family.</summary>
+    public AppleDeviceFamily DeviceFamily { get; init; } = AppleDeviceFamily.IPhone;
+    /// <summary>
+    /// A bundle identifier for this build only (for a team that does not own the project's identifier). Passed as a
+    /// build setting; the project's files are not changed.
+    /// </summary>
+    public string? BundleIdentifier { get; init; }
+    /// <summary>For an App Store Connect .ipa: TestFlight or App Store (the same signed export; HCG never uploads either).</summary>
+    public AppleBuildDestination? Destination { get; init; }
+    /// <summary>The source commit (prefix, 7+ hex characters) the build must be made from; checked before compiling.</summary>
+    public string? ExpectedSourceCommit { get; init; }
+    /// <summary>Compilation flags that must be active in this build (e.g. DEBUG, UNIMATCH_DEVELOPMENT_RUN); checked before compiling.</summary>
+    public IReadOnlyList<string> ExpectedCompilationFlags { get; init; } = [];
+}
+
+public enum AppleDeviceFamily
+{
+    IPhone,
+    IPad,
+}
+
+/// <summary>Where an Apple build is going. Each destination has its own signing needs (see AppleDestinations).</summary>
+public enum AppleBuildDestination
+{
+    /// <summary>iOS Simulator, Debug: no team, certificate or profile needed.</summary>
+    IosSimulatorDebug,
+    /// <summary>A physical iPhone, Debug: Apple Development signing, device registered in the profile.</summary>
+    IPhoneDebug,
+    /// <summary>A physical iPad, Debug: Apple Development signing, device registered in the profile.</summary>
+    IPadDebug,
+    /// <summary>A Release .xcarchive for distribution (signed with the chosen route, or unsigned for inspection).</summary>
+    IosDistributionArchive,
+    /// <summary>An App Store Connect .ipa meant for TestFlight. Exported locally; HCG never uploads it.</summary>
+    TestFlight,
+    /// <summary>An App Store Connect .ipa meant for the App Store. Exported locally; HCG never uploads it.</summary>
+    AppStore,
+    /// <summary>A macOS app signed for development on this Mac (Apple Development).</summary>
+    MacDevelopment,
+    /// <summary>A macOS app signed with Developer ID for direct distribution (notarization is separate).</summary>
+    MacDeveloperId,
+}
+
+public static class AppleDestinations
+{
+    public static AppleBuildDestination Of(MobileBuildOptions o) => o.Output switch
+    {
+        MobileOutput.IosSimulatorApp => AppleBuildDestination.IosSimulatorDebug,
+        MobileOutput.IosDeviceApp => o.DeviceFamily == AppleDeviceFamily.IPad ? AppleBuildDestination.IPadDebug : AppleBuildDestination.IPhoneDebug,
+        // A development-signed .ipa is for registered devices, like a device build: Debug is allowed and expected.
+        MobileOutput.IosIpa when o.ExportMethod == IosExportMethod.Debugging =>
+            o.DeviceFamily == AppleDeviceFamily.IPad ? AppleBuildDestination.IPadDebug : AppleBuildDestination.IPhoneDebug,
+        MobileOutput.IosIpa when o.ExportMethod == IosExportMethod.AppStoreConnect =>
+            o.Destination == AppleBuildDestination.AppStore ? AppleBuildDestination.AppStore : AppleBuildDestination.TestFlight,
+        _ => AppleBuildDestination.IosDistributionArchive,
+    };
+
+    public static string Label(this AppleBuildDestination d) => d switch
+    {
+        AppleBuildDestination.IosSimulatorDebug => "iOS Simulator (Debug)",
+        AppleBuildDestination.IPhoneDebug => "Physical iPhone (Debug)",
+        AppleBuildDestination.IPadDebug => "Physical iPad (Debug)",
+        AppleBuildDestination.IosDistributionArchive => "iOS distribution archive",
+        AppleBuildDestination.TestFlight => "TestFlight (App Store Connect .ipa, not uploaded)",
+        AppleBuildDestination.AppStore => "App Store (App Store Connect .ipa, not uploaded)",
+        AppleBuildDestination.MacDevelopment => "macOS development",
+        _ => "macOS Developer ID distribution",
+    };
+
+    /// <summary>The configuration a destination uses unless the person chooses otherwise.</summary>
+    public static string DefaultConfiguration(this AppleBuildDestination d) =>
+        d is AppleBuildDestination.IosSimulatorDebug or AppleBuildDestination.IPhoneDebug or AppleBuildDestination.IPadDebug or AppleBuildDestination.MacDevelopment ? "Debug" : "Release";
+
+    /// <summary>Destinations whose product is meant for other people: they must never be Debug builds.</summary>
+    public static bool IsDistribution(this AppleBuildDestination d) =>
+        d is AppleBuildDestination.IosDistributionArchive or AppleBuildDestination.TestFlight or AppleBuildDestination.AppStore or AppleBuildDestination.MacDeveloperId;
+
+    /// <summary>Destinations that run on a device and so need Apple signing (a team, a certificate, a profile).</summary>
+    public static bool NeedsDeviceSigning(this AppleBuildDestination d) => d is not AppleBuildDestination.IosSimulatorDebug;
 }
 
 public static class MobileNames
@@ -319,6 +402,7 @@ public static class MobileNames
         MobileOutput.AndroidAppBundle => "Android App Bundle (.aab)",
         MobileOutput.AndroidAabToApk => "AAB → APK (bundletool)",
         MobileOutput.IosSimulatorApp => "iOS Simulator build",
+        MobileOutput.IosDeviceApp => "iOS device build (iPhone/iPad, development signing)",
         MobileOutput.IosArchive => "iOS Archive (.xcarchive)",
         MobileOutput.IosIpa => "iOS IPA (export from archive)",
         _ => o.ToString(),
@@ -326,7 +410,7 @@ public static class MobileNames
 
     public static TargetPlatform Platform(this MobileOutput o) => o switch
     {
-        MobileOutput.IosSimulatorApp or MobileOutput.IosArchive or MobileOutput.IosIpa => TargetPlatform.IOS,
+        MobileOutput.IosSimulatorApp or MobileOutput.IosArchive or MobileOutput.IosIpa or MobileOutput.IosDeviceApp => TargetPlatform.IOS,
         _ => TargetPlatform.Android,
     };
 
