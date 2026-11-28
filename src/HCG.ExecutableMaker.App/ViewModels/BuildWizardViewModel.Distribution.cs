@@ -25,6 +25,15 @@ public sealed partial class BuildWizardViewModel
     /// <summary>macOS signing/installer choices. Not for Electron (electron-builder signs) or Xcode apps (the project signs).</summary>
     public bool ShowDistribution => !IsElectronBuild && !IsMacXcodeBuild && (SelectedPlatform?.Value ?? TargetPlatform.Windows) == TargetPlatform.MacOS;
 
+    /// <summary>A .NET GUI app (Avalonia or WinExe) built by the .NET path.</summary>
+    public bool IsDotNetGui => IsDotNetBuild && SelectedProject?.Project is { } d && (d.IsAvalonia || string.Equals(d.OutputType, "WinExe", StringComparison.OrdinalIgnoreCase));
+    /// <summary>Developer ID (and a signed .pkg) can be chosen: Swift GUI apps and .NET GUI apps.</summary>
+    public bool CanSignForDistribution => IsSwiftGui || IsDotNetGui;
+    /// <summary>What was taken from the project's saved signing route (Signing &amp; Security › Project signing), if anything.</summary>
+    [ObservableProperty] private string _savedSigningNote = "";
+    public bool HasSavedSigningNote => SavedSigningNote.Length > 0;
+    partial void OnSavedSigningNoteChanged(string value) => OnPropertyChanged(nameof(HasSavedSigningNote));
+
     // ---------- Signing mode ----------
     public IReadOnlyList<Choice<MacSigningMode>> SigningModeOptions { get; } =
     [
@@ -113,11 +122,34 @@ public sealed partial class BuildWizardViewModel
         PopulateDistributionChoices(CreateDistributionOptions() with { AppStoreProfilePath = path });
     }
 
-    private IReadOnlyList<EntitlementEvidence> ProductEvidence => SelectedSwiftProduct?.Facts?.EntitlementEvidence ?? [];
+    // A .NET app always carries CoreCLR, which compiles code just in time: allow-jit is proposed with that evidence.
+    private IReadOnlyList<EntitlementEvidence> ProductEvidence => IsDotNetGui ? [MacBundleLayout.DotNetRuntime] : SelectedSwiftProduct?.Facts?.EntitlementEvidence ?? [];
 
     private bool ProductHasResourceBundles =>
         SelectedSwiftPackage?.Evaluated?.Targets.Any(t => t.Kind is SwiftTargetKind.Regular or SwiftTargetKind.Executable && t.ResourceCount > 0) == true
         || SelectedSwiftProduct?.Facts?.HasResourceDirectory == true;
+
+    /// <summary>
+    /// Starts a macOS build's distribution choices from the project's saved signing route (Signing &amp; Security › Project
+    /// signing › macOS Developer ID), when one is saved and its identities are still in the keychain. Choices the person
+    /// made in this wizard (a repeated build) are kept as they are.
+    /// </summary>
+    private async Task PrepareDistributionChoicesAsync(MacDistributionOptions keep, bool applySaved)
+    {
+        if (_signing is null) await RefreshSigningAsync();
+        SavedSigningNote = "";
+        if (applySaved && CanSignForDistribution && Project is { } project && _signing is { } inventory)
+        {
+            try
+            {
+                var saved = await _projectSigning.LoadAsync(project.Id.ToString());
+                (keep, var note) = SavedMacSigning.Apply(keep, saved, inventory);
+                SavedSigningNote = note ?? "";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { SavedSigningNote = "Project signing could not be read: " + ex.Message; }
+        }
+        PopulateDistributionChoices(keep);
+    }
 
     /// <summary>Fills the pickers and entitlement lists, keeping <paramref name="keep"/>'s choices where they still exist.</summary>
     private void PopulateDistributionChoices(MacDistributionOptions keep)
@@ -188,10 +220,10 @@ public sealed partial class BuildWizardViewModel
 
     private MacDistributionOptions CreateDistributionOptions() => new()
     {
-        SigningMode = IsSwiftGui ? SelectedSigningMode?.Value ?? MacSigningMode.AdHoc : MacSigningMode.AdHoc,
+        SigningMode = CanSignForDistribution ? SelectedSigningMode?.Value ?? MacSigningMode.AdHoc : MacSigningMode.AdHoc,
         DeveloperIdApplicationSha1 = SelectedDeveloperIdIdentity?.Sha1,
-        PkgInstallerSha1 = IsSwiftGui ? SelectedInstallerIdentity?.Sha1 : null,
-        PkgInstallerName = IsSwiftGui ? SelectedInstallerIdentity?.Identity?.Name : null,
+        PkgInstallerSha1 = CanSignForDistribution ? SelectedInstallerIdentity?.Sha1 : null,
+        PkgInstallerName = CanSignForDistribution ? SelectedInstallerIdentity?.Identity?.Name : null,
         DeveloperIdEntitlements = DeveloperIdEntitlements.Where(e => e.IsSelected).Select(e => e.Key).ToList(),
         AppStoreApplicationSha1 = SelectedAppStoreIdentity?.Sha1,
         AppStoreInstallerSha1 = SelectedAppStoreInstaller?.Sha1,
@@ -216,6 +248,8 @@ public sealed partial class BuildWizardViewModel
         // Also runs while moving from Configure to Package (PreparePackaging), so the states are right on first display.
         if (_suspendDistribution || !ShowDistribution || Step is WizardStep.Build or WizardStep.Results) return;
         var ctx = DistributionContext(BasePackagingContext());
+        OnPropertyChanged(nameof(IsDotNetGui));
+        OnPropertyChanged(nameof(CanSignForDistribution));
         var (devState, devReason) = MacDistributionCatalog.DeveloperId(ctx);
         DeveloperIdAvailable = devState == PackagingAvailability.Available;
         DeveloperIdState = new StatusTag(Format.Label(devState), devState == PackagingAvailability.Available ? "success" : devState == PackagingAvailability.Failed ? "error" : "warning");
@@ -243,12 +277,12 @@ public sealed partial class BuildWizardViewModel
         DistributionErrors.Clear();
         var d = CreateDistributionOptions();
         var formats = SelectedFormats();
-        if (IsSwiftGui && d.SigningMode == MacSigningMode.DeveloperId)
+        if (CanSignForDistribution && d.SigningMode == MacSigningMode.DeveloperId)
         {
             if (!DeveloperIdAvailable) DistributionErrors.Add("Developer ID signing is not available: " + DeveloperIdReason);
             else if (d.DeveloperIdApplicationSha1 is null) DistributionErrors.Add("Choose the Developer ID Application certificate.");
         }
-        var needsReview = (IsSwiftGui && d.SigningMode == MacSigningMode.DeveloperId) || formats.Contains(PackagingFormat.MacAppStore);
+        var needsReview = (CanSignForDistribution && d.SigningMode == MacSigningMode.DeveloperId) || formats.Contains(PackagingFormat.MacAppStore);
         if (needsReview && !d.EntitlementsConfirmed)
             DistributionErrors.Add("Review the entitlements shown and confirm them (\"I reviewed these entitlements\").");
         if (d.PkgInstallerSha1 is not null && d.SigningMode != MacSigningMode.DeveloperId && formats.Contains(PackagingFormat.MacPkg))

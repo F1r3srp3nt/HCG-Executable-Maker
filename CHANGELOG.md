@@ -2,6 +2,37 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — Sign an existing macOS app
+
+### Added
+- **Sign an existing app** (new page; `--mac-sign-existing` without the UI) signs, packages, notarizes, staples and
+  Gatekeeper-checks an already-built macOS `.app`, for example HCG Mail's CI-qualified .NET app, without rebuilding it.
+  - The input is copied (`ditto`, `xattr -cr`) and never changed.
+  - Every Mach-O and nested bundle is signed inside out with the hardened runtime. Then the bundle is signed with the
+    entitlements plist exactly as the person reviewed it.
+  - Optional: a Developer ID Installer–signed `.pkg`, and notarization with a keychain profile (the app is stapled
+    before it is zipped).
+  - Outputs: checksums, a Release Passport per file, a signing report, and a hand-off to Ship to Store.
+  - Everything is checked before anything runs: identity kind and team, entitlements (`get-task-allow` refused; a
+    missing `allow-jit` on a .NET app is warned about), data in `Contents/MacOS`, output location, release version.
+  - An ad-hoc test build (`--test`) runs the same checks without a certificate. It is never notarized and its files are
+    named `…-adhoc-TEST-not-for-distribution`.
+- The page also has the **Signing Doctor** and **Release Passport** for an existing archive, which were command-line
+  only before.
+- **.NET GUI apps can be signed with Developer ID in New Build** (single-file publish), with `allow-jit` proposed for
+  CoreCLR. The signed `.pkg` and Notarize are offered for them.
+- **Saved Project signing (macOS Developer ID)** is now used: New Build's macOS distribution choices and Sign an
+  existing app start from it.
+- `--release-passport --version <release version>` records a pre-release version (such as `1.0.0-beta.2`) whose
+  numeric part equals `CFBundleShortVersionString`. Distribution Studio no longer reports a discrepancy for it.
+- CI: `macos-sign-existing` signs a .NET fixture app with an ad-hoc test identity (no notarization). It checks the
+  result with Apple's own tools and launches the signed app.
+
+### Changed
+- Notarization is a file-level `NotaryClient`; a build's **Notarize** uses it unchanged.
+- `docs/HCG-MAIL-MACOS.md`, `docs/MACOS-DISTRIBUTION.md` and the Signing & Security page now describe what the code
+  does.
+
 ## [Unreleased] — HCG Store Manager compatibility (Swift apps with a command-line tool)
 
 ### Added

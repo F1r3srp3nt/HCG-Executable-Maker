@@ -23,8 +23,6 @@ public sealed record DistributionActionResult(string Artifact, IReadOnlyList<Dis
 /// </summary>
 public sealed class NotarizationService(IProcessRunner runner, IBuildRepository builds, IAppPaths paths)
 {
-    private const string Xcrun = "/usr/bin/xcrun";
-
     /// <summary>Artifacts that can be notarized: a Developer ID .app, its DMG, and a Developer ID Installer-signed .pkg.</summary>
     public static IReadOnlyList<ArtifactRecord> Eligible(BuildRecord build)
     {
@@ -38,7 +36,7 @@ public sealed class NotarizationService(IProcessRunner runner, IBuildRepository 
     {
         if (!OperatingSystem.IsMacOS()) return "Notarization runs on a Mac (xcrun notarytool).";
         if (build.Settings.MacDistribution.SigningMode != MacSigningMode.DeveloperId)
-            return "This build is ad-hoc signed. The notary service accepts only Developer ID signed software with the hardened runtime: rebuild with Developer ID signing.";
+            return "This build is ad-hoc signed. The notary service accepts only Developer ID signed software with the hardened runtime: rebuild with Developer ID signing, or sign the app on Sign an existing app.";
         if (build.Status != BuildStatus.Succeeded) return "Only a successful, verified build can be notarized.";
         if (string.IsNullOrWhiteSpace(keychainProfile))
             return "Set up notarization credentials first (Settings › Apple credentials): store them in the keychain with xcrun notarytool store-credentials and enter the profile name.";
@@ -55,65 +53,14 @@ public sealed class NotarizationService(IProcessRunner runner, IBuildRepository 
         {
             ct.ThrowIfCancellationRequested();
             var steps = new List<DistributionStep>();
-            string? temp = null;
             try
             {
-                var submitPath = artifact.Path;
-                if (artifact.Format == PackagingFormat.MacAppBundle)
-                {
-                    // An .app is submitted as a ZIP made with ditto (the notary service accepts UDIF, flat pkg and ZIP).
-                    temp = Path.Combine(Path.GetTempPath(), "hcg-notary-" + Guid.NewGuid().ToString("N")[..10]);
-                    Directory.CreateDirectory(temp);
-                    submitPath = Path.Combine(temp, Path.GetFileNameWithoutExtension(artifact.Path) + ".zip");
-                    var zip = await runner.RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = ["-c", "-k", "--keepParent", artifact.Path, submitPath], Timeout = TimeSpan.FromMinutes(10) },
-                        (_, _) => { }, ct).ConfigureAwait(false);
-                    if (!zip.Succeeded) { steps.Add(new("Submit", VerificationStatus.Failed, $"Could not zip the app for submission (ditto exit code {zip.ExitCode}).")); continue; }
-                }
-                log($"Submitting {Path.GetFileName(artifact.Path)} to Apple's notary service (this usually takes a few minutes)…");
-                var (sr, so, se) = await runner.CaptureAsync(new ProcessSpec
-                {
-                    Executable = Xcrun,
-                    Arguments = ["notarytool", "submit", submitPath, "--keychain-profile", keychainProfile, "--wait", "--timeout", "1h", "--output-format", "json"],
-                    Timeout = TimeSpan.FromMinutes(75),
-                }, ct).ConfigureAwait(false);
-                var (id, status, message) = ParseSubmission(so);
-                if (status is null)
-                {
-                    steps.Add(new("Submit", VerificationStatus.Failed, $"notarytool did not complete (exit code {sr.ExitCode}): {MacCodeSigner.LastLines(se + so, 3)} " +
-                                                                       "Check the keychain profile name and your network connection."));
-                    continue;
-                }
-                steps.Add(new("Submit", VerificationStatus.Passed, $"Submission {id} uploaded."));
-                if (status != "Accepted")
-                {
-                    var logPath = Path.Combine(paths.LogsDirectory, $"notary-{id}.json");
-                    var (lr, _, _) = await runner.CaptureAsync(new ProcessSpec
-                    {
-                        Executable = Xcrun, Arguments = ["notarytool", "log", id!, "--keychain-profile", keychainProfile, logPath], Timeout = TimeSpan.FromMinutes(5),
-                    }, ct).ConfigureAwait(false);
-                    steps.Add(new("Notarization", VerificationStatus.Failed, $"Apple's notary service answered {status}: {message}." +
-                        (lr.Succeeded ? $" The notary log with the exact issues was saved to {logPath}." : " The notary log could not be downloaded.")));
-                    continue;
-                }
-                steps.Add(new("Notarization", VerificationStatus.Passed, $"Accepted by Apple's notary service (submission {id})."));
-
-                var (str, sto, ste) = await runner.CaptureAsync(new ProcessSpec { Executable = Xcrun, Arguments = ["stapler", "staple", artifact.Path], Timeout = TimeSpan.FromMinutes(10) }, ct).ConfigureAwait(false);
-                steps.Add(str.Succeeded
-                    ? new("Staple", VerificationStatus.Passed, "Ticket stapled, so Gatekeeper can verify it offline.")
-                    : new("Staple", VerificationStatus.Failed, $"stapler staple failed: {MacCodeSigner.LastLines(sto + ste, 2)} (the ticket can take a moment to propagate; run Notarize again to retry stapling)."));
-                var (vr, vo, ve) = await runner.CaptureAsync(new ProcessSpec { Executable = Xcrun, Arguments = ["stapler", "validate", artifact.Path], Timeout = TimeSpan.FromMinutes(5) }, ct).ConfigureAwait(false);
-                steps.Add(vr.Succeeded ? new("Staple validation", VerificationStatus.Passed, "stapler validate passed.")
-                    : new("Staple validation", VerificationStatus.Failed, MacCodeSigner.LastLines(vo + ve, 2)));
-                var type = artifact.Format switch { PackagingFormat.MacPkg => "install", PackagingFormat.MacDmg => "open", _ => "execute" };
-                var gk = await new MacCodeSigner(runner).GatekeeperAsync(artifact.Path, type, ct, expectNotarized: true).ConfigureAwait(false);
-                steps.Add(new("Gatekeeper", gk.Status, gk.Detail));
-
-                if (artifact.Format == PackagingFormat.MacAppBundle && str.Succeeded)
+                steps.AddRange(await new NotaryClient(runner, paths.LogsDirectory).NotarizeAsync(artifact.Path, artifact.Format, keychainProfile, log, ct).ConfigureAwait(false));
+                if (artifact.Format == PackagingFormat.MacAppBundle && steps.Any(s => s is { Name: "Staple", Status: VerificationStatus.Passed }))
                     await RezipStapledAppAsync(build, artifact, steps, log, ct).ConfigureAwait(false);
             }
             finally
             {
-                if (temp is not null) try { Directory.Delete(temp, recursive: true); } catch (IOException) { }
                 results.Add(new DistributionActionResult(Path.GetFileName(artifact.Path), steps));
                 await RecordAsync(build, artifact, steps, ct).ConfigureAwait(false);
             }
@@ -193,6 +140,94 @@ public sealed class NotarizationService(IProcessRunner runner, IBuildRepository 
         }
         catch (JsonException) { return (null, null, null); }
     }
+}
+
+/// <summary>
+/// One container through Apple's notary service, as an explicit step: an .app is zipped with ditto and submitted
+/// (<c>notarytool submit --keychain-profile … --wait</c>); on rejection the notary log is saved; on acceptance the ticket
+/// is stapled to the .app, .pkg or .dmg itself, validated, and Gatekeeper assesses it. Works on any file, with or without a
+/// Maker build record. Credentials are referenced by keychain profile name only; HCG never sees the password.
+/// </summary>
+public sealed class NotaryClient(IProcessRunner runner, string logsDirectory)
+{
+    private const string Xcrun = "/usr/bin/xcrun";
+
+    /// <summary>Why a Developer ID signed file cannot be notarized now, or null when it can.</summary>
+    public static string? Blocker(bool developerIdSigned, string? keychainProfile, bool isMac)
+    {
+        if (!isMac) return "Notarization runs on a Mac (xcrun notarytool).";
+        if (!developerIdSigned)
+            return "The app is not signed with Developer ID. The notary service accepts only Developer ID signed software with the hardened runtime and a secure timestamp.";
+        if (string.IsNullOrWhiteSpace(keychainProfile))
+            return "Set up notarization credentials first (Settings › Apple credentials): store them in the keychain with xcrun notarytool store-credentials and enter the profile name.";
+        return null;
+    }
+
+    public async Task<IReadOnlyList<DistributionStep>> NotarizeAsync(string path, PackagingFormat format, string keychainProfile, Action<string> log, CancellationToken ct)
+    {
+        var steps = new List<DistributionStep>();
+        string? temp = null;
+        try
+        {
+            var submitPath = path;
+            if (format == PackagingFormat.MacAppBundle)
+            {
+                // An .app is submitted as a ZIP made with ditto (the notary service accepts UDIF, flat pkg and ZIP).
+                temp = Path.Combine(Path.GetTempPath(), "hcg-notary-" + Guid.NewGuid().ToString("N")[..10]);
+                Directory.CreateDirectory(temp);
+                submitPath = Path.Combine(temp, Path.GetFileNameWithoutExtension(path) + ".zip");
+                var zip = await runner.RunAsync(new ProcessSpec { Executable = "/usr/bin/ditto", Arguments = ["-c", "-k", "--keepParent", path, submitPath], Timeout = TimeSpan.FromMinutes(10) },
+                    (_, _) => { }, ct).ConfigureAwait(false);
+                if (!zip.Succeeded) { steps.Add(new("Submit", VerificationStatus.Failed, $"Could not zip the app for submission (ditto exit code {zip.ExitCode}).")); return steps; }
+            }
+            log($"Submitting {Path.GetFileName(path)} to Apple's notary service (this usually takes a few minutes)…");
+            var (sr, so, se) = await runner.CaptureAsync(new ProcessSpec
+            {
+                Executable = Xcrun,
+                Arguments = ["notarytool", "submit", submitPath, "--keychain-profile", keychainProfile, "--wait", "--timeout", "1h", "--output-format", "json"],
+                Timeout = TimeSpan.FromMinutes(75),
+            }, ct).ConfigureAwait(false);
+            var (id, status, message) = NotarizationService.ParseSubmission(so);
+            if (status is null)
+            {
+                steps.Add(new("Submit", VerificationStatus.Failed, $"notarytool did not complete (exit code {sr.ExitCode}): {MacCodeSigner.LastLines(se + so, 3)} " +
+                                                                   "Check the keychain profile name and your network connection."));
+                return steps;
+            }
+            steps.Add(new("Submit", VerificationStatus.Passed, $"Submission {id} uploaded."));
+            if (status != "Accepted")
+            {
+                Directory.CreateDirectory(logsDirectory);
+                var logPath = Path.Combine(logsDirectory, $"notary-{id}.json");
+                var (lr, _, _) = await runner.CaptureAsync(new ProcessSpec
+                {
+                    Executable = Xcrun, Arguments = ["notarytool", "log", id!, "--keychain-profile", keychainProfile, logPath], Timeout = TimeSpan.FromMinutes(5),
+                }, ct).ConfigureAwait(false);
+                steps.Add(new("Notarization", VerificationStatus.Failed, $"Apple's notary service answered {status}: {message}." +
+                    (lr.Succeeded ? $" The notary log with the exact issues was saved to {logPath}." : " The notary log could not be downloaded.")));
+                return steps;
+            }
+            steps.Add(new("Notarization", VerificationStatus.Passed, $"Accepted by Apple's notary service (submission {id})."));
+
+            var (str, sto, ste) = await runner.CaptureAsync(new ProcessSpec { Executable = Xcrun, Arguments = ["stapler", "staple", path], Timeout = TimeSpan.FromMinutes(10) }, ct).ConfigureAwait(false);
+            steps.Add(str.Succeeded
+                ? new("Staple", VerificationStatus.Passed, "Ticket stapled, so Gatekeeper can verify it offline.")
+                : new("Staple", VerificationStatus.Failed, $"stapler staple failed: {MacCodeSigner.LastLines(sto + ste, 2)} (the ticket can take a moment to propagate; run Notarize again to retry stapling)."));
+            var (vr, vo, ve) = await runner.CaptureAsync(new ProcessSpec { Executable = Xcrun, Arguments = ["stapler", "validate", path], Timeout = TimeSpan.FromMinutes(5) }, ct).ConfigureAwait(false);
+            steps.Add(vr.Succeeded ? new("Staple validation", VerificationStatus.Passed, "stapler validate passed.")
+                : new("Staple validation", VerificationStatus.Failed, MacCodeSigner.LastLines(vo + ve, 2)));
+            var gk = await new MacCodeSigner(runner).GatekeeperAsync(path, GatekeeperType(format), ct, expectNotarized: true).ConfigureAwait(false);
+            steps.Add(new("Gatekeeper", gk.Status, gk.Detail));
+            return steps;
+        }
+        finally
+        {
+            if (temp is not null) try { Directory.Delete(temp, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>spctl's assessment type for a container: install for .pkg, open for .dmg, execute for an .app.</summary>
+    public static string GatekeeperType(PackagingFormat format) => format switch { PackagingFormat.MacPkg => "install", PackagingFormat.MacDmg => "open", _ => "execute" };
 }
 
 /// <summary>

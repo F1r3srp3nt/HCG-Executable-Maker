@@ -35,7 +35,8 @@ public sealed record SigningCapability(
 
 /// <summary>
 /// Reports which signing/notarization operations exist and whether this host has their tools. The macOS operations
-/// (Developer ID, notarization, Mac App Store) are implemented for Swift apps; Windows signing is not implemented yet.
+/// (Developer ID and notarization for Swift and .NET apps and for already-built apps; the Mac App Store for Swift apps) are
+/// implemented.
 /// </summary>
 public static class SigningCapabilityCatalog
 {
@@ -56,9 +57,9 @@ public static class SigningCapabilityCatalog
             Make("msix-store", "Microsoft Store (MSIX)", TargetPlatform.Windows,
                 "Package and sign MSIX for Partner Center submission.", [ToolchainIds.MakeAppx, ToolchainIds.SignTool]),
             Make("developer-id", "Apple Developer ID", TargetPlatform.MacOS,
-                "Swift apps: sign the .app and .dmg with a Developer ID Application certificate (hardened runtime, secure timestamp, reviewed entitlements); sign the .pkg with Developer ID Installer.", [ToolchainIds.Codesign], implemented: true),
+                "Swift and .NET apps in a build, and any already-built .app on Sign an existing app: sign every Mach-O inside out and the .app with a Developer ID Application certificate (hardened runtime, secure timestamp, reviewed entitlements); sign the .pkg with Developer ID Installer.", [ToolchainIds.Codesign], implemented: true),
             Make("notarization", "Apple notarization", TargetPlatform.MacOS,
-                "Explicit step after a Developer ID build: notarytool submit with a keychain profile, staple, Gatekeeper check (Build results › Notarize).", [ToolchainIds.Notarytool], implemented: true),
+                "Explicit step after Developer ID signing: notarytool submit with a keychain profile, staple, Gatekeeper check (Build results › Notarize, or Sign an existing app).", [ToolchainIds.Notarytool], implemented: true),
             Make("mac-app-store", "Mac App Store", TargetPlatform.MacOS,
                 "Swift apps: sandboxed, Apple Distribution signed app with embedded profile in a Mac Installer Distribution signed .pkg; validation explicit, upload manual.", [ToolchainIds.Codesign, ToolchainIds.Productbuild], implemented: true),
         ];

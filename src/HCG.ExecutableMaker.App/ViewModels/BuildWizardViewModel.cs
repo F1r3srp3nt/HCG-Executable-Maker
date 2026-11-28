@@ -61,9 +61,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         HCG.ExecutableMaker.BuildEngine.MacDistribution.AppStoreValidationService validator,
         IProcessRunner processRunner,
         HCG.ExecutableMaker.BuildEngine.Native.NativeConfigurator nativeConfigurator,
+        IProjectSigningStore projectSigning,
         BuildReadinessPanelViewModel readiness,
         BuildHostPanelViewModel buildHost)
     {
+        _projectSigning = projectSigning;
         Readiness = readiness;
         BuildHost = buildHost;
         _processRunner = processRunner;
@@ -223,6 +225,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasProject), nameof(ProjectTitle), nameof(ProjectSource))]
     [NotifyCanExecuteChangedFor(nameof(NextCommand))]
     private ProjectRecord? _project;
+    private readonly IProjectSigningStore _projectSigning;
 
     public bool HasProject => Project is not null;
     public string ProjectTitle => Project?.Name ?? "";
@@ -549,6 +552,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         OnPropertyChanged(nameof(IsSwiftBuild));
         OnPropertyChanged(nameof(IsDotNetBuild));
         OnPropertyChanged(nameof(IsSwiftGui));
+        OnPropertyChanged(nameof(CanSignForDistribution));
         var key = Project?.Id + "|" + detected.RelativePath + (swift ? "|" + SelectedSwiftProduct?.Name : "");
         OnPropertyChanged(nameof(IsElectronBuild));
         OnPropertyChanged(nameof(IdentityEditable));
@@ -804,6 +808,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
             IsTheos = IsTheosBuild,
             IsNativeMacBundle = IsNativeBuild && IsNativeMacBundle,
             IsMacXcode = IsMacXcodeBuild,
+            SingleFile = SingleFile,
         };
     }
 
@@ -814,6 +819,7 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         var ctx = DistributionContext(baseCtx);
         OnPropertyChanged(nameof(ShowDistribution));
         OnPropertyChanged(nameof(IsSwiftGui));
+        OnPropertyChanged(nameof(CanSignForDistribution));
         if (IsElectronBuild)
             preselect ??= RecordedElectronFormats() ?? DefaultElectronFormats();
         if (swiftKind is not null)
@@ -835,9 +841,11 @@ public sealed partial class BuildWizardViewModel : PageViewModel
         NextCommand.NotifyCanExecuteChanged();
         if (ShowDistribution)
         {
-            var keep = _repeatDistribution ?? CreateDistributionOptions();
+            var repeat = _repeatDistribution;
             _repeatDistribution = null;
-            if (_signing is null) _ = RefreshSigningThenApplyAsync(keep);
+            var keep = repeat ?? CreateDistributionOptions();
+            if (repeat is null && CanSignForDistribution && Project is not null) _ = PrepareDistributionChoicesAsync(keep, applySaved: true);
+            else if (_signing is null) _ = RefreshSigningThenApplyAsync(keep);
             else PopulateDistributionChoices(keep);
         }
     }
