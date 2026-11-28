@@ -753,7 +753,7 @@ public class MobileBuildServiceTests : IDisposable
         {
             var props = new Dictionary<string, string>
             {
-                ["OutputType"] = "Exe", ["ApplicationId"] = "com.hakmicapital.hellodotnet",
+                ["OutputType"] = "Exe", ["ApplicationId"] = "com.hakmicapitalgroup.fixtures.hellodotnetios",
                 ["ArchiveOnBuild"] = a.Contains("-p:ArchiveOnBuild=true") ? "true" : "",
                 ["ArchiveDir"] = a.FirstOrDefault(x => x.StartsWith("-p:ArchiveDir=", StringComparison.Ordinal))?["-p:ArchiveDir=".Length..] ?? "",
                 ["BuildIpa"] = a.Contains("-p:BuildIpa=true") ? "true" : "false",
@@ -792,13 +792,21 @@ public class MobileBuildServiceTests : IDisposable
         SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "Dev",
     };
 
+    /// <summary>
+    /// The service for the .NET routes. On a Mac host the verifier runs codesign --verify on archives and device apps; the
+    /// scripted SDK's bundles carry a synthetic signature real codesign rejects, so verification gets a recording runner
+    /// that answers like codesign for a valid signature (the real check runs in the hcg-mail-ios-signed CI job).
+    /// </summary>
+    private MobileBuildService DotNetService(IBuildWorker worker, ToolchainReport report) =>
+        new(worker, new FixedToolchains(report), _builds, new MobileArtifactVerifier(new RecordingProcessRunner(_ => (0, "", "valid on disk"))), _paths, TimeProvider.System);
+
     [Fact]
     public async Task A_dotnet_ios_ipa_is_the_sdks_own_with_the_archive_found_where_ArchiveDir_put_it_and_no_xcodebuild_export()
     {
         // Regression (HCG Mail on Xcode 27.2, workload 27.2.10000): "dotnet publish succeeded but created no .xcarchive".
         var (p, report) = await DotNetIosProject();
         var worker = DotNetIosSdk();
-        var build = await Service(worker, report).RunAsync(Request(p, DotNetManual(MobileOutput.IosIpa)), new Observer(), CancellationToken.None);
+        var build = await DotNetService(worker, report).RunAsync(Request(p, DotNetManual(MobileOutput.IosIpa)), new Observer(), CancellationToken.None);
         Assert.True(build.Status == BuildStatus.Succeeded, build.FailureReason + " | " + string.Join(" | ", build.Messages.Select(m => m.Text)));
         Assert.Contains(build.Artifacts, x => x.Format == PackagingFormat.IosIpa);
         Assert.Contains(build.Artifacts, x => x.Format == PackagingFormat.IosArchive && x.Path.EndsWith(".xcarchive", StringComparison.Ordinal));
@@ -812,7 +820,7 @@ public class MobileBuildServiceTests : IDisposable
     public async Task A_dotnet_ios_archive_alone_and_a_signed_device_app_are_separate_routes()
     {
         var (p, report) = await DotNetIosProject();
-        var archive = await Service(DotNetIosSdk(), report).RunAsync(Request(p, DotNetManual(MobileOutput.IosArchive)), new Observer(), CancellationToken.None);
+        var archive = await DotNetService(DotNetIosSdk(), report).RunAsync(Request(p, DotNetManual(MobileOutput.IosArchive)), new Observer(), CancellationToken.None);
         Assert.True(archive.Status == BuildStatus.Succeeded, archive.FailureReason);
         Assert.Equal(PackagingFormat.IosArchive, Assert.Single(archive.Artifacts).Format);
 
@@ -823,7 +831,7 @@ public class MobileBuildServiceTests : IDisposable
             MobileSamples.AppBundle(Path.Combine(a[a.IndexOf("-o") + 1], "HelloDotNetIos.app"), "iphoneos", MobileSamples.MachO(0x0100000C), signed: true);
             return ScriptedMobileWorker.Exit(0);
         });
-        var device = await Service(worker, report).RunAsync(Request(p, DotNetManual(MobileOutput.IosDeviceApp)), new Observer(), CancellationToken.None);
+        var device = await DotNetService(worker, report).RunAsync(Request(p, DotNetManual(MobileOutput.IosDeviceApp)), new Observer(), CancellationToken.None);
         Assert.True(device.Status == BuildStatus.Succeeded, device.FailureReason);
         Assert.Equal(PackagingFormat.IosDeviceApp, Assert.Single(device.Artifacts).Format);
         Assert.Equal("build", worker.Calls.Last().Arguments[0]);
@@ -834,14 +842,14 @@ public class MobileBuildServiceTests : IDisposable
     public async Task When_packaging_fails_after_signing_the_signed_app_is_kept_and_named_and_no_archive_is_invented()
     {
         var (p, report) = await DotNetIosProject();
-        var build = await Service(DotNetIosSdk(failPackaging: true), report).RunAsync(Request(p, DotNetManual(MobileOutput.IosIpa)), new Observer(), CancellationToken.None);
+        var build = await DotNetService(DotNetIosSdk(failPackaging: true), report).RunAsync(Request(p, DotNetManual(MobileOutput.IosIpa)), new Observer(), CancellationToken.None);
         Assert.Equal(BuildStatus.Failed, build.Status);
         Assert.Contains("The app itself compiled and was signed", build.FailureReason);
         Assert.Contains("HelloDotNetIos.app (kept)", build.FailureReason);
         Assert.Empty(build.Artifacts);
 
         // The SDK says it succeeded but wrote no IPA: refused with the reason, never a renamed app.
-        var noIpa = await Service(DotNetIosSdk(makeIpa: false), report).RunAsync(Request(p, DotNetManual(MobileOutput.IosIpa)), new Observer(), CancellationToken.None);
+        var noIpa = await DotNetService(DotNetIosSdk(makeIpa: false), report).RunAsync(Request(p, DotNetManual(MobileOutput.IosIpa)), new Observer(), CancellationToken.None);
         Assert.Equal(BuildStatus.Failed, noIpa.Status);
         Assert.Contains("made no IPA", noIpa.FailureReason);
     }
