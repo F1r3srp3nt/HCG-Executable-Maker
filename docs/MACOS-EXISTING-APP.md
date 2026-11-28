@@ -108,6 +108,28 @@ Each run is recorded in Build History. Its files appear in Artifacts and in Ship
 
     The published Windows release is not touched. Review, approval and publication happen in HCG Store, by a person.
 
+## One pipeline (reconciled with PR #22)
+
+PR #22 ("Sign an existing macOS app") implemented the same flow separately. This page is the single pipeline; it kept
+its own core (ZIP and checksum input, the original re-hashed after every stage, build records, packaging only after
+notarization, DMG, Gatekeeper on the extracted ZIP, Ship to Store only when every file is notarized and accepted) and
+took these from PR #22:
+- extended attributes are cleared on the copy before signing (`xattr -cr`), so quarantine or Finder info cannot make
+  codesign fail; the original keeps its attributes;
+- `get-task-allow` is refused before anything is signed;
+- a .NET app (CoreCLR, or a single-file host) without `com.apple.security.cs.allow-jit` is warned about on Inspect and
+  before signing; it is not blocked (an ahead-of-time compiled app does not need it);
+- versions compare as numbers (`1.0` is release `1.0.0-beta.2`'s numeric part);
+- the Release Passport states the release version (`1.0.0-beta.2`) when its numeric part is the app's version;
+  `--release-passport` takes `--release-version`.
+
+Fixed at the same time: running Notarize & package again replaces the earlier ZIP/PKG/DMG records instead of adding
+duplicates, and the staging folder is removed when reading the input fails.
+
+Not taken from PR #22: its ad-hoc test mode (outputs that look like releases but are not), its Ship to Store button
+without the notarized-and-accepted gate, and its changes to the New Build wizard's .NET Developer ID signing (a separate
+change to the build-from-source flow).
+
 ## Not done by this page (stated, not implied)
 
 - **Downloading the CI artifact.** Download it from GitHub yourself. Maker verifies it against the published `SHA256SUMS-signing-input.txt`.

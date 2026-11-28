@@ -126,6 +126,38 @@ public sealed class ExistingMacAppTests : IDisposable
     }
 
     [Fact]
+    public void Versions_compare_as_numbers_and_development_entitlements_are_refused_before_signing()
+    {
+        // From PR #22: "1.0" in Info.plist is release 1.0.0-beta.2's numeric part.
+        var facts = MacAppFacts.Read(MailShapedApp(_t.Combine("v"), version: "1.0"));
+        ExistingMacAppRequest R(string version) => new() { Input = "x", ReleaseVersion = version, Architecture = TargetArchitecture.Arm64, DeveloperIdApplicationSha1 = "x", OutputDirectory = "o" };
+        Assert.Contains(ExistingMacAppDistribution.ReleaseChecks(facts, R("1.0.0-beta.2")), c => c.Name == "Version" && c.Status == VerificationStatus.Passed);
+        Assert.Contains(ExistingMacAppDistribution.ReleaseChecks(facts, R("1.0.1")), c => c.Name == "Version" && c.Status == VerificationStatus.Failed);
+        Assert.Equal("1.0.0", ExistingMacAppDistribution.NormalizeVersion("1.0"));
+        Assert.Equal("1.2.0", ExistingMacAppDistribution.NormalizeVersion("01.2"));
+
+        Assert.Contains("get-task-allow", ExistingMacAppDistribution.Entitlements_Invalid(["com.apple.security.cs.allow-jit", "com.apple.security.get-task-allow"]));
+        Assert.Null(ExistingMacAppDistribution.Entitlements_Invalid(["com.apple.security.cs.allow-jit"]));
+    }
+
+    [Fact]
+    public void A_dotnet_app_without_allow_jit_is_warned_about_never_blocked()
+    {
+        var app = MailShapedApp(_t.Combine("net"));
+        Assert.Null(ExistingMacAppDistribution.JitCheck(app, []));                                     // not .NET (no CoreCLR)
+        File.WriteAllBytes(Path.Combine(app, "Contents", "MacOS", "libcoreclr.dylib"), Arm64);
+        var warn = ExistingMacAppDistribution.JitCheck(app, [])!;
+        Assert.Equal(VerificationStatus.PassedWithWarnings, warn.Status);
+        Assert.Contains("allow-jit", warn.Detail);
+        Assert.Equal(VerificationStatus.Passed, ExistingMacAppDistribution.JitCheck(app, ["com.apple.security.cs.allow-jit"])!.Status);
+
+        // A single-file .NET host embeds System.Private.CoreLib in the executable itself.
+        var single = MailShapedApp(_t.Combine("single"));
+        File.WriteAllBytes(Path.Combine(single, "Contents", "MacOS", "HCG Mail"), [.. Arm64, .. new byte[3_000_000], .. "System.Private.CoreLib"u8.ToArray()]);
+        Assert.True(ExistingMacAppDistribution.LooksLikeDotNet(single));
+    }
+
+    [Fact]
     public void Data_files_in_Contents_MacOS_are_refused_with_the_reason()
     {
         var app = MailShapedApp(_t.Combine("in"), dataInMacOS: true);

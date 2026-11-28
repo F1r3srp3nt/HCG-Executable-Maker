@@ -8,7 +8,7 @@ namespace HCG.ExecutableMaker.App;
 
 /// <summary>
 /// <c>HCGExecutableMaker --release-passport --app &lt;X.app&gt; --file &lt;X.app.zip&gt; [--source-repo &lt;dir&gt;]
-/// [--provider executable-maker-local|github-actions] [--toolchain "…"] [--out &lt;file&gt;]</c>: the Release Passport build
+/// [--provider executable-maker-local|github-actions] [--toolchain "…"] [--release-version 1.0.0-beta.2] [--out &lt;file&gt;]</c>: the Release Passport build
 /// half for a macOS app archive (.zip of the .app, .pkg or .dmg) that already exists, e.g. a .NET app's distribution
 /// files or Maker's own packaged app (<c>--self</c>: Maker's embedded build provenance, no git needed). Facts are measured: the archive's
 /// SHA-256 and size, the bundle's identity, version and architectures, the code signing as the Signing Doctor reads it
@@ -55,7 +55,7 @@ internal static class ReleasePassportCommand
         var result = MacArchivePassport.WriteAsync(runner, new MacArchivePassport.Request
         {
             App = app, File = file, Source = source, Provider = Arg("--provider") ?? "executable-maker-local", Toolchain = Arg("--toolchain"),
-            BuildNumber = Arg("--build-number"), Output = Arg("--out"),
+            BuildNumber = Arg("--build-number"), ReleaseVersion = Arg("--release-version"), Output = Arg("--out"),
         }, CancellationToken.None).GetAwaiter().GetResult();
         if (!result.Written) { Console.Error.WriteLine("Not written: " + string.Join("; ", result.Problems)); return MacArchivePassport.KindOf(file) is null ? 2 : 6; }
         var signing = result.Signing!;

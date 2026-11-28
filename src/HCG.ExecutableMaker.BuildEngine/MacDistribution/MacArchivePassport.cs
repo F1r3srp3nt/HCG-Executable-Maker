@@ -23,6 +23,8 @@ public static class MacArchivePassport
         public string Provider { get; init; } = "executable-maker-local";
         public string? Toolchain { get; init; }
         public string? BuildNumber { get; init; }
+        /// <summary>The release version (e.g. 1.0.0-beta.2) when its numeric part is the app's CFBundleShortVersionString; else the passport states the latter.</summary>
+        public string? ReleaseVersion { get; init; }
         /// <summary>Further measured checks to record (name, Passed/PassedWithWarnings/Failed, detail).</summary>
         public IReadOnlyList<(string Name, string State, string Detail)> ExtraChecks { get; init; } = [];
         public string? Output { get; init; }
@@ -61,7 +63,9 @@ public static class MacArchivePassport
         checks.AddRange(r.ExtraChecks);
         var passport = ReleasePassport.ForArtifact(new ReleasePassport.ArtifactFacts(
             Platform: "macos", Architecture: MacXcodePassport.ArchitectureName(facts.Architectures), Package: facts.BundleIdentifier ?? facts.Label,
-            Version: facts.ShortVersion ?? "0", BuildNumber: r.BuildNumber ?? facts.BuildVersion, ProductName: facts.Label,
+            Version: r.ReleaseVersion is { Length: > 0 } rv && facts.ShortVersion is { } sv
+                     && ExistingMacAppDistribution.NormalizeVersion(rv.Split('-', '+')[0]) == ExistingMacAppDistribution.NormalizeVersion(sv) ? rv : facts.ShortVersion ?? "0",
+            BuildNumber: r.BuildNumber ?? facts.BuildVersion, ProductName: facts.Label,
             FileName: System.IO.Path.GetFileName(r.File), Sha256: sha, Size: size, ArtifactKind: kind,
             Source: r.Source, Provider: r.Provider,
             Toolchain: r.Toolchain ?? "HCG Executable Maker " + HostInfo.ProductVersion, BuiltAt: DateTimeOffset.UtcNow,

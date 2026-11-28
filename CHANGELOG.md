@@ -4,6 +4,10 @@ All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](
 
 ## [Unreleased] — Sign & Notarize (macOS): Developer ID distribution of an app built elsewhere
 
+One pipeline, reconciled with PR #22: from it, `xattr -cr` on the copy before signing, `get-task-allow` refused before
+signing, the .NET `allow-jit` warning, numeric version comparison and the release version in passports
+(`--release-passport --release-version`). Re-running Notarize & package no longer duplicates artifact records.
+
 ### Added
 - **Sign & Notarize (macOS)** page and `--mac-distribute` command
   ([docs/MACOS-EXISTING-APP.md](docs/MACOS-EXISTING-APP.md)). They take an already-built `.app`, or a ZIP holding one

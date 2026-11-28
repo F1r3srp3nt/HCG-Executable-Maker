@@ -97,6 +97,7 @@ public sealed partial class ExistingMacAppDistribution(
             checks.Add(facts.Problem is { } p ? new("Bundle", VerificationStatus.Failed, p)
                 : new("Bundle", VerificationStatus.Passed, $"{facts.Label}: {facts.BundleIdentifier} {facts.ShortVersion} ({facts.BuildVersion}), {string.Join("/", facts.Architectures)}, macOS {facts.MinimumSystemVersion ?? "?"}+"));
             checks.Add(CodeOnlyCheck(nonCode));
+            if (JitCheck(app, []) is { } jit) checks.Add(jit with { Detail = jit.Detail.Replace("signed with", "to be signed with", StringComparison.Ordinal) });
             return new(input, sha, facts, nonCode, MacCodeSigner.NestedCode(app).Select(n => Path.GetRelativePath(app, n)).ToList(), checks, asReceived);
         }
         finally { TryDelete(temp); }
@@ -137,9 +138,9 @@ public sealed partial class ExistingMacAppDistribution(
 
         var now = time.GetUtcNow();
         var staging = Path.Combine(Path.GetTempPath(), "hcg-mac-import-" + Guid.NewGuid().ToString("N")[..10]);
-        var (stagedApp, inputSha, inputChecks) = await StageInputAsync(request.Input, request.ChecksumsFile, staging, ct).ConfigureAwait(false);
         try
         {
+            var (stagedApp, inputSha, inputChecks) = await StageInputAsync(request.Input, request.ChecksumsFile, staging, ct).ConfigureAwait(false);
             if (stagedApp is null) throw new InvalidOperationException(inputChecks.Last().Detail);
             var facts = MacAppFacts.Read(stagedApp);
             if (facts.Problem is { } problem) throw new InvalidOperationException($"{Path.GetFileName(stagedApp)}: {problem}");
@@ -201,8 +202,12 @@ public sealed partial class ExistingMacAppDistribution(
                 if (checks.FirstOrDefault(c => c.Status == VerificationStatus.Failed) is { } stop)
                     throw new InvalidOperationException($"{stop.Name}: {stop.Detail}");
 
+                if (JitCheck(received, request.Entitlements) is { } jit) checks.Add(jit);
                 var signedApp = Path.Combine(job, bundleName);
                 await RunAsync(Ditto, [received, signedApp], log, ct).ConfigureAwait(false);
+                // Quarantine, Finder info and resource forks on the copy make codesign fail ("resource fork, Finder
+                // information, or similar detritus not allowed"); the original keeps its attributes.
+                await RunAsync("/usr/bin/xattr", ["-cr", signedApp], log, ct).ConfigureAwait(false);
                 var signer = new MacCodeSigner(runner);
                 fileLog.Info($"Signing {bundleName} with {app.Name} (hardened runtime, secure timestamp, entitlements: {(request.Entitlements.Count == 0 ? "none" : string.Join(", ", request.Entitlements))})");
                 await signer.SignBundleInsideOutAsync(signedApp, app.Sha1, request.Entitlements, fileLog, ct).ConfigureAwait(false);
@@ -270,6 +275,8 @@ public sealed partial class ExistingMacAppDistribution(
         var job = build.Settings.OutputDirectory;
         var d = build.Settings.MacDistribution;
         var made = new List<Guid>();
+        // A second run replaces the files of the first; its records go with them (no duplicate artifacts).
+        build.Artifacts.RemoveAll(a => a.Kind == ArtifactKind.File && a.Format is PackagingFormat.PortableZip or PackagingFormat.MacPkg or PackagingFormat.MacDmg);
         try
         {
             if (formats.Contains("zip"))
@@ -357,7 +364,7 @@ public sealed partial class ExistingMacAppDistribution(
             var gatekeeper = a.Checks.FirstOrDefault(c => c.Name == "Gatekeeper");
             var r = await MacArchivePassport.WriteAsync(runner, new MacArchivePassport.Request
             {
-                App = app, File = a.Path, Source = source, BuildNumber = MacAppFacts.Read(app).BuildVersion,
+                App = app, File = a.Path, Source = source, BuildNumber = MacAppFacts.Read(app).BuildVersion, ReleaseVersion = build.Settings.Identity.Version,
                 Toolchain = $"HCG Executable Maker {HostInfo.ProductVersion}: Developer ID signing, notarization and packaging of an app built elsewhere (not rebuilt)",
                 ExtraChecks =
                 [
@@ -437,7 +444,7 @@ public sealed partial class ExistingMacAppDistribution(
     {
         var checks = new List<VerificationCheck>();
         var numeric = NumericPart().Match(r.ReleaseVersion).Value;
-        checks.Add(facts.ShortVersion == numeric
+        checks.Add(facts.ShortVersion is not null && NormalizeVersion(facts.ShortVersion) == NormalizeVersion(numeric)
             ? new("Version", VerificationStatus.Passed, $"CFBundleShortVersionString {facts.ShortVersion} is the numeric part of release {r.ReleaseVersion}.")
             : new("Version", VerificationStatus.Failed, $"CFBundleShortVersionString is {facts.ShortVersion ?? "missing"}, but release {r.ReleaseVersion} needs {numeric}. This app is another version; nothing was signed."));
         if (r.ExpectedBuildNumber is { Length: > 0 } build)
@@ -638,7 +645,47 @@ public sealed partial class ExistingMacAppDistribution(
     public static string? Entitlements_Invalid(IReadOnlyList<string> keys)
     {
         var bad = keys.Where(k => !EntitlementKey().IsMatch(k)).ToList();
-        return bad.Count == 0 ? null : $"Not an entitlement key: {string.Join(", ", bad)} (keys look like com.apple.security.cs.allow-jit).";
+        if (bad.Count > 0) return $"Not an entitlement key: {string.Join(", ", bad)} (keys look like com.apple.security.cs.allow-jit).";
+        // Refused before anything is signed (Apple's notary service rejects it, and it lets any process attach a debugger).
+        if (keys.Any(k => k is "com.apple.security.get-task-allow" or "get-task-allow"))
+            return "get-task-allow is a development entitlement: Apple's notary service rejects Developer ID apps that carry it. Remove it; nothing was signed.";
+        return null;
+    }
+
+    /// <summary>A .NET app (CoreCLR next to the executable, or a single-file host that embeds System.Private.CoreLib).</summary>
+    public static bool LooksLikeDotNet(string app)
+    {
+        var macos = Path.Combine(app, "Contents", "MacOS");
+        if (!Directory.Exists(macos)) return false;
+        if (Directory.EnumerateFiles(app, "*.dylib", SearchOption.AllDirectories).Any(f => Path.GetFileName(f) is "libcoreclr.dylib" or "libclrjit.dylib")) return true;
+        if (MacAppFacts.Read(app).Executable is not { } exe || !File.Exists(Path.Combine(macos, exe))) return false;
+        var needle = "System.Private.CoreLib"u8.ToArray();
+        using var s = File.OpenRead(Path.Combine(macos, exe));
+        var buffer = new byte[(1 << 20) + needle.Length];
+        int carry = 0, read;
+        while ((read = s.Read(buffer, carry, buffer.Length - carry)) > 0)
+        {
+            var span = buffer.AsSpan(0, carry + read);
+            if (span.IndexOf(needle) >= 0) return true;
+            carry = Math.Min(needle.Length - 1, span.Length);
+            span[^carry..].CopyTo(buffer);
+        }
+        return false;
+    }
+
+    /// <summary>Warns (never blocks) when a .NET app is about to be signed without allow-jit: CoreCLR's JIT needs it under the hardened runtime.</summary>
+    public static VerificationCheck? JitCheck(string app, IReadOnlyList<string> entitlements) =>
+        !LooksLikeDotNet(app) ? null
+        : entitlements.Contains("com.apple.security.cs.allow-jit")
+            ? new("JIT entitlement", VerificationStatus.Passed, "A .NET app, signed with com.apple.security.cs.allow-jit (CoreCLR compiles code at run time).")
+            : new("JIT entitlement", VerificationStatus.PassedWithWarnings, "This is a .NET app: under the hardened runtime CoreCLR needs com.apple.security.cs.allow-jit, or it stops at start-up. Add it unless the app is ahead-of-time compiled.");
+
+    /// <summary>"1.0" and "1.0.0" are the same version; numeric parts compare as numbers.</summary>
+    public static string NormalizeVersion(string? numeric)
+    {
+        var parts = (numeric ?? "").Trim().Split('.').Select(p => int.TryParse(p, out var n) ? n.ToString(System.Globalization.CultureInfo.InvariantCulture) : p).ToList();
+        while (parts.Count < 3) parts.Add("0");
+        return string.Join('.', parts);
     }
 
     /// <summary>The boolean-true keys of an .entitlements property list; anything else is reported, never signed silently.</summary>
