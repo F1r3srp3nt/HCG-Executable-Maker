@@ -1085,7 +1085,7 @@ jobs:
       # HCG Store Manager is a private repository: it is built only when this public repository has a read-only token
       # for it (secret HCG_STORE_MANAGER_READ_TOKEN). Its build log stays in this job; its app is never uploaded.
       STORE_MANAGER_REPOSITORY: F1r3srp3nt/HCG-Store-Manager
-      STORE_MANAGER_COMMIT: 24454ed595fb09f2ee18585533eb330d50d0a9fc  # HCG-Store-Manager main (PR #1 merged)
+      STORE_MANAGER_COMMIT: f489282f4ab5c8501db1d34d062e5bee01f3f370  # HCG-Store-Manager main (PR #2 merged; packaging unchanged since 24454ed)
       HAS_STORE_MANAGER_ACCESS: ${{ secrets.HCG_STORE_MANAGER_READ_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
