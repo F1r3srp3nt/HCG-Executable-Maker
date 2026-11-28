@@ -58,8 +58,8 @@ public static class ToolCatalog
         Locations = p => p switch
         {
             TargetPlatform.MacOS => [.. Brew("go"), "/opt/homebrew/opt/go/libexec/bin/go", "/usr/local/opt/go/libexec/bin/go", "/usr/local/go/bin/go", "~/sdk/go*/bin/go", "~/go/pkg/mod/golang.org/toolchain@*/bin/go", .. Managed("go")],
-            TargetPlatform.Linux => ["/usr/local/go/bin/go", "/usr/lib/go/bin/go", "/snap/bin/go", "~/sdk/go*/bin/go", "~/.asdf/shims/go", "~/.local/share/mise/shims/go"],
-            TargetPlatform.Windows => [@"C:\Program Files\Go\bin\go.exe", @"~\sdk\go*\bin\go.exe"],
+            TargetPlatform.Linux => ["/usr/local/go/bin/go", "/usr/lib/go/bin/go", "/snap/bin/go", "~/sdk/go*/bin/go", "~/go/pkg/mod/golang.org/toolchain@*/bin/go", "~/.asdf/shims/go", "~/.local/share/mise/shims/go"],
+            TargetPlatform.Windows => [@"C:\Program Files\Go\bin\go.exe", @"~\sdk\go*\bin\go.exe", @"~\go\pkg\mod\golang.org\toolchain@*\bin\go.exe"],
             _ => [],
         },
     };
@@ -215,8 +215,23 @@ public static class ToolCatalog
         HomebrewFormula = "pkgconf", LinuxInstructions = "sudo apt install pkg-config", Locations = p => p == TargetPlatform.MacOS ? Brew("pkg-config") : [],
     };
 
+    /// <summary>NSIS, which builds Windows installers (HCG Server's windows/WindowsPackaging.json requires it); it also runs on macOS and Linux.</summary>
+    public static readonly ToolDefinition Makensis = new()
+    {
+        Id = "makensis", DisplayName = "NSIS (makensis)", Executables = ["makensis"], VersionArguments = [["-VERSION"]],
+        VersionPattern = new Regex(@"v?(\d+\.\d+(?:\.\d+)?)", RegexOptions.Compiled),
+        OfficialUrl = "https://nsis.sourceforge.io/Download", HomebrewFormula = "makensis",
+        LinuxInstructions = "sudo apt install nsis", WindowsInstructions = "winget install --id NSIS.NSIS",
+        Locations = p => p switch
+        {
+            TargetPlatform.MacOS => Brew("makensis"),
+            TargetPlatform.Windows => [@"C:\Program Files (x86)\NSIS\makensis.exe", @"C:\Program Files\NSIS\makensis.exe"],
+            _ => ["/usr/bin/makensis", "/usr/local/bin/makensis"],
+        },
+    };
+
     public static IReadOnlyList<ToolDefinition> All { get; } =
-        [Go, Swift, DotNet, Node, Npm, Python, Rustc, Cargo, Java, CMake, Ninja, Clang, Gcc, Make, Lipo, Git, Docker, Perl, PkgConfig];
+        [Go, Swift, DotNet, Node, Npm, Python, Rustc, Cargo, Java, CMake, Ninja, Clang, Gcc, Make, Lipo, Git, Docker, Perl, PkgConfig, Makensis];
 
     private static readonly Dictionary<string, string> Aliases = new(StringComparer.OrdinalIgnoreCase)
     {

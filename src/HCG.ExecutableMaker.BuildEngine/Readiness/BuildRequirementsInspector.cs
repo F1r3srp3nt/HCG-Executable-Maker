@@ -112,6 +112,9 @@ public static partial class BuildRequirementsInspector
             list.Add(new ToolRequirement { ToolId = "dotnet", DisplayName = ".NET SDK", MinimumVersion = analysis?.GlobalJsonSdkVersion, DeclaredBy = analysis?.GlobalJsonSdkVersion is null ? "the .NET project files" : "global.json (sdk.version)", Purpose = "dotnet publish" });
         if (analysis?.MacXcode?.Projects.Count > 0)
             list.Add(new ToolRequirement { ToolId = "xcode", DisplayName = "Xcode", DeclaredBy = analysis.MacXcode.Projects[0].ProjectPath, Purpose = "xcodebuild" });
+        // A Windows packaging contract (HCG Server's windows/WindowsPackaging.json) declares its own tools, e.g. makensis.
+        if (Windows.WindowsPackagingContract.Find(sourceRoot).Contract is { } winContract)
+            list.AddRange(winContract.ToolRequirements());
         if (File.Exists(Path.Combine(sourceRoot, "Dockerfile")))
             list.Add(new ToolRequirement { ToolId = "docker", DisplayName = "Docker", DeclaredBy = "Dockerfile", Purpose = "container images (HCG's app builds do not use it)", Required = false });
         return Merge(list);

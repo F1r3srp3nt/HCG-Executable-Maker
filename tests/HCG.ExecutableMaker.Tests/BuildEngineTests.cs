@@ -173,6 +173,16 @@ public class SecurityTests
             Assert.Contains(kept, r.Environment.Keys);
         Assert.Equal("1", r.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"]);
         Assert.Equal("1", r.Environment["MSBUILDDISABLENODEREUSE"]);
+
+        // Git's environment configuration goes as a whole: a COUNT without its KEY_n makes git refuse to run at all
+        // (found running HCG Server's package-windows.sh, whose passports then had no commit).
+        var git = BuildEnvironmentPolicy.CreateUntrustedBuildEnvironment(new Dictionary<string, string>
+        {
+            ["PATH"] = "/usr/bin", ["GIT_CONFIG_COUNT"] = "1", ["GIT_CONFIG_KEY_0"] = "http.extraHeader", ["GIT_CONFIG_VALUE_0"] = "Authorization: Bearer x",
+            ["GIT_CONFIG_PARAMETERS"] = "'http.extraheader'='x'", ["GIT_SSL_CAINFO"] = "/ca.pem",
+        });
+        Assert.DoesNotContain(git.Environment.Keys, k => k.StartsWith("GIT_CONFIG_", StringComparison.Ordinal));
+        Assert.Contains("GIT_SSL_CAINFO", git.Environment.Keys);
     }
 
     [Fact]

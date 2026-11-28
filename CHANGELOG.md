@@ -2,6 +2,24 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — HCG Server for Windows: its packaging contract, and why its Build Host refuses jobs
+
+### Added
+- **Windows packaging contracts** (`windows/WindowsPackaging.json`, `hcg-windows-packaging/1`, as HCG Server declares it):
+  `--windows-contract <folder>` reviews the steps and the file's SHA-256; with `--confirm <sha256>` it checks the
+  declared tools, runs the steps in a copy of the source and verifies the outputs independently (SHA256SUMS, Release
+  Passports against the bytes, installed files in the ZIP, PE architecture). Build Readiness lists the contract's tools.
+  Verified with the real HCG Server at `d36efba`: portable ZIP and NSIS installer. See
+  [docs/HCG-SERVER-WINDOWS.md](docs/HCG-SERVER-WINDOWS.md).
+- NSIS (`makensis`) in Build Readiness's tool catalogue.
+- **Build Host:** an HCG Server whose isolation is not enforced (HCG Server for Windows: no backend yet) is explained
+  in the provider check and the Build Host panel; no job is submitted to it.
+
+### Fixed
+- Builds could not run git when the environment configured it through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`: only the
+  keys were removed. Git's environment configuration is now removed as a whole.
+- Build Readiness looks for Go in Go's toolchain cache on Linux and Windows too.
+
 ## [Unreleased] — .NET for iOS: genuine XCArchive and IPA (HCG Mail), device route, signing by route
 
 Builds on the exact-path archive and IPA of PR #23 (next section): its archive and IPA checks and its Xcode Archives

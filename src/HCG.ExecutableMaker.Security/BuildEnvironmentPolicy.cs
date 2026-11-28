@@ -24,6 +24,10 @@ public static partial class BuildEnvironmentPolicy
         "NPM_", "APPLE_", "ASC_", "APP_STORE_", "SSH_", "GPG_", "DOCKER_", "VAULT_", "OPENAI_", "ANTHROPIC_",
         // electron-builder code-signing certificates and their passwords (CSC_LINK, WIN_CSC_LINK, CSC_NAME, …).
         "CSC_", "WIN_CSC_",
+        // Git's environment configuration (GIT_CONFIG_COUNT with GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n, GIT_CONFIG_PARAMETERS)
+        // can carry credentials (http.extraHeader) and must be removed as a whole: removing only the KEY_n names leaves
+        // COUNT and VALUE_n behind, and git then refuses to run at all ("missing config key GIT_CONFIG_KEY_0").
+        "GIT_CONFIG_",
     ];
 
     /// <summary>Exact names that are needed for tooling and are kept even if they match a pattern.</summary>
