@@ -241,4 +241,19 @@ public class BuildProviderTests : IDisposable
         Assert.Same(f, MakerFeatures.ById("buildhost.local"));
         Assert.Contains(f, MakerFeatures.All);
     }
+
+    [Theory]
+    [InlineData("{\"contract\":\"hcg.buildhost/1\",\"isolation\":\"none\",\"enforced\":false,\"toolchains\":[],\"providers\":[],\"queued\":0,\"clients\":[]}", "AppContainer + Job Objects")]
+    [InlineData("{\"contract\":\"hcg.buildhost/1\",\"isolation\":\"landlock\",\"enforced\":false,\"toolchains\":[],\"providers\":[],\"queued\":0,\"clients\":[]}", "(landlock) is not available")]
+    public void A_build_host_without_enforced_isolation_is_explained_and_never_sent_a_job(string statusJson, string reason)
+    {
+        // HCG Server for Windows (d36efba) reports isolation "none": its Build Host refuses every job (it never runs build
+        // steps unconfined). Executable Maker states why and does not submit, instead of working around it.
+        var status = System.Text.Json.JsonSerializer.Deserialize<HCG.ExecutableMaker.BuildEngine.BuildHost.BuildHostStatus>(statusJson,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+        Assert.False(status.Enforced);
+        Assert.Contains(reason, status.Refusal);
+        Assert.Contains("does not send", status.Refusal);
+        Assert.Null((status with { Enforced = true }).Refusal);
+    }
 }

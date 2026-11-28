@@ -318,7 +318,7 @@ public sealed partial class BuildHostPanelViewModel : ViewModelBase
         }
         var provider = p is null ? null : Connection?.Status?.Providers.FirstOrDefault(x => x.Id == p.Provider);
         Blocker = Connection is not { IsConnected: true } ? "Connect to HCG Server's Build Host first (Test connection)."
-            : Connection.Status is { Enforced: false } ? "HCG Server's isolation is not enforced on that computer: Executable Maker does not submit builds to it."
+            : Connection.Status is { Refusal: { } refusal } ? refusal
             : p is null ? (Projects.Count == 0 ? "No project is registered on the Build Host. The owner registers one with `hcg-agent build project add --id … --repo OWNER/NAME --remote <working copy> --provider …`." : "Choose the Build Host project to build.")
             : provider is not { Available: true } ? ProviderState
             : Source?.HasPinnedCommit != true ? "The imported copy has no recorded 40-character commit, so there is nothing pinned to build. Import the project from a Git working copy."

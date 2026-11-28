@@ -78,7 +78,7 @@ public sealed class HcgServerBuildHost(HcgBuildHostClient client, IAppPaths path
     public string? CannotBuild(TargetPlatform platform)
     {
         if (_status is null) return "HCG Server's Build Host has not been contacted yet (status unknown).";
-        if (!_status.Enforced) return $"HCG Server's isolation ({_status.Isolation}) is not enforced on that computer.";
+        if (_status.Refusal is { } refusal) return refusal;
         return platform is TargetPlatform.IOS or TargetPlatform.MacOS && _status.Providers.FirstOrDefault(p => p.Id == "xcode") is not { Available: true }
             ? "HCG Server's Build Host has no Xcode: iOS and macOS builds need its xcode provider." : null;
     }
