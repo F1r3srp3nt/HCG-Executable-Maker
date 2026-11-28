@@ -270,6 +270,11 @@ public class AppleProjectRoutesTests : IDisposable
         Assert.Contains("-getProperty:ArchiveDir", a);
         Assert.Contains("-getProperty:BuildIpa", a);
         Assert.DoesNotContain(a, x => x is "publish" or "build");                          // evaluation only
+        // dotnet msbuild has no -f: MSBuild rejects it (MSB1001), the probe printed nothing and the real HCG Mail build
+        // went on unchecked (CI run 46112257158). The framework goes in as the property -f sets.
+        var build = plan.Steps[0].Process.Arguments.ToList();
+        Assert.DoesNotContain("-f", a);
+        Assert.Contains("-p:TargetFramework=" + build[build.IndexOf("-f") + 1], a);
         Assert.Null(DotNetIosPlanner.PropertyProbe(Input(m, new MobileBuildOptions { Framework = MobileFramework.DotNetIos, Output = MobileOutput.IosSimulatorApp }), plan));
 
         var json = $$"""

@@ -172,8 +172,16 @@ public sealed partial class MobileBuildService(
             observer.OnStage(probe.Stage, probe.Title);
             Log(BuildLogKind.Command, probe.DisplayCommand);
             var output = new StringBuilder();
-            var result = await worker.RunAsync(probe.Process, (stream, text) => { if (stream == OutputStream.StdOut) lock (output) output.AppendLine(text); }, overall.Token).ConfigureAwait(false);
+            var stderr = new StringBuilder();
+            var result = await worker.RunAsync(probe.Process, (stream, text) => { lock (output) (stream == OutputStream.StdOut ? output : stderr).AppendLine(text); }, overall.Token).ConfigureAwait(false);
             var props = result.ExitCode == 0 ? DotNetIosPlanner.ParseProperties(output.ToString()) : new Dictionary<string, string>();
+            if (props.Count == 0)
+            {
+                // Say why, instead of only "could not be read": MSBuild's own first error lines.
+                var why = (stderr + "\n" + output).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(l => l.Contains("error", StringComparison.OrdinalIgnoreCase) || l.StartsWith("MSB", StringComparison.Ordinal)).Take(3).ToList();
+                Log(BuildLogKind.Warning, $"The property probe exited with {result.ExitCode}{(why.Count > 0 ? ": " + string.Join(" | ", why) : " and printed no properties")}.");
+            }
             foreach (var name in DotNetIosPlanner.ProbedProperties)
                 if (props.TryGetValue(name, out var v)) { Log(BuildLogKind.Info, $"  {name} = {(v.Length == 0 ? "(empty)" : v)}"); build.ToolchainVersions["msbuild:" + name] = v; }
             var findings = DotNetIosPlanner.CheckProperties(props, planInput.Options, planInput.Analysis.DotNetIos!);

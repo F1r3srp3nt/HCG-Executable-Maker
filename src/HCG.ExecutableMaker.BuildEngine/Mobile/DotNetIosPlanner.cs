@@ -175,7 +175,10 @@ public static partial class DotNetIosPlanner
         if (build is null) return null;
         var a = build.Arguments;
         var configuration = a[a.ToList().IndexOf("-c") + 1];
-        var args = new List<string> { "msbuild", a[1], "-p:Configuration=" + configuration, "-p:RuntimeIdentifier=ios-arm64", "-f", a[a.ToList().IndexOf("-f") + 1] };
+        // dotnet msbuild has no -f (that is dotnet build/publish's option): MSBuild rejects it as an unknown switch
+        // (MSB1001), so the framework is passed as the property it sets. Found on the real HCG Mail (CI run 46112257158).
+        var args = new List<string> { "msbuild", a[1], "-p:Configuration=" + configuration, "-p:RuntimeIdentifier=ios-arm64" };
+        if (a.ToList().IndexOf("-f") is var fi and >= 0 && fi + 1 < a.Count) args.Add("-p:TargetFramework=" + a[fi + 1]);
         args.AddRange(a.Where(x => x.StartsWith("-p:", StringComparison.Ordinal) && !x.StartsWith("-p:UseSharedCompilation", StringComparison.Ordinal)));
         if (a.Contains("-o")) args.Add("-p:OutputPath=" + a[a.ToList().IndexOf("-o") + 1] + Path.DirectorySeparatorChar);
         args.AddRange(ProbedProperties.Select(n => "-getProperty:" + n));
