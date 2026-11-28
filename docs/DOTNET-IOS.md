@@ -91,12 +91,23 @@ Nothing is uploaded to TestFlight or HCG Store.
   - profile selection by route and bundle ID, never by team alone, and no wildcard for the App Store;
   - entitlement variables resolved per team;
   - the service with a scripted SDK that writes into ArchiveDir: the archive and IPA are found, no xcodebuild runs, and a packaging failure keeps and names the signed app.
+- **Release Passport:** every device IPA gets `<file>.ipa.release-passport.json` (build half), next to it, where Ship to Store finds it. It records:
+  - the IPA's SHA-256 and size, bundle ID, version, build number and architecture;
+  - the source commit as Git states it, and Xcode, the .NET SDK and the iOS workload;
+  - `code_signing`: every Mach-O and whether it is signed, the signed executable's entitlements, the embedded profile (name, team, type, expiry) and the verdict of Apple's `codesign --verify` (on a Mac).
+
+  Device installation and launch stay `not-recorded`: the builder never claims them. A development IPA is platform `ios`; only an App Store profile makes it `ios-app-store`.
+- **Maker's own verifier** runs Apple's `codesign --verify --deep --strict` on device apps, archives and (new) the app inside an IPA, on a Mac. The service tests replace codesign with a recording runner because their scripted bundles carry synthetic signatures; the production verifier is unchanged and its real verdict on HCG Mail is asserted in CI.
 - **CI** (`hcg-mail-ios-signed`, `xcode-27`, `tools/ci/hcg-mail-ios-e2e.sh`), on the real HCG Mail at `6ddd667` through Mobile Build Studio's own UI:
   - a Simulator launch;
   - a signed Debug device app, an XCArchive and the SDK's IPA, signed with a **synthetic** Apple Development identity and wildcard profile;
-  - codesign, plutil, `security cms` and unzip check the bundle ID, platform, signature, resolved entitlements and the embedded profile.
+  - codesign, plutil, `security cms` and unzip check the bundle ID, platform, signature, resolved entitlements and the embedded profile;
+  - Maker's own codesign verdict for the device app, archive and IPA, and the IPA's Release Passport (hash, size, bundle ID, version, source commit, profile, entitlements, codesign verdict, nothing claimed about devices).
 - **Not verified in CI:**
   - signing with your real Apple certificate and profile;
-  - installation on a physical iPhone.
+  - installation and launch on a physical iPhone;
+  - App Store compatibility (an Apple Distribution certificate and an App Store profile; HCG never uploads).
+
+  A Simulator build is never evidence for any of these.
 
   Both need your Mac, certificate and device.

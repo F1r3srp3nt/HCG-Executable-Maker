@@ -118,6 +118,23 @@ public sealed partial class MobileArtifactVerifier(IProcessRunner runner)
                 if (app is not null)
                     checks.Add(await ToolCheckAsync("codesign --verify", "/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], ct, _ => "Code signature is valid").ConfigureAwait(false));
                 break;
+            // An IPA is verified as the device will see it: the app inside Payload/, extracted to a scratch folder that is
+            // deleted afterwards (the IPA itself is never changed).
+            case MobileArtifactKind.Ipa when OperatingSystem.IsMacOS() && report.Signing != MobileSigningState.Unsigned && File.Exists("/usr/bin/codesign"):
+                var scratch = Path.Combine(Path.GetTempPath(), "hcg-ipa-verify-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    if (MobilePassport.ExtractApp(path, scratch) is { } payloadApp)
+                        checks.Add(await ToolCheckAsync("codesign --verify", "/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=2", payloadApp], ct,
+                            _ => $"Code signature of Payload/{Path.GetFileName(payloadApp)} is valid").ConfigureAwait(false));
+                    else checks.Add(new VerificationCheck("codesign --verify", VerificationStatus.Failed, "The IPA has no Payload/<App>.app to verify."));
+                }
+                finally
+                {
+                    try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                }
+                break;
         }
         return (report, checks);
     }

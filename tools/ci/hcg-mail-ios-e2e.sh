@@ -134,4 +134,36 @@ check "the IPA was made by the .NET iOS SDK, not by xcodebuild -exportArchive" "
 check "the archive was written where ArchiveDir named it" "grep -Eq -- '-p:ArchiveDir=[^ ]+\\.xcarchive' '$OUT/archive/mail-archive-build.log'"
 check "the effective MSBuild properties were read before compiling" "grep -q 'ArchiveOnBuild = true' '$OUT/archive/mail-archive-build.log'"
 endgroup
-echo "HCG Mail iOS: simulator launch, signed device app, XCArchive and IPA verified with a synthetic identity. Installation on a physical device needs the owner's certificate, profile and iPhone."
+
+group "Maker's own verification (production code, real Apple codesign — not a test double)"
+for r in device archive ipa; do
+  grep -E '^.*codesign --verify:' "$OUT/$r/mail-$r-build.log" || true
+  check "$r: Maker's verifier ran Apple's codesign --verify and it passed" "grep -Eq 'codesign --verify: Code signature (of Payload/[^ ]+ )?is valid' '$OUT/$r/mail-$r-build.log'"
+done
+check "simulator: no codesign verdict is claimed for a Simulator app as device proof" "! grep -q 'Device build (iphoneos)' '$OUT/sim/mail-sim-build.log'"
+endgroup
+
+group "Release Passport (build half) of the IPA, written by Mobile Build Studio"
+PASSPORT="$IPA.release-passport.json"
+check "a Release Passport sits next to the IPA" "[ -f '$PASSPORT' ]"
+cat "$PASSPORT"
+pj() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); v=d
+for k in sys.argv[2].split("."): v=v[k]
+print(v if not isinstance(v,(list,dict)) else json.dumps(v))' "$PASSPORT" "$1"; }
+MAIL_HEAD="$(git -C "$MAIL" rev-parse HEAD)"
+check "passport: format hcg.release-passport v1" "[ \"\$(pj format)\" = hcg.release-passport ] && [ \"\$(pj formatVersion)\" = 1 ]"
+check "passport: SHA-256 is the IPA's own (shasum)" "[ \"\$(pj artifact.sha256)\" = \"\$(shasum -a 256 '$IPA' | cut -d' ' -f1)\" ]"
+check "passport: size is the IPA's own" "[ \"\$(pj artifact.size)\" = \"\$(stat -f%z '$IPA')\" ]"
+check "passport: package is $BUNDLE" "[ \"\$(pj package)\" = '$BUNDLE' ]"
+check "passport: version matches the app's Info.plist" "[ \"\$(pj version)\" = \"\$(plutil -extract CFBundleShortVersionString raw '$OUT/ipa-x/Payload/'*.app/Info.plist)\" ]"
+check "passport: source commit is HCG Mail's checkout ($MAIL_HEAD)" "[ \"\$(pj source.commit)\" = '$MAIL_HEAD' ]"
+check "passport: a development IPA is platform ios, not ios-app-store" "[ \"\$(pj platform)\" = ios ]"
+check "passport: Apple's codesign --verify passed (Maker's verdict)" "pj code_signing.codesign_verify | grep -q '^passed'"
+check "passport: every Mach-O carries a signature" "[ \"\$(pj code_signing.all_signed)\" = True ]"
+check "passport: the embedded profile is the chosen one" "[ \"\$(pj code_signing.profile.name)\" = '$PROFILE_NAME' ] && [ \"\$(pj code_signing.profile.team_id)\" = '$TEAM' ]"
+check "passport: entitlements read from the signed executable" "pj code_signing.entitlements | grep -q keychain-access-groups"
+check "passport: device installation and launch are not claimed by the builder" "[ \"\$(pj validation.levels.device_installation.state)\" = not-recorded ] && [ \"\$(pj validation.levels.application_launch.state)\" = not-recorded ]"
+check "passport: nothing published" "pj publication.note | grep -q 'never publishes'"
+endgroup
+echo "HCG Mail iOS: simulator launch, signed device app, XCArchive, IPA and its Release Passport verified with a SYNTHETIC identity."
+echo "Not proven here: installation or launch on a physical iPhone, and App Store compatibility (they need the owner's Apple certificate, profile and device)."

@@ -425,8 +425,16 @@ public class MobileBuildServiceTests : IDisposable
         public string Text { get { lock (Lines) return string.Join('\n', Lines.Select(l => l.Text)); } }
     }
 
+    /// <summary>
+    /// The verifier for scripted builds. On a Mac host the production verifier runs Apple's codesign --verify on apps,
+    /// archives and IPAs; the scripted tools write bundles with a synthetic signature that real codesign rejects, so these
+    /// service tests answer codesign with a recording runner. The production verifier is unchanged: the real codesign
+    /// verdict on genuine artifacts is asserted in the macOS CI jobs (hcg-mail-ios-signed, Mobile iOS, Impactor).
+    /// </summary>
+    internal static MobileArtifactVerifier ScriptedVerifier() => new(new RecordingProcessRunner(_ => (0, "", "valid on disk\nsatisfies its Designated Requirement")));
+
     private MobileBuildService Service(IBuildWorker worker, ToolchainReport report) =>
-        new(worker, new FixedToolchains(report), _builds, new MobileArtifactVerifier(new HCG.ExecutableMaker.Infrastructure.Processes.ProcessRunner()), _paths, TimeProvider.System);
+        new(worker, new FixedToolchains(report), _builds, ScriptedVerifier(), _paths, TimeProvider.System);
 
     private async Task<ProjectRecord> Project(string fixture, ToolchainReport report)
     {
@@ -592,7 +600,7 @@ public class MobileBuildServiceTests : IDisposable
         var options = new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosDeviceApp, Signing = MobileSigningMode.AppleAutomatic, AllowProvisioningUpdates = true };
 
         var worker = new ScriptedMobileWorker((_, _, _) => ScriptedMobileWorker.Exit(1)); // -showBuildSettings unreadable
-        var assisted = new MobileBuildService(worker, new FixedToolchains(report), _builds, new MobileArtifactVerifier(new HCG.ExecutableMaker.Infrastructure.Processes.ProcessRunner()), _paths,
+        var assisted = new MobileBuildService(worker, new FixedToolchains(report), _builds, ScriptedVerifier(), _paths,
             TimeProvider.System, signingAssistant: new HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService(null, null, TimeProvider.System));
         var observer = new Observer();
         var build = await assisted.RunAsync(Request(p, options), observer, CancellationToken.None);
@@ -630,7 +638,7 @@ public class MobileBuildServiceTests : IDisposable
             onOutput(OutputStream.StdOut, Settings(config == "Debug" ? "DEBUG PROBE_DEVELOPMENT_RUN" : ""));
             return ScriptedMobileWorker.Exit(0);
         });
-        var service = new MobileBuildService(worker, new FixedToolchains(report), _builds, new MobileArtifactVerifier(new HCG.ExecutableMaker.Infrastructure.Processes.ProcessRunner()), _paths,
+        var service = new MobileBuildService(worker, new FixedToolchains(report), _builds, ScriptedVerifier(), _paths,
             TimeProvider.System, signingAssistant: new HCG.ExecutableMaker.BuildEngine.Signing.AppleSigningAssistantService(null, null, TimeProvider.System));
         var options = new MobileBuildOptions { Framework = MobileFramework.NativeIos, Output = MobileOutput.IosArchive, Variant = "Debug", Signing = MobileSigningMode.Unsigned };
         var build = await service.RunAsync(Request(p, options), new Observer(), CancellationToken.None);
@@ -771,7 +779,13 @@ public class MobileBuildServiceTests : IDisposable
         {
             var ipa = Prop(a, "IpaPackagePath");
             Directory.CreateDirectory(Path.GetDirectoryName(ipa)!);
-            MobileSamples.Ipa(ipa, "iphoneos", MobileSamples.MachO(0x0100000C), signed: true, MobileSamples.Profile(getTaskAllow: true, devices: true, DateTime.UtcNow.AddMonths(6)));
+            // The executable carries an embedded signature with entitlements, as the SDK's codesign leaves it.
+            var exe = ImpactorFixtures.MachO(new ImpactorFixtures.MachOSpec
+            {
+                Signature = ImpactorFixtures.Signature("com.hakmicapitalgroup.fixtures.hellodotnetios", "ABCDE12345", null,
+                    ImpactorFixtures.Entitlements("ABCDE12345", "com.hakmicapitalgroup.fixtures.hellodotnetios")),
+            });
+            MobileSamples.Ipa(ipa, "iphoneos", exe, signed: true, MobileSamples.Profile(getTaskAllow: true, devices: true, DateTime.UtcNow.AddMonths(6)));
         }
         return ScriptedMobileWorker.Exit(0);
     });
@@ -792,13 +806,7 @@ public class MobileBuildServiceTests : IDisposable
         SigningIdentity = "Apple Development: Jane (ABCDE12345)", ProvisioningProfile = "Dev",
     };
 
-    /// <summary>
-    /// The service for the .NET routes. On a Mac host the verifier runs codesign --verify on archives and device apps; the
-    /// scripted SDK's bundles carry a synthetic signature real codesign rejects, so verification gets a recording runner
-    /// that answers like codesign for a valid signature (the real check runs in the hcg-mail-ios-signed CI job).
-    /// </summary>
-    private MobileBuildService DotNetService(IBuildWorker worker, ToolchainReport report) =>
-        new(worker, new FixedToolchains(report), _builds, new MobileArtifactVerifier(new RecordingProcessRunner(_ => (0, "", "valid on disk"))), _paths, TimeProvider.System);
+    private MobileBuildService DotNetService(IBuildWorker worker, ToolchainReport report) => Service(worker, report);
 
     [Fact]
     public async Task A_dotnet_ios_ipa_is_the_sdks_own_with_the_archive_found_where_ArchiveDir_put_it_and_no_xcodebuild_export()
@@ -814,6 +822,38 @@ public class MobileBuildServiceTests : IDisposable
         Assert.Equal("msbuild", worker.Calls[0].Arguments[0]);                              // the effective properties first
         Assert.Equal("true", build.ToolchainVersions["msbuild:BuildIpa"]);
         Assert.EndsWith(".xcarchive", build.ToolchainVersions["msbuild:ArchiveDir"]);
+
+        // The Release Passport build half of the IPA: these exact bytes, the signature as the app inside carries it.
+        var ipa = build.Artifacts.Single(x => x.Format == PackagingFormat.IosIpa);
+        var passport = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(ipa.Path + ".release-passport.json"))!.AsObject();
+        Assert.Empty(HCG.ExecutableMaker.Packaging.Distribution.ReleasePassport.ValidateBuildHalf(passport));
+        Assert.Equal(ipa.Sha256, passport["artifact"]!["sha256"]!.GetValue<string>());
+        Assert.Equal(ipa.SizeBytes, passport["artifact"]!["size"]!.GetValue<long>());
+        Assert.Equal("ios", passport["platform"]!.GetValue<string>());                     // a development IPA, not an App Store one
+        Assert.Equal("apple-development", passport["code_signing"]!["method_claimed"]!.GetValue<string>());
+        Assert.True(passport["code_signing"]!["all_signed"]!.GetValue<bool>());
+        var entitlements = passport["code_signing"]!["entitlements"]!.AsObject().Single().Value!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        Assert.Contains("application-identifier", entitlements);                         // read from the signed executable, not the project
+        Assert.Contains("get-task-allow", entitlements);
+        Assert.Equal("not-recorded", passport["validation"]!["levels"]!["device_installation"]!["state"]!.GetValue<string>()); // never claimed by the builder
+        Assert.Equal(OperatingSystem.IsMacOS(), passport["code_signing"]!["codesign_verify"]!.GetValue<string>().StartsWith("passed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task On_a_Mac_the_production_verifier_runs_codesign_on_the_app_inside_an_ipa_and_never_changes_the_ipa()
+    {
+        var ipa = _k.Temp.Combine("Mail.ipa");
+        MobileSamples.Ipa(ipa, "iphoneos", MobileSamples.MachO(0x0100000C), signed: true, MobileSamples.Profile(getTaskAllow: true, devices: true, DateTime.UtcNow.AddMonths(6)));
+        var before = File.ReadAllBytes(ipa);
+        var runner = new RecordingProcessRunner(_ => (1, "", "Mail.app: code object is not signed at all"));
+        var (_, checks) = await new MobileArtifactVerifier(runner).VerifyAsync(ipa, _k.Report(TargetPlatform.MacOS, MobileTestKit.Apple), CancellationToken.None);
+        Assert.Equal(before, File.ReadAllBytes(ipa));
+        if (!OperatingSystem.IsMacOS()) { Assert.Empty(runner.Calls); return; }           // Apple's codesign exists only on a Mac
+        var call = Assert.Single(runner.Calls);
+        Assert.Equal("/usr/bin/codesign", call.Executable);
+        Assert.Contains("--strict", call.Arguments);
+        Assert.EndsWith(".app", call.Arguments[^1]);
+        Assert.Contains(checks, c => c.Name == "codesign --verify" && c.Status == VerificationStatus.Failed && c.Detail.Contains("not signed"));   // a failing codesign fails the IPA
     }
 
     [Fact]

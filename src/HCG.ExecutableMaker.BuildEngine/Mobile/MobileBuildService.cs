@@ -364,6 +364,45 @@ public sealed partial class MobileBuildService(
             if (products.Count == 0)
                 throw new StepFailedException("The build reported success, but no new artifact was found in the expected output location.");
 
+            // The Release Passport build half of a device IPA, next to it (Ship to Store reads <file>.release-passport.json).
+            async Task WriteIpaPassportAsync(ArtifactRecord artifact, Packaging.Mobile.MobileArtifactReport artifactReport, IReadOnlyList<VerificationCheck> checks)
+            {
+                var scratch = Path.Combine(workDir, "passport-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var app = MobilePassport.ExtractApp(artifact.Path, scratch);
+                    if (app is null) { Log(BuildLogKind.Warning, $"Release Passport for {artifact.FileName} not written: no Payload/<App>.app."); return; }
+                    var sourceFolder = Directory.Exists(request.Project.SourceLocation) ? request.Project.SourceLocation : request.Project.SourceDirectory;
+                    var source = await Packaging.Distribution.SourceProvenance.ReadAsync(new WorkerRunner(worker, scrub.Environment), report.Find(ToolchainIds.Git)?.ExecutablePath, sourceFolder, overall.Token).ConfigureAwait(false);
+                    var toolchain = string.Join(", ", new[]
+                    {
+                        report.Xcode?.VerifiedVersion is { } xv ? "Xcode " + xv : null,
+                        report.Find(ToolchainIds.DotNetSdk)?.Version is { } sdk && options.Framework == MobileFramework.DotNetIos ? ".NET SDK " + sdk : null,
+                        options.Framework == MobileFramework.DotNetIos && report.Find(ToolchainIds.DotNetIosWorkload)?.Version is { } wl ? ".NET iOS workload " + wl : null,
+                        "HCG Executable Maker " + HCG.ExecutableMaker.Core.HostInfo.ProductVersion,
+                    }.OfType<string>());
+                    var passport = MobilePassport.ForIpa(artifact, artifactReport, app, checks, source, toolchain, build.StartedAt);
+                    if (Packaging.Distribution.ReleasePassport.ValidateBuildHalf(passport) is { Count: > 0 } problems)
+                    {
+                        Log(BuildLogKind.Warning, $"Release Passport for {artifact.FileName} not written: {string.Join("; ", problems.Take(3))}");
+                        return;
+                    }
+                    var file = artifact.Path + ".release-passport.json";
+                    await File.WriteAllTextAsync(file, MacXcode.NativeBuildContract.Serialize(passport), overall.Token).ConfigureAwait(false);
+                    Log(BuildLogKind.Info, $"Release Passport: {Path.GetFileName(file)} ({passport["platform"]}, {passport["code_signing"]?["method_claimed"]}, " +
+                        $"codesign {passport["code_signing"]?["codesign_verify"]?.GetValue<string>().Split(':')[0]}, source {source.Commit?[..Math.Min(12, source.Commit.Length)] ?? "no commit"})");
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+                {
+                    Log(BuildLogKind.Warning, $"Release Passport for {artifact.FileName} not written: {ex.Message}");
+                }
+                finally
+                {
+                    try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                }
+            }
+
             observer.OnStage(BuildStage.Packaging, "Collecting artifacts");
             outputRoot = BuildService.PrepareOutputRoot(Path.GetDirectoryName(OutputRootFor(settings))!, Path.GetFileName(OutputRootFor(settings)), request.AllowOverwriteOutput);
             await File.WriteAllTextAsync(Path.Combine(outputRoot, BuildService.OutputMarkerFile), HcgJson.Serialize(new { buildId = build.Id, complete = false }), overall.Token).ConfigureAwait(false);
@@ -403,6 +442,8 @@ public sealed partial class MobileBuildService(
                     Log(c.Status switch { VerificationStatus.Failed => BuildLogKind.Error, VerificationStatus.Passed => BuildLogKind.Info, _ => BuildLogKind.Warning }, $"  {c.Name}: {c.Detail}");
                 if (!artifactReport.IsDistributable)
                     Log(BuildLogKind.Warning, $"  {Path.GetFileName(destination)} is not a store-distributable artifact ({artifactReport.Signing}).");
+                if (format == PackagingFormat.IosIpa && !isDir && status != VerificationStatus.Failed && artifactReport.Platform == "iphoneos")
+                    await WriteIpaPassportAsync(build.Artifacts[^1], artifactReport, checks).ConfigureAwait(false);
             }
             if (sums.Length > 0) await File.WriteAllTextAsync(Path.Combine(outputRoot, "SHA256SUMS.txt"), sums.ToString(), overall.Token).ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(outputRoot, BuildService.OutputMarkerFile), HcgJson.Serialize(new
