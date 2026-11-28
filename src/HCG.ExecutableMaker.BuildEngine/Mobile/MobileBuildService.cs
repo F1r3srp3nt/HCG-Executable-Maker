@@ -280,14 +280,26 @@ public sealed partial class MobileBuildService(
                 };
                 await RunStepsAsync(plan).ConfigureAwait(false);
 
-                if (options.Framework is MobileFramework.NativeIos or MobileFramework.DotNetIos && options.Output == MobileOutput.IosIpa)
+                if (options.Framework == MobileFramework.DotNetIos && options.Output is MobileOutput.IosArchive or MobileOutput.IosIpa)
                 {
-                    var archive = options.Framework == MobileFramework.NativeIos
-                        ? XcodePlanner.ArchivePath(input, XcodePlanner.ResolveContainer(input).Scheme)
-                        : Directory.Exists(DotNetIosPlanner.ArchiveDirectory(input))
-                            ? Directory.EnumerateDirectories(DotNetIosPlanner.ArchiveDirectory(input), "*.xcarchive", SearchOption.AllDirectories).FirstOrDefault()
-                              ?? throw new StepFailedException("dotnet publish succeeded but created no .xcarchive, so there is nothing to export.")
-                            : throw new StepFailedException("dotnet publish succeeded but created no archive folder, so there is nothing to export.");
+                    // The SDK writes the archive (and the IPA) exactly where HCG said: those paths are checked, not searched.
+                    var archive = DotNetIosPlanner.ArchivePath(input);
+                    var (app, problem) = DotNetIosPlanner.InspectArchive(archive);
+                    if (problem is not null) throw new StepFailedException(problem);
+                    Log(BuildLogKind.Info, $"Archive: {archive} (app {Path.GetFileName(app)})");
+                    if (options.Output == MobileOutput.IosArchive) products.Add((PackagingFormat.IosArchive, archive));
+                    else
+                    {
+                        var ipa = DotNetIosPlanner.IpaPath(input);
+                        var executable = Packaging.Mobile.PlistReader.ParseDictionary(File.ReadAllBytes(Path.Combine(app!, "Info.plist"))).GetValueOrDefault("CFBundleExecutable") as string;
+                        if (DotNetIosPlanner.InspectIpa(ipa, Path.GetFileName(app!), executable) is { } ipaProblem) throw new StepFailedException(ipaProblem);
+                        Log(BuildLogKind.Info, $"IPA: {ipa}");
+                        products.Add((PackagingFormat.IosIpa, ipa));
+                    }
+                }
+                else if (options.Framework == MobileFramework.NativeIos && options.Output == MobileOutput.IosIpa)
+                {
+                    var archive = XcodePlanner.ArchivePath(input, XcodePlanner.ResolveContainer(input).Scheme);
                     Log(BuildLogKind.Info, $"Archive: {archive}");
                     observer.OnStage(BuildStage.VerifyingOutput, "Inspecting the archive's signature");
                     var archiveReport = MobileArtifactInspector.Inspect(archive);

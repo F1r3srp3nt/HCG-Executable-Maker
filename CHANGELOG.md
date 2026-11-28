@@ -2,6 +2,25 @@
 
 All notable changes to HCG Executable Maker. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — .NET for iOS archive and IPA at exact paths
+
+### Fixed
+- **.NET for iOS Archive and IPA** failed with "dotnet publish succeeded but created no .xcarchive". The cause: the
+  .NET iOS SDK's `ArchiveDir` is the `.xcarchive` itself, not a folder for it, so the archive was written into
+  `<work>/archives` directly. HCG Mail iOS, HCG-Mail CI run 46074732453.
+  - Maker now passes `-p:ArchiveDir=<work>/archives/<AssemblyName>.xcarchive` and uses exactly that path.
+  - It checks the archive's `Info.plist` and its one app in `Products/Applications`, with a precise message for each
+    gap. It no longer searches for a child `*.xcarchive`.
+  - The IPA is packaged by the SDK in the same build (`-p:BuildIpa=true -p:IpaPackagePath=<work>/ipa/<name>.ipa`) and
+    checked for `Payload/<app>.app` with its `Info.plist` and executable. `xcodebuild -exportArchive` is no longer
+    used for .NET.
+- **The .NET for iOS Archive output was never available**: it was judged as unsigned, which the SDK cannot do. It is now
+  judged with the chosen signing.
+- **Project-default signing that is ad hoc** (`CodesignKey=-` in the project) no longer demands an Apple Development
+  certificate. Maker says the result installs on no device and cannot be distributed.
+- CI: the HCG Mail iOS job builds the .NET iOS sample's ad-hoc archive and IPA through Mobile Build Studio, then checks
+  them with `plutil`, `lipo`, `vtool`, `codesign` and `ditto`.
+
 ## [Unreleased] — HCG Store Manager compatibility (Swift apps with a command-line tool)
 
 ### Added

@@ -120,8 +120,15 @@ for signed output a certificate in the keychain and an installed provisioning pr
 | Output | Command | Notes |
 |---|---|---|
 | iOS Simulator build | `dotnet build <csproj> -c Debug -f net10.0-ios -r iossimulator-arm64` (`-x64` on Intel) | Runs only in the Simulator. |
-| iOS Archive | `dotnet publish … -c Release -r ios-arm64 -p:ArchiveOnBuild=true -p:ArchiveDir=<HCG build folder> -p:BuildIpa=false -p:CodesignKey=<certificate> -p:CodesignProvision=<profile>` | Signed only: the .NET iOS SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode archive"), so Maker never offers one and blocks the archive until a certificate is in the keychain. |
-| iOS IPA | the signed archive above → archive signature check → `xcodebuild -exportArchive` with Maker's export options | Separate stages; the IPA exists only after export. Never uploaded. |
+| iOS Archive | `dotnet publish … -c Release -r ios-arm64 -p:ArchiveOnBuild=true -p:ArchiveDir=<work>/archives/<AssemblyName>.xcarchive -p:BuildIpa=false [-p:CodesignKey=<certificate> -p:CodesignProvision=<profile>]` | The SDK's `ArchiveDir` **is** the `.xcarchive` (Xamarin.MacDev.Tasks.Archive creates exactly that folder), so Maker passes the exact path and then checks it: the folder, its `Info.plist`, and exactly one app in `Products/Applications` with its `Info.plist`. Nothing is searched for. Signed only: the SDK refuses an unsigned archive ("Code signing must be enabled to create an Xcode archive"), so Maker never offers one. |
+| iOS IPA | the same `dotnet publish` with `-p:BuildIpa=true -p:IpaPackagePath=<work>/ipa/<AssemblyName>.ipa` | The SDK packages the IPA from the archived app in the same build; Maker checks the archive as above, then that the IPA holds `Payload/<app>.app` with its `Info.plist` and executable. The distribution type follows the provisioning profile (no `xcodebuild -exportArchive` for .NET). Never uploaded. |
+
+**Signing modes.** *Named certificate and profile* passes `CodesignKey` / `CodesignProvision`. *Project default* passes
+nothing: the project's own settings sign it. A project that sets `CodesignKey` to `-` signs ad hoc. Maker then needs
+no certificate and says that the archive and IPA install on no device and cannot be distributed; CI uses this. Before
+this change, the `ArchiveDir` was a folder, the SDK wrote the archive into that folder itself, and Archive/IPA builds
+failed with "created no .xcarchive". The Archive output was also judged as unsigned, so it was never available for
+.NET for iOS.
 
 ## HCG Sentinel — archive failure
 
